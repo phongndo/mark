@@ -26,7 +26,7 @@ command above if you used one of those paths before.
 Installer environment variables use the `DX_` prefix:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/phongndo/dx/main/scripts/install.sh | DX_VERSION=0.1.1 sh
+curl -fsSL https://raw.githubusercontent.com/phongndo/dx/main/scripts/install.sh | DX_VERSION=0.1.2 sh
 curl -fsSL https://raw.githubusercontent.com/phongndo/dx/main/scripts/install.sh | DX_INSTALL_DIR=/usr/local/bin sh
 ```
 
@@ -34,7 +34,7 @@ Update a curl-installed binary in place:
 
 ```sh
 dx update
-dx update --target-version 0.1.1
+dx update --target-version 0.1.2
 ```
 
 ## Release
