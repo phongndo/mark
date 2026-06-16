@@ -26,7 +26,7 @@ curl -fsSL https://raw.githubusercontent.com/phongndo/dx/main/scripts/install.sh
 Installer environment variables use the `DX_` prefix:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/phongndo/dx/main/scripts/install.sh | DX_VERSION=0.1.0 sh
+curl -fsSL https://raw.githubusercontent.com/phongndo/dx/main/scripts/install.sh | DX_VERSION=0.1.1 sh
 curl -fsSL https://raw.githubusercontent.com/phongndo/dx/main/scripts/install.sh | DX_INSTALL_DIR=/usr/local/bin sh
 ```
 
@@ -34,13 +34,13 @@ Update an installer-managed binary in place:
 
 ```sh
 dx update
-dx update --target-version 0.1.0
+dx update --target-version 0.1.1
 ```
 
 With Cargo:
 
 ```sh
-cargo install --locked --git https://github.com/phongndo/dx --tag v0.1.0 dx-cli
+cargo install --locked --git https://github.com/phongndo/dx --tag v0.1.1 dx-cli
 ```
 
 ## Release

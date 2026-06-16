@@ -86,7 +86,7 @@ examples:
         after_help = "\
 examples:
   dx update
-  dx update --target-version 0.1.0
+  dx update --target-version 0.1.1
   dx update --install-dir ~/.local/bin
   dx update --force-self-update"
     )]
