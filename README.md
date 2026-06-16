@@ -43,6 +43,11 @@ With Cargo:
 cargo install --locked --git https://github.com/phongndo/dx --tag v0.1.0 dx-cli
 ```
 
+## Release
+
+Push a `vX.Y.Z` tag, or run the Release workflow manually, to build release
+binaries and publish the GitHub release assets used by the shell installer.
+
 ## Usage
 
 ```sh

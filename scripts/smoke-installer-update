@@ -80,6 +80,7 @@ set -eu
 
 out=""
 url=""
+write_format=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -o)
@@ -89,6 +90,14 @@ while [ "$#" -gt 0 ]; do
         exit 2
       fi
       out="$1"
+      ;;
+    -w)
+      shift
+      if [ "$#" -eq 0 ]; then
+        echo "fake curl: -w requires a format" >&2
+        exit 2
+      fi
+      write_format="$1"
       ;;
     -*)
       ;;
@@ -112,12 +121,28 @@ write_stdout_or_file() {
   fi
 }
 
+http_ok() {
+  if [ -n "$write_format" ]; then
+    printf '200'
+  fi
+}
+
+http_not_found() {
+  if [ -n "$write_format" ]; then
+    printf '404'
+    exit 0
+  fi
+
+  exit 22
+}
+
 api_url="https://api.github.com/repos/$DX_SMOKE_REPO/releases/latest"
 installer_url="https://raw.githubusercontent.com/$DX_SMOKE_REPO/main/scripts/install.sh"
 download_prefix="https://github.com/$DX_SMOKE_REPO/releases/download/$DX_SMOKE_TAG/"
 
 if [ "$url" = "$api_url" ]; then
   printf '{"tag_name":"%s"}\n' "$DX_SMOKE_TAG" | write_stdout_or_file
+  http_ok
   exit 0
 fi
 
@@ -127,6 +152,7 @@ if [ "$url" = "$installer_url" ]; then
   else
     cat "$DX_SMOKE_INSTALLER"
   fi
+  http_ok
   exit 0
 fi
 
@@ -136,17 +162,18 @@ case "$url" in
     source="$DX_SMOKE_RELEASE_DIR/$file"
     if [ ! -f "$source" ]; then
       echo "fake curl: missing release asset: $file" >&2
-      exit 22
+      http_not_found
     fi
     if [ -n "$out" ]; then
       cp "$source" "$out"
     else
       cat "$source"
     fi
+    http_ok
     ;;
   *)
     echo "fake curl: unexpected URL: $url" >&2
-    exit 22
+    http_not_found
     ;;
 esac
 SH
