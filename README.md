@@ -13,15 +13,15 @@ so workspace isolation and diff review can evolve as separate products.
 
 ## Install
 
-```sh
-brew install phongndo/tap/dx-cli
-```
-
-Or use the shell installer:
+Install the latest release with the shell installer:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/phongndo/dx/main/scripts/install.sh | sh
 ```
+
+The curl installer is the only supported install path for now. Homebrew, mise,
+Cargo, and other package-manager installs are deprecated; reinstall with the
+command above if you used one of those paths before.
 
 Installer environment variables use the `DX_` prefix:
 
@@ -30,17 +30,11 @@ curl -fsSL https://raw.githubusercontent.com/phongndo/dx/main/scripts/install.sh
 curl -fsSL https://raw.githubusercontent.com/phongndo/dx/main/scripts/install.sh | DX_INSTALL_DIR=/usr/local/bin sh
 ```
 
-Update an installer-managed binary in place:
+Update a curl-installed binary in place:
 
 ```sh
 dx update
 dx update --target-version 0.1.1
-```
-
-With Cargo:
-
-```sh
-cargo install --locked --git https://github.com/phongndo/dx --tag v0.1.1 dx-cli
 ```
 
 ## Release

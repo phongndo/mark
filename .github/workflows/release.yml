@@ -149,16 +149,10 @@ jobs:
           cat > release-notes.md <<EOF
           Release $release_tag.
 
-          Install with Homebrew:
+          Install with curl:
 
           \`\`\`sh
-          brew install phongndo/tap/dx-cli
-          \`\`\`
-
-          Install with mise:
-
-          \`\`\`sh
-          mise use -g github:phongndo/dx@$version
+          curl -fsSL https://raw.githubusercontent.com/phongndo/dx/main/scripts/install.sh | sh
           \`\`\`
           EOF
 
@@ -173,38 +167,3 @@ jobs:
               --title "dx $version" \
               --notes-file release-notes.md
           fi
-
-      - name: Update Homebrew tap
-        env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-        shell: bash
-        run: |
-          if [ -z "${GH_TOKEN:-}" ]; then
-            echo "HOMEBREW_TAP_TOKEN is not configured; skipping Homebrew tap update" >&2
-            exit 0
-          fi
-
-          version="$(
-            sed -n '/^\[workspace.package\]/,/^\[/{s/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p;}' Cargo.toml \
-              | head -n 1
-          )"
-          if [ -z "$version" ]; then
-            echo "could not read workspace package version" >&2
-            exit 1
-          fi
-
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          gh repo clone phongndo/homebrew-tap homebrew-tap
-          scripts/render-homebrew-formula "$version" dist homebrew-tap/Formula/dx-cli.rb
-
-          cd homebrew-tap
-          if git diff --quiet -- Formula/dx-cli.rb; then
-            echo "Homebrew formula is already up to date"
-            exit 0
-          fi
-
-          git add Formula/dx-cli.rb
-          git commit -m "Update dx-cli to $version"
-          git push

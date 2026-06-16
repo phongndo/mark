@@ -85,13 +85,12 @@ examples:
     #[command(about = "Print the user config file path")]
     Config,
     #[command(
-        about = "Update this dx binary from GitHub releases",
+        about = "Update this curl-installed dx binary from GitHub releases",
         after_help = "\
 examples:
   dx update
   dx update --target-version 0.1.1
-  dx update --install-dir ~/.local/bin
-  dx update --force-self-update"
+  dx update --install-dir ~/.local/bin"
     )]
     Update(UpdateArgs),
 }
@@ -183,7 +182,4 @@ pub(crate) struct UpdateArgs {
     /// Directory to update. Defaults to the directory containing the invoked dx.
     #[arg(long, value_name = "DIR")]
     pub(crate) install_dir: Option<PathBuf>,
-    /// Allow dx update to overwrite a package-manager-managed binary.
-    #[arg(long)]
-    pub(crate) force_self_update: bool,
 }

@@ -12,7 +12,6 @@ use dx_core::DxResult;
 use crate::{
     CliResult,
     args::{INSTALL_SCRIPT, RELEASE_REPO, UpdateArgs},
-    write_stderr,
 };
 
 pub(crate) fn update(args: UpdateArgs) -> CliResult<()> {
@@ -20,23 +19,11 @@ pub(crate) fn update(args: UpdateArgs) -> CliResult<()> {
         dx_core::DxError::Usage("could not determine current executable".to_owned())
     })?;
     let binary = update_binary_name(&argv0)?;
-    let explicit_install_dir = args.install_dir.is_some();
-    let force_self_update = args.force_self_update;
     let install_dir = match args.install_dir {
         Some(path) => absolute_path(path)?,
         None => default_update_install_dir(&argv0)?,
     };
-    if let Some(manager) = check_update_install_dir(
-        &install_dir,
-        &binary,
-        explicit_install_dir,
-        force_self_update,
-    )? {
-        write_stderr(format_args!(
-            "{}\n",
-            managed_update_warning(manager, &install_dir, binary.as_os_str())
-        ))?;
-    }
+    check_update_install_dir(&install_dir, &binary)?;
     let version = args.version.unwrap_or_else(|| "latest".to_owned());
     let repo = update_repo(env::var_os("DX_REPO"));
 
@@ -45,6 +32,7 @@ pub(crate) fn update(args: UpdateArgs) -> CliResult<()> {
         .env("DX_REPO", repo)
         .env("DX_INSTALL_DIR", install_dir)
         .env("DX_VERSION", version)
+        .env("DX_CURRENT_VERSION", env!("CARGO_PKG_VERSION"))
         .env("DX_BINARY", binary)
         .env("DX_INSTALL_ACTION", "update")
         .stdin(Stdio::piped())
@@ -105,50 +93,18 @@ impl ManagedUpdateInstall {
             Self::Asdf => "asdf",
         }
     }
-
-    pub(crate) fn update_hint(self) -> &'static str {
-        match self {
-            Self::Homebrew => "update it with Homebrew",
-            Self::Mise => "update it with mise",
-            Self::Cargo => "reinstall it with Cargo",
-            Self::Nix => "update it with Nix",
-            Self::Asdf => "update it with asdf",
-        }
-    }
 }
 
-pub(crate) fn check_update_install_dir(
-    install_dir: &Path,
-    binary: &OsStr,
-    explicit_install_dir: bool,
-    force_self_update: bool,
-) -> DxResult<Option<ManagedUpdateInstall>> {
+pub(crate) fn check_update_install_dir(install_dir: &Path, binary: &OsStr) -> DxResult<()> {
     let Some(manager) = managed_update_install(install_dir, binary) else {
-        return Ok(None);
+        return Ok(());
     };
 
-    if explicit_install_dir || force_self_update {
-        return Ok(Some(manager));
-    }
-
     Err(dx_core::DxError::Usage(format!(
-        "refusing to update {} because it looks {}-managed; {}; pass --install-dir DIR to update an installer-managed binary explicitly, or --force-self-update to overwrite the detected target",
-        install_dir.join(binary).display(),
+        "dx update only supports curl-installed dx binaries.\n\nThis path looks {}-managed:\n  {}\n\nReinstall with:\n  curl -fsSL https://raw.githubusercontent.com/phongndo/dx/main/scripts/install.sh | sh\n\nUse --install-dir DIR only for curl-installed targets outside package-manager directories.",
         manager.name(),
-        manager.update_hint()
-    )))
-}
-
-pub(crate) fn managed_update_warning(
-    manager: ManagedUpdateInstall,
-    install_dir: &Path,
-    binary: &OsStr,
-) -> String {
-    format!(
-        "dx: warning: updating {} even though it looks {}-managed",
         install_dir.join(binary).display(),
-        manager.name()
-    )
+    )))
 }
 
 pub(crate) fn managed_update_install(
@@ -256,5 +212,51 @@ pub(crate) fn absolute_path(path: PathBuf) -> DxResult<PathBuf> {
         Ok(path)
     } else {
         Ok(env::current_dir()?.join(path))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn update_detects_package_manager_install_dirs() {
+        assert_eq!(
+            managed_update_install(Path::new("/opt/homebrew/bin"), OsStr::new("dx")),
+            Some(ManagedUpdateInstall::Homebrew)
+        );
+        assert_eq!(
+            managed_update_install(Path::new("/Users/me/.cargo/bin"), OsStr::new("dx")),
+            Some(ManagedUpdateInstall::Cargo)
+        );
+        assert_eq!(
+            managed_update_install(
+                Path::new("/Users/me/.local/share/mise/shims"),
+                OsStr::new("dx")
+            ),
+            Some(ManagedUpdateInstall::Mise)
+        );
+        assert_eq!(
+            managed_update_install(Path::new("/nix/store/abc-dx/bin"), OsStr::new("dx")),
+            Some(ManagedUpdateInstall::Nix)
+        );
+        assert_eq!(
+            classify_managed_update_path(Path::new("/usr/local/bin")),
+            None
+        );
+    }
+
+    #[test]
+    fn update_rejects_managed_install_dirs() {
+        let error = check_update_install_dir(Path::new("/Users/me/.cargo/bin"), OsStr::new("dx"))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("Cargo-managed"));
+        assert!(error.contains("--install-dir DIR"));
+        assert!(!error.contains("--force-self-update"));
+
+        assert!(
+            check_update_install_dir(Path::new("dx-unmanaged-test-bin"), OsStr::new("dx")).is_ok()
+        );
     }
 }
