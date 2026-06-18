@@ -45,7 +45,7 @@
   "packageManager": "pnpm@11.7.0",
   "pi": {
     "extensions": [
-      "./extensions"
+      "./extensions/pi-dx.ts"
     ]
   }
 }

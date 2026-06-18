@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
+import { discoverAndLoadExtensions } from "@earendil-works/pi-coding-agent";
 import extension, { dxInvocationNeedsGit, parseCommandLine } from "../extensions/pi-dx.ts";
+
+const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 test("extension registers /diff", () => {
   let registered;
@@ -12,6 +19,22 @@ test("extension registers /diff", () => {
   });
 
   assert.deepEqual(registered, { name: "diff", description: "Open the current diff in dx" });
+});
+
+test("package manifest loads /diff extension", async () => {
+  const agentDir = await mkdtemp(join(tmpdir(), "pi-dx-test-"));
+
+  try {
+    const result = await discoverAndLoadExtensions([packageRoot], packageRoot, agentDir);
+    assert.deepEqual(result.errors, []);
+
+    const diffExtension = result.extensions.find((loadedExtension) =>
+      loadedExtension.commands.has("diff"),
+    );
+    assert.ok(diffExtension, "expected package manifest to load the /diff extension");
+  } finally {
+    await rm(agentDir, { recursive: true, force: true });
+  }
 });
 
 test("parseCommandLine splits whitespace", () => {
