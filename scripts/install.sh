@@ -171,6 +171,39 @@ allow_unverified() {
   esac
 }
 
+is_dx_release_tag() {
+  case "$1" in
+    v[0-9]*.[0-9]*.[0-9]*)
+      case "${1#v}" in
+        *[!0-9.]* | *.*.*.*)
+          return 1
+          ;;
+        *)
+          return 0
+          ;;
+      esac
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+release_tags_from_json() {
+  sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$1"
+}
+
+latest_dx_release_tag_from_json() {
+  for candidate in $(release_tags_from_json "$1"); do
+    if is_dx_release_tag "$candidate"; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 need curl
 need tar
 need install
@@ -224,9 +257,26 @@ if [ "$version" = "latest" ]; then
     exit 1
   fi
 
-  tag="$(sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$latest_json" | head -n 1)"
+  tag="$(latest_dx_release_tag_from_json "$latest_json" || true)"
   if [ -z "$tag" ]; then
-    echo "dx $action: could not resolve latest release for $repo: response did not contain tag_name" >&2
+    releases_json="$tmp_dir/releases.json"
+    releases_url="https://api.github.com/repos/$repo/releases?per_page=100"
+    if ! curl_download "$releases_url" "$releases_json"; then
+      print_download_error "could not list releases for $repo" "$releases_url"
+      exit 1
+    fi
+
+    tag="$(latest_dx_release_tag_from_json "$releases_json" || true)"
+  fi
+
+  if [ -z "$tag" ]; then
+    latest_tag="$(release_tags_from_json "$latest_json" | head -n 1)"
+    if [ -n "$latest_tag" ]; then
+      echo "dx $action: latest GitHub release for $repo is $latest_tag, which is not a dx binary release" >&2
+    else
+      echo "dx $action: could not resolve latest release for $repo: response did not contain tag_name" >&2
+    fi
+    echo "dx $action: expected a release tagged like v0.2.0 with dx-$target assets" >&2
     exit 1
   fi
 else

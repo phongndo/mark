@@ -137,11 +137,18 @@ http_not_found() {
 }
 
 api_url="https://api.github.com/repos/$DX_SMOKE_REPO/releases/latest"
+releases_url="https://api.github.com/repos/$DX_SMOKE_REPO/releases?per_page=100"
 installer_url="https://raw.githubusercontent.com/$DX_SMOKE_REPO/main/scripts/install.sh"
 download_prefix="https://github.com/$DX_SMOKE_REPO/releases/download/$DX_SMOKE_TAG/"
 
 if [ "$url" = "$api_url" ]; then
-  printf '{"tag_name":"%s"}\n' "$DX_SMOKE_TAG" | write_stdout_or_file
+  printf '{"tag_name":"%s"}\n' "${DX_SMOKE_LATEST_TAG:-$DX_SMOKE_TAG}" | write_stdout_or_file
+  http_ok
+  exit 0
+fi
+
+if [ "$url" = "$releases_url" ]; then
+  printf '[\n{"tag_name":"%s"},\n{"tag_name":"%s"}\n]\n' "${DX_SMOKE_LATEST_TAG:-$DX_SMOKE_TAG}" "$DX_SMOKE_TAG" | write_stdout_or_file
   http_ok
   exit 0
 fi
@@ -182,6 +189,7 @@ chmod +x "$tmp_dir/bin/curl"
 DX_INSTALLER= \
 DX_INSTALLER_URL="https://raw.githubusercontent.com/$repo/main/scripts/install.sh" \
 DX_REPO="$repo" \
+DX_SMOKE_LATEST_TAG="pi-dx-v0.1.1" \
 DX_SMOKE_INSTALLER="$repo_dir/scripts/install.sh" \
 DX_SMOKE_RELEASE_DIR="$release_dir" \
 DX_SMOKE_REPO="$repo" \
@@ -190,6 +198,7 @@ PATH="$tmp_dir/bin:$PATH" \
   "$repo_dir/scripts/smoke-curl-install" "$version"
 
 DX_REPO="$repo" \
+DX_SMOKE_LATEST_TAG="pi-dx-v0.1.1" \
 DX_SMOKE_RELEASE_DIR="$release_dir" \
 DX_SMOKE_REPO="$repo" \
 DX_SMOKE_TAG="$tag" \

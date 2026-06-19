@@ -121,5 +121,6 @@ jobs:
           gh release create "$release_tag" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
+            --latest=false \
             --title "pi-dx ${VERSION}" \
             --notes-file release-notes.md
