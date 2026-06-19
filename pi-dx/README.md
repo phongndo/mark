@@ -8,16 +8,30 @@ reviewer from inside Pi.
 
 ## Install
 
-From this checkout:
+Install `dx` first:
 
 ```sh
-pi install ./pi-dx
+curl -fsSL https://raw.githubusercontent.com/phongndo/dx/main/scripts/install.sh | sh
 ```
 
-For development without installing:
+Then install the Pi package from npm:
 
 ```sh
-pi -e ./pi-dx/extensions/pi-dx.ts
+pi install npm:pi-dx
+```
+
+Use a non-`PATH` binary with:
+
+```sh
+PI_DX_BIN=/path/to/dx pi
+```
+
+## Development
+
+Run the extension from this checkout without installing the npm package:
+
+```sh
+pi -e ./extensions/pi-dx.ts
 ```
 
 Developer checks use pnpm:
@@ -48,18 +62,6 @@ Publishing is manual, matching the main `dx` binary release flow:
 The workflow validates the package, publishes it to npm with provenance, and can
 create a `pi-dx-vX.Y.Z` GitHub release. npm trusted publishing must be configured
 for this repository and workflow before the publish step can succeed.
-
-Install `dx` with:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/phongndo/dx/main/scripts/install.sh | sh
-```
-
-Use a non-`PATH` binary with:
-
-```sh
-PI_DX_BIN=/path/to/dx pi
-```
 
 ## Usage
 

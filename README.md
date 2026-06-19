@@ -66,12 +66,12 @@ plain `dx ...` is the primary interface.
 
 ## Pi extension
 
-This repository includes a separate `pi-dx/` Pi package that adds a `/diff`
+This repository includes a separate `pi-dx` Pi package that adds a `/diff`
 command to Pi and shells out to an already-installed `dx` binary. It does not
-bundle the CLI. From this checkout:
+bundle the CLI. Install the published package from npm:
 
 ```sh
-pi install ./pi-dx
+pi install npm:pi-dx
 ```
 
 ## Configuration
