@@ -19,6 +19,7 @@ use dx_syntax::{
     ColorOverrides, DiffContextExpansion, HighlightedLine, SyntaxLimits, SyntaxSettings,
     SyntaxThemeConfig, SyntaxThemeSource,
 };
+use ratatui::layout::Rect;
 use tokio::sync::{mpsc::Receiver, oneshot};
 use unicode_width::UnicodeWidthStr;
 
@@ -39,7 +40,7 @@ use crate::{
     },
     render::{
         draw,
-        menus::{branch_menu_width, diff_menu_width, diff_selector_width},
+        menus::{branch_menu_width, diff_menu_block, diff_selector_width},
         sidebar::max_file_sidebar_width,
         text::fit_padded,
     },
@@ -256,6 +257,7 @@ pub(crate) fn sync_live_diff(
         *live_diff = None;
         app.live_diff_failed_options = None;
         app.live_reload_pending = false;
+        app.clear_cached_diff_choices();
         return;
     }
 
@@ -279,6 +281,7 @@ pub(crate) fn sync_live_diff(
             *live_diff = None;
             app.live_diff_failed_options = Some(app.options.clone());
             app.live_reload_pending = false;
+            app.clear_cached_diff_choices();
             app.set_error_log(format!("live reload unavailable: {error}"));
         }
     }
@@ -695,6 +698,7 @@ pub(crate) struct DiffApp {
     pub(crate) file_sidebar_width: Option<u16>,
     pub(crate) file_sidebar_render_width: u16,
     pub(crate) file_sidebar_resizing: bool,
+    pub(crate) rendered_diff_menu_area: Option<Rect>,
     pub(crate) leader_pending: bool,
     pub(crate) help_menu_open: bool,
     pub(crate) diff_menu_open: bool,
@@ -901,6 +905,7 @@ impl DiffApp {
             file_sidebar_width: None,
             file_sidebar_render_width: 0,
             file_sidebar_resizing: false,
+            rendered_diff_menu_area: None,
             leader_pending: false,
             help_menu_open: false,
             diff_menu_open: false,
@@ -1111,6 +1116,10 @@ impl DiffApp {
             self.toggle_layout();
             return Ok(false);
         }
+        if self.keymap.matches_single(GlobalAction::EditHunk, key) {
+            self.open_focused_hunk_in_editor();
+            return Ok(false);
+        }
         if self.keymap.matches_single(GlobalAction::NextDiffType, key) {
             self.cycle_diff_choice(1);
             return Ok(false);
@@ -1155,10 +1164,8 @@ impl DiffApp {
             }
             KeyCode::PageDown | KeyCode::Char('d') => self.scroll_or_focus_hunk(20),
             KeyCode::PageUp | KeyCode::Char('u') => self.scroll_or_focus_hunk(-20),
-            KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.open_focused_hunk_in_editor();
-            }
-            KeyCode::Home | KeyCode::Char('g') => self.set_scroll(0),
+            KeyCode::Home => self.set_scroll(0),
+            KeyCode::Char('g') if is_plain_char_key(key, 'g') => self.set_scroll(0),
             KeyCode::End | KeyCode::Char('G') => self.set_scroll(self.max_scroll()),
             KeyCode::Char('n') if !self.grep_filter.is_empty() => self.move_grep_match(1),
             KeyCode::Char('p') | KeyCode::Char('N') if !self.grep_filter.is_empty() => {
@@ -1216,6 +1223,17 @@ impl DiffApp {
         }
         if self.keymap.matches_leader(GlobalAction::FileBrowser, key) {
             self.toggle_file_sidebar();
+            return Ok(false);
+        }
+        if self.keymap.matches_leader(GlobalAction::NextDiffType, key) {
+            self.cycle_diff_choice(1);
+            return Ok(false);
+        }
+        if self
+            .keymap
+            .matches_leader(GlobalAction::PreviousDiffType, key)
+        {
+            self.cycle_diff_choice(-1);
             return Ok(false);
         }
 
@@ -1313,6 +1331,9 @@ impl DiffApp {
     pub(crate) fn editor_shortcut_available(&self) -> bool {
         self.filter_input.is_none()
             && !self.help_menu_open
+            && self.branch_menu_open.is_none()
+            && !self.diff_menu_open
+            && !self.options_menu_open
             && !self.leader_pending
             && !self.color_scheme_picker_open
     }
@@ -1344,7 +1365,7 @@ impl DiffApp {
             return false;
         }
 
-        is_quit_key(key)
+        is_quit_key(key) || self.keymap.matches_single(GlobalAction::Quit, key)
     }
 
     pub(crate) fn toggle_help_menu(&mut self) {
@@ -1418,6 +1439,10 @@ impl DiffApp {
         self.rendered_error_log_separator_row = row.filter(|_| self.error_log.is_some());
     }
 
+    pub(crate) fn set_rendered_diff_menu_area(&mut self, area: Option<Rect>) {
+        self.rendered_diff_menu_area = area.filter(|_| self.diff_menu_open);
+    }
+
     pub(crate) fn start_error_log_resize(&mut self, row: u16) -> bool {
         if self.error_log_separator_row() != Some(row) {
             return false;
@@ -1483,6 +1508,8 @@ impl DiffApp {
         let success_notice = success_notice.into();
         let error_prefix = error_prefix.into();
 
+        let use_cache = use_cache && self.diff_cache_invalidator_active();
+
         if use_cache {
             self.store_current_diff_cache();
 
@@ -1514,6 +1541,8 @@ impl DiffApp {
                 self.set_notice(pending_notice);
                 return;
             }
+        } else {
+            self.clear_cached_diff_choices();
         }
 
         let (tx, rx) = oneshot::channel();
@@ -1569,6 +1598,11 @@ impl DiffApp {
     }
 
     pub(crate) fn start_diff_prefetches(&mut self) {
+        if !self.diff_cache_invalidator_active() {
+            self.clear_cached_diff_choices();
+            return;
+        }
+
         if self.diff_prefetch_started {
             self.start_next_diff_prefetch();
             return;
@@ -1608,6 +1642,11 @@ impl DiffApp {
     }
 
     fn start_next_diff_prefetch(&mut self) {
+        if !self.diff_cache_invalidator_active() {
+            self.clear_cached_diff_choices();
+            return;
+        }
+
         if self.pending_diff_prefetch.is_some() {
             return;
         }
@@ -1670,14 +1709,25 @@ impl DiffApp {
 
     pub(crate) fn invalidate_diff_cache(&mut self) {
         self.pending_diff_load = None;
+        self.clear_cached_diff_choices();
+    }
+
+    pub(crate) fn clear_cached_diff_choices(&mut self) {
         self.diff_cache.clear();
         self.pending_diff_prefetch = None;
         self.diff_prefetch_queue.clear();
         self.diff_prefetch_started = false;
     }
 
+    fn diff_cache_invalidator_active(&self) -> bool {
+        self.live_updates_allowed
+            && self.live_updates_enabled
+            && live_diff_supported(&self.options)
+            && self.live_diff_failed_options.as_ref() != Some(&self.options)
+    }
+
     fn store_current_diff_cache(&mut self) {
-        if !cacheable_diff_options(&self.options) {
+        if !self.diff_cache_invalidator_active() || !cacheable_diff_options(&self.options) {
             return;
         }
 
@@ -1715,7 +1765,7 @@ impl DiffApp {
     }
 
     pub(crate) fn cache_loaded_diff(&mut self, options: DiffOptions, changeset: Changeset) {
-        if !cacheable_diff_options(&options) {
+        if !self.diff_cache_invalidator_active() || !cacheable_diff_options(&options) {
             return;
         }
 
@@ -2870,12 +2920,23 @@ impl DiffApp {
 
     pub(crate) fn diff_choice_at(&self, column: u16, row: u16) -> Option<DiffChoice> {
         let choices = self.diff_menu_choices();
-        let width = diff_menu_width(&choices);
-        if column >= width || row == 0 {
+        let menu_area = self.rendered_diff_menu_area?;
+        let inner = diff_menu_block(self.theme).inner(menu_area);
+        if column < inner.x
+            || column >= inner.x.saturating_add(inner.width)
+            || row < inner.y
+            || row >= inner.y.saturating_add(inner.height)
+        {
             return None;
         }
 
-        choices.get(usize::from(row - 1)).copied()
+        let row_index = usize::from(row.saturating_sub(inner.y));
+        let rendered_choices = choices.len().min(inner.height.saturating_sub(1) as usize);
+        if row_index >= rendered_choices {
+            return None;
+        }
+
+        choices.get(row_index).copied()
     }
 
     pub(crate) fn diff_menu_choices(&self) -> Vec<DiffChoice> {

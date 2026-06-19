@@ -21,28 +21,14 @@ use crate::{
     },
 };
 
-pub(crate) fn draw_diff_menu(frame: &mut Frame<'_>, app: &DiffApp, area: Rect) {
-    if !app.diff_menu_open || area.width < 24 || area.height < 5 {
-        return;
-    }
-
+pub(crate) fn draw_diff_menu(frame: &mut Frame<'_>, app: &mut DiffApp, area: Rect) {
     let choices = app.diff_menu_choices();
-    if choices.is_empty() {
+    let Some(menu_area) = diff_menu_area(app, area, &choices) else {
+        app.set_rendered_diff_menu_area(None);
         return;
-    }
-
-    let width = diff_menu_floating_width(app, &choices).min(area.width);
-    let height = (choices.len() as u16).saturating_add(3).min(area.height);
-    if width == 0 || height == 0 {
-        return;
-    }
-
-    let menu_area = Rect {
-        x: area.x + area.width.saturating_sub(width) / 2,
-        y: area.y + area.height.saturating_sub(height) / 2,
-        width,
-        height,
     };
+    app.set_rendered_diff_menu_area(Some(menu_area));
+
     let block = diff_menu_block(app.theme);
     let inner = block.inner(menu_area);
     let active = app.current_diff_choice();
@@ -98,6 +84,25 @@ pub(crate) fn draw_diff_menu(frame: &mut Frame<'_>, app: &DiffApp, area: Rect) {
         Paragraph::new(Text::from(lines)).style(Style::default().bg(base_bg(app.theme))),
         inner,
     );
+}
+
+pub(crate) fn diff_menu_area(app: &DiffApp, area: Rect, choices: &[DiffChoice]) -> Option<Rect> {
+    if !app.diff_menu_open || area.width < 24 || area.height < 5 || choices.is_empty() {
+        return None;
+    }
+
+    let width = diff_menu_floating_width(app, choices).min(area.width);
+    let height = (choices.len() as u16).saturating_add(3).min(area.height);
+    if width == 0 || height == 0 {
+        return None;
+    }
+
+    Some(Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    })
 }
 
 pub(crate) fn diff_menu_block(theme: DiffTheme) -> Block<'static> {
@@ -719,14 +724,6 @@ pub(crate) fn diff_comparison_label(options: &DiffOptions) -> String {
         DiffSource::Patch(dx_diff::PatchSource::Stdin(_)) => "patch stdin".to_owned(),
         DiffSource::Patch(dx_diff::PatchSource::Text { label, .. }) => label.clone(),
     }
-}
-
-pub(crate) fn diff_menu_width(choices: &[DiffChoice]) -> u16 {
-    choices
-        .iter()
-        .map(|choice| choice.label().width() + 4)
-        .max()
-        .unwrap_or_default() as u16
 }
 
 pub(crate) fn branch_menu_width(branches: &[String]) -> u16 {
