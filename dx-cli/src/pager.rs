@@ -265,11 +265,7 @@ fn skip_escape(input: &[u8], index: &mut usize) {
     match introducer {
         b'[' => skip_csi(input, index),
         b']' | b'P' | b'^' | b'_' | b'X' => skip_string_escape(input, index),
-        0x20..=0x2f => {
-            if *index < input.len() {
-                *index += 1;
-            }
-        }
+        0x20..=0x2f if *index < input.len() => *index += 1,
         _ => {}
     }
 }
