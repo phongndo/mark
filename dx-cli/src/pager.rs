@@ -66,15 +66,15 @@ fn pager_action(
         };
     }
 
-    if !stdout_tty {
+    if env.is_captured_pager_host() {
+        return PagerAction::StaticDiff;
+    }
+
+    if !stdout_tty || env.term_is_dumb() {
         return PagerAction::Passthrough;
     }
 
-    if env.term_is_dumb() && !env.is_captured_pager_host() {
-        return PagerAction::Passthrough;
-    }
-
-    if env.is_captured_pager_host() || !has_controlling_terminal {
+    if !has_controlling_terminal {
         return PagerAction::StaticDiff;
     }
 
@@ -420,6 +420,10 @@ mod tests {
                 &env(Some("dumb"), None, Some("dx pager"), false),
                 true,
             ),
+            PagerAction::StaticDiff
+        );
+        assert_eq!(
+            pager_action(input, false, &env(Some("dumb"), None, None, true), true),
             PagerAction::StaticDiff
         );
     }

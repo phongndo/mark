@@ -215,6 +215,10 @@ fn sanitize_terminal_fragment(text: &str) -> String {
     while index < bytes.len() {
         match bytes[index] {
             0x1b => skip_escape(bytes, &mut index),
+            b'\t' => {
+                output.push('\t');
+                index += 1;
+            }
             0x00..=0x1f | 0x7f => index += 1,
             _ => {
                 let Some(character) = text[index..].chars().next() else {
@@ -357,6 +361,28 @@ mod tests {
         assert!(!output.contains('\x07'));
         assert!(output.contains("bad.txt"));
         assert!(output.contains("safe"));
+    }
+
+    #[test]
+    fn static_pager_preserves_tabs_in_diff_lines() {
+        let mut changeset = fixture_changeset();
+        changeset.files[0].hunks[0].lines[0].text = "\told".to_owned();
+        changeset.files[0].hunks[0].lines[1].text = "\tnew".to_owned();
+
+        let output = render_static_changeset(
+            DiffOptions::default(),
+            changeset,
+            StaticPagerOptions {
+                width: 80,
+                layout: StaticPagerLayout::Unified,
+                color: false,
+                syntax: false,
+                ..StaticPagerOptions::default()
+            },
+        );
+
+        assert!(output.contains("\told"));
+        assert!(output.contains("\tnew"));
     }
 
     #[test]
