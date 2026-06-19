@@ -219,7 +219,13 @@ fn sanitize_terminal_fragment(text: &str) -> String {
                 output.push('\t');
                 index += 1;
             }
-            0x00..=0x1f | 0x7f => index += 1,
+            0x00..=0x1f | 0x7f => {
+                let Some(character) = text[index..].chars().next() else {
+                    break;
+                };
+                output.extend(character.escape_default());
+                index += character.len_utf8();
+            }
             _ => {
                 let Some(character) = text[index..].chars().next() else {
                     break;
@@ -383,6 +389,28 @@ mod tests {
 
         assert!(output.contains("\told"));
         assert!(output.contains("\tnew"));
+    }
+
+    #[test]
+    fn static_pager_escapes_cr_payloads_in_diff_lines() {
+        let mut changeset = fixture_changeset();
+        changeset.files[0].hunks[0].lines[0].text = "old\r".to_owned();
+        changeset.files[0].hunks[0].lines[1].text = "old".to_owned();
+
+        let output = render_static_changeset(
+            DiffOptions::default(),
+            changeset,
+            StaticPagerOptions {
+                width: 80,
+                layout: StaticPagerLayout::Unified,
+                color: false,
+                syntax: false,
+                ..StaticPagerOptions::default()
+            },
+        );
+
+        assert!(output.contains("old\\r"));
+        assert!(output.contains("+old"));
     }
 
     #[test]

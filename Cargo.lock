@@ -420,6 +420,7 @@ dependencies = [
  "crossterm",
  "dx-command",
  "dx-core",
+ "dx-diff",
  "dx-tui",
  "rustix 0.38.44",
  "unicode-width 0.2.0",

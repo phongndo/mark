@@ -18,6 +18,7 @@ clap.workspace = true
 crossterm.workspace = true
 dx-command.workspace = true
 dx-core.workspace = true
+dx-diff.workspace = true
 dx-tui.workspace = true
 unicode-width.workspace = true
 

@@ -210,18 +210,43 @@ fn spawn_shell_command(command: &str) -> io::Result<std::process::Child> {
 fn looks_like_patch_input(input: &[u8]) -> bool {
     let normalized = normalized_patch_input(input);
     let text = String::from_utf8_lossy(&normalized);
-    text.lines().any(|line| line.starts_with("diff --git "))
-        || (text.lines().any(|line| line.starts_with("--- "))
-            && text.lines().any(|line| line.starts_with("+++ ")))
-        || text.lines().any(|line| line.starts_with("@@ "))
+    parseable_patch_has_renderable_change(&text)
+}
+
+fn parseable_patch_has_renderable_change(patch: &str) -> bool {
+    let has_git_header = patch_header_lines(patch).any(|line| line.starts_with("diff --git "));
+    dx_diff::parse_patch(patch)
+        .iter()
+        .any(|file| diff_file_has_renderable_change(file, has_git_header))
+}
+
+fn diff_file_has_renderable_change(file: &dx_diff::DiffFile, input_has_git_header: bool) -> bool {
+    !file.hunks.is_empty()
+        || file.is_binary
+        || (input_has_git_header
+            && matches!(
+                file.status,
+                dx_diff::FileStatus::Added
+                    | dx_diff::FileStatus::Deleted
+                    | dx_diff::FileStatus::Renamed
+                    | dx_diff::FileStatus::Copied
+                    | dx_diff::FileStatus::TypeChanged
+            ))
+}
+
+fn patch_header_lines(patch: &str) -> impl Iterator<Item = &str> {
+    patch
+        .split_inclusive('\n')
+        .map(|line| line.strip_suffix('\n').unwrap_or(line))
+        .map(|line| line.strip_suffix('\r').unwrap_or(line))
 }
 
 fn normalized_patch_input(input: &[u8]) -> Vec<u8> {
-    strip_terminal_control(input)
+    strip_terminal_escapes(input)
 }
 
 fn sanitized_terminal_bytes(input: &[u8]) -> Vec<u8> {
-    let stripped = strip_terminal_control(input);
+    let stripped = strip_terminal_escapes(input);
     let text = String::from_utf8_lossy(&stripped);
     let mut output = String::with_capacity(text.len());
     for character in text.chars() {
@@ -234,18 +259,12 @@ fn sanitized_terminal_bytes(input: &[u8]) -> Vec<u8> {
     output.into_bytes()
 }
 
-fn strip_terminal_control(input: &[u8]) -> Vec<u8> {
+fn strip_terminal_escapes(input: &[u8]) -> Vec<u8> {
     let mut output = Vec::with_capacity(input.len());
     let mut index = 0;
     while index < input.len() {
         match input[index] {
             0x1b => skip_escape(input, &mut index),
-            b'\r' => {
-                if input.get(index + 1) != Some(&b'\n') {
-                    output.push(b'\n');
-                }
-                index += 1;
-            }
             byte => {
                 output.push(byte);
                 index += 1;
@@ -484,16 +503,51 @@ mod tests {
     }
 
     #[test]
-    fn strip_terminal_control_removes_csi_and_osc() {
-        let stripped = strip_terminal_control(b"a\x1b[31mb\x1b[0mc\x1b]52;c;secret\x07d");
+    fn patch_detection_rejects_bare_hunk_marker() {
+        assert!(!looks_like_patch_input(
+            b"commit abc123\n\n    @@ -1 +1 @@\n    example text\n"
+        ));
+    }
 
-        assert_eq!(stripped, b"abcd");
+    #[test]
+    fn patch_detection_rejects_unified_headers_without_changes() {
+        assert!(!looks_like_patch_input(
+            b"commit abc123\n\n--- not-a-diff\n+++ still-not-a-diff\n"
+        ));
+    }
+
+    #[test]
+    fn patch_detection_accepts_metadata_only_git_diff() {
+        assert!(looks_like_patch_input(
+            b"diff --git a/old.txt b/new.txt\nrename from old.txt\nrename to new.txt\n"
+        ));
+    }
+
+    #[test]
+    fn normalized_patch_input_preserves_crlf_payloads() {
+        let patch =
+            b"diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\r\n+old\n";
+
+        let normalized = normalized_patch_input(patch);
+        let text = String::from_utf8_lossy(&normalized);
+        let files = dx_diff::parse_patch(&text);
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].hunks[0].lines[0].text, "old\r");
+        assert_eq!(files[0].hunks[0].lines[1].text, "old");
+    }
+
+    #[test]
+    fn strip_terminal_escapes_removes_csi_and_osc_but_preserves_cr() {
+        let stripped = strip_terminal_escapes(b"a\r\n\x1b[31mb\x1b[0mc\x1b]52;c;secret\x07d");
+
+        assert_eq!(stripped, b"a\r\nbcd");
     }
 
     #[test]
     fn sanitized_terminal_bytes_escapes_controls_after_stripping_sequences() {
-        let sanitized = sanitized_terminal_bytes(b"a\x07\x1b[31mb\x1b[0m\n");
+        let sanitized = sanitized_terminal_bytes(b"a\r\x07\x1b[31mb\x1b[0m\n");
 
-        assert_eq!(sanitized, b"a\\u{7}b\n");
+        assert_eq!(sanitized, b"a\\r\\u{7}b\n");
     }
 }
