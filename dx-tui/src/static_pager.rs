@@ -214,8 +214,10 @@ fn sanitize_terminal_fragment(text: &str) -> String {
     let mut index = 0;
     while index < bytes.len() {
         if bytes[index] == 0x1b {
-            skip_escape(bytes, &mut index);
-            continue;
+            if let Some(end) = escape_end(bytes, index) {
+                index = end;
+                continue;
+            }
         }
 
         let Some(character) = text[index..].chars().next() else {
@@ -233,41 +235,48 @@ fn sanitize_terminal_fragment(text: &str) -> String {
     output
 }
 
-fn skip_escape(input: &[u8], index: &mut usize) {
-    *index += 1;
-    let Some(introducer) = input.get(*index).copied() else {
-        return;
-    };
-    *index += 1;
-
+fn escape_end(input: &[u8], index: usize) -> Option<usize> {
+    let introducer = input.get(index + 1).copied()?;
+    let payload = index + 2;
     match introducer {
-        b'[' => skip_csi(input, index),
-        b']' | b'P' | b'^' | b'_' | b'X' => skip_string_escape(input, index),
-        0x20..=0x2f if *index < input.len() => *index += 1,
-        _ => {}
+        b'[' => csi_escape_end(input, payload),
+        b']' | b'P' | b'^' | b'_' | b'X' => string_escape_end(input, payload),
+        0x20..=0x2f => input
+            .get(payload)
+            .filter(|byte| (0x30..=0x7e).contains(*byte))
+            .map(|_| payload + 1),
+        0x30..=0x7e => Some(payload),
+        _ => None,
     }
 }
 
-fn skip_csi(input: &[u8], index: &mut usize) {
-    while let Some(byte) = input.get(*index).copied() {
-        *index += 1;
-        if (0x40..=0x7e).contains(&byte) {
-            break;
+fn csi_escape_end(input: &[u8], mut index: usize) -> Option<usize> {
+    let mut seen_intermediate = false;
+    while let Some(byte) = input.get(index).copied() {
+        match byte {
+            0x30..=0x3f if !seen_intermediate => index += 1,
+            0x20..=0x2f => {
+                seen_intermediate = true;
+                index += 1;
+            }
+            0x40..=0x7e => return Some(index + 1),
+            _ => return None,
         }
     }
+    None
 }
 
-fn skip_string_escape(input: &[u8], index: &mut usize) {
-    while let Some(byte) = input.get(*index).copied() {
-        *index += 1;
-        if byte == 0x07 {
-            break;
-        }
-        if byte == 0x1b && input.get(*index) == Some(&b'\\') {
-            *index += 1;
-            break;
+fn string_escape_end(input: &[u8], mut index: usize) -> Option<usize> {
+    while let Some(byte) = input.get(index).copied() {
+        match byte {
+            0x07 => return Some(index + 1),
+            b'\n' | b'\r' => return None,
+            0x1b if input.get(index + 1) == Some(&b'\\') => return Some(index + 2),
+            0x1b => return None,
+            _ => index += 1,
         }
     }
+    None
 }
 
 #[cfg(test)]
@@ -427,6 +436,26 @@ mod tests {
 
         assert!(!output.contains('\u{009b}'));
         assert!(output.contains("safe\\u{9b}31m"));
+    }
+
+    #[test]
+    fn static_pager_escapes_malformed_terminal_sequences() {
+        let mut changeset = fixture_changeset();
+        changeset.files[0].hunks[0].lines[1].text = "safe\x1b]unterminated\x1b[31".to_owned();
+
+        let output = render_static_changeset(
+            DiffOptions::default(),
+            changeset,
+            StaticPagerOptions {
+                width: 80,
+                layout: StaticPagerLayout::Unified,
+                color: false,
+                syntax: false,
+                ..StaticPagerOptions::default()
+            },
+        );
+
+        assert!(output.contains("safe\\u{1b}]unterminated\\u{1b}[31"));
     }
 
     #[test]

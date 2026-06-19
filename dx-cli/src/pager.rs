@@ -23,6 +23,8 @@ const DEFAULT_TEXT_PAGER: &str = "less -R";
 const DEFAULT_STATIC_WIDTH: usize = 120;
 const MIN_STATIC_WIDTH: usize = 20;
 const PLAIN_TEXT_PAGER_GUARD: &str = "DX_PAGER_PLAIN_TEXT_FALLBACK";
+const PAGER_CLASSIFICATION_LIMIT: usize = 128 * 1024;
+const STREAM_BUFFER_SIZE: usize = 8192;
 
 pub(crate) fn pager(args: PagerArgs) -> CliResult<()> {
     if io::stdin().is_terminal() {
@@ -33,19 +35,36 @@ pub(crate) fn pager(args: PagerArgs) -> CliResult<()> {
         .into());
     }
 
-    let mut input = Vec::new();
-    io::stdin().read_to_end(&mut input)?;
-
     let env = PagerEnv::current();
     let stdout_tty = io::stdout().is_terminal();
     let static_color =
         static_pager_color_enabled(stdout_tty, &env, env::var_os("NO_COLOR").is_some());
-    match pager_action(&input, stdout_tty, &env, controlling_terminal_available()) {
-        PagerAction::Passthrough => write_stdout_bytes(&input),
-        PagerAction::PlainTextPager => page_plain_text(&input),
-        PagerAction::StaticDiff => write_static_diff(&input, &args, static_color),
-        PagerAction::InteractiveDiff => run_interactive_diff(input, &args, static_color),
+    let has_controlling_terminal = controlling_terminal_available();
+    let mut stdin = io::stdin().lock();
+    match read_pager_input(&mut stdin, stdout_tty, &env, has_controlling_terminal)? {
+        PagerInput::Buffered { input, action } => match action {
+            PagerAction::Passthrough => write_stdout_bytes(&input),
+            PagerAction::PlainTextPager => page_plain_text(&input),
+            PagerAction::StaticDiff => write_static_diff(&input, &args, static_color),
+            PagerAction::InteractiveDiff => run_interactive_diff(input, &args, static_color),
+        },
+        PagerInput::Streaming { prefix, action } => match action {
+            StreamingPagerAction::Passthrough => stream_to_stdout(&prefix, &mut stdin),
+            StreamingPagerAction::PlainTextPager => page_plain_text_stream(&prefix, &mut stdin),
+        },
     }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum PagerInput {
+    Buffered {
+        input: Vec<u8>,
+        action: PagerAction,
+    },
+    Streaming {
+        prefix: Vec<u8>,
+        action: StreamingPagerAction,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,6 +75,69 @@ enum PagerAction {
     InteractiveDiff,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StreamingPagerAction {
+    Passthrough,
+    PlainTextPager,
+}
+
+fn read_pager_input<R: Read>(
+    reader: &mut R,
+    stdout_tty: bool,
+    env: &PagerEnv,
+    has_controlling_terminal: bool,
+) -> io::Result<PagerInput> {
+    if let Some(action) = input_independent_streaming_action(stdout_tty, env) {
+        return Ok(PagerInput::Streaming {
+            prefix: Vec::new(),
+            action,
+        });
+    }
+
+    let mut input = Vec::new();
+    let mut buffer = [0; STREAM_BUFFER_SIZE];
+    loop {
+        if looks_like_patch_input(&input) {
+            reader.read_to_end(&mut input)?;
+            return Ok(PagerInput::Buffered {
+                action: pager_action(&input, stdout_tty, env, has_controlling_terminal),
+                input,
+            });
+        }
+
+        if input.len() >= PAGER_CLASSIFICATION_LIMIT {
+            // Git does not tell core.pager which command produced stdin. Once a
+            // bounded prefix has no parseable diff, switch to streaming so
+            // large non-diff commands like `git log` can be quit early.
+            return Ok(PagerInput::Streaming {
+                prefix: input,
+                action: non_diff_streaming_action(stdout_tty, env),
+            });
+        }
+
+        let read_limit = (PAGER_CLASSIFICATION_LIMIT - input.len()).min(buffer.len());
+        let bytes_read = reader.read(&mut buffer[..read_limit])?;
+        if bytes_read == 0 {
+            return Ok(PagerInput::Buffered {
+                action: pager_action(&input, stdout_tty, env, has_controlling_terminal),
+                input,
+            });
+        }
+        input.extend_from_slice(&buffer[..bytes_read]);
+    }
+}
+
+fn input_independent_streaming_action(
+    stdout_tty: bool,
+    env: &PagerEnv,
+) -> Option<StreamingPagerAction> {
+    if !env.is_captured_pager_host() && (!stdout_tty || env.term_is_dumb()) {
+        Some(StreamingPagerAction::Passthrough)
+    } else {
+        None
+    }
+}
+
 fn pager_action(
     input: &[u8],
     stdout_tty: bool,
@@ -63,11 +145,7 @@ fn pager_action(
     has_controlling_terminal: bool,
 ) -> PagerAction {
     if !looks_like_patch_input(input) {
-        return if env.term_is_dumb() || !stdout_tty {
-            PagerAction::Passthrough
-        } else {
-            PagerAction::PlainTextPager
-        };
+        return non_diff_pager_action(stdout_tty, env);
     }
 
     if env.is_captured_pager_host() {
@@ -83,6 +161,21 @@ fn pager_action(
     }
 
     PagerAction::InteractiveDiff
+}
+
+fn non_diff_pager_action(stdout_tty: bool, env: &PagerEnv) -> PagerAction {
+    match non_diff_streaming_action(stdout_tty, env) {
+        StreamingPagerAction::Passthrough => PagerAction::Passthrough,
+        StreamingPagerAction::PlainTextPager => PagerAction::PlainTextPager,
+    }
+}
+
+fn non_diff_streaming_action(stdout_tty: bool, env: &PagerEnv) -> StreamingPagerAction {
+    if env.term_is_dumb() || !stdout_tty {
+        StreamingPagerAction::Passthrough
+    } else {
+        StreamingPagerAction::PlainTextPager
+    }
 }
 
 fn static_pager_color_enabled(stdout_tty: bool, env: &PagerEnv, no_color: bool) -> bool {
@@ -193,6 +286,67 @@ fn page_plain_text(input: &[u8]) -> CliResult<()> {
             ))?;
             write_stdout_bytes(input)
         }
+    }
+}
+
+fn page_plain_text_stream<R: Read>(prefix: &[u8], input: &mut R) -> CliResult<()> {
+    if env::var_os(PLAIN_TEXT_PAGER_GUARD).is_some() {
+        return stream_to_stdout(prefix, input);
+    }
+
+    let configured_pager = env::var("PAGER").ok();
+    let pager_command = resolve_text_pager_command(configured_pager.as_deref());
+    match spawn_shell_command(&pager_command) {
+        Ok(mut child) => {
+            let write_result = if let Some(mut stdin) = child.stdin.take() {
+                let result = stream_to_writer(prefix, input, &mut stdin);
+                drop(stdin);
+                result
+            } else {
+                Ok(())
+            };
+
+            let status = child.wait()?;
+            if let Err(error) = write_result
+                && error.kind() != io::ErrorKind::BrokenPipe
+            {
+                return Err(error.into());
+            }
+            if !status.success() {
+                write_stderr(format_args!(
+                    "dx: pager command exited with {status}: {pager_command}\n"
+                ))?;
+            }
+            Ok(())
+        }
+        Err(error) => {
+            write_stderr(format_args!(
+                "dx: failed to run pager command `{pager_command}`: {error}\n"
+            ))?;
+            stream_to_stdout(prefix, input)
+        }
+    }
+}
+
+fn stream_to_writer<R: Read, W: Write>(
+    prefix: &[u8],
+    input: &mut R,
+    output: &mut W,
+) -> io::Result<()> {
+    output.write_all(prefix)?;
+    io::copy(input, output)?;
+    Ok(())
+}
+
+fn stream_to_stdout<R: Read>(prefix: &[u8], input: &mut R) -> CliResult<()> {
+    write_stdout_bytes(prefix)?;
+    let mut buffer = [0; STREAM_BUFFER_SIZE];
+    loop {
+        let bytes_read = input.read(&mut buffer)?;
+        if bytes_read == 0 {
+            return Ok(());
+        }
+        write_stdout_bytes(&buffer[..bytes_read])?;
     }
 }
 
@@ -354,7 +508,14 @@ fn strip_terminal_escapes(input: &[u8]) -> Vec<u8> {
     let mut index = 0;
     while index < input.len() {
         match input[index] {
-            0x1b => skip_escape(input, &mut index),
+            0x1b => {
+                if let Some(end) = escape_end(input, index) {
+                    index = end;
+                } else {
+                    output.push(input[index]);
+                    index += 1;
+                }
+            }
             byte => {
                 output.push(byte);
                 index += 1;
@@ -364,41 +525,48 @@ fn strip_terminal_escapes(input: &[u8]) -> Vec<u8> {
     output
 }
 
-fn skip_escape(input: &[u8], index: &mut usize) {
-    *index += 1;
-    let Some(introducer) = input.get(*index).copied() else {
-        return;
-    };
-    *index += 1;
-
+fn escape_end(input: &[u8], index: usize) -> Option<usize> {
+    let introducer = input.get(index + 1).copied()?;
+    let payload = index + 2;
     match introducer {
-        b'[' => skip_csi(input, index),
-        b']' | b'P' | b'^' | b'_' | b'X' => skip_string_escape(input, index),
-        0x20..=0x2f if *index < input.len() => *index += 1,
-        _ => {}
+        b'[' => csi_escape_end(input, payload),
+        b']' | b'P' | b'^' | b'_' | b'X' => string_escape_end(input, payload),
+        0x20..=0x2f => input
+            .get(payload)
+            .filter(|byte| (0x30..=0x7e).contains(*byte))
+            .map(|_| payload + 1),
+        0x30..=0x7e => Some(payload),
+        _ => None,
     }
 }
 
-fn skip_csi(input: &[u8], index: &mut usize) {
-    while let Some(byte) = input.get(*index).copied() {
-        *index += 1;
-        if (0x40..=0x7e).contains(&byte) {
-            break;
+fn csi_escape_end(input: &[u8], mut index: usize) -> Option<usize> {
+    let mut seen_intermediate = false;
+    while let Some(byte) = input.get(index).copied() {
+        match byte {
+            0x30..=0x3f if !seen_intermediate => index += 1,
+            0x20..=0x2f => {
+                seen_intermediate = true;
+                index += 1;
+            }
+            0x40..=0x7e => return Some(index + 1),
+            _ => return None,
         }
     }
+    None
 }
 
-fn skip_string_escape(input: &[u8], index: &mut usize) {
-    while let Some(byte) = input.get(*index).copied() {
-        *index += 1;
-        if byte == 0x07 {
-            break;
-        }
-        if byte == 0x1b && input.get(*index) == Some(&b'\\') {
-            *index += 1;
-            break;
+fn string_escape_end(input: &[u8], mut index: usize) -> Option<usize> {
+    while let Some(byte) = input.get(index).copied() {
+        match byte {
+            0x07 => return Some(index + 1),
+            b'\n' | b'\r' => return None,
+            0x1b if input.get(index + 1) == Some(&b'\\') => return Some(index + 2),
+            0x1b => return None,
+            _ => index += 1,
         }
     }
+    None
 }
 
 #[cfg(unix)]
@@ -613,6 +781,69 @@ mod tests {
     }
 
     #[test]
+    fn pager_streams_plain_text_after_classification_limit() {
+        let mut input = std::io::Cursor::new(vec![b'x'; PAGER_CLASSIFICATION_LIMIT + 1]);
+
+        let decision = read_pager_input(
+            &mut input,
+            true,
+            &env(Some("xterm-256color"), None, None, false),
+            true,
+        )
+        .unwrap();
+
+        let PagerInput::Streaming { prefix, action } = decision else {
+            panic!("expected streaming input");
+        };
+        assert_eq!(action, StreamingPagerAction::PlainTextPager);
+        assert_eq!(prefix.len(), PAGER_CLASSIFICATION_LIMIT);
+        assert_eq!(input.position(), PAGER_CLASSIFICATION_LIMIT as u64);
+    }
+
+    #[test]
+    fn pager_buffers_diff_after_detection() {
+        let mut input_bytes =
+            b"diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-a\n+b\n".to_vec();
+        input_bytes.extend(vec![b'x'; STREAM_BUFFER_SIZE * 2]);
+        let expected_len = input_bytes.len();
+        let mut input = std::io::Cursor::new(input_bytes);
+
+        let decision = read_pager_input(
+            &mut input,
+            true,
+            &env(Some("xterm-256color"), None, None, false),
+            true,
+        )
+        .unwrap();
+
+        let PagerInput::Buffered { input, action } = decision else {
+            panic!("expected buffered input");
+        };
+        assert_eq!(action, PagerAction::InteractiveDiff);
+        assert_eq!(input.len(), expected_len);
+    }
+
+    #[test]
+    fn pager_streams_without_classification_when_action_cannot_change() {
+        let mut input = std::io::Cursor::new(vec![b'x'; PAGER_CLASSIFICATION_LIMIT + 1]);
+
+        let decision = read_pager_input(
+            &mut input,
+            false,
+            &env(Some("xterm-256color"), None, None, false),
+            true,
+        )
+        .unwrap();
+
+        let PagerInput::Streaming { prefix, action } = decision else {
+            panic!("expected streaming input");
+        };
+        assert_eq!(action, StreamingPagerAction::Passthrough);
+        assert!(prefix.is_empty());
+        assert_eq!(input.position(), 0);
+    }
+
+    #[test]
     fn plain_text_pager_replaces_self_referential_dx_pager() {
         assert_eq!(
             resolve_text_pager_command(Some("dx pager")),
@@ -696,6 +927,27 @@ mod tests {
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].hunks[0].lines[0].text, "old\r");
         assert_eq!(files[0].hunks[0].lines[1].text, "old");
+    }
+
+    #[test]
+    fn normalized_patch_input_preserves_diff_after_malformed_string_escape() {
+        let patch = b"diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+\x1b]unterminated\ndiff --git a/b.txt b/b.txt\n--- a/b.txt\n+++ b/b.txt\n@@ -1 +1 @@\n-before\n+after\n";
+
+        let normalized = normalized_patch_input(patch);
+        let text = String::from_utf8_lossy(&normalized);
+        let files = dx_diff::parse_patch(&text);
+
+        assert!(text.contains("diff --git a/b.txt b/b.txt"));
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].hunks[0].lines[1].text, "\u{1b}]unterminated");
+        assert_eq!(files[1].new_path.as_deref(), Some("b.txt"));
+    }
+
+    #[test]
+    fn sanitized_terminal_bytes_escapes_malformed_escapes() {
+        let sanitized = sanitized_terminal_bytes(b"a\x1b]unterminated\nb\x1b[31\nc");
+
+        assert_eq!(sanitized, b"a\\u{1b}]unterminated\nb\\u{1b}[31\nc");
     }
 
     #[test]
