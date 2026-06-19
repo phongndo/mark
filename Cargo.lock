@@ -483,8 +483,10 @@ dependencies = [
  "notify",
  "ratatui",
  "rustix 0.38.44",
+ "serde",
  "shlex",
  "tokio",
+ "toml",
  "unicode-width 0.2.0",
 ]
 

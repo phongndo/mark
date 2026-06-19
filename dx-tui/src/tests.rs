@@ -22,7 +22,9 @@ use crate::render::{
         skip_display_prefix,
     },
 };
-use crate::{app::*, controls::*, editor::*, live_diff::*, model::*, syntax::*, theme::*};
+use crate::{
+    app::*, controls::*, editor::*, keymap::*, live_diff::*, model::*, syntax::*, theme::*,
+};
 use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
@@ -1002,8 +1004,15 @@ fn post_editor_quit_key_guard_ignores_only_transient_quit_keys() {
     let now = Instant::now();
     app.post_editor_quit_key_ignore_until = Some(now + Duration::from_millis(250));
 
+    assert!(app.ignore_post_editor_quit_key(
+        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        now
+    ));
     assert!(
-        app.ignore_post_editor_quit_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE), now)
+        !app.ignore_post_editor_quit_key(
+            KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE),
+            now
+        )
     );
     assert!(!app.ignore_post_editor_quit_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), now));
     assert!(!app.ignore_post_editor_quit_key(
@@ -1533,7 +1542,7 @@ fn responsive_layout_remembers_manual_split_after_narrow_resize() {
 }
 
 #[test]
-fn b_key_toggles_file_sidebar() {
+fn b_key_does_not_toggle_file_sidebar() {
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
 
@@ -1543,15 +1552,11 @@ fn b_key_toggles_file_sidebar() {
         .handle_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE))
         .expect("b should be handled");
     assert!(!should_quit);
-    assert!(app.file_sidebar_open);
-
-    app.handle_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE))
-        .expect("b should be handled");
     assert!(!app.file_sidebar_open);
 }
 
 #[test]
-fn b_key_clears_file_sidebar_resize_state() {
+fn leader_b_clears_file_sidebar_resize_state() {
     let changeset = changeset_with_files(&["a.rs"]);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
     app.file_sidebar_open = true;
@@ -1569,8 +1574,10 @@ fn b_key_clears_file_sidebar_resize_state() {
     assert!(app.file_sidebar_resizing);
     assert_eq!(app.file_sidebar_width, Some(30));
 
+    app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
+        .expect("leader should be handled");
     app.handle_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE))
-        .expect("b should be handled");
+        .expect("leader b should be handled");
 
     assert!(!app.file_sidebar_open);
     assert!(!app.file_sidebar_resizing);
@@ -2048,6 +2055,175 @@ fn question_mark_key_toggles_help_menu() {
 }
 
 #[test]
+fn q_key_does_not_quit_without_leader() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+
+    let should_quit = app
+        .handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE))
+        .expect("q should be handled");
+
+    assert!(!should_quit);
+}
+
+#[test]
+fn leader_q_quits() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+
+    let should_quit = app
+        .handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
+        .expect("leader should be handled");
+    assert!(!should_quit);
+    assert!(app.leader_pending);
+
+    let should_quit = app
+        .handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE))
+        .expect("leader q should be handled");
+
+    assert!(should_quit);
+    assert!(!app.leader_pending);
+}
+
+#[test]
+fn leader_escape_cancels() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
+        .expect("leader should be handled");
+    app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+        .expect("escape should cancel leader");
+
+    assert!(!app.leader_pending);
+}
+
+#[test]
+fn flat_action_keys_are_unmapped_under_leader() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
+        .expect("leader should be handled");
+    app.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE))
+        .expect("leader f should be handled");
+    assert!(app.filter_input.is_none());
+
+    app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
+        .expect("leader should be handled");
+    app.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE))
+        .expect("leader slash should be handled");
+    assert!(app.filter_input.is_none());
+
+    app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
+        .expect("leader should be handled");
+    app.handle_key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::SHIFT))
+        .expect("leader question mark should be handled");
+    assert!(!app.help_menu_open);
+}
+
+#[test]
+fn leader_b_toggles_file_sidebar() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
+        .expect("leader should be handled");
+    app.handle_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE))
+        .expect("leader b should be handled");
+    assert!(app.file_sidebar_open);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
+        .expect("leader should be handled");
+    app.handle_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE))
+        .expect("leader b should be handled");
+    assert!(!app.file_sidebar_open);
+}
+
+#[test]
+fn leader_m_opens_diff_source_menu() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
+        .expect("leader should be handled");
+    app.handle_key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE))
+        .expect("leader m should be handled");
+
+    assert!(app.diff_menu_open);
+    assert_eq!(app.highlighted_diff_choice(), Some(DiffChoice::All));
+}
+
+#[test]
+fn leader_o_opens_options_menu() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
+        .expect("leader should be handled");
+    app.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE))
+        .expect("leader o should be handled");
+
+    assert!(app.options_menu_open);
+    assert_eq!(app.highlighted_option(), Some(OptionsMenuItem::Layout));
+}
+
+#[test]
+fn configured_keymap_changes_leader_actions_and_flat_keys() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.keymap = Keymap::parse(
+        r#"
+        [keymap.global]
+        leader = ","
+        diff_menu = ", d"
+        options_menu = ", o"
+        file_filter = "ctrl-f"
+        "#,
+    )
+    .expect("keymap should parse");
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE))
+        .expect("unmapped f should be handled");
+    assert!(app.filter_input.is_none());
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL))
+        .expect("configured file filter should be handled");
+    assert_eq!(app.filter_input, Some(DiffFilterKind::File));
+
+    app.filter_input = None;
+    app.handle_key(KeyEvent::new(KeyCode::Char(','), KeyModifiers::NONE))
+        .expect("configured leader should be handled");
+    app.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE))
+        .expect("configured diff menu should be handled");
+    assert!(app.diff_menu_open);
+
+    app.close_diff_menu();
+    app.handle_key(KeyEvent::new(KeyCode::Char(','), KeyModifiers::NONE))
+        .expect("configured leader should be handled");
+    app.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE))
+        .expect("configured options menu should be handled");
+    assert!(app.options_menu_open);
+}
+
+#[test]
+fn leader_e_is_unmapped() {
+    let mut changeset = changeset_with_hunk_at(PathBuf::from("/repo"), 20);
+    changeset.files[0].new_path = None;
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
+        .expect("leader should be handled");
+    let should_quit = app
+        .handle_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE))
+        .expect("leader e should be ignored");
+
+    assert!(!should_quit);
+    assert!(!app.leader_pending);
+    assert!(app.notice.is_none());
+}
+
+#[test]
 fn question_mark_key_filters_branch_menu() {
     let options = DiffOptions {
         source: DiffSource::Base("main".to_owned()),
@@ -2230,7 +2406,8 @@ fn help_menu_lines_list_keybindings() {
 
     assert_eq!(lines.len(), help_menu_content_rows(width));
     assert!(text.iter().any(|line| line.contains("?")));
-    assert!(text.iter().any(|line| line.contains("q")));
+    assert!(text.iter().any(|line| line.contains("Space q")));
+    assert!(text.iter().any(|line| line.contains("Tab/Shift-Tab")));
     assert!(text.iter().any(|line| line.contains("Ctrl-C")));
     assert!(text.iter().any(|line| line.contains("j/k")));
     assert!(text.iter().any(|line| line.contains("n/p")));
@@ -2588,16 +2765,410 @@ fn diff_menu_lists_all_changes_first() {
 }
 
 #[test]
-fn diff_choice_number_shortcuts_match_menu_order() {
-    assert_eq!(diff_choice_shortcut('1'), Some(DiffChoice::All));
-    assert_eq!(diff_choice_shortcut('2'), Some(DiffChoice::Branch));
-    assert_eq!(diff_choice_shortcut('3'), Some(DiffChoice::Unstaged));
-    assert_eq!(diff_choice_shortcut('4'), Some(DiffChoice::Staged));
-    assert_eq!(diff_choice_shortcut('5'), None);
+fn diff_menu_keyboard_selects_diff_choice() {
+    let mut app = DiffApp::new(
+        DiffOptions::default(),
+        changeset_with_context_lines(1),
+        DiffLayoutMode::Unified,
+    );
+
+    app.open_diff_menu();
+    app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE))
+        .expect("j should move menu selection");
+    assert_eq!(app.highlighted_diff_choice(), Some(DiffChoice::Unstaged));
+
+    let should_quit = app
+        .handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("enter should apply menu selection");
+
+    assert!(!should_quit);
+    assert!(!app.diff_menu_open);
+    let load = app
+        .pending_diff_load
+        .as_ref()
+        .expect("menu selection should queue diff load");
+    assert_eq!(load.options.source, DiffSource::Worktree);
+    assert_eq!(load.options.scope, DiffScope::Unstaged);
 }
 
 #[test]
-fn number_key_switches_diff_choice() {
+fn diff_menu_space_applies_selection_without_entering_leader() {
+    let mut app = DiffApp::new(
+        DiffOptions::default(),
+        changeset_with_context_lines(1),
+        DiffLayoutMode::Unified,
+    );
+
+    app.open_diff_menu();
+    app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+        .expect("tab should move menu selection");
+    app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
+        .expect("space should apply menu selection");
+
+    assert!(!app.diff_menu_open);
+    assert!(!app.leader_pending);
+    assert_eq!(
+        app.pending_diff_load
+            .as_ref()
+            .map(|load| load.options.scope),
+        Some(DiffScope::Unstaged)
+    );
+}
+
+#[test]
+fn diff_menu_q_closes_without_quitting() {
+    let mut app = DiffApp::new(
+        DiffOptions::default(),
+        changeset_with_context_lines(1),
+        DiffLayoutMode::Unified,
+    );
+    app.open_diff_menu();
+
+    let should_quit = app
+        .handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE))
+        .expect("q should close menu");
+
+    assert!(!should_quit);
+    assert!(!app.diff_menu_open);
+}
+
+#[test]
+fn diff_menu_branch_keys_do_not_open_branch_picker() {
+    let mut app = DiffApp::new(
+        DiffOptions::default(),
+        changeset_with_context_lines(1),
+        DiffLayoutMode::Unified,
+    );
+    app.branch_base = Some("main".to_owned());
+    app.branch_head = Some("feature".to_owned());
+    app.current_head = Some("feature".to_owned());
+    app.comparison_branches = vec!["main".to_owned(), "feature".to_owned()];
+
+    app.open_diff_menu();
+    app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE))
+        .expect("j should select branch row");
+    assert_eq!(app.highlighted_diff_choice(), Some(DiffChoice::Branch));
+    app.handle_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE))
+        .expect("b should be ignored by diff menu");
+
+    assert!(app.diff_menu_open);
+    assert!(app.branch_menu_open.is_none());
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE))
+        .expect("h should be ignored by diff menu");
+
+    assert!(app.diff_menu_open);
+    assert!(app.branch_menu_open.is_none());
+}
+
+#[test]
+fn diff_menu_number_keys_apply_choice() {
+    let mut app = DiffApp::new(
+        DiffOptions::default(),
+        changeset_with_context_lines(1),
+        DiffLayoutMode::Unified,
+    );
+    app.branch_base = Some("main".to_owned());
+    app.branch_head = Some("feature".to_owned());
+    app.current_head = Some("feature".to_owned());
+
+    app.open_diff_menu();
+    app.handle_key(KeyEvent::new(KeyCode::Char('3'), KeyModifiers::NONE))
+        .expect("3 should switch to unstaged");
+
+    assert!(!app.diff_menu_open);
+    let load = app
+        .pending_diff_load
+        .as_ref()
+        .expect("number key should queue diff load");
+    assert_eq!(load.options.source, DiffSource::Worktree);
+    assert_eq!(load.options.scope, DiffScope::Unstaged);
+}
+
+#[test]
+fn diff_menu_draws_centered_floating_menu() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.open_diff_menu();
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 20))
+        .expect("test terminal should be created");
+
+    terminal
+        .draw(|frame| crate::render::draw(frame, &mut app))
+        .expect("diff menu draw should succeed");
+
+    let buffer = terminal.backend().buffer();
+    let rows: Vec<String> = (0..buffer.area.height)
+        .map(|y| {
+            (0..buffer.area.width)
+                .map(|x| buffer.cell((x, y)).expect("cell should exist").symbol())
+                .collect()
+        })
+        .collect();
+    let title = rows
+        .iter()
+        .enumerate()
+        .find_map(|(row, text)| text.find("diff source").map(|column| (row, column)))
+        .expect("floating diff menu should render title");
+
+    assert!(title.0 > 4 && title.0 < 12, "title row was {}", title.0);
+    assert!(title.1 > 8 && title.1 < 32, "title column was {}", title.1);
+    assert!(
+        rows.iter()
+            .any(|row| row.contains("1") && row.contains("All changes"))
+    );
+    assert!(
+        rows.iter()
+            .any(|row| row.contains("2") && row.contains("Unstaged"))
+    );
+}
+
+#[test]
+fn options_menu_toggles_draft_and_applies_on_enter() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+
+    app.open_options_menu();
+    app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
+        .expect("space should toggle layout draft");
+    assert_eq!(app.layout, DiffLayoutMode::Unified);
+    assert_eq!(app.options_menu_draft.layout, DiffLayoutMode::Split);
+
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("enter should apply options");
+
+    assert!(!app.options_menu_open);
+    assert_eq!(app.layout, DiffLayoutMode::Split);
+}
+
+#[test]
+fn options_menu_include_untracked_applies_with_single_reload() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    assert!(app.options.include_untracked);
+
+    app.open_options_menu();
+    app.move_options_menu_selection(2);
+    assert_eq!(
+        app.highlighted_option(),
+        Some(OptionsMenuItem::IncludeUntracked)
+    );
+    app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
+        .expect("space should toggle include-untracked draft");
+    assert!(app.pending_diff_load.is_none());
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("enter should apply options");
+
+    let load = app
+        .pending_diff_load
+        .as_ref()
+        .expect("include-untracked should queue reload");
+    assert!(!load.options.include_untracked);
+}
+
+#[test]
+fn options_menu_colorscheme_input_selects_draft_and_applies_on_enter() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.color_scheme = ColorSchemeChoice::System;
+    app.theme = DiffTheme::system();
+
+    app.open_options_menu();
+    app.move_options_menu_selection(5);
+    assert_eq!(app.highlighted_option(), Some(OptionsMenuItem::ColorScheme));
+
+    app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
+        .expect("space should open colorscheme input");
+    assert!(app.color_scheme_picker_open);
+    for character in ['d', 'a', 'r', 'k'] {
+        app.handle_key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE))
+            .expect("typing should filter colorschemes");
+    }
+    assert_eq!(app.color_scheme, ColorSchemeChoice::System);
+    assert_eq!(
+        app.filtered_color_schemes(),
+        vec![ColorSchemeChoice::TerminalDark]
+    );
+
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("enter should select colorscheme draft");
+    assert!(!app.color_scheme_picker_open);
+    assert!(app.options_menu_open);
+    assert_eq!(
+        app.options_menu_draft.color_scheme,
+        ColorSchemeChoice::TerminalDark
+    );
+
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("enter should apply colorscheme");
+
+    assert!(!app.options_menu_open);
+    assert_eq!(app.color_scheme, ColorSchemeChoice::TerminalDark);
+    assert_eq!(app.theme.background, DiffTheme::terminal_dark().background);
+    assert!(app.pending_diff_load.is_none());
+}
+
+#[test]
+fn options_menu_shows_branch_options_for_branch_diff() {
+    let options = DiffOptions {
+        source: DiffSource::Branch {
+            base: "main".to_owned(),
+            head: "feature".to_owned(),
+        },
+        ..DiffOptions::default()
+    };
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(options, changeset, DiffLayoutMode::Unified);
+    app.branch_base = Some("main".to_owned());
+    app.branch_head = Some("feature".to_owned());
+    app.current_head = Some("feature".to_owned());
+    app.comparison_branches = vec!["main".to_owned(), "feature".to_owned()];
+
+    app.open_options_menu();
+
+    assert_eq!(app.highlighted_option(), Some(OptionsMenuItem::BranchHead));
+    assert_eq!(
+        app.options_menu_items().get(1),
+        Some(&OptionsMenuItem::BranchBase)
+    );
+}
+
+#[test]
+fn options_menu_branch_rows_open_branch_picker() {
+    let options = DiffOptions {
+        source: DiffSource::Branch {
+            base: "main".to_owned(),
+            head: "feature".to_owned(),
+        },
+        ..DiffOptions::default()
+    };
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(options, changeset, DiffLayoutMode::Unified);
+    app.branch_base = Some("main".to_owned());
+    app.branch_head = Some("feature".to_owned());
+    app.current_head = Some("feature".to_owned());
+    app.comparison_branches = vec!["main".to_owned(), "feature".to_owned()];
+
+    app.open_options_menu();
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("enter should open head branch picker");
+    assert!(!app.options_menu_open);
+    assert_eq!(app.branch_menu_open, Some(BranchMenu::Head));
+
+    app.close_branch_menu();
+    app.open_options_menu();
+    app.move_options_menu_selection(1);
+    app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
+        .expect("space should open base branch picker");
+    assert!(!app.options_menu_open);
+    assert_eq!(app.branch_menu_open, Some(BranchMenu::Base));
+}
+
+#[test]
+fn options_menu_live_reload_toggles_without_reloading_diff() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    assert!(app.live_updates_enabled);
+
+    app.open_options_menu();
+    app.move_options_menu_selection(3);
+    assert_eq!(app.highlighted_option(), Some(OptionsMenuItem::LiveReload));
+    app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
+        .expect("space should toggle live reload draft");
+    assert!(app.live_updates_enabled);
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("enter should apply options");
+
+    assert!(!app.live_updates_enabled);
+    assert!(app.pending_diff_load.is_none());
+}
+
+#[test]
+fn options_menu_does_not_enable_live_reload_when_watch_is_disabled() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.live_updates_allowed = false;
+    app.live_updates_enabled = false;
+
+    app.open_options_menu();
+    app.move_options_menu_selection(3);
+    app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
+        .expect("space should be handled");
+
+    assert!(!app.options_menu_draft.live_updates_enabled);
+    assert_eq!(
+        app.notice.as_ref().map(|notice| notice.text.as_str()),
+        Some("live reload disabled by --no-watch")
+    );
+}
+
+#[test]
+fn options_menu_draws_centered_floating_menu() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.open_options_menu();
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 20))
+        .expect("test terminal should be created");
+
+    terminal
+        .draw(|frame| crate::render::draw(frame, &mut app))
+        .expect("options menu draw should succeed");
+
+    let buffer = terminal.backend().buffer();
+    let rows: Vec<String> = (0..buffer.area.height)
+        .map(|y| {
+            (0..buffer.area.width)
+                .map(|x| buffer.cell((x, y)).expect("cell should exist").symbol())
+                .collect()
+        })
+        .collect();
+    let title = rows
+        .iter()
+        .enumerate()
+        .find_map(|(row, text)| text.find("options").map(|column| (row, column)))
+        .expect("floating options menu should render title");
+
+    assert!(title.0 > 4 && title.0 < 12, "title row was {}", title.0);
+    assert!(title.1 > 8 && title.1 < 32, "title column was {}", title.1);
+    assert!(rows.iter().any(|row| row.contains("Layout")));
+    assert!(rows.iter().any(|row| row.contains("Include untracked")));
+    assert!(rows.iter().any(|row| row.contains("Live reload")));
+    assert!(rows.iter().any(|row| row.contains("Colorscheme")));
+}
+
+#[test]
+fn colorscheme_picker_draws_input_dropdown() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.open_options_menu();
+    app.move_options_menu_selection(5);
+    app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
+        .expect("space should open colorscheme picker");
+    app.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE))
+        .expect("typing should filter colorschemes");
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 20))
+        .expect("test terminal should be created");
+
+    terminal
+        .draw(|frame| crate::render::draw(frame, &mut app))
+        .expect("colorscheme picker draw should succeed");
+
+    let buffer = terminal.backend().buffer();
+    let rows: Vec<String> = (0..buffer.area.height)
+        .map(|y| {
+            (0..buffer.area.width)
+                .map(|x| buffer.cell((x, y)).expect("cell should exist").symbol())
+                .collect()
+        })
+        .collect();
+
+    assert!(rows.iter().any(|row| row.contains("colorscheme")));
+    assert!(rows.iter().any(|row| row.contains("filter d")));
+    assert!(rows.iter().any(|row| row.contains("terminal-dark")));
+}
+
+#[test]
+fn number_keys_do_not_switch_diff_choice() {
     let mut app = DiffApp::new(
         DiffOptions::default(),
         changeset_with_context_lines(1),
@@ -2608,15 +3179,127 @@ fn number_key_switches_diff_choice() {
 
     let should_quit = app
         .handle_key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE))
-        .expect("number shortcut should be handled");
+        .expect("number key should be handled");
 
     assert!(!should_quit);
-    assert_eq!(
-        app.pending_diff_load
-            .as_ref()
-            .map(|load| &load.options.source),
-        Some(&DiffSource::Base("origin/main".to_owned()))
+    assert!(app.pending_diff_load.is_none());
+    assert_eq!(app.options.source, DiffSource::Worktree);
+}
+
+#[test]
+fn tab_keys_cycle_diff_choice() {
+    let mut app = DiffApp::new(
+        DiffOptions::default(),
+        changeset_with_context_lines(1),
+        DiffLayoutMode::Unified,
     );
+
+    let should_quit = app
+        .handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+        .expect("tab should cycle diff type");
+
+    assert!(!should_quit);
+    let load = app
+        .pending_diff_load
+        .as_ref()
+        .expect("tab should queue diff load");
+    assert_eq!(load.options.source, DiffSource::Worktree);
+    assert_eq!(load.options.scope, DiffScope::Unstaged);
+
+    app.pending_diff_load = None;
+    app.options.scope = DiffScope::Staged;
+    app.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT))
+        .expect("shift-tab should cycle diff type backwards");
+
+    let load = app
+        .pending_diff_load
+        .as_ref()
+        .expect("shift-tab should queue diff load");
+    assert_eq!(load.options.source, DiffSource::Worktree);
+    assert_eq!(load.options.scope, DiffScope::Unstaged);
+}
+
+#[test]
+fn cached_tab_key_switches_diff_choice_without_loading() {
+    let mut app = DiffApp::new(
+        DiffOptions::default(),
+        changeset_with_files(&["all.rs"]),
+        DiffLayoutMode::Unified,
+    );
+    let unstaged = DiffOptions {
+        scope: DiffScope::Unstaged,
+        ..DiffOptions::default()
+    };
+    let cached_changeset = changeset_with_files(&["unstaged.rs"]);
+    app.cache_loaded_diff(unstaged.clone(), cached_changeset.clone());
+
+    let should_quit = app
+        .handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+        .expect("tab should cycle diff type");
+
+    assert!(!should_quit);
+    assert!(app.pending_diff_load.is_none());
+    assert_eq!(app.options, unstaged);
+    assert_eq!(app.base_changeset, cached_changeset);
+    assert_eq!(visible_paths(&app), vec!["unstaged.rs"]);
+}
+
+#[test]
+fn repeated_tab_uses_pending_diff_choice_for_next_target() {
+    let mut app = DiffApp::new(
+        DiffOptions::default(),
+        changeset_with_context_lines(1),
+        DiffLayoutMode::Unified,
+    );
+
+    app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+        .expect("tab should queue next diff type");
+    app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+        .expect("tab should advance from pending diff type");
+
+    let load = app
+        .pending_diff_load
+        .as_ref()
+        .expect("second tab should queue diff load");
+    assert_eq!(load.options.source, DiffSource::Worktree);
+    assert_eq!(load.options.scope, DiffScope::Staged);
+}
+
+#[test]
+fn reload_invalidates_cached_diff_choices() {
+    let mut app = DiffApp::new(
+        DiffOptions::default(),
+        changeset_with_context_lines(1),
+        DiffLayoutMode::Unified,
+    );
+    let unstaged = DiffOptions {
+        scope: DiffScope::Unstaged,
+        ..DiffOptions::default()
+    };
+    app.cache_loaded_diff(unstaged, changeset_with_files(&["unstaged.rs"]));
+
+    app.reload().expect("reload should start");
+
+    assert!(app.diff_cache.is_empty());
+    assert!(app.pending_diff_prefetch.is_none());
+    assert!(app.diff_prefetch_queue.is_empty());
+    assert!(!app.diff_prefetch_started);
+}
+
+#[test]
+fn cache_invalidation_cancels_stale_pending_diff_load() {
+    let mut app = DiffApp::new(
+        DiffOptions::default(),
+        changeset_with_context_lines(1),
+        DiffLayoutMode::Unified,
+    );
+    app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+        .expect("tab should queue diff load");
+    assert!(app.pending_diff_load.is_some());
+
+    app.invalidate_diff_cache();
+
+    assert!(app.pending_diff_load.is_none());
 }
 
 #[test]

@@ -2,6 +2,7 @@ mod app;
 mod controls;
 mod editor;
 mod event_reader;
+mod keymap;
 mod live_diff;
 mod model;
 mod render;

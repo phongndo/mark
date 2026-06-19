@@ -66,7 +66,8 @@ pub(crate) enum HelpMenuRow {
 pub(crate) const HELP_MENU_LEFT_ROWS: &[HelpMenuRow] = &[
     HelpMenuRow::Section("Global"),
     HelpMenuRow::Binding("?", "toggle this help"),
-    HelpMenuRow::Binding("q", "quit"),
+    HelpMenuRow::Binding("Space", "leader"),
+    HelpMenuRow::Binding("Space q", "quit"),
     HelpMenuRow::Binding("Ctrl-C", "force quit"),
     HelpMenuRow::Binding("Esc", "close"),
     HelpMenuRow::Section("Navigate"),
@@ -77,6 +78,7 @@ pub(crate) const HELP_MENU_LEFT_ROWS: &[HelpMenuRow] = &[
     HelpMenuRow::Binding("J/K", "file"),
     HelpMenuRow::Binding("]/[", "hunk"),
     HelpMenuRow::Binding("Ctrl-G", "edit focused hunk"),
+    HelpMenuRow::Binding("Tab/Shift-Tab", "cycle diff type"),
 ];
 
 pub(crate) const HELP_MENU_RIGHT_ROWS: &[HelpMenuRow] = &[
@@ -84,10 +86,11 @@ pub(crate) const HELP_MENU_RIGHT_ROWS: &[HelpMenuRow] = &[
     HelpMenuRow::Binding("f", "filter files"),
     HelpMenuRow::Binding("/", "grep diff"),
     HelpMenuRow::Binding("n/p", "next / previous grep match"),
-    HelpMenuRow::Binding("b", "toggle file sidebar"),
-    HelpMenuRow::Binding("s", "split / unified"),
+    HelpMenuRow::Binding("b, Space b", "toggle file sidebar"),
+    HelpMenuRow::Binding("s, Space s", "split / unified"),
     HelpMenuRow::Binding("r", "reload diff"),
-    HelpMenuRow::Binding("1/2/3/4", "all / branch / unstaged / staged"),
+    HelpMenuRow::Binding("Space m", "diff source menu"),
+    HelpMenuRow::Binding("Space o", "options menu"),
     HelpMenuRow::Section("Filter input"),
     HelpMenuRow::Binding("Enter", "keep filter"),
     HelpMenuRow::Binding("Esc", "clear active filters"),
