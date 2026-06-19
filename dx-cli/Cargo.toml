@@ -20,3 +20,6 @@ dx-command.workspace = true
 dx-core.workspace = true
 dx-tui.workspace = true
 unicode-width.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+rustix.workspace = true

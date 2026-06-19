@@ -55,6 +55,7 @@ dx --pr 123
 dx --pr https://github.com/owner/repo/pull/123
 dx --patch changes.diff
 cat changes.diff | dx --patch -
+git diff | dx pager
 dx --no-watch
 dx --no-syntax
 dx --stat
@@ -63,6 +64,19 @@ dx config
 
 `dx diff ...` is also accepted as a compatibility/discoverability alias, but
 plain `dx ...` is the primary interface.
+
+Use `dx pager` as a Git pager for `git diff`/`git show` output:
+
+```sh
+git config --global core.pager "dx pager"
+```
+
+`dx pager` reads stdin; run `dx` for the current worktree. Diff input opens the
+interactive reviewer when possible and falls back to static ANSI output in
+captured pager hosts such as lazygit. Non-diff input is passed through the
+user's text pager. Static output reuses dx's diff renderer, colorscheme, syntax
+highlighting, and layout; use `dx pager --layout split` or
+`dx pager --layout unified` to override auto layout for static hosts.
 
 ## Pi extension
 

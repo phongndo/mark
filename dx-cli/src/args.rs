@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use clap::{
-    Args, Parser, Subcommand,
+    Args, Parser, Subcommand, ValueEnum,
     builder::styling::{AnsiColor, Styles},
 };
 
@@ -26,6 +26,7 @@ examples:
   dx --pr https://github.com/owner/repo/pull/123
   dx --patch changes.diff
   cat changes.diff | dx --patch -
+  git diff | dx pager
   dx --no-watch
   dx --no-syntax
   dx --stat
@@ -72,6 +73,15 @@ examples:
   dx diff --pr https://github.com/owner/repo/pull/123"
     )]
     Diff(DiffArgs),
+    #[command(
+        alias = "page",
+        about = "Read pager input from stdin and review diffs",
+        after_help = "\
+examples:
+  git config --global core.pager \"dx pager\"
+  git diff | dx pager"
+    )]
+    Pager(PagerArgs),
     #[command(
         alias = "ts",
         alias = "tree-sitter",
@@ -189,6 +199,25 @@ pub(crate) struct DiffArgs {
     pub(crate) no_syntax: bool,
     #[arg(short = 's', long)]
     pub(crate) stat: bool,
+}
+
+#[derive(Debug, Args, Default)]
+pub(crate) struct PagerArgs {
+    /// Disable syntax highlighting in diff pager output.
+    #[arg(long = "no-syntax")]
+    pub(crate) no_syntax: bool,
+    /// Layout for static diff output.
+    #[arg(long, alias = "mode", value_enum, default_value_t = PagerLayoutArg::Auto)]
+    pub(crate) layout: PagerLayoutArg,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
+pub(crate) enum PagerLayoutArg {
+    #[default]
+    Auto,
+    Split,
+    #[value(alias = "stack")]
+    Unified,
 }
 
 #[derive(Debug, Args)]
