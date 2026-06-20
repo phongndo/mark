@@ -2,10 +2,14 @@ use std::{
     borrow::Cow,
     env,
     ffi::OsString,
-    fs::OpenOptions,
-    io::{self, IsTerminal, Read, Write},
-    process::{Command, Stdio},
-    sync::Arc,
+    fs::{self, File, OpenOptions},
+    io::{self, IsTerminal, Read, Seek, SeekFrom, Write},
+    path::{Path, PathBuf},
+    process::{self, Command, Stdio},
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 #[cfg(unix)]
@@ -25,6 +29,9 @@ const MIN_STATIC_WIDTH: usize = 20;
 const PLAIN_TEXT_PAGER_GUARD: &str = "DX_PAGER_PLAIN_TEXT_FALLBACK";
 const PAGER_CLASSIFICATION_LIMIT: usize = 128 * 1024;
 const STREAM_BUFFER_SIZE: usize = 8192;
+const TEMP_SPOOL_CREATE_ATTEMPTS: usize = 16;
+
+static NEXT_TEMP_SPOOL: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) fn pager(args: PagerArgs) -> CliResult<()> {
     if io::stdin().is_terminal() {
@@ -298,8 +305,9 @@ fn page_plain_text_stream<R: Read>(prefix: &[u8], input: &mut R) -> CliResult<()
     let pager_command = resolve_text_pager_command(configured_pager.as_deref());
     match spawn_shell_command(&pager_command) {
         Ok(mut child) => {
+            let mut fallback = StreamFallback::default();
             let write_result = if let Some(mut stdin) = child.stdin.take() {
-                let result = stream_to_writer(prefix, input, &mut stdin);
+                let result = stream_to_pager(prefix, input, &mut stdin, &mut fallback);
                 drop(stdin);
                 result
             } else {
@@ -316,6 +324,7 @@ fn page_plain_text_stream<R: Read>(prefix: &[u8], input: &mut R) -> CliResult<()
                 write_stderr(format_args!(
                     "dx: pager command exited with {status}: {pager_command}\n"
                 ))?;
+                fallback.write_to_stdout(prefix, input)?;
             }
             Ok(())
         }
@@ -328,14 +337,138 @@ fn page_plain_text_stream<R: Read>(prefix: &[u8], input: &mut R) -> CliResult<()
     }
 }
 
-fn stream_to_writer<R: Read, W: Write>(
+fn stream_to_pager<R: Read, W: Write>(
     prefix: &[u8],
     input: &mut R,
     output: &mut W,
+    fallback: &mut StreamFallback,
 ) -> io::Result<()> {
     output.write_all(prefix)?;
-    io::copy(input, output)?;
-    Ok(())
+    let mut buffer = [0; STREAM_BUFFER_SIZE];
+    loop {
+        let bytes_read = input.read(&mut buffer)?;
+        if bytes_read == 0 {
+            return Ok(());
+        }
+
+        let chunk = &buffer[..bytes_read];
+        fallback.record(chunk)?;
+        output.write_all(chunk)?;
+    }
+}
+
+#[derive(Default)]
+struct StreamFallback {
+    spool: Option<TempSpool>,
+}
+
+impl StreamFallback {
+    fn record(&mut self, bytes: &[u8]) -> io::Result<()> {
+        if bytes.is_empty() {
+            return Ok(());
+        }
+
+        if self.spool.is_none() {
+            self.spool = Some(TempSpool::new()?);
+        }
+        self.spool
+            .as_mut()
+            .expect("spool should exist")
+            .write_all(bytes)
+    }
+
+    fn write_to_stdout<R: Read>(&mut self, prefix: &[u8], input: &mut R) -> CliResult<()> {
+        write_stdout_bytes(prefix)?;
+        if let Some(spool) = self.spool.as_mut() {
+            spool.write_to_stdout()?;
+        }
+        stream_to_stdout(&[], input)
+    }
+
+    #[cfg(test)]
+    fn write_to_writer<R: Read, W: Write>(
+        &mut self,
+        prefix: &[u8],
+        input: &mut R,
+        output: &mut W,
+    ) -> io::Result<()> {
+        output.write_all(prefix)?;
+        if let Some(spool) = self.spool.as_mut() {
+            spool.write_to_writer(output)?;
+        }
+        io::copy(input, output)?;
+        Ok(())
+    }
+}
+
+struct TempSpool {
+    path: PathBuf,
+    file: File,
+}
+
+impl TempSpool {
+    fn new() -> io::Result<Self> {
+        for _ in 0..TEMP_SPOOL_CREATE_ATTEMPTS {
+            let path = temp_spool_path();
+            match create_private_temp_file(&path) {
+                Ok(file) => return Ok(Self { path, file }),
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error),
+            }
+        }
+
+        Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "failed to create pager fallback spool",
+        ))
+    }
+
+    fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
+        self.file.write_all(bytes)
+    }
+
+    fn write_to_stdout(&mut self) -> CliResult<()> {
+        self.file.flush()?;
+        self.file.seek(SeekFrom::Start(0))?;
+        let mut buffer = [0; STREAM_BUFFER_SIZE];
+        loop {
+            let bytes_read = self.file.read(&mut buffer)?;
+            if bytes_read == 0 {
+                return Ok(());
+            }
+            write_stdout_bytes(&buffer[..bytes_read])?;
+        }
+    }
+
+    #[cfg(test)]
+    fn write_to_writer<W: Write>(&mut self, output: &mut W) -> io::Result<()> {
+        self.file.flush()?;
+        self.file.seek(SeekFrom::Start(0))?;
+        io::copy(&mut self.file, output)?;
+        Ok(())
+    }
+}
+
+impl Drop for TempSpool {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+fn temp_spool_path() -> PathBuf {
+    let counter = NEXT_TEMP_SPOOL.fetch_add(1, Ordering::Relaxed);
+    env::temp_dir().join(format!("dx-pager-spool-{}-{counter}.tmp", process::id()))
+}
+
+fn create_private_temp_file(path: &Path) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)
 }
 
 fn stream_to_stdout<R: Read>(prefix: &[u8], input: &mut R) -> CliResult<()> {
@@ -801,6 +934,71 @@ mod tests {
     }
 
     #[test]
+    fn plain_text_stream_fallback_replays_prefix_and_unread_input() {
+        let prefix = b"buffered prefix\n";
+        let rest = b"still unread\n".to_vec();
+        let mut input = std::io::Cursor::new(rest.clone());
+        let mut pager = FailingWriter::new(0);
+        let mut fallback = StreamFallback::default();
+
+        let error = stream_to_pager(prefix, &mut input, &mut pager, &mut fallback).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
+        assert_eq!(input.position(), 0);
+
+        let mut output = Vec::new();
+        fallback
+            .write_to_writer(prefix, &mut input, &mut output)
+            .unwrap();
+
+        let mut expected = prefix.to_vec();
+        expected.extend_from_slice(&rest);
+        assert_eq!(output, expected);
+    }
+
+    #[test]
+    fn plain_text_stream_fallback_replays_spooled_and_unread_input() {
+        let prefix = b"buffered prefix\n";
+        let rest = vec![b'x'; STREAM_BUFFER_SIZE + 1];
+        let mut input = std::io::Cursor::new(rest.clone());
+        let mut pager = FailingWriter::new(prefix.len() + 4);
+        let mut fallback = StreamFallback::default();
+
+        let error = stream_to_pager(prefix, &mut input, &mut pager, &mut fallback).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
+        assert_eq!(input.position(), STREAM_BUFFER_SIZE as u64);
+
+        let mut output = Vec::new();
+        fallback
+            .write_to_writer(prefix, &mut input, &mut output)
+            .unwrap();
+
+        let mut expected = prefix.to_vec();
+        expected.extend_from_slice(&rest);
+        assert_eq!(output, expected);
+    }
+
+    #[test]
+    fn plain_text_stream_fallback_replays_fully_spooled_input() {
+        let prefix = b"buffered prefix\n";
+        let rest = vec![b'x'; STREAM_BUFFER_SIZE + 1];
+        let mut input = std::io::Cursor::new(rest.clone());
+        let mut pager = Vec::new();
+        let mut fallback = StreamFallback::default();
+
+        stream_to_pager(prefix, &mut input, &mut pager, &mut fallback).unwrap();
+        assert_eq!(input.position(), rest.len() as u64);
+
+        let mut output = Vec::new();
+        fallback
+            .write_to_writer(prefix, &mut input, &mut output)
+            .unwrap();
+
+        let mut expected = prefix.to_vec();
+        expected.extend_from_slice(&rest);
+        assert_eq!(output, expected);
+    }
+
+    #[test]
     fn pager_buffers_diff_after_detection() {
         let mut input_bytes =
             b"diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-a\n+b\n".to_vec();
@@ -962,5 +1160,34 @@ mod tests {
         let sanitized = sanitized_terminal_bytes(b"a\r\x07\x1b[31mb\x1b[0m\n");
 
         assert_eq!(sanitized, b"a\\r\\u{7}b\n");
+    }
+
+    struct FailingWriter {
+        bytes_until_error: usize,
+    }
+
+    impl FailingWriter {
+        fn new(bytes_until_error: usize) -> Self {
+            Self { bytes_until_error }
+        }
+    }
+
+    impl Write for FailingWriter {
+        fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+            if self.bytes_until_error == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "pager stdin closed",
+                ));
+            }
+
+            let bytes_written = self.bytes_until_error.min(buffer.len());
+            self.bytes_until_error -= bytes_written;
+            Ok(bytes_written)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
     }
 }
