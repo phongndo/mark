@@ -3100,6 +3100,7 @@ impl DiffApp {
         };
 
         if options == self.options {
+            self.pending_diff_load = None;
             self.dirty = true;
             return;
         }

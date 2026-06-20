@@ -591,11 +591,14 @@ fn parse_key_press(input: &str) -> Result<KeyPress, String> {
         _ => {
             let character_source = if modifiers.is_empty() { input } else { key };
             let mut chars = character_source.chars();
-            let Some(character) = chars.next() else {
+            let Some(mut character) = chars.next() else {
                 return Err("empty key".to_owned());
             };
             if chars.next().is_some() {
                 return Err(format!("unknown key `{input}`"));
+            }
+            if modifiers.contains(KeyModifiers::SHIFT) && character.is_ascii_alphabetic() {
+                character = character.to_ascii_uppercase();
             }
             KeyCode::Char(character)
         }
@@ -651,6 +654,26 @@ mod tests {
         assert!(keymap.matches_single(
             GlobalAction::PreviousDiffType,
             KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT)
+        ));
+    }
+
+    #[test]
+    fn keymap_preserves_shifted_character_bindings() {
+        let keymap = Keymap::parse(
+            r#"
+            [keymap.global]
+            quit = "shift-q"
+            "#,
+        )
+        .expect("keymap should parse");
+
+        assert!(keymap.matches_single(
+            GlobalAction::Quit,
+            KeyEvent::new(KeyCode::Char('Q'), KeyModifiers::SHIFT)
+        ));
+        assert!(!keymap.matches_single(
+            GlobalAction::Quit,
+            KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)
         ));
     }
 

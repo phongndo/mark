@@ -3819,6 +3819,25 @@ fn repeated_tab_uses_pending_diff_choice_for_next_target() {
 }
 
 #[test]
+fn cycling_back_to_current_diff_clears_pending_load() {
+    let mut app = DiffApp::new(
+        DiffOptions::default(),
+        changeset_with_context_lines(1),
+        DiffLayoutMode::Unified,
+    );
+
+    app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+        .expect("tab should queue next diff type");
+    assert!(app.pending_diff_load.is_some());
+
+    app.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT))
+        .expect("shift-tab should return to current diff type");
+
+    assert_eq!(app.options, DiffOptions::default());
+    assert!(app.pending_diff_load.is_none());
+}
+
+#[test]
 fn reload_invalidates_cached_diff_choices() {
     let mut app = DiffApp::new(
         DiffOptions::default(),
