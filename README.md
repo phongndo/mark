@@ -86,9 +86,37 @@ when `XDG_CONFIG_HOME` is unset.
 
 No config file is created automatically; missing config means built-in defaults.
 Create the file manually only when you want to override syntax mode,
-colorscheme, diff styling, or highlight performance limits. Parser registry
-state is kept separately in `tree-sitter.json` under the same `dx` config
-directory.
+colorscheme, diff styling, highlight performance limits, or keybindings. Parser
+registry state is kept separately in `tree-sitter.json` under the same `dx`
+config directory.
+
+Keybindings can be overridden in the same file. Multi-key global bindings must
+start with the configured leader key; menu bindings are single-key and apply to
+the diff source and options menus.
+
+```toml
+[keymap.global]
+leader = "space"
+help = "?"
+reload = "r"
+file_filter = "f"
+grep = "/"
+diff_menu = "space m"
+options_menu = "space o"
+file_browser = "space b"
+quit = "space q"
+layout = "space s"
+edit_hunk = "ctrl-g"
+next_diff_type = "tab"
+previous_diff_type = "shift-tab" # prev_diff_type also works
+
+[keymap.menu]
+up = ["k", "up", "shift-tab"]
+down = ["j", "down", "tab"]
+select = "space"
+confirm = "enter"
+close = ["esc", "q"]
+```
 
 ## Syntax highlighting
 
