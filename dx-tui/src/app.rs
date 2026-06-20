@@ -2149,13 +2149,8 @@ impl DiffApp {
     }
 
     fn prepare_focused_hunk_editor(&mut self) -> Option<FocusedEditorLaunch> {
-        let Some(target) = self.focused_hunk_editor_target() else {
-            return None;
-        };
-        let Some(editor) = configured_editor() else {
-            return None;
-        };
-
+        let target = self.focused_hunk_editor_target()?;
+        let editor = configured_editor()?;
         Some(FocusedEditorLaunch { target, editor })
     }
 
