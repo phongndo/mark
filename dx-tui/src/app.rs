@@ -3391,9 +3391,30 @@ impl DiffApp {
     }
 
     fn prepare_focused_hunk_editor(&mut self) -> Option<FocusedEditorLaunch> {
+        self.prepare_focused_hunk_editor_with(configured_editor())
+    }
+
+    fn prepare_focused_hunk_editor_with(
+        &mut self,
+        configured_editor: Option<String>,
+    ) -> Option<FocusedEditorLaunch> {
         let target = self.focused_hunk_editor_target()?;
-        let editor = configured_editor()?;
+        let Some(editor) = configured_editor else {
+            self.set_error_log(
+                "editor unavailable: set $VISUAL, $GIT_EDITOR, or $EDITOR to edit focused hunk",
+            );
+            return None;
+        };
         Some(FocusedEditorLaunch { target, editor })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn prepare_focused_hunk_editor_for_test(
+        &mut self,
+        configured_editor: Option<String>,
+    ) -> bool {
+        self.prepare_focused_hunk_editor_with(configured_editor)
+            .is_some()
     }
 
     fn open_prepared_hunk_in_editor(

@@ -1011,6 +1011,20 @@ fn ctrl_g_without_editor_launch_preserves_queued_events() {
 }
 
 #[test]
+fn editable_hunk_without_configured_editor_sets_error_log() {
+    let changeset = changeset_with_hunk_at(PathBuf::from("/repo"), 20);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(5);
+
+    assert!(!app.prepare_focused_hunk_editor_for_test(None));
+    assert_eq!(
+        app.error_log.as_deref(),
+        Some("editor unavailable: set $VISUAL, $GIT_EDITOR, or $EDITOR to edit focused hunk")
+    );
+    assert!(app.dirty);
+}
+
+#[test]
 fn post_editor_quit_key_guard_ignores_only_transient_quit_keys() {
     let changeset = changeset_with_hunk_at(PathBuf::from("/repo"), 20);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
@@ -3091,6 +3105,23 @@ fn statusline_header_right_aligns_current_file() {
     assert_eq!(file.style.fg, Some(STATUSLINE_INFO_FG));
     assert_eq!(file.style.bg, Some(STATUSLINE_INFO_BG));
     assert!(file.style.add_modifier.contains(Modifier::BOLD));
+}
+
+#[test]
+fn statusline_header_shows_pending_diff_load() {
+    let changeset = changeset_with_files(&["src/lib.rs", "README.md", "docs/guide.md"]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    let options = DiffOptions {
+        scope: DiffScope::Staged,
+        ..DiffOptions::default()
+    };
+    app.pending_diff_load = Some(pending_diff_load(options));
+
+    let line = statusline_header_line(&app, 80);
+    let text = line_text(&line);
+
+    assert_eq!(text.width(), 80);
+    assert!(text.contains("loading diff"));
 }
 
 #[test]
