@@ -524,12 +524,49 @@ pub(crate) struct DiffApp {
     pub(crate) dirty: bool,
 }
 
-pub(crate) fn load_syntax_settings_for_diff(load_user_settings: bool) -> SyntaxSettings {
+pub(crate) fn load_syntax_settings_for_diff(
+    load_user_settings: bool,
+) -> (SyntaxSettings, Option<String>) {
     if !load_user_settings {
-        return SyntaxSettings::default();
+        return (SyntaxSettings::default(), None);
     }
 
-    dx_syntax::load_settings().unwrap_or_default()
+    syntax_settings_for_diff(dx_syntax::load_settings())
+}
+
+pub(crate) fn syntax_settings_for_diff(
+    result: DxResult<SyntaxSettings>,
+) -> (SyntaxSettings, Option<String>) {
+    match result {
+        Ok(settings) => (settings, None),
+        Err(error) => (
+            SyntaxSettings::default(),
+            Some(format!("syntax settings ignored: {error}")),
+        ),
+    }
+}
+
+fn push_startup_error_log(error_log: &mut Option<String>, message: impl Into<String>) {
+    match error_log {
+        Some(error_log) => {
+            error_log.push('\n');
+            error_log.push_str(&message.into());
+        }
+        None => *error_log = Some(message.into()),
+    }
+}
+
+pub(crate) fn syntax_runtime_for_diff(
+    result: DxResult<Option<SyntaxRuntime>>,
+    error_log: &mut Option<String>,
+) -> Option<SyntaxRuntime> {
+    match result {
+        Ok(syntax) => syntax,
+        Err(error) => {
+            push_startup_error_log(error_log, format!("syntax disabled: {error}"));
+            None
+        }
+    }
 }
 
 impl DiffApp {
@@ -565,7 +602,7 @@ impl DiffApp {
                 branch_base.as_deref(),
             ],
         );
-        let settings = load_syntax_settings_for_diff(matches!(
+        let (settings, mut startup_error_log) = load_syntax_settings_for_diff(matches!(
             syntax_mode,
             SyntaxStartupMode::Config | SyntaxStartupMode::Disabled
         ));
@@ -575,15 +612,23 @@ impl DiffApp {
                 .map(|theme| theme.with_transparent_background(settings.transparent_background))
         }) {
             Ok(theme) => theme.with_diff_settings(settings.diff),
-            Err(_) => DiffTheme::default()
-                .with_color_overrides(&settings.colors)
-                .unwrap_or_else(|_| DiffTheme::default())
-                .with_transparent_background(settings.transparent_background)
-                .with_diff_settings(settings.diff),
+            Err(error) => {
+                push_startup_error_log(
+                    &mut startup_error_log,
+                    format!("syntax theme ignored: {error}"),
+                );
+                DiffTheme::default()
+                    .with_color_overrides(&settings.colors)
+                    .unwrap_or_else(|_| DiffTheme::default())
+                    .with_transparent_background(settings.transparent_background)
+                    .with_diff_settings(settings.diff)
+            }
         };
         let syntax_limits = settings.limits;
         let syntax = match syntax_mode {
-            SyntaxStartupMode::Config => SyntaxRuntime::start(&settings).ok().flatten(),
+            SyntaxStartupMode::Config => {
+                syntax_runtime_for_diff(SyntaxRuntime::start(&settings), &mut startup_error_log)
+            }
             SyntaxStartupMode::Disabled => None,
             SyntaxStartupMode::Languages(languages) => {
                 SyntaxRuntime::start_with_languages(languages, syntax_limits)
@@ -640,7 +685,7 @@ impl DiffApp {
             pending_filter_apply: None,
             filter_worker: None,
             filter_searching: false,
-            error_log: None,
+            error_log: startup_error_log,
             error_log_height: ERROR_LOG_DEFAULT_HEIGHT,
             error_log_resizing: false,
             rendered_error_log_separator_row: None,
@@ -2195,7 +2240,7 @@ impl DiffApp {
                     EditorReloadBehavior::None => self.dirty = true,
                     EditorReloadBehavior::ScopedAsync => {
                         let request = scoped_reload.expect("scoped reload requires a request");
-                        self.pending_editor_reload = Some(request);
+                        self.queue_editor_scoped_reload(request);
                     }
                     EditorReloadBehavior::Sync => {
                         if let Err(error) = self.reload() {
@@ -2245,6 +2290,11 @@ impl DiffApp {
             generation: self.generation,
             rx,
         });
+    }
+
+    pub(crate) fn queue_editor_scoped_reload(&mut self, request: EditorReloadRequest) {
+        self.pending_editor_reload = Some(request);
+        self.dirty = true;
     }
 
     pub(crate) fn start_pending_editor_reload(&mut self) {

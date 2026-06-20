@@ -26,12 +26,13 @@ use crate::{app::*, controls::*, editor::*, live_diff::*, model::*, syntax::*, t
 use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
+use dx_core::DxError;
 use dx_diff::{
     Changeset, DiffLine, DiffLineKind, DiffOptions, DiffScope, DiffSource, FileStatus, PatchSource,
 };
 use dx_syntax::{
     ColorOverrides, DiffContextExpansion, DiffSettings, HighlightedLine, SyntaxClass,
-    SyntaxLanguageSet, SyntaxLimits, SyntaxThemeConfig, SyntaxThemeSource,
+    SyntaxLanguageSet, SyntaxLimits, SyntaxSettings, SyntaxThemeConfig, SyntaxThemeSource,
 };
 use ratatui::prelude::{Color, Line, Modifier, Span, Style};
 use std::{
@@ -1063,6 +1064,21 @@ fn editor_reload_behavior_supports_worktree_backed_diffs() {
 }
 
 #[test]
+fn queue_editor_scoped_reload_marks_dirty_for_terminal_repaint() {
+    let changeset = changeset_with_hunk_at(PathBuf::from("/repo"), 20);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.dirty = false;
+
+    app.queue_editor_scoped_reload(EditorReloadRequest {
+        path: PathBuf::from("src/file.rs"),
+        pathspecs: vec![PathBuf::from("src/file.rs")],
+    });
+
+    assert!(app.dirty);
+    assert!(app.pending_editor_reload.is_some());
+}
+
+#[test]
 fn focused_editor_reload_request_preserves_rename_pair() {
     let mut changeset = changeset_with_hunk_at(PathBuf::from("/repo"), 20);
     changeset.files[0].old_path = Some("old.rs".to_owned());
@@ -1077,6 +1093,33 @@ fn focused_editor_reload_request_preserves_rename_pair() {
     assert_eq!(
         request.pathspecs,
         vec![PathBuf::from("old.rs"), PathBuf::from("new.rs")]
+    );
+}
+
+#[test]
+fn syntax_settings_load_error_falls_back_with_visible_diagnostic() {
+    let (settings, error_log) =
+        syntax_settings_for_diff(Err(DxError::Usage("bad syntax config".to_owned())));
+
+    assert_eq!(settings, SyntaxSettings::default());
+    let error_log = error_log.expect("settings error should be visible");
+    assert!(error_log.contains("syntax settings ignored"));
+    assert!(error_log.contains("bad syntax config"));
+}
+
+#[test]
+fn syntax_runtime_start_error_disables_syntax_with_visible_diagnostic() {
+    let mut error_log = Some("syntax settings ignored: bad theme".to_owned());
+
+    let syntax = syntax_runtime_for_diff(
+        Err(DxError::Usage("bad tree-sitter config".to_owned())),
+        &mut error_log,
+    );
+
+    assert!(syntax.is_none());
+    assert_eq!(
+        error_log.as_deref(),
+        Some("syntax settings ignored: bad theme\nsyntax disabled: bad tree-sitter config")
     );
 }
 
