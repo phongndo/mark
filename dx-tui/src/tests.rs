@@ -3516,6 +3516,49 @@ fn options_menu_draws_centered_floating_menu() {
 }
 
 #[test]
+fn menu_footers_use_configured_keymap_labels() {
+    let keymap = Keymap::parse(
+        r#"
+        [keymap.menu]
+        up = "u"
+        down = "d"
+        select = "x"
+        confirm = "a"
+        close = "z"
+        "#,
+    )
+    .expect("keymap should parse");
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.keymap = keymap;
+
+    app.open_options_menu();
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 20))
+        .expect("test terminal should be created");
+    terminal
+        .draw(|frame| crate::render::draw(frame, &mut app))
+        .expect("options menu draw should succeed");
+    let rows = buffer_rows(terminal.backend().buffer());
+    assert!(
+        rows.iter()
+            .any(|row| row.contains("d/u move · x toggle/open · a apply/open · z close"))
+    );
+    assert!(!rows.iter().any(|row| row.contains("Space toggle/open")));
+
+    app.close_options_menu();
+    app.open_diff_menu();
+    terminal
+        .draw(|frame| crate::render::draw(frame, &mut app))
+        .expect("diff menu draw should succeed");
+    let rows = buffer_rows(terminal.backend().buffer());
+    assert!(
+        rows.iter()
+            .any(|row| row.contains("1-4 switch · d/u move · x/a apply · z close"))
+    );
+    assert!(!rows.iter().any(|row| row.contains("Enter apply")));
+}
+
+#[test]
 fn colorscheme_picker_draws_input_dropdown() {
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
@@ -5715,6 +5758,16 @@ fn range_texts(text: &str, ranges: &[InlineRange]) -> Vec<String> {
 
 fn line_text(line: &Line<'_>) -> String {
     span_text(&line.spans)
+}
+
+fn buffer_rows(buffer: &ratatui::buffer::Buffer) -> Vec<String> {
+    (0..buffer.area.height)
+        .map(|y| {
+            (0..buffer.area.width)
+                .map(|x| buffer.cell((x, y)).expect("cell should exist").symbol())
+                .collect()
+        })
+        .collect()
 }
 
 fn visible_paths(app: &DiffApp) -> Vec<&str> {

@@ -282,6 +282,13 @@ impl Keymap {
             .any(|sequence| sequence.0.as_slice() == [key])
     }
 
+    pub(crate) fn menu_action_label(&self, action: MenuAction) -> String {
+        self.menu_sequences(action)
+            .first()
+            .map(sequence_display_label)
+            .unwrap_or_else(|| "unbound".to_owned())
+    }
+
     fn global_sequences(&self, action: GlobalAction) -> &[KeySequence] {
         match action {
             GlobalAction::Help => &self.help,

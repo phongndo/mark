@@ -10,7 +10,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::{
     app::{DiffApp, OptionsMenuItem, color_scheme_label, context_expansion_label},
     controls::{DiffChoice, INPUT_CURSOR},
-    keymap::Keymap,
+    keymap::{Keymap, MenuAction},
     render::{
         style::{base_bg, header_bg},
         text::fit_padded,
@@ -71,10 +71,7 @@ pub(crate) fn draw_diff_menu(frame: &mut Frame<'_>, app: &mut DiffApp, area: Rec
 
     if inner.height as usize > lines.len() {
         lines.push(Line::from(Span::styled(
-            fit_padded(
-                " 1-4 switch · j/k move · Enter apply · Esc close ",
-                inner.width as usize,
-            ),
+            fit_padded(&diff_menu_footer(&app.keymap), inner.width as usize),
             Style::default().fg(app.theme.muted).bg(base_bg(app.theme)),
         )));
     }
@@ -123,7 +120,7 @@ pub(crate) fn diff_menu_block(theme: DiffTheme) -> Block<'static> {
 }
 
 fn diff_menu_floating_width(app: &DiffApp, choices: &[DiffChoice]) -> u16 {
-    let footer = " 1-4 switch · j/k move · Enter apply · Esc close ".width();
+    let footer = diff_menu_footer(&app.keymap).width();
     let rows = choices
         .iter()
         .enumerate()
@@ -139,6 +136,16 @@ fn diff_menu_floating_width(app: &DiffApp, choices: &[DiffChoice]) -> u16 {
         .max()
         .unwrap_or_default();
     rows.max(footer).max(36).saturating_add(4).min(72) as u16
+}
+
+fn diff_menu_footer(keymap: &Keymap) -> String {
+    format!(
+        " 1-4 switch · {} move · {}/{} apply · {} close ",
+        menu_move_label(keymap),
+        keymap.menu_action_label(MenuAction::Select),
+        keymap.menu_action_label(MenuAction::Confirm),
+        keymap.menu_action_label(MenuAction::Close),
+    )
 }
 
 fn diff_choice_detail(app: &DiffApp, choice: DiffChoice) -> String {
@@ -212,10 +219,7 @@ pub(crate) fn draw_options_menu(frame: &mut Frame<'_>, app: &DiffApp, area: Rect
 
     if inner.height as usize > lines.len() {
         lines.push(Line::from(Span::styled(
-            fit_padded(
-                " j/k move · Space toggle/open · Enter apply/open · Esc close ",
-                inner.width as usize,
-            ),
+            fit_padded(&options_menu_footer(&app.keymap), inner.width as usize),
             Style::default().fg(app.theme.muted).bg(base_bg(app.theme)),
         )));
     }
@@ -245,7 +249,7 @@ pub(crate) fn options_menu_block(theme: DiffTheme) -> Block<'static> {
 }
 
 fn options_menu_width(app: &DiffApp) -> u16 {
-    let footer = " j/k move · Space toggle/open · Enter apply/open · Esc close ".width();
+    let footer = options_menu_footer(&app.keymap).width();
     let rows = app
         .options_menu_items()
         .iter()
@@ -253,6 +257,24 @@ fn options_menu_width(app: &DiffApp) -> u16 {
         .max()
         .unwrap_or_default();
     rows.max(footer).max(36).saturating_add(4).min(72) as u16
+}
+
+fn options_menu_footer(keymap: &Keymap) -> String {
+    format!(
+        " {} move · {} toggle/open · {} apply/open · {} close ",
+        menu_move_label(keymap),
+        keymap.menu_action_label(MenuAction::Select),
+        keymap.menu_action_label(MenuAction::Confirm),
+        keymap.menu_action_label(MenuAction::Close),
+    )
+}
+
+fn menu_move_label(keymap: &Keymap) -> String {
+    format!(
+        "{}/{}",
+        keymap.menu_action_label(MenuAction::Down),
+        keymap.menu_action_label(MenuAction::Up)
+    )
 }
 
 fn option_label(item: OptionsMenuItem) -> &'static str {
