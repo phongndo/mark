@@ -619,7 +619,70 @@ fn patch_header_lines(patch: &str) -> impl Iterator<Item = &str> {
 }
 
 fn normalized_patch_input(input: &[u8]) -> Vec<u8> {
-    strip_terminal_escapes(input)
+    let mut output = Vec::with_capacity(input.len());
+    for line in input.split_inclusive(|byte| *byte == b'\n') {
+        append_patch_line_without_color_wrappers(line, &mut output);
+    }
+    output
+}
+
+fn append_patch_line_without_color_wrappers(line: &[u8], output: &mut Vec<u8>) {
+    let line_break_start = line.strip_suffix(b"\n").map_or(line.len(), <[u8]>::len);
+    let mut content_start = 0;
+    let mut stripped_leading_color = false;
+    while content_start < line_break_start {
+        let Some(end) = sgr_escape_end(line, content_start) else {
+            break;
+        };
+        stripped_leading_color = true;
+        content_start = end;
+    }
+
+    let content_end = if stripped_leading_color {
+        trailing_sgr_reset_start(line, content_start, line_break_start).unwrap_or(line_break_start)
+    } else {
+        line_break_start
+    };
+
+    output.extend_from_slice(&line[content_start..content_end]);
+    output.extend_from_slice(&line[line_break_start..]);
+}
+
+fn trailing_sgr_reset_start(input: &[u8], start: usize, end: usize) -> Option<usize> {
+    let mut index = start;
+    while index < end {
+        if let Some(escape_end) = sgr_escape_end(input, index) {
+            if escape_end == end && sgr_escape_is_reset(&input[index..escape_end]) {
+                return Some(index);
+            }
+            index = escape_end;
+        } else {
+            index += 1;
+        }
+    }
+    None
+}
+
+fn sgr_escape_end(input: &[u8], index: usize) -> Option<usize> {
+    if input.get(index) != Some(&0x1b) || input.get(index + 1) != Some(&b'[') {
+        return None;
+    }
+
+    csi_escape_end(input, index + 2).filter(|end| input.get(end - 1) == Some(&b'm'))
+}
+
+fn sgr_escape_is_reset(escape: &[u8]) -> bool {
+    let Some(parameters) = escape
+        .strip_prefix(b"\x1b[")
+        .and_then(|escape| escape.strip_suffix(b"m"))
+    else {
+        return false;
+    };
+
+    parameters.is_empty()
+        || parameters
+            .split(|byte| *byte == b';')
+            .all(|parameter| parameter.is_empty() || parameter.iter().all(|byte| *byte == b'0'))
 }
 
 fn sanitized_terminal_bytes(input: &[u8]) -> Vec<u8> {
@@ -1125,6 +1188,31 @@ mod tests {
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].hunks[0].lines[0].text, "old\r");
         assert_eq!(files[0].hunks[0].lines[1].text, "old");
+    }
+
+    #[test]
+    fn normalized_patch_input_preserves_literal_terminal_sequences() {
+        let patch = b"diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+\x1b[31mred\x1b[0m\n";
+
+        let normalized = normalized_patch_input(patch);
+        let text = String::from_utf8_lossy(&normalized);
+        let files = dx_diff::parse_patch(&text);
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].hunks[0].lines[1].text, "\x1b[31mred\x1b[0m");
+    }
+
+    #[test]
+    fn normalized_patch_input_strips_only_git_color_wrappers() {
+        let patch = b"\x1b[1mdiff --git a/a.txt b/a.txt\x1b[m\n\x1b[1m--- a/a.txt\x1b[m\n\x1b[1m+++ b/a.txt\x1b[m\n\x1b[36m@@ -1 +1 @@\x1b[m\n\x1b[31m-old\x1b[m\n\x1b[32m+\x1b[31mred\x1b[0m\x1b[m\n";
+
+        let normalized = normalized_patch_input(patch);
+        let text = String::from_utf8_lossy(&normalized);
+        let files = dx_diff::parse_patch(&text);
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].hunks[0].lines[0].text, "old");
+        assert_eq!(files[0].hunks[0].lines[1].text, "\x1b[31mred\x1b[0m");
     }
 
     #[test]

@@ -209,20 +209,8 @@ fn indexed_color(prefix: &str, index: u8) -> String {
 }
 
 fn sanitize_terminal_fragment(text: &str) -> String {
-    let bytes = text.as_bytes();
     let mut output = String::with_capacity(text.len());
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] == 0x1b {
-            if let Some(end) = escape_end(bytes, index) {
-                index = end;
-                continue;
-            }
-        }
-
-        let Some(character) = text[index..].chars().next() else {
-            break;
-        };
+    for character in text.chars() {
         if character == '\t' {
             output.push('\t');
         } else if character.is_control() {
@@ -230,53 +218,8 @@ fn sanitize_terminal_fragment(text: &str) -> String {
         } else {
             output.push(character);
         }
-        index += character.len_utf8();
     }
     output
-}
-
-fn escape_end(input: &[u8], index: usize) -> Option<usize> {
-    let introducer = input.get(index + 1).copied()?;
-    let payload = index + 2;
-    match introducer {
-        b'[' => csi_escape_end(input, payload),
-        b']' | b'P' | b'^' | b'_' | b'X' => string_escape_end(input, payload),
-        0x20..=0x2f => input
-            .get(payload)
-            .filter(|byte| (0x30..=0x7e).contains(*byte))
-            .map(|_| payload + 1),
-        0x30..=0x7e => Some(payload),
-        _ => None,
-    }
-}
-
-fn csi_escape_end(input: &[u8], mut index: usize) -> Option<usize> {
-    let mut seen_intermediate = false;
-    while let Some(byte) = input.get(index).copied() {
-        match byte {
-            0x30..=0x3f if !seen_intermediate => index += 1,
-            0x20..=0x2f => {
-                seen_intermediate = true;
-                index += 1;
-            }
-            0x40..=0x7e => return Some(index + 1),
-            _ => return None,
-        }
-    }
-    None
-}
-
-fn string_escape_end(input: &[u8], mut index: usize) -> Option<usize> {
-    while let Some(byte) = input.get(index).copied() {
-        match byte {
-            0x07 => return Some(index + 1),
-            b'\n' | b'\r' => return None,
-            0x1b if input.get(index + 1) == Some(&b'\\') => return Some(index + 2),
-            0x1b => return None,
-            _ => index += 1,
-        }
-    }
-    None
 }
 
 #[cfg(test)]
@@ -369,8 +312,8 @@ mod tests {
 
         assert!(!output.contains('\x1b'));
         assert!(!output.contains('\x07'));
-        assert!(output.contains("bad.txt"));
-        assert!(output.contains("safe"));
+        assert!(output.contains("bad\\u{1b}]52;c;secret\\u{7}.txt"));
+        assert!(output.contains("safe\\u{1b}[2J"));
     }
 
     #[test]
@@ -456,6 +399,27 @@ mod tests {
         );
 
         assert!(output.contains("safe\\u{1b}]unterminated\\u{1b}[31"));
+    }
+
+    #[test]
+    fn static_pager_escapes_complete_terminal_sequences() {
+        let mut changeset = fixture_changeset();
+        changeset.files[0].hunks[0].lines[1].text = "\x1b[31mred\x1b[0m".to_owned();
+
+        let output = render_static_changeset(
+            DiffOptions::default(),
+            changeset,
+            StaticPagerOptions {
+                width: 80,
+                layout: StaticPagerLayout::Unified,
+                color: false,
+                syntax: false,
+                ..StaticPagerOptions::default()
+            },
+        );
+
+        assert!(!output.contains('\x1b'));
+        assert!(output.contains("\\u{1b}[31mred\\u{1b}[0m"));
     }
 
     #[test]
