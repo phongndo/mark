@@ -2192,7 +2192,7 @@ impl DiffApp {
                     changed,
                     scoped_reload.as_ref().map(|request| request.path.as_path()),
                 ) {
-                    EditorReloadBehavior::None => {}
+                    EditorReloadBehavior::None => self.dirty = true,
                     EditorReloadBehavior::ScopedAsync => {
                         let request = scoped_reload.expect("scoped reload requires a request");
                         self.pending_editor_reload = Some(request);
