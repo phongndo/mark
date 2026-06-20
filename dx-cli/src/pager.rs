@@ -151,6 +151,10 @@ fn pager_action(
     env: &PagerEnv,
     has_controlling_terminal: bool,
 ) -> PagerAction {
+    if input.is_empty() {
+        return PagerAction::Passthrough;
+    }
+
     if !looks_like_patch_input(input) {
         return non_diff_pager_action(stdout_tty, env);
     }
@@ -974,6 +978,18 @@ mod tests {
         );
 
         assert_eq!(action, PagerAction::PlainTextPager);
+    }
+
+    #[test]
+    fn pager_passthroughs_empty_input() {
+        let action = pager_action(
+            b"",
+            true,
+            &env(Some("xterm-256color"), None, None, false),
+            true,
+        );
+
+        assert_eq!(action, PagerAction::Passthrough);
     }
 
     #[test]
