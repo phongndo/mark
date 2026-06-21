@@ -2206,7 +2206,7 @@ fn configured_leader_help_key_toggles_help_menu_closed() {
 }
 
 #[test]
-fn q_key_does_not_quit_without_leader() {
+fn q_key_quits_without_leader() {
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
 
@@ -2214,11 +2214,11 @@ fn q_key_does_not_quit_without_leader() {
         .handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE))
         .expect("q should be handled");
 
-    assert!(!should_quit);
+    assert!(should_quit);
 }
 
 #[test]
-fn leader_q_quits() {
+fn leader_q_does_not_quit() {
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
 
@@ -2232,7 +2232,7 @@ fn leader_q_quits() {
         .handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE))
         .expect("leader q should be handled");
 
-    assert!(should_quit);
+    assert!(!should_quit);
     assert!(!app.leader_pending);
 }
 
@@ -2743,7 +2743,7 @@ fn help_menu_lines_list_keybindings() {
 
     assert_eq!(lines.len(), help_menu_content_rows(width));
     assert!(text.iter().any(|line| line.contains("?")));
-    assert!(text.iter().any(|line| line.contains("Space q")));
+    assert!(text.iter().any(|line| line.contains("  q") && line.contains("quit")));
     assert!(text.iter().any(|line| line.contains("Tab/Shift-Tab")));
     assert!(text.iter().any(|line| line.contains("Ctrl-C")));
     assert!(text.iter().any(|line| line.contains("j/k")));
