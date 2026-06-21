@@ -1035,12 +1035,10 @@ fn post_editor_quit_key_guard_ignores_only_transient_quit_keys() {
         KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
         now
     ));
-    assert!(
-        !app.ignore_post_editor_quit_key(
-            KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE),
-            now
-        )
-    );
+    assert!(app.ignore_post_editor_quit_key(
+        KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE),
+        now
+    ));
     assert!(!app.ignore_post_editor_quit_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), now));
     assert!(!app.ignore_post_editor_quit_key(
         KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL),
@@ -2614,9 +2612,9 @@ fn esc_closes_error_log_and_clears_pending_leader() {
 
     let should_quit = app
         .handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE))
-        .expect("q should not be handled as a leader suffix");
+        .expect("q should be handled as a fresh quit key");
 
-    assert!(!should_quit);
+    assert!(should_quit);
 }
 
 #[test]
