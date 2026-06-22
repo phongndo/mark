@@ -1,7 +1,7 @@
 use dx_diff::{DiffOptions, DiffScope, DiffSource};
 use ratatui::{
     Frame,
-    layout::Rect,
+    layout::{Alignment, Rect},
     prelude::{Color, Line, Modifier, Span, Style, Text},
     widgets::{Block, BorderType, Clear, Padding, Paragraph},
 };
@@ -9,7 +9,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::{
     app::{DiffApp, OptionsMenuItem, color_scheme_label, context_expansion_label},
-    controls::{DiffChoice, INPUT_CURSOR},
+    controls::{BranchMenu, DiffChoice, INPUT_CURSOR},
     keymap::{Keymap, MenuAction},
     render::{
         style::{base_bg, header_bg},
@@ -23,7 +23,7 @@ use crate::{
 };
 
 pub(crate) fn draw_diff_menu(frame: &mut Frame<'_>, app: &mut DiffApp, area: Rect) {
-    let choices = app.diff_menu_choices();
+    let choices = app.filtered_diff_choices();
     let Some(menu_area) = diff_menu_area(app, area, &choices) else {
         app.set_rendered_diff_menu_area(None);
         return;
@@ -32,48 +32,50 @@ pub(crate) fn draw_diff_menu(frame: &mut Frame<'_>, app: &mut DiffApp, area: Rec
 
     let block = diff_menu_block(app.theme);
     let inner = block.inner(menu_area);
-    let active = app.current_diff_choice();
     let selected = app.diff_menu_selected.min(choices.len().saturating_sub(1));
-    let mut lines: Vec<_> = choices
-        .iter()
-        .enumerate()
-        .take(inner.height.saturating_sub(1) as usize)
-        .map(|(index, choice)| {
-            let highlighted = index == selected;
-            let active = active == Some(*choice);
-            let cursor = if highlighted { "›" } else { " " };
-            let marker = if active { "✓" } else { " " };
-            let label = choice.label();
-            let detail = diff_choice_detail(app, *choice);
-            let number = index + 1;
-            let left = format!(" {number} {cursor} {marker} {label}");
-            let available = inner.width as usize;
-            let gap = available.saturating_sub(left.width().saturating_add(detail.width()));
-            let text = fit_padded(
-                &format!("{left}{}{}", " ".repeat(gap.max(2)), detail),
-                available,
-            );
-            let mut style = Style::default()
-                .fg(app.theme.foreground)
-                .bg(base_bg(app.theme));
-            if active {
-                style = style.add_modifier(Modifier::BOLD);
-            }
-            if highlighted {
-                style = style
-                    .fg(app.theme.header)
-                    .bg(header_bg(app.theme))
-                    .add_modifier(Modifier::BOLD);
-            }
-            Line::from(Span::styled(text, style))
-        })
-        .collect();
-
-    if inner.height as usize > lines.len() {
-        lines.push(Line::from(Span::styled(
-            fit_padded(&diff_menu_footer(&app.keymap), inner.width as usize),
-            Style::default().fg(app.theme.muted).bg(base_bg(app.theme)),
-        )));
+    let mut lines = vec![selector_input_line(
+        &app.diff_menu_input,
+        inner.width as usize,
+        app.theme,
+        choices.len(),
+        app.selectable_diff_choices().len(),
+    )];
+    lines.push(selector_separator_line(inner.width as usize, app.theme));
+    if let Some(choice) = app.selected_diff_menu_choice() {
+        lines.push(selector_disabled_line(
+            choice.label(),
+            &app.diff_choice_detail(choice),
+            inner.width as usize,
+            app.theme,
+        ));
+    }
+    let remaining_rows = inner.height.saturating_sub(lines.len() as u16) as usize;
+    if choices.is_empty() {
+        if remaining_rows > 0 {
+            lines.push(selector_empty_line(
+                " no matching diff types",
+                inner.width as usize,
+                app.theme,
+            ));
+        }
+    } else {
+        lines.extend(
+            choices
+                .iter()
+                .enumerate()
+                .take(remaining_rows)
+                .map(|(index, choice)| {
+                    let highlighted = index == selected;
+                    selector_entry_line(
+                        choice.label(),
+                        &app.diff_choice_detail(*choice),
+                        quick_key_label(index).unwrap_or(" "),
+                        inner.width as usize,
+                        app.theme,
+                        highlighted,
+                    )
+                }),
+        );
     }
 
     frame.render_widget(Clear, menu_area);
@@ -85,12 +87,18 @@ pub(crate) fn draw_diff_menu(frame: &mut Frame<'_>, app: &mut DiffApp, area: Rec
 }
 
 pub(crate) fn diff_menu_area(app: &DiffApp, area: Rect, choices: &[DiffChoice]) -> Option<Rect> {
-    if !app.diff_menu_open || area.width < 24 || area.height < 5 || choices.is_empty() {
+    if !app.diff_menu_open
+        || area.width < 24
+        || area.height < 5
+        || app.diff_menu_choices().is_empty()
+    {
         return None;
     }
 
     let width = diff_menu_floating_width(app, choices).min(area.width);
-    let height = (choices.len() as u16).saturating_add(3).min(area.height);
+    let pinned_rows = u16::from(app.selected_diff_menu_choice().is_some());
+    let rows = (choices.len().max(1) as u16).saturating_add(pinned_rows);
+    let height = rows.saturating_add(4).min(area.height);
     if width == 0 || height == 0 {
         return None;
     }
@@ -107,63 +115,200 @@ pub(crate) fn diff_menu_block(theme: DiffTheme) -> Block<'static> {
     let bg = base_bg(theme);
     Block::bordered()
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(theme.muted).bg(bg))
+        .border_style(Style::default().fg(selector_border_color(theme)).bg(bg))
         .style(Style::default().bg(bg))
         .padding(Padding::horizontal(1))
         .title(Line::from(Span::styled(
-            " diff source ",
+            " Diff ",
             Style::default()
-                .fg(theme.header)
+                .fg(selector_title_color(theme))
                 .bg(bg)
                 .add_modifier(Modifier::BOLD),
         )))
+        .title_alignment(Alignment::Center)
 }
 
 fn diff_menu_floating_width(app: &DiffApp, choices: &[DiffChoice]) -> u16 {
-    let footer = diff_menu_footer(&app.keymap).width();
+    let input = app.diff_menu_input.width().saturating_add(12);
     let rows = choices
         .iter()
         .enumerate()
         .map(|(index, choice)| {
             format!(
-                " {} › ✓ {}  {} ",
-                index + 1,
+                " {}  {}  {} ",
                 choice.label(),
-                diff_choice_detail(app, *choice)
+                app.diff_choice_detail(*choice),
+                quick_key_label(index).unwrap_or(" "),
             )
             .width()
         })
         .max()
+        .unwrap_or_else(|| " no matching diff types ".width());
+    let selected = app
+        .selected_diff_menu_choice()
+        .map(|choice| format!(" {}  {} ", choice.label(), app.diff_choice_detail(choice)).width())
         .unwrap_or_default();
-    rows.max(footer).max(36).saturating_add(4).min(72) as u16
+    rows.max(selected)
+        .max(input)
+        .max(42)
+        .saturating_add(4)
+        .min(88) as u16
 }
 
-fn diff_menu_footer(keymap: &Keymap) -> String {
-    format!(
-        " 1-4 switch · {} move · {}/{} apply · {} close ",
-        menu_move_label(keymap),
-        keymap.menu_action_label(MenuAction::Select),
-        keymap.menu_action_label(MenuAction::Confirm),
-        keymap.menu_action_label(MenuAction::Close),
-    )
+fn selector_input_line(
+    input: &str,
+    width: usize,
+    theme: DiffTheme,
+    matched: usize,
+    total: usize,
+) -> Line<'static> {
+    let input = if input.is_empty() {
+        INPUT_CURSOR.to_owned()
+    } else {
+        format!("{input}{INPUT_CURSOR}")
+    };
+    let left = format!("> {input}");
+    let right = format!("{matched}/{total}");
+    let bg = base_bg(theme);
+    let right_width = right.width();
+    if width <= right_width {
+        return Line::from(Span::styled(
+            fit_padded(&right, width),
+            Style::default().fg(selector_count_color(theme)).bg(bg),
+        ));
+    }
+    let left_width = width.saturating_sub(right_width).saturating_sub(1);
+    let left = fit_padded(&left, left_width);
+    Line::from(vec![
+        Span::styled(
+            left,
+            Style::default().fg(selector_prompt_color(theme)).bg(bg),
+        ),
+        Span::styled(" ", Style::default().bg(bg)),
+        Span::styled(
+            fit_padded(&right, right_width.min(width)),
+            Style::default().fg(selector_count_color(theme)).bg(bg),
+        ),
+    ])
 }
 
-fn diff_choice_detail(app: &DiffApp, choice: DiffChoice) -> String {
-    match choice {
-        DiffChoice::All => "HEAD → working tree".to_owned(),
-        DiffChoice::Unstaged => "index → working tree".to_owned(),
-        DiffChoice::Staged => "HEAD → index".to_owned(),
-        DiffChoice::Branch => match app.branch_base.as_deref() {
-            Some(base) => {
-                let head = app
-                    .branch_head
-                    .as_deref()
-                    .or(app.current_head.as_deref())
-                    .unwrap_or("HEAD");
-                format!("{head} → {base}")
-            }
-            None => "base unavailable".to_owned(),
-        },
+fn selector_separator_line(width: usize, theme: DiffTheme) -> Line<'static> {
+    Line::from(Span::styled(
+        "─".repeat(width),
+        Style::default()
+            .fg(selector_border_color(theme))
+            .bg(base_bg(theme)),
+    ))
+}
+
+fn selector_empty_line(text: &str, width: usize, theme: DiffTheme) -> Line<'static> {
+    Line::from(Span::styled(
+        fit_padded(text, width),
+        Style::default().fg(theme.muted).bg(base_bg(theme)),
+    ))
+}
+
+fn selector_disabled_line(
+    label: &str,
+    detail: &str,
+    width: usize,
+    theme: DiffTheme,
+) -> Line<'static> {
+    let text = if detail.is_empty() {
+        format!(" {label}")
+    } else {
+        format!(" {label}  {detail}")
+    };
+    Line::from(Span::styled(
+        fit_padded(&text, width),
+        Style::default().fg(theme.muted).bg(base_bg(theme)),
+    ))
+}
+
+fn selector_row_style(theme: DiffTheme, highlighted: bool) -> Style {
+    let mut style = Style::default().fg(theme.foreground).bg(base_bg(theme));
+    if highlighted {
+        style = style
+            .fg(selector_highlight_color(theme))
+            .bg(header_bg(theme))
+            .add_modifier(Modifier::BOLD);
+    }
+    style
+}
+
+fn selector_title_color(theme: DiffTheme) -> Color {
+    theme.syntax.function.unwrap_or(theme.header)
+}
+
+fn selector_prompt_color(theme: DiffTheme) -> Color {
+    theme.syntax.operator.unwrap_or(selector_title_color(theme))
+}
+
+fn selector_border_color(theme: DiffTheme) -> Color {
+    theme.syntax.punctuation.unwrap_or(theme.muted)
+}
+
+fn selector_count_color(theme: DiffTheme) -> Color {
+    theme.syntax.comment.unwrap_or(theme.muted)
+}
+
+fn selector_number_color(theme: DiffTheme) -> Color {
+    theme.syntax.number.unwrap_or(theme.hunk)
+}
+
+fn selector_highlight_color(theme: DiffTheme) -> Color {
+    theme.syntax.keyword.unwrap_or(theme.header)
+}
+
+fn selector_entry_line(
+    label: &str,
+    detail: &str,
+    key: &str,
+    width: usize,
+    theme: DiffTheme,
+    highlighted: bool,
+) -> Line<'static> {
+    let left = if detail.is_empty() {
+        format!(" {label}")
+    } else {
+        format!(" {label}  {detail}")
+    };
+    let right_width = key.width();
+    let left_width = width.saturating_sub(right_width).saturating_sub(1);
+    let bg = if highlighted {
+        header_bg(theme)
+    } else {
+        base_bg(theme)
+    };
+    Line::from(vec![
+        Span::styled(
+            fit_padded(&left, left_width),
+            selector_row_style(theme, highlighted),
+        ),
+        Span::styled(" ", Style::default().bg(bg)),
+        Span::styled(
+            key.to_owned(),
+            Style::default()
+                .fg(selector_number_color(theme))
+                .bg(bg)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ])
+}
+
+fn quick_key_label(index: usize) -> Option<&'static str> {
+    match index {
+        0 => Some("1"),
+        1 => Some("2"),
+        2 => Some("3"),
+        3 => Some("4"),
+        4 => Some("5"),
+        5 => Some("6"),
+        6 => Some("7"),
+        7 => Some("8"),
+        8 => Some("9"),
+        9 => Some("0"),
+        _ => None,
     }
 }
 
@@ -446,83 +591,107 @@ fn color_scheme_picker_width(app: &DiffApp) -> u16 {
         .min(64) as u16
 }
 
-pub(crate) fn draw_branch_menu(frame: &mut Frame<'_>, app: &DiffApp, area: Rect) {
+pub(crate) fn draw_branch_menu(frame: &mut Frame<'_>, app: &mut DiffApp, area: Rect) {
     let Some(menu) = app.branch_menu_open else {
+        app.set_rendered_branch_menu_area(None);
         return;
     };
-    if area.height <= 1 || app.comparison_branches.is_empty() {
+    if area.width < 24 || area.height < 5 || app.comparison_branches.is_empty() {
+        app.set_rendered_branch_menu_area(None);
         return;
     }
 
-    let x = app
-        .branch_selector_start(menu)
-        .unwrap_or_default()
-        .min(area.width);
-    let width = app.branch_menu_width().min(area.width.saturating_sub(x));
-    let height = (app.branch_menu_height() as u16).min(area.height - 1);
+    let width = app.branch_menu_width().min(area.width).min(88);
+    let height = (app.branch_menu_height() as u16).min(area.height);
     if width == 0 || height == 0 {
+        app.set_rendered_branch_menu_area(None);
         return;
     }
 
     let menu_area = Rect {
-        x: area.x + x,
-        y: area.y + 1,
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
         width,
         height,
     };
-    let selected = app.branch_ref(menu);
+    app.set_rendered_branch_menu_area(Some(menu_area));
+
+    let block = branch_menu_block(app.theme, menu);
+    let inner = block.inner(menu_area);
     let matches = app.filtered_branches();
-    let lines: Vec<_> = if matches.is_empty() {
-        vec![Line::from(Span::styled(
-            fit_padded("   no matches", width as usize),
-            Style::default()
-                .fg(app.theme.muted)
-                .bg(header_bg(app.theme)),
-        ))]
+    let mut lines = vec![selector_input_line(
+        &app.branch_menu_input,
+        inner.width as usize,
+        app.theme,
+        matches.len(),
+        app.selectable_branch_count(menu),
+    )];
+    lines.push(selector_separator_line(inner.width as usize, app.theme));
+    if let Some(branch) = app.selected_branch_menu_choice(menu) {
+        lines.push(selector_disabled_line(
+            branch,
+            "",
+            inner.width as usize,
+            app.theme,
+        ));
+    }
+    let remaining_rows = inner.height.saturating_sub(lines.len() as u16) as usize;
+    if matches.is_empty() {
+        if remaining_rows > 0 {
+            lines.push(selector_empty_line(
+                " no matching branches",
+                inner.width as usize,
+                app.theme,
+            ));
+        }
     } else {
-        matches
-            .iter()
-            .enumerate()
-            .skip(app.branch_menu_scroll)
-            .take(height as usize)
-            .map(|(index, branch)| {
-                let active = selected == Some(*branch);
-                let highlighted = index == app.branch_menu_selected;
-                let marker = if active {
-                    "✓"
-                } else if highlighted {
-                    "›"
-                } else {
-                    " "
-                };
-                let branch_marker = app.branch_marker(menu, branch).unwrap_or(" ");
-                let text = fit_padded(
-                    &format!(" {marker} {branch_marker} {branch}"),
-                    width as usize,
-                );
-                let mut style = if active || highlighted {
-                    Style::default()
-                        .fg(app.theme.header)
-                        .bg(header_bg(app.theme))
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default()
-                        .fg(app.theme.foreground)
-                        .bg(header_bg(app.theme))
-                };
-                if highlighted {
-                    style = style.add_modifier(Modifier::REVERSED);
-                }
-                Line::from(Span::styled(text, style))
-            })
-            .collect()
-    };
+        lines.extend(
+            matches
+                .iter()
+                .enumerate()
+                .skip(app.branch_menu_scroll)
+                .take(remaining_rows)
+                .map(|(index, branch)| {
+                    let highlighted = index == app.branch_menu_selected;
+                    selector_entry_line(
+                        branch,
+                        "",
+                        quick_key_label(index).unwrap_or(" "),
+                        inner.width as usize,
+                        app.theme,
+                        highlighted,
+                    )
+                }),
+        );
+    }
 
     frame.render_widget(Clear, menu_area);
+    frame.render_widget(block, menu_area);
     frame.render_widget(
-        Paragraph::new(Text::from(lines)).style(Style::default().bg(header_bg(app.theme))),
-        menu_area,
+        Paragraph::new(Text::from(lines)).style(Style::default().bg(base_bg(app.theme))),
+        inner,
     );
+}
+
+pub(crate) fn branch_menu_block(theme: DiffTheme, menu: BranchMenu) -> Block<'static> {
+    let bg = base_bg(theme);
+    let title = match menu {
+        BranchMenu::Head => " head branch ",
+        BranchMenu::Base => " base branch ",
+    };
+    Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(selector_border_color(theme)).bg(bg))
+        .style(Style::default().bg(bg))
+        .padding(Padding::horizontal(1))
+        .title(Line::from(Span::styled(
+            title,
+            Style::default()
+                .fg(selector_title_color(theme))
+                .bg(bg)
+                .add_modifier(Modifier::BOLD),
+        )))
+        .title_alignment(Alignment::Center)
 }
 
 pub(crate) fn draw_help_menu(frame: &mut Frame<'_>, app: &DiffApp, area: Rect) {
@@ -785,7 +954,7 @@ pub(crate) fn diff_comparison_label(options: &DiffOptions) -> String {
 pub(crate) fn branch_menu_width(branches: &[String]) -> u16 {
     branches
         .iter()
-        .map(|branch| branch.width() + 6)
+        .map(|branch| branch.width() + 8)
         .max()
         .unwrap_or_default() as u16
 }

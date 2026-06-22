@@ -2299,7 +2299,7 @@ fn leader_m_opens_diff_source_menu() {
         .expect("leader m should be handled");
 
     assert!(app.diff_menu_open);
-    assert_eq!(app.highlighted_diff_choice(), Some(DiffChoice::All));
+    assert_eq!(app.highlighted_diff_choice(), Some(DiffChoice::Unstaged));
 }
 
 #[test]
@@ -2481,7 +2481,8 @@ fn configured_edit_hunk_key_does_not_bypass_open_menus() {
     );
 
     assert!(!should_quit);
-    assert_eq!(app.highlighted_diff_choice(), Some(DiffChoice::Unstaged));
+    assert!(app.diff_menu_open);
+    assert_eq!(app.diff_menu_input, "j");
     assert!(app.error_log.is_none());
 
     let mut app = DiffApp::new(
@@ -3215,8 +3216,6 @@ fn diff_menu_keyboard_selects_diff_choice() {
     );
 
     app.open_diff_menu();
-    app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE))
-        .expect("j should move menu selection");
     assert_eq!(app.highlighted_diff_choice(), Some(DiffChoice::Unstaged));
 
     let should_quit = app
@@ -3234,7 +3233,28 @@ fn diff_menu_keyboard_selects_diff_choice() {
 }
 
 #[test]
-fn diff_menu_space_applies_selection_without_entering_leader() {
+fn diff_menu_ctrl_n_and_ctrl_p_move_selection() {
+    let mut app = DiffApp::new(
+        DiffOptions::default(),
+        changeset_with_context_lines(1),
+        DiffLayoutMode::Unified,
+    );
+    app.branch_base = Some("main".to_owned());
+
+    app.open_diff_menu();
+    assert_eq!(app.highlighted_diff_choice(), Some(DiffChoice::Branch));
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL))
+        .expect("ctrl-n should move menu selection");
+    assert_eq!(app.highlighted_diff_choice(), Some(DiffChoice::Unstaged));
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL))
+        .expect("ctrl-p should move menu selection");
+    assert_eq!(app.highlighted_diff_choice(), Some(DiffChoice::Branch));
+}
+
+#[test]
+fn diff_menu_plain_letters_filter_input() {
     let mut app = DiffApp::new(
         DiffOptions::default(),
         changeset_with_context_lines(1),
@@ -3242,23 +3262,34 @@ fn diff_menu_space_applies_selection_without_entering_leader() {
     );
 
     app.open_diff_menu();
-    app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
-        .expect("tab should move menu selection");
-    app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
-        .expect("space should apply menu selection");
+    app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE))
+        .expect("plain j should filter menu input");
 
-    assert!(!app.diff_menu_open);
-    assert!(!app.leader_pending);
-    assert_eq!(
-        app.pending_diff_load
-            .as_ref()
-            .map(|load| load.options.scope),
-        Some(DiffScope::Unstaged)
-    );
+    assert_eq!(app.diff_menu_input, "j");
+    assert!(app.diff_menu_open);
+    assert_eq!(app.highlighted_diff_choice(), None);
 }
 
 #[test]
-fn diff_menu_q_closes_without_quitting() {
+fn diff_menu_space_filters_without_entering_leader() {
+    let mut app = DiffApp::new(
+        DiffOptions::default(),
+        changeset_with_context_lines(1),
+        DiffLayoutMode::Unified,
+    );
+
+    app.open_diff_menu();
+    app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
+        .expect("space should filter menu input");
+
+    assert!(app.diff_menu_open);
+    assert!(!app.leader_pending);
+    assert_eq!(app.diff_menu_input, " ");
+    assert!(app.pending_diff_load.is_none());
+}
+
+#[test]
+fn diff_menu_q_filters_without_quitting() {
     let mut app = DiffApp::new(
         DiffOptions::default(),
         changeset_with_context_lines(1),
@@ -3268,10 +3299,11 @@ fn diff_menu_q_closes_without_quitting() {
 
     let should_quit = app
         .handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE))
-        .expect("q should close menu");
+        .expect("q should filter menu input");
 
     assert!(!should_quit);
-    assert!(!app.diff_menu_open);
+    assert!(app.diff_menu_open);
+    assert_eq!(app.diff_menu_input, "q");
 }
 
 #[test]
@@ -3287,20 +3319,20 @@ fn diff_menu_branch_keys_do_not_open_branch_picker() {
     app.comparison_branches = vec!["main".to_owned(), "feature".to_owned()];
 
     app.open_diff_menu();
-    app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE))
-        .expect("j should select branch row");
     assert_eq!(app.highlighted_diff_choice(), Some(DiffChoice::Branch));
     app.handle_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE))
-        .expect("b should be ignored by diff menu");
+        .expect("b should filter diff menu");
 
     assert!(app.diff_menu_open);
     assert!(app.branch_menu_open.is_none());
+    assert_eq!(app.diff_menu_input, "b");
 
     app.handle_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE))
-        .expect("h should be ignored by diff menu");
+        .expect("h should filter diff menu");
 
     assert!(app.diff_menu_open);
     assert!(app.branch_menu_open.is_none());
+    assert_eq!(app.diff_menu_input, "bh");
 }
 
 #[test]
@@ -3315,8 +3347,8 @@ fn diff_menu_number_keys_apply_choice() {
     app.current_head = Some("feature".to_owned());
 
     app.open_diff_menu();
-    app.handle_key(KeyEvent::new(KeyCode::Char('3'), KeyModifiers::NONE))
-        .expect("3 should switch to unstaged");
+    app.handle_key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE))
+        .expect("2 should switch to unstaged");
 
     assert!(!app.diff_menu_open);
     let load = app
@@ -3350,18 +3382,25 @@ fn diff_menu_draws_centered_floating_menu() {
     let title = rows
         .iter()
         .enumerate()
-        .find_map(|(row, text)| text.find("diff source").map(|column| (row, column)))
+        .find_map(|(row, text)| {
+            text.find(" Diff ")
+                .map(|column| (row, text[..column].width()))
+        })
         .expect("floating diff menu should render title");
 
     assert!(title.0 > 4 && title.0 < 12, "title row was {}", title.0);
-    assert!(title.1 > 8 && title.1 < 32, "title column was {}", title.1);
+    assert!(title.1 > 30 && title.1 < 48, "title column was {}", title.1);
     assert!(
         rows.iter()
-            .any(|row| row.contains("1") && row.contains("All changes"))
+            .any(|row| row.contains("│  All changes") && !row.contains("1 │"))
     );
     assert!(
         rows.iter()
-            .any(|row| row.contains("2") && row.contains("Unstaged"))
+            .any(|row| row.contains("Unstaged") && row.contains("1 │"))
+    );
+    assert!(
+        rows.iter()
+            .any(|row| row.contains("Staged") && row.contains("2 │"))
     );
 }
 
@@ -3687,10 +3726,12 @@ fn menu_footers_use_configured_keymap_labels() {
         .draw(|frame| crate::render::draw(frame, &mut app))
         .expect("diff menu draw should succeed");
     let rows = buffer_rows(terminal.backend().buffer());
+    assert!(rows.iter().any(|row| row.contains("> │")));
     assert!(
         rows.iter()
-            .any(|row| row.contains("1-4 switch · d/u move · x/a apply · z close"))
+            .any(|row| row.contains("1") && row.contains("All changes"))
     );
+    assert!(!rows.iter().any(|row| row.contains("d/u move")));
     assert!(!rows.iter().any(|row| row.contains("Enter apply")));
 }
 
@@ -4129,18 +4170,130 @@ fn branch_header_exposes_head_and_base_selectors() {
 
     app.toggle_branch_menu(BranchMenu::Head);
     let empty_input = app.branch_selector_text(BranchMenu::Head).unwrap();
-    assert_eq!(empty_input.width(), "● feature/ui ▾".width());
-    assert!(empty_input.starts_with(INPUT_CURSOR));
-    assert!(empty_input.trim_end().ends_with('▾'));
+    assert_eq!(empty_input, "● feature/ui ▾");
     app.push_branch_input('f');
     let typed_input = app.branch_selector_text(BranchMenu::Head).unwrap();
-    assert_eq!(typed_input.width(), "● feature/ui ▾".width());
-    assert!(typed_input.starts_with('f'));
+    assert_eq!(typed_input, "● feature/ui ▾");
     app.close_branch_menu();
     assert_eq!(
         app.branch_selector_text(BranchMenu::Head).as_deref(),
         Some("● feature/ui ▾")
     );
+}
+
+#[test]
+fn branch_menu_draws_centered_floating_filter() {
+    let options = DiffOptions {
+        source: DiffSource::Base("main".to_owned()),
+        ..DiffOptions::default()
+    };
+    let mut app = DiffApp::new(
+        options,
+        changeset_with_context_lines(1),
+        DiffLayoutMode::Unified,
+    );
+    app.branch_base = Some("main".to_owned());
+    app.branch_head = Some("feature".to_owned());
+    app.current_head = Some("feature".to_owned());
+    app.comparison_branches = vec!["main".to_owned(), "feature".to_owned()];
+    app.toggle_branch_menu(BranchMenu::Base);
+    app.push_branch_input('m');
+
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 20))
+        .expect("test terminal should be created");
+    terminal
+        .draw(|frame| crate::render::draw(frame, &mut app))
+        .expect("branch menu draw should succeed");
+
+    let buffer = terminal.backend().buffer();
+    let rows: Vec<String> = (0..buffer.area.height)
+        .map(|y| {
+            (0..buffer.area.width)
+                .map(|x| buffer.cell((x, y)).expect("cell should exist").symbol())
+                .collect()
+        })
+        .collect();
+    let title = rows
+        .iter()
+        .enumerate()
+        .find_map(|(row, text)| text.find("base branch").map(|column| (row, column)))
+        .expect("floating branch menu should render title");
+
+    assert!(title.0 > 4 && title.0 < 12, "title row was {}", title.0);
+    assert!(rows.iter().any(|row| row.contains("> m│")));
+    assert!(rows.iter().any(|row| row.contains("main")));
+    assert!(
+        !rows
+            .iter()
+            .any(|row| row.contains("main") && row.contains("1 │"))
+    );
+}
+
+#[test]
+fn branch_menu_number_keys_quick_select_top_ten() {
+    let options = DiffOptions {
+        source: DiffSource::Base("main".to_owned()),
+        ..DiffOptions::default()
+    };
+    let mut app = DiffApp::new(
+        options,
+        changeset_with_context_lines(1),
+        DiffLayoutMode::Unified,
+    );
+    app.branch_base = Some("main".to_owned());
+    app.branch_head = Some("feature".to_owned());
+    app.current_head = Some("feature".to_owned());
+    app.comparison_branches = ["aa", "bb", "cc", "dd", "ee", "ff", "gg", "hh", "ii", "jj"]
+        .into_iter()
+        .map(|suffix| format!("topic-{suffix}"))
+        .collect();
+
+    app.toggle_branch_menu(BranchMenu::Head);
+    for character in "topic".chars() {
+        app.push_branch_input(character);
+    }
+    app.handle_key(KeyEvent::new(KeyCode::Char('0'), KeyModifiers::NONE))
+        .expect("0 should quick-select the tenth branch");
+
+    assert!(app.branch_menu_open.is_none());
+    let load = app
+        .pending_diff_load
+        .as_ref()
+        .expect("quick-select should queue branch diff");
+    assert_eq!(
+        load.options.source,
+        DiffSource::Branch {
+            base: "main".to_owned(),
+            head: "topic-jj".to_owned(),
+        }
+    );
+}
+
+#[test]
+fn branch_menu_ctrl_n_and_ctrl_p_cycle_selection_from_input() {
+    let options = DiffOptions {
+        source: DiffSource::Base("main".to_owned()),
+        ..DiffOptions::default()
+    };
+    let mut app = DiffApp::new(
+        options,
+        changeset_with_context_lines(1),
+        DiffLayoutMode::Unified,
+    );
+    app.branch_base = Some("main".to_owned());
+    app.branch_head = Some("feature".to_owned());
+    app.current_head = Some("feature".to_owned());
+    app.comparison_branches = vec!["main".to_owned(), "feature".to_owned(), "topic".to_owned()];
+
+    app.toggle_branch_menu(BranchMenu::Base);
+    app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL))
+        .expect("ctrl-n should move branch selection");
+    assert_eq!(app.branch_menu_selected, 1);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL))
+        .expect("ctrl-p should move branch selection");
+    assert_eq!(app.branch_menu_selected, 0);
+    assert!(app.branch_menu_input.is_empty());
 }
 
 #[test]
@@ -4157,15 +4310,15 @@ fn branch_menu_scrolls_visible_branch_window() {
     app.comparison_branches = (0..12).map(|index| format!("branch-{index:02}")).collect();
 
     assert_eq!(app.visible_branch_menu_rows(), MAX_BRANCH_MENU_ROWS);
-    assert_eq!(app.max_branch_menu_scroll(), 2);
+    assert_eq!(app.max_branch_menu_scroll(), 1);
 
     app.move_branch_selection(99);
-    assert_eq!(app.branch_menu_selected, 11);
-    assert_eq!(app.branch_menu_scroll, 2);
+    assert_eq!(app.branch_menu_selected, 10);
+    assert_eq!(app.branch_menu_scroll, 1);
 
     app.move_branch_selection(-1);
-    assert_eq!(app.branch_menu_selected, 10);
-    assert_eq!(app.branch_menu_scroll, 2);
+    assert_eq!(app.branch_menu_selected, 9);
+    assert_eq!(app.branch_menu_scroll, 1);
 }
 
 #[test]
@@ -4238,13 +4391,13 @@ fn branch_combo_pins_current_head_and_base_before_recent_order() {
     app.branch_menu_open = Some(BranchMenu::Base);
     assert_eq!(
         app.filtered_branches(),
-        vec!["release", "feature/header", "recent", "old", "origin/main"]
+        vec!["feature/header", "recent", "old", "origin/main"]
     );
 
     app.branch_menu_open = Some(BranchMenu::Head);
     assert_eq!(
         app.filtered_branches(),
-        vec!["feature/header", "release", "recent", "old", "origin/main"]
+        vec!["release", "recent", "old", "origin/main"]
     );
 }
 

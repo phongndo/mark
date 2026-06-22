@@ -25,7 +25,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::{
     controls::{
-        BranchMenu, CrosstermTerminal, DiffChoice, DiffFilterKind, DiffLayoutMode, INPUT_CURSOR,
+        BranchMenu, CrosstermTerminal, DiffChoice, DiffFilterKind, DiffLayoutMode,
         branch_base_from_options, branch_head_from_options, branch_match_score,
         comparison_branches, current_head_label, default_branch_base, default_layout_for_width,
         diff_stats_for_files,
@@ -40,9 +40,8 @@ use crate::{
     },
     render::{
         draw,
-        menus::{branch_menu_width, diff_menu_block, diff_selector_width},
+        menus::{branch_menu_block, branch_menu_width, diff_menu_block, diff_selector_width},
         sidebar::max_file_sidebar_width,
-        text::fit_padded,
     },
     runtime,
     search::{DiffSearchIndex, DiffSearchResult, grep_match_rows},
@@ -359,6 +358,31 @@ pub(crate) fn is_plain_char_key(key: KeyEvent, character: char) -> bool {
     key.code == KeyCode::Char(character)
         && !key.modifiers.contains(KeyModifiers::CONTROL)
         && !key.modifiers.contains(KeyModifiers::ALT)
+}
+
+fn number_key_index(key: KeyEvent) -> Option<usize> {
+    if key.modifiers.contains(KeyModifiers::CONTROL) || key.modifiers.contains(KeyModifiers::ALT) {
+        return None;
+    }
+    let KeyCode::Char(character) = key.code else {
+        return None;
+    };
+    number_key_index_for_char(character)
+}
+
+fn number_key_index_for_char(character: char) -> Option<usize> {
+    match character {
+        '1'..='9' => Some(character as usize - '1' as usize),
+        '0' => Some(9),
+        _ => None,
+    }
+}
+
+fn rect_contains(area: Rect, column: u16, row: u16) -> bool {
+    column >= area.x
+        && column < area.x.saturating_add(area.width)
+        && row >= area.y
+        && row < area.y.saturating_add(area.height)
 }
 
 pub(crate) fn diff_choice_for_options(options: &DiffOptions) -> Option<DiffChoice> {
@@ -704,9 +728,11 @@ pub(crate) struct DiffApp {
     pub(crate) file_sidebar_render_width: u16,
     pub(crate) file_sidebar_resizing: bool,
     pub(crate) rendered_diff_menu_area: Option<Rect>,
+    pub(crate) rendered_branch_menu_area: Option<Rect>,
     pub(crate) leader_pending: bool,
     pub(crate) help_menu_open: bool,
     pub(crate) diff_menu_open: bool,
+    pub(crate) diff_menu_input: String,
     pub(crate) diff_menu_selected: usize,
     pub(crate) options_menu_open: bool,
     pub(crate) options_menu_selected: usize,
@@ -925,9 +951,11 @@ impl DiffApp {
             file_sidebar_render_width: 0,
             file_sidebar_resizing: false,
             rendered_diff_menu_area: None,
+            rendered_branch_menu_area: None,
             leader_pending: false,
             help_menu_open: false,
             diff_menu_open: false,
+            diff_menu_input: String::new(),
             diff_menu_selected: 0,
             options_menu_open: false,
             options_menu_selected: 0,
@@ -1041,6 +1069,16 @@ impl DiffApp {
                     self.select_highlighted_branch_match();
                     return Ok(false);
                 }
+                _ if self.select_branch_for_number_key(key) => {
+                    return Ok(false);
+                }
+                KeyCode::Char(character)
+                    if !key.modifiers.contains(KeyModifiers::CONTROL)
+                        && !key.modifiers.contains(KeyModifiers::ALT)
+                        && number_key_index_for_char(character).is_some() =>
+                {
+                    return Ok(false);
+                }
                 KeyCode::Tab => {
                     self.cycle_branch_completion(1);
                     return Ok(false);
@@ -1061,8 +1099,16 @@ impl DiffApp {
                     self.move_branch_selection(1);
                     return Ok(false);
                 }
+                KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.cycle_branch_completion(1);
+                    return Ok(false);
+                }
                 KeyCode::Up => {
                     self.move_branch_selection(-1);
+                    return Ok(false);
+                }
+                KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.cycle_branch_completion(-1);
                     return Ok(false);
                 }
                 KeyCode::PageDown => {
@@ -1273,26 +1319,43 @@ impl DiffApp {
     }
 
     pub(crate) fn handle_diff_menu_key(&mut self, key: KeyEvent) -> DxResult<bool> {
-        if self.keymap.matches_menu(MenuAction::Close, key) {
+        if key.code == KeyCode::Esc {
             self.close_diff_menu();
             return Ok(false);
         }
-        if self.keymap.matches_single(GlobalAction::Help, key) {
-            self.toggle_help_menu();
+
+        if let Some(choice) = self.diff_choice_for_number_key(key) {
+            self.close_diff_menu();
+            self.select_diff_choice(choice);
+            return Ok(false);
+        }
+        if number_key_index(key).is_some() {
             return Ok(false);
         }
 
-        if self.keymap.matches_menu(MenuAction::Down, key) {
-            self.move_diff_menu_selection(1);
-        } else if self.keymap.matches_menu(MenuAction::Up, key) {
-            self.move_diff_menu_selection(-1);
-        } else if let Some(choice) = self.diff_choice_for_number_key(key) {
-            self.diff_menu_open = false;
-            self.select_diff_choice(choice);
-        } else if self.keymap.matches_menu(MenuAction::Select, key)
-            || self.keymap.matches_menu(MenuAction::Confirm, key)
-        {
-            self.select_highlighted_diff_choice();
+        match key.code {
+            KeyCode::Enter => self.select_highlighted_diff_choice(),
+            KeyCode::Down | KeyCode::Tab => self.move_diff_menu_selection(1),
+            KeyCode::Up | KeyCode::BackTab => self.move_diff_menu_selection(-1),
+            KeyCode::Home => self.set_diff_menu_selection(0),
+            KeyCode::End => self.set_diff_menu_selection(usize::MAX),
+            KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.move_diff_menu_selection(1);
+            }
+            KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.move_diff_menu_selection(-1);
+            }
+            KeyCode::Backspace => self.pop_diff_menu_input(),
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.clear_diff_menu_input();
+            }
+            KeyCode::Char(character)
+                if !key.modifiers.contains(KeyModifiers::CONTROL)
+                    && !key.modifiers.contains(KeyModifiers::ALT) =>
+            {
+                self.push_diff_menu_input(character);
+            }
+            _ => {}
         }
 
         Ok(false)
@@ -1472,6 +1535,10 @@ impl DiffApp {
 
     pub(crate) fn set_rendered_diff_menu_area(&mut self, area: Option<Rect>) {
         self.rendered_diff_menu_area = area.filter(|_| self.diff_menu_open);
+    }
+
+    pub(crate) fn set_rendered_branch_menu_area(&mut self, area: Option<Rect>) {
+        self.rendered_branch_menu_area = area.filter(|_| self.branch_menu_open.is_some());
     }
 
     pub(crate) fn start_error_log_resize(&mut self, row: u16) -> bool {
@@ -1952,6 +2019,10 @@ impl DiffApp {
                 return;
             }
 
+            if self.is_rendered_branch_menu_position(column, row) {
+                return;
+            }
+
             if let Some(clicked_menu) = clicked_branch_selector {
                 self.toggle_branch_menu(clicked_menu);
                 return;
@@ -1966,13 +2037,17 @@ impl DiffApp {
 
         if self.diff_menu_open {
             if let Some(choice) = self.diff_choice_at(column, row) {
-                self.diff_menu_open = false;
+                self.close_diff_menu();
                 self.select_diff_choice(choice);
                 return;
             }
 
+            if self.is_rendered_diff_menu_position(column, row) {
+                return;
+            }
+
             if let Some(menu) = clicked_branch_selector {
-                self.diff_menu_open = false;
+                self.close_diff_menu();
                 self.toggle_branch_menu(menu);
                 return;
             }
@@ -1982,8 +2057,7 @@ impl DiffApp {
                 return;
             }
 
-            self.diff_menu_open = false;
-            self.dirty = true;
+            self.close_diff_menu();
             return;
         }
 
@@ -2245,20 +2319,24 @@ impl DiffApp {
         if choices.is_empty() {
             return;
         }
-        self.diff_menu_selected = self
-            .pending_or_current_diff_choice()
-            .and_then(|choice| choices.iter().position(|candidate| *candidate == choice))
-            .unwrap_or_default();
+        self.diff_menu_input.clear();
+        self.diff_menu_selected = 0;
         self.diff_menu_open = true;
         self.options_menu_open = false;
         self.color_scheme_picker_open = false;
         self.branch_menu_open = None;
+        self.rendered_branch_menu_area = None;
         self.dirty = true;
     }
 
     pub(crate) fn close_diff_menu(&mut self) {
-        if self.diff_menu_open {
+        if self.diff_menu_open
+            || !self.diff_menu_input.is_empty()
+            || self.rendered_diff_menu_area.is_some()
+        {
             self.diff_menu_open = false;
+            self.diff_menu_input.clear();
+            self.rendered_diff_menu_area = None;
             self.dirty = true;
         }
     }
@@ -2278,7 +2356,10 @@ impl DiffApp {
         self.options_menu_open = true;
         self.color_scheme_picker_open = false;
         self.diff_menu_open = false;
+        self.diff_menu_input.clear();
+        self.rendered_diff_menu_area = None;
         self.branch_menu_open = None;
+        self.rendered_branch_menu_area = None;
         self.dirty = true;
     }
 
@@ -2570,11 +2651,13 @@ impl DiffApp {
         if self.branch_menu_open.is_some()
             || !self.branch_menu_input.is_empty()
             || self.branch_menu_scroll != 0
+            || self.rendered_branch_menu_area.is_some()
         {
             self.branch_menu_open = None;
             self.branch_menu_input.clear();
             self.branch_menu_scroll = 0;
             self.branch_menu_selected = 0;
+            self.rendered_branch_menu_area = None;
             self.dirty = true;
         }
     }
@@ -2590,6 +2673,8 @@ impl DiffApp {
 
         self.branch_menu_open = Some(menu);
         self.diff_menu_open = false;
+        self.diff_menu_input.clear();
+        self.rendered_diff_menu_area = None;
         self.options_menu_open = false;
         self.color_scheme_picker_open = false;
         self.branch_menu_input.clear();
@@ -2620,24 +2705,46 @@ impl DiffApp {
             })
     }
 
+    pub(crate) fn is_rendered_branch_menu_position(&self, column: u16, row: u16) -> bool {
+        self.rendered_branch_menu_area
+            .is_some_and(|area| rect_contains(area, column, row))
+    }
+
     pub(crate) fn branch_choice_at(
         &self,
         menu: BranchMenu,
         column: u16,
         row: u16,
     ) -> Option<String> {
-        let start = self.branch_selector_start(menu)?;
-        let width = self.branch_menu_width();
-        if column < start || column >= start.saturating_add(width) || row == 0 {
+        if self.branch_menu_open != Some(menu) {
             return None;
         }
 
-        let row_index = usize::from(row - 1);
-        if row_index >= self.visible_branch_menu_rows() {
+        let menu_area = self.rendered_branch_menu_area?;
+        let inner = branch_menu_block(self.theme, menu).inner(menu_area);
+        if column < inner.x
+            || column >= inner.x.saturating_add(inner.width)
+            || row < inner.y.saturating_add(2)
+            || row >= inner.y.saturating_add(inner.height)
+        {
             return None;
         }
 
-        self.filtered_branch(row_index).map(str::to_owned)
+        let row_index = usize::from(row.saturating_sub(inner.y).saturating_sub(2));
+        let pinned_rows = usize::from(self.selected_branch_menu_choice(menu).is_some());
+        if row_index < pinned_rows {
+            return None;
+        }
+
+        let branch_index = row_index.saturating_sub(pinned_rows);
+        let rendered_choices = self
+            .visible_branch_menu_rows()
+            .min(inner.height.saturating_sub(2 + pinned_rows as u16) as usize);
+        if branch_index >= rendered_choices {
+            return None;
+        }
+
+        self.filtered_branch(branch_index).map(str::to_owned)
     }
 
     pub(crate) fn filtered_branch(&self, row_index: usize) -> Option<&str> {
@@ -2711,18 +2818,24 @@ impl DiffApp {
     }
 
     pub(crate) fn branch_menu_height(&self) -> usize {
+        let menu = self.branch_menu_open.unwrap_or(BranchMenu::Base);
+        let pinned_rows = usize::from(self.selected_branch_menu_choice(menu).is_some());
         self.visible_branch_menu_rows()
             .max(usize::from(self.filtered_branches().is_empty()))
+            .saturating_add(4)
+            .saturating_add(pinned_rows)
     }
 
     pub(crate) fn filtered_branches(&self) -> Vec<&str> {
         let menu = self.branch_menu_open.unwrap_or(BranchMenu::Base);
         let query = self.branch_menu_input.trim().to_ascii_lowercase();
+        let selected = self.selected_branch_menu_choice(menu);
         if query.is_empty() {
             let mut matches: Vec<_> = self
                 .comparison_branches
                 .iter()
                 .enumerate()
+                .filter(|(_, branch)| selected != Some(branch.as_str()))
                 .map(|(index, branch)| (self.branch_pin_rank(menu, branch), index, branch.as_str()))
                 .collect();
             matches.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
@@ -2733,6 +2846,7 @@ impl DiffApp {
             .comparison_branches
             .iter()
             .enumerate()
+            .filter(|(_, branch)| selected != Some(branch.as_str()))
             .filter_map(|(index, branch)| {
                 branch_match_score(&query, branch).map(|score| {
                     (
@@ -2757,6 +2871,18 @@ impl DiffApp {
             .into_iter()
             .map(|(_, _, _, _, branch)| branch)
             .collect()
+    }
+
+    pub(crate) fn selected_branch_menu_choice(&self, menu: BranchMenu) -> Option<&str> {
+        self.branch_ref(menu)
+    }
+
+    pub(crate) fn selectable_branch_count(&self, menu: BranchMenu) -> usize {
+        let selected = self.selected_branch_menu_choice(menu);
+        self.comparison_branches
+            .iter()
+            .filter(|branch| selected != Some(branch.as_str()))
+            .count()
     }
 
     pub(crate) fn branch_pin_rank(&self, menu: BranchMenu, branch: &str) -> usize {
@@ -2826,6 +2952,26 @@ impl DiffApp {
         self.select_branch(menu, branch);
     }
 
+    pub(crate) fn branch_choice_for_number_key(&self, key: KeyEvent) -> Option<String> {
+        let index = number_key_index(key)?;
+        self.filtered_branches()
+            .get(index)
+            .map(|branch| (*branch).to_owned())
+    }
+
+    pub(crate) fn select_branch_for_number_key(&mut self, key: KeyEvent) -> bool {
+        let Some(menu) = self.branch_menu_open else {
+            return false;
+        };
+        let Some(branch) = self.branch_choice_for_number_key(key) else {
+            return false;
+        };
+
+        self.close_branch_menu();
+        self.select_branch(menu, branch);
+        true
+    }
+
     pub(crate) fn is_branch_diff(&self) -> bool {
         matches!(
             &self.options.source,
@@ -2843,12 +2989,6 @@ impl DiffApp {
     pub(crate) fn branch_selector_text(&self, menu: BranchMenu) -> Option<String> {
         let branch = self.branch_ref(menu)?;
         let label = self.branch_label(menu, branch);
-        if self.branch_menu_open == Some(menu) {
-            let input = format!("{}{}", self.branch_menu_input, INPUT_CURSOR);
-            let width = label.width().max(input.width());
-            return Some(format!("{} ▾", fit_padded(&input, width)));
-        }
-
         Some(format!("{label} ▾"))
     }
 
@@ -2891,8 +3031,8 @@ impl DiffApp {
 
     pub(crate) fn branch_menu_width(&self) -> u16 {
         let branch_width = branch_menu_width(&self.comparison_branches) as usize;
-        let input_width = self.branch_menu_input.width().saturating_add(6).max(20);
-        branch_width.max(input_width) as u16
+        let input_width = self.branch_menu_input.width().saturating_add(4);
+        branch_width.max(input_width).max(36).saturating_add(4) as u16
     }
 
     pub(crate) fn branch_selector_start(&self, menu: BranchMenu) -> Option<u16> {
@@ -2914,24 +3054,37 @@ impl DiffApp {
     }
 
     pub(crate) fn diff_choice_at(&self, column: u16, row: u16) -> Option<DiffChoice> {
-        let choices = self.diff_menu_choices();
+        let choices = self.filtered_diff_choices();
         let menu_area = self.rendered_diff_menu_area?;
         let inner = diff_menu_block(self.theme).inner(menu_area);
         if column < inner.x
             || column >= inner.x.saturating_add(inner.width)
-            || row < inner.y
+            || row < inner.y.saturating_add(2)
             || row >= inner.y.saturating_add(inner.height)
         {
             return None;
         }
 
-        let row_index = usize::from(row.saturating_sub(inner.y));
-        let rendered_choices = choices.len().min(inner.height.saturating_sub(1) as usize);
-        if row_index >= rendered_choices {
+        let row_index = usize::from(row.saturating_sub(inner.y).saturating_sub(2));
+        let pinned_rows = usize::from(self.selected_diff_menu_choice().is_some());
+        if row_index < pinned_rows {
             return None;
         }
 
-        choices.get(row_index).copied()
+        let choice_index = row_index.saturating_sub(pinned_rows);
+        let rendered_choices = choices
+            .len()
+            .min(inner.height.saturating_sub(2 + pinned_rows as u16) as usize);
+        if choice_index >= rendered_choices {
+            return None;
+        }
+
+        choices.get(choice_index).copied()
+    }
+
+    pub(crate) fn is_rendered_diff_menu_position(&self, column: u16, row: u16) -> bool {
+        self.rendered_diff_menu_area
+            .is_some_and(|area| rect_contains(area, column, row))
     }
 
     pub(crate) fn diff_menu_choices(&self) -> Vec<DiffChoice> {
@@ -2950,27 +3103,85 @@ impl DiffApp {
         choices
     }
 
-    pub(crate) fn highlighted_diff_choice(&self) -> Option<DiffChoice> {
+    pub(crate) fn filtered_diff_choices(&self) -> Vec<DiffChoice> {
+        let choices = self.selectable_diff_choices();
+        let query = self.diff_menu_input.trim().to_ascii_lowercase();
+        if query.is_empty() {
+            return choices;
+        }
+
+        let mut matches: Vec<_> = choices
+            .iter()
+            .enumerate()
+            .filter_map(|(index, choice)| {
+                self.diff_choice_match_score(&query, *choice)
+                    .map(|score| (score, index, *choice))
+            })
+            .collect();
+        matches.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+        matches.into_iter().map(|(_, _, choice)| choice).collect()
+    }
+
+    pub(crate) fn selectable_diff_choices(&self) -> Vec<DiffChoice> {
+        let selected = self.selected_diff_menu_choice();
         self.diff_menu_choices()
+            .into_iter()
+            .filter(|choice| Some(*choice) != selected)
+            .collect()
+    }
+
+    pub(crate) fn selected_diff_menu_choice(&self) -> Option<DiffChoice> {
+        let selected = self.pending_or_current_diff_choice()?;
+        self.diff_menu_choices()
+            .contains(&selected)
+            .then_some(selected)
+    }
+
+    pub(crate) fn diff_choice_match_score(
+        &self,
+        query: &str,
+        choice: DiffChoice,
+    ) -> Option<(usize, usize)> {
+        let label = choice.label().to_ascii_lowercase();
+        let detail = self.diff_choice_detail(choice).to_ascii_lowercase();
+        let combined = format!("{label} {detail}");
+        branch_match_score(query, &label)
+            .or_else(|| branch_match_score(query, &detail))
+            .or_else(|| branch_match_score(query, &combined))
+    }
+
+    pub(crate) fn diff_choice_detail(&self, choice: DiffChoice) -> String {
+        match choice {
+            DiffChoice::All => "HEAD → working tree".to_owned(),
+            DiffChoice::Unstaged => "index → working tree".to_owned(),
+            DiffChoice::Staged => "HEAD → index".to_owned(),
+            DiffChoice::Branch => match self.branch_base.as_deref() {
+                Some(base) => {
+                    let head = self
+                        .branch_head
+                        .as_deref()
+                        .or(self.current_head.as_deref())
+                        .unwrap_or("HEAD");
+                    format!("{head} → {base}")
+                }
+                None => "base unavailable".to_owned(),
+            },
+        }
+    }
+
+    pub(crate) fn highlighted_diff_choice(&self) -> Option<DiffChoice> {
+        self.filtered_diff_choices()
             .get(self.diff_menu_selected)
             .copied()
     }
 
     pub(crate) fn diff_choice_for_number_key(&self, key: KeyEvent) -> Option<DiffChoice> {
-        if key.modifiers.contains(KeyModifiers::CONTROL)
-            || key.modifiers.contains(KeyModifiers::ALT)
-        {
-            return None;
-        }
-        let KeyCode::Char(character) = key.code else {
-            return None;
-        };
-        let index = character.to_digit(10)?.checked_sub(1)? as usize;
-        self.diff_menu_choices().get(index).copied()
+        let index = number_key_index(key)?;
+        self.filtered_diff_choices().get(index).copied()
     }
 
     pub(crate) fn move_diff_menu_selection(&mut self, delta: isize) {
-        let choices = self.diff_menu_choices();
+        let choices = self.filtered_diff_choices();
         if choices.is_empty() {
             return;
         }
@@ -2980,13 +3191,41 @@ impl DiffApp {
         self.dirty = true;
     }
 
+    pub(crate) fn set_diff_menu_selection(&mut self, selected: usize) {
+        let selected = selected.min(self.filtered_diff_choices().len().saturating_sub(1));
+        if self.diff_menu_selected != selected {
+            self.diff_menu_selected = selected;
+            self.dirty = true;
+        }
+    }
+
+    pub(crate) fn push_diff_menu_input(&mut self, character: char) {
+        self.diff_menu_input.push(character);
+        self.diff_menu_selected = 0;
+        self.dirty = true;
+    }
+
+    pub(crate) fn pop_diff_menu_input(&mut self) {
+        if self.diff_menu_input.pop().is_some() {
+            self.diff_menu_selected = 0;
+            self.dirty = true;
+        }
+    }
+
+    pub(crate) fn clear_diff_menu_input(&mut self) {
+        if !self.diff_menu_input.is_empty() || self.diff_menu_selected != 0 {
+            self.diff_menu_input.clear();
+            self.diff_menu_selected = 0;
+            self.dirty = true;
+        }
+    }
+
     pub(crate) fn select_highlighted_diff_choice(&mut self) {
         let Some(choice) = self.highlighted_diff_choice() else {
-            self.close_diff_menu();
             return;
         };
 
-        self.diff_menu_open = false;
+        self.close_diff_menu();
         self.select_diff_choice(choice);
     }
 
@@ -3428,6 +3667,8 @@ impl DiffApp {
     ) {
         let FocusedEditorLaunch { target, editor } = editor;
         self.diff_menu_open = false;
+        self.diff_menu_input.clear();
+        self.rendered_diff_menu_area = None;
         self.options_menu_open = false;
         self.color_scheme_picker_open = false;
         self.close_branch_menu();
@@ -3821,6 +4062,8 @@ impl DiffApp {
     pub(crate) fn open_filter_input(&mut self, kind: DiffFilterKind) {
         self.filter_input = Some(kind);
         self.diff_menu_open = false;
+        self.diff_menu_input.clear();
+        self.rendered_diff_menu_area = None;
         self.options_menu_open = false;
         self.color_scheme_picker_open = false;
         self.close_branch_menu();
@@ -4344,6 +4587,8 @@ impl DiffApp {
         self.file_sidebar_open = !self.file_sidebar_open;
         self.file_sidebar_resizing = false;
         self.diff_menu_open = false;
+        self.diff_menu_input.clear();
+        self.rendered_diff_menu_area = None;
         self.options_menu_open = false;
         self.color_scheme_picker_open = false;
         self.close_branch_menu();

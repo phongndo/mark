@@ -58,8 +58,8 @@ next_diff_type = "tab"
 previous_diff_type = "shift-tab"
 
 [keymap.menu]
-up = ["k", "up", "shift-tab"]
-down = ["j", "down", "tab"]
+up = ["k", "up", "shift-tab", "ctrl-p"]
+down = ["j", "down", "tab", "ctrl-n"]
 select = "space"
 confirm = "enter"
 close = ["esc", "q"]
@@ -159,7 +159,7 @@ prefetch_viewports = 1
 ## Keybindings
 
 Global multi-key bindings must start with the configured leader key. Menu
-bindings are single-key and apply to the diff source and options menus.
+bindings are single-key and apply to selector and options menus.
 
 Bindings can be a string or a list of strings:
 

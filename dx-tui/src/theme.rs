@@ -110,10 +110,7 @@ pub(crate) const HELP_MENU_RIGHT_ROWS: &[HelpMenuRow] = &[
     ),
     HelpMenuRow::Binding(HelpMenuKey::Global(GlobalAction::Layout), "split / unified"),
     HelpMenuRow::Binding(HelpMenuKey::Global(GlobalAction::Reload), "reload diff"),
-    HelpMenuRow::Binding(
-        HelpMenuKey::Global(GlobalAction::DiffMenu),
-        "diff source menu",
-    ),
+    HelpMenuRow::Binding(HelpMenuKey::Global(GlobalAction::DiffMenu), "diff selector"),
     HelpMenuRow::Binding(
         HelpMenuKey::Global(GlobalAction::OptionsMenu),
         "options menu",
@@ -126,7 +123,9 @@ pub(crate) const HELP_MENU_RIGHT_ROWS: &[HelpMenuRow] = &[
     HelpMenuRow::Section("Branch filter"),
     HelpMenuRow::Binding(HelpMenuKey::Static("type"), "filter branches"),
     HelpMenuRow::Binding(HelpMenuKey::Static("Enter"), "select branch"),
+    HelpMenuRow::Binding(HelpMenuKey::Static("1-0"), "quick select"),
     HelpMenuRow::Binding(HelpMenuKey::Static("Tab/Shift-Tab"), "cycle matches"),
+    HelpMenuRow::Binding(HelpMenuKey::Static("Ctrl-N/Ctrl-P"), "cycle matches"),
     HelpMenuRow::Binding(HelpMenuKey::Static("Backspace"), "delete char"),
     HelpMenuRow::Binding(HelpMenuKey::Static("Ctrl-U"), "clear filter"),
     HelpMenuRow::Binding(HelpMenuKey::Static("↑/↓, PgUp/PgDn"), "move"),
