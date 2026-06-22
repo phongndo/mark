@@ -37,6 +37,8 @@
               git
               gnutar
               just
+              nodejs_24
+              pnpm_11
               rust-analyzer
               rustc
               rustfmt

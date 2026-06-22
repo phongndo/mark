@@ -28,10 +28,10 @@ PI_DX_BIN=/path/to/dx pi
 
 ## Development
 
-Run the extension from this checkout without installing the npm package:
+Run the extension from this repository root without installing the npm package:
 
 ```sh
-pi -e ./extensions/pi-dx.ts
+pi -e ./pi-dx/extensions/pi-dx.ts
 ```
 
 Developer checks use pnpm:
