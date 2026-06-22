@@ -2778,6 +2778,74 @@ fn error_log_header_uses_configured_copy_command() {
 }
 
 #[test]
+fn copy_error_log_key_ignores_absent_error_log() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.keymap = Keymap::parse(
+        r#"
+        [keymap.global]
+        copy_error_log = "e"
+        "#,
+    )
+    .expect("keymap should parse");
+
+    let should_quit = app
+        .handle_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE))
+        .expect("copy key without error log should be handled");
+
+    assert!(!should_quit);
+    assert!(app.error_log.is_none());
+    assert!(app.notice.is_none());
+}
+
+#[test]
+fn copy_error_log_key_does_not_preempt_filter_input() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.keymap = Keymap::parse(
+        r#"
+        [keymap.global]
+        copy_error_log = "e"
+        "#,
+    )
+    .expect("keymap should parse");
+    app.set_error_log("reload failed");
+    app.open_filter_input(DiffFilterKind::File);
+
+    let should_quit = app
+        .handle_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE))
+        .expect("copy key should be handled as filter input");
+
+    assert!(!should_quit);
+    assert_eq!(app.file_filter_input, "e");
+    assert_eq!(app.file_filter, "e");
+    assert!(app.notice.is_none());
+}
+
+#[test]
+fn copy_error_log_key_does_not_preempt_branch_menu_input() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.keymap = Keymap::parse(
+        r#"
+        [keymap.global]
+        copy_error_log = "e"
+        "#,
+    )
+    .expect("keymap should parse");
+    app.set_error_log("reload failed");
+    app.branch_menu_open = Some(BranchMenu::Head);
+
+    let should_quit = app
+        .handle_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE))
+        .expect("copy key should be handled as branch input");
+
+    assert!(!should_quit);
+    assert_eq!(app.branch_menu_input, "e");
+    assert!(app.notice.is_none());
+}
+
+#[test]
 fn copy_error_log_writes_full_log_to_clipboard_sequence() {
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);

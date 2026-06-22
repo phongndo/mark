@@ -1050,11 +1050,6 @@ impl DiffApp {
 
         self.mouse_scroll.reset();
 
-        if self.keymap.matches_single(GlobalAction::CopyErrorLog, key) {
-            self.copy_error_log_to_terminal_clipboard();
-            return Ok(false);
-        }
-
         if self.filter_input.is_some() && self.handle_filter_input_key(key) {
             return Ok(false);
         }
@@ -1203,6 +1198,10 @@ impl DiffApp {
             self.open_focused_hunk_in_editor();
             return Ok(false);
         }
+        if self.error_log.is_some() && self.keymap.matches_single(GlobalAction::CopyErrorLog, key) {
+            self.copy_error_log_to_terminal_clipboard();
+            return Ok(false);
+        }
         if self.keymap.matches_single(GlobalAction::NextDiffType, key) {
             self.cycle_diff_choice(1);
             return Ok(false);
@@ -1308,7 +1307,7 @@ impl DiffApp {
             self.toggle_file_sidebar();
             return Ok(false);
         }
-        if self.keymap.matches_leader(GlobalAction::CopyErrorLog, key) {
+        if self.error_log.is_some() && self.keymap.matches_leader(GlobalAction::CopyErrorLog, key) {
             self.copy_error_log_to_terminal_clipboard();
             return Ok(false);
         }
