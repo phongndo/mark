@@ -4167,6 +4167,87 @@ fn line_wrapping_scrolls_through_continuation_rows() {
 }
 
 #[test]
+fn select_file_scrolls_to_visual_file_start_for_wrapped_no_hunk_file() {
+    let mut changeset = changeset_with_wrapped_leading_file();
+    changeset.files[1].hunks.clear();
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.line_wrapping = true;
+    app.set_viewport_width(18);
+
+    app.select_file(1);
+
+    assert_eq!(app.selected_file, 1);
+    assert_eq!(app.scroll, wrapped_file_start_scroll(&app, 1));
+}
+
+#[test]
+fn replace_loaded_diff_preserves_wrapped_file_relative_scroll() {
+    let mut app = DiffApp::new(
+        DiffOptions::default(),
+        changeset_with_wrapped_leading_file(),
+        DiffLayoutMode::Unified,
+    );
+    let relative_scroll = 1;
+    set_wrapped_scroll_relative_to_file_start(&mut app, 1, relative_scroll);
+    let mut replacement = changeset_with_wrapped_leading_file();
+    replacement.files[1].hunks[0].lines[0].text = "updated target".to_owned();
+
+    app.replace_loaded_diff(DiffOptions::default(), replacement);
+
+    assert_eq!(
+        app.scroll,
+        wrapped_file_start_scroll(&app, 1).saturating_add(relative_scroll)
+    );
+}
+
+#[test]
+fn replace_path_changeset_preserves_wrapped_file_relative_scroll() {
+    let mut app = DiffApp::new(
+        DiffOptions::default(),
+        changeset_with_wrapped_leading_file(),
+        DiffLayoutMode::Unified,
+    );
+    let relative_scroll = 1;
+    set_wrapped_scroll_relative_to_file_start(&mut app, 1, relative_scroll);
+    let replacement = changeset_with_files(&["target.rs"]);
+
+    app.replace_path_changeset(Path::new("target.rs"), replacement);
+
+    assert_eq!(
+        app.scroll,
+        wrapped_file_start_scroll(&app, 1).saturating_add(relative_scroll)
+    );
+}
+
+#[test]
+fn replace_cached_diff_preserves_wrapped_file_relative_scroll() {
+    let mut app = DiffApp::new(
+        DiffOptions::default(),
+        changeset_with_wrapped_leading_file(),
+        DiffLayoutMode::Unified,
+    );
+    let relative_scroll = 1;
+    set_wrapped_scroll_relative_to_file_start(&mut app, 1, relative_scroll);
+    let options = DiffOptions {
+        scope: DiffScope::Staged,
+        ..DiffOptions::default()
+    };
+    let mut replacement = changeset_with_wrapped_leading_file();
+    replacement.files[1].hunks[0].lines[0].text = "cached target".to_owned();
+
+    app.replace_cached_diff(
+        options.clone(),
+        diff_cache_entry(options, replacement),
+        false,
+    );
+
+    assert_eq!(
+        app.scroll,
+        wrapped_file_start_scroll(&app, 1).saturating_add(relative_scroll)
+    );
+}
+
+#[test]
 fn options_menu_clamps_selection_after_toggle_leaves_filter() {
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new_with_syntax(
@@ -6958,6 +7039,31 @@ fn changeset_with_line_texts(texts: &[&str]) -> Changeset {
         }],
         raw_patch: Vec::new(),
     }
+}
+
+fn changeset_with_wrapped_leading_file() -> Changeset {
+    let mut changeset = changeset_with_files(&["wide.rs", "target.rs"]);
+    changeset.files[0].hunks[0].lines[0].text = "a".repeat(96);
+    changeset
+}
+
+fn set_wrapped_scroll_relative_to_file_start(
+    app: &mut DiffApp,
+    file: usize,
+    relative_scroll: usize,
+) {
+    app.line_wrapping = true;
+    app.set_viewport_width(18);
+    app.set_scroll(wrapped_file_start_scroll(app, file).saturating_add(relative_scroll));
+    assert_eq!(app.selected_file, file);
+}
+
+fn wrapped_file_start_scroll(app: &DiffApp, file: usize) -> usize {
+    let row = app
+        .model
+        .file_start_row(file)
+        .expect("file should be visible");
+    app.wrapped_visual_scroll_for_model_row(row)
 }
 
 fn changeset_with_hunk_at(repo: PathBuf, line_number: usize) -> Changeset {

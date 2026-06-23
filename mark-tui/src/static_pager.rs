@@ -79,8 +79,7 @@ pub fn render_static_changeset(
             DiffApp::new_with_explicit_layout(diff_options, changeset, layout, syntax_mode)
         }
     };
-    app.set_viewport_width(width);
-    app.set_viewport_rows(app.model.len().max(1));
+    configure_static_app(&mut app, width);
     settle_static_syntax(&mut app, pager_options.syntax_timeout);
 
     let mut output = String::new();
@@ -92,6 +91,12 @@ pub fn render_static_changeset(
         push_ansi_line(&mut output, line, pager_options.color);
     }
     output
+}
+
+fn configure_static_app(app: &mut DiffApp, width: usize) {
+    app.line_wrapping = false;
+    app.set_viewport_width(width);
+    app.set_viewport_rows(app.model.len().max(1));
 }
 
 fn resolve_static_layout(layout: StaticPagerLayout, width: usize) -> DiffLayoutMode {
@@ -231,9 +236,17 @@ fn sanitize_terminal_fragment(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{HashMap, HashSet};
+
     use mark_diff::{DiffFile, DiffHunk, DiffLine, DiffLineKind, FileStatus};
+    use mark_syntax::{SyntaxLanguageSet, SyntaxLimits};
+    use tokio::sync::mpsc;
 
     use super::*;
+    use crate::{
+        syntax::{LruCache, SyntaxRuntime, SyntaxWorkerQueue},
+        theme::SyntaxBenchmarkReport,
+    };
 
     #[test]
     fn static_pager_renders_unified_diff_with_line_numbers() {
@@ -283,6 +296,32 @@ mod tests {
         assert_ne!(unified, split);
         assert!(split.contains("old"));
         assert!(split.contains("new"));
+    }
+
+    #[test]
+    fn static_pager_syntax_settle_ignores_interactive_line_wrapping() {
+        let queue = SyntaxWorkerQueue::new(8, 0);
+        let mut app = DiffApp::new_with_syntax(
+            DiffOptions::default(),
+            wrapping_static_changeset(),
+            DiffLayoutMode::Unified,
+            SyntaxStartupMode::Disabled,
+        );
+        app.line_wrapping = true;
+        app.syntax = Some(syntax_runtime_with_rust_queue(queue.clone()));
+
+        configure_static_app(&mut app, 20);
+        settle_static_syntax(&mut app, Duration::ZERO);
+
+        let mut files = Vec::new();
+        while let Some(job) = queue.try_pop() {
+            files.push(job.key.source.file);
+        }
+        files.sort_unstable();
+        files.dedup();
+
+        assert!(!app.line_wrapping);
+        assert_eq!(files, vec![0, 1]);
     }
 
     #[test]
@@ -484,6 +523,38 @@ mod tests {
                 deletions: 1,
                 is_binary: false,
             }],
+        }
+    }
+
+    fn wrapping_static_changeset() -> Changeset {
+        let mut changeset = fixture_changeset();
+        changeset.files[0].hunks[0].lines[0].text = "a".repeat(160);
+        changeset.files[0].hunks[0].lines[1].text = "b".repeat(160);
+        let mut second = changeset.files[0].clone();
+        second.old_path = Some("second.rs".to_owned());
+        second.new_path = Some("second.rs".to_owned());
+        changeset.files.push(second);
+        changeset
+    }
+
+    fn syntax_runtime_with_rust_queue(queue: SyntaxWorkerQueue) -> SyntaxRuntime {
+        let (_result_tx, result_rx) = mpsc::channel(1);
+        SyntaxRuntime {
+            languages: SyntaxLanguageSet::from_enabled_languages(&["rust".to_owned()]),
+            limits: SyntaxLimits::default(),
+            result_rx,
+            queue,
+            cache: LruCache::new(8),
+            pending: HashSet::new(),
+            source_keys: HashMap::new(),
+            position_keys: HashMap::new(),
+            line_maps: HashMap::new(),
+            skipped: HashMap::new(),
+            skipped_sources: HashSet::new(),
+            unavailable_full_files: HashSet::new(),
+            failed: HashSet::new(),
+            stats: SyntaxBenchmarkReport::default(),
+            worker: None,
         }
     }
 

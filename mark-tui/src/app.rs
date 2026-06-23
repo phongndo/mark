@@ -4213,6 +4213,13 @@ impl DiffApp {
         }
     }
 
+    fn relative_scroll_from_file_start(&self, file: usize) -> usize {
+        self.model
+            .file_start_row(file)
+            .map(|start| self.scroll.saturating_sub(self.scroll_for_model_row(start)))
+            .unwrap_or_default()
+    }
+
     fn visible_model_range_for_viewport(&self, visible_rows: usize) -> Option<Range<usize>> {
         if visible_rows == 0 || self.model.is_empty() {
             return None;
@@ -5093,11 +5100,7 @@ impl DiffApp {
             .files
             .get(self.selected_file)
             .map(|file| file.display_path().to_owned());
-        let relative_scroll = self
-            .model
-            .file_start_row(self.selected_file)
-            .map(|start| self.scroll.saturating_sub(self.scroll_for_model_row(start)))
-            .unwrap_or_default();
+        let relative_scroll = self.relative_scroll_from_file_start(self.selected_file);
 
         let search_result = self.search_index.search_with_grep_match_limit(
             &self.file_filter,
@@ -5219,11 +5222,7 @@ impl DiffApp {
             .files
             .get(self.selected_file)
             .map(|file| file.display_path().to_owned());
-        let relative_scroll = self
-            .model
-            .file_start_row(self.selected_file)
-            .map(|start| self.scroll.saturating_sub(self.scroll_for_model_row(start)))
-            .unwrap_or_default();
+        let relative_scroll = self.relative_scroll_from_file_start(self.selected_file);
 
         self.replace_visible_files(
             search_result,
@@ -5492,7 +5491,7 @@ impl DiffApp {
 
         self.selected_file = next;
         if let Some(row) = self.model.file_start_row(next) {
-            self.set_scroll(row);
+            self.set_scroll(self.scroll_for_model_row(row));
         } else {
             self.dirty = true;
         }
@@ -5685,11 +5684,7 @@ impl DiffApp {
             .files
             .get(self.selected_file)
             .map(|file| file.display_path().to_owned());
-        let relative_scroll = self
-            .model
-            .file_start_row(self.selected_file)
-            .map(|start| self.scroll.saturating_sub(start))
-            .unwrap_or_default();
+        let relative_scroll = self.relative_scroll_from_file_start(self.selected_file);
 
         splice_diff_files_for_path(
             &mut self.changeset.files,
@@ -5745,11 +5740,7 @@ impl DiffApp {
             .files
             .get(self.selected_file)
             .map(|file| file.display_path().to_owned());
-        let relative_scroll = self
-            .model
-            .file_start_row(self.selected_file)
-            .map(|start| self.scroll.saturating_sub(start))
-            .unwrap_or_default();
+        let relative_scroll = self.relative_scroll_from_file_start(self.selected_file);
 
         let previous_branch_base = self.branch_base.clone();
         let previous_branch_head = self.branch_head.clone();
@@ -5848,7 +5839,10 @@ impl DiffApp {
             let scroll = self
                 .model
                 .file_start_row(self.selected_file)
-                .map(|start| start.saturating_add(relative_scroll))
+                .map(|start| {
+                    self.scroll_for_model_row(start)
+                        .saturating_add(relative_scroll)
+                })
                 .unwrap_or_default();
             self.set_scroll_with_grep_sync(scroll, true, HunkFocusScrollBehavior::ClearOnScroll);
             self.set_horizontal_scroll(self.horizontal_scroll);
@@ -5872,11 +5866,7 @@ impl DiffApp {
             .files
             .get(self.selected_file)
             .map(|file| file.display_path().to_owned());
-        let relative_scroll = self
-            .model
-            .file_start_row(self.selected_file)
-            .map(|start| self.scroll.saturating_sub(start))
-            .unwrap_or_default();
+        let relative_scroll = self.relative_scroll_from_file_start(self.selected_file);
 
         let previous_branch_base = self.branch_base.clone();
         let previous_branch_head = self.branch_head.clone();
