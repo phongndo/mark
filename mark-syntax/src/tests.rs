@@ -428,9 +428,65 @@ fn syntax_settings_default_to_enabled_system_colorscheme() {
     assert_eq!(settings.mode, SyntaxMode::Enabled);
     assert_eq!(settings.theme.source, SyntaxThemeSource::Builtin);
     assert_eq!(settings.theme.name.as_deref(), Some("system"));
+    assert_eq!(settings.layout, None);
+    assert!(settings.live_reload);
+    assert!(settings.syntax_highlighting);
+    assert!(!settings.line_wrapping);
     assert!(!settings.transparent_background);
     assert_eq!(settings.diff, DiffSettings::default());
     assert_eq!(settings.limits, SyntaxLimits::default());
+}
+
+#[test]
+fn settings_write_path_preserves_legacy_settings_source() {
+    let dir = temp_syntax_test_dir("settings-write-path");
+    let settings_path = dir.join("config.toml");
+    let legacy_settings_path = dir.join("syntax.toml");
+
+    assert_eq!(
+        crate::paths::settings_write_path_from_paths(
+            settings_path.clone(),
+            legacy_settings_path.clone()
+        ),
+        settings_path
+    );
+
+    fs::write(&legacy_settings_path, "colorscheme = \"ansi\"\n")
+        .expect("legacy settings should be written");
+    assert_eq!(
+        crate::paths::settings_write_path_from_paths(
+            settings_path.clone(),
+            legacy_settings_path.clone()
+        ),
+        legacy_settings_path
+    );
+
+    fs::write(&settings_path, "line_wrapping = true\n").expect("settings should be written");
+    assert_eq!(
+        crate::paths::settings_write_path_from_paths(settings_path.clone(), legacy_settings_path),
+        settings_path
+    );
+}
+
+#[test]
+fn syntax_settings_supports_persistent_ui_settings() {
+    let settings = parse_settings(
+        r#"
+layout = "unified"
+live_reload = false
+syntax_highlighting = false
+line_wrapping = true
+"#,
+    )
+    .expect("settings should parse");
+
+    assert_eq!(settings.layout, Some(LayoutSetting::Unified));
+    assert!(!settings.live_reload);
+    assert!(!settings.syntax_highlighting);
+    assert!(settings.line_wrapping);
+
+    let settings = parse_settings("layout = \"dynamic\"\n").expect("settings should parse");
+    assert_eq!(settings.layout, Some(LayoutSetting::Dynamic));
 }
 
 #[test]
@@ -552,6 +608,7 @@ addition_bg = "#1f3025"
 [colors]
 addition_bg = "#222222"
 deletion_bg = "#372526"
+statusline_accent_bg = "#334455"
 "##,
     )
     .expect("settings should parse");
@@ -559,6 +616,10 @@ deletion_bg = "#372526"
     assert_eq!(settings.colors.bg.as_deref(), Some("#111315"));
     assert_eq!(settings.colors.addition_bg.as_deref(), Some("#1f3025"));
     assert_eq!(settings.colors.deletion_bg.as_deref(), Some("#372526"));
+    assert_eq!(
+        settings.colors.statusline_accent_bg.as_deref(),
+        Some("#334455")
+    );
 }
 
 #[test]

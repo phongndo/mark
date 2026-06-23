@@ -2,8 +2,9 @@ use crate::render::{
     diff::{
         SplitCellRender, SplitLineRender, SplitSide, content_spans_at_scroll, context_hide_line,
         context_show_line, empty_diff_fill_from, inline_bg, render_row, render_row_with_focus,
+        render_row_wrapped_with_focus, render_split_context_line_wrapped,
         render_split_line_with_focus, render_unified_line_at_scroll, row_bg,
-        split_cell_spans_at_scroll, syntax_fg,
+        split_cell_spans_at_scroll, syntax_fg, wrapped_diff_lines_for_viewport,
     },
     grep::{grep_highlight_target_for_columns, highlighted_grep_text_line},
     headers::{file_header_line, file_separator_line, hunk_header_line, hunk_header_spans},
@@ -33,8 +34,9 @@ use mark_diff::{
     Changeset, DiffLine, DiffLineKind, DiffOptions, DiffScope, DiffSource, FileStatus, PatchSource,
 };
 use mark_syntax::{
-    ColorOverrides, DiffContextExpansion, DiffSettings, HighlightedLine, SyntaxClass,
-    SyntaxLanguageSet, SyntaxLimits, SyntaxSettings, SyntaxThemeConfig, SyntaxThemeSource,
+    ColorOverrides, DiffContextExpansion, DiffSettings, HighlightedLine, LayoutSetting,
+    SyntaxClass, SyntaxLanguageSet, SyntaxLimits, SyntaxSettings, SyntaxThemeConfig,
+    SyntaxThemeSource,
 };
 use ratatui::prelude::{Color, Line, Modifier, Span, Style};
 use std::{
@@ -1154,6 +1156,26 @@ fn syntax_settings_load_error_falls_back_with_visible_diagnostic() {
 }
 
 #[test]
+fn explicit_layout_ignores_saved_layout_preference() {
+    let settings = SyntaxSettings {
+        layout: Some(LayoutSetting::Unified),
+        ..SyntaxSettings::default()
+    };
+
+    assert_eq!(
+        layout_override_from_settings(&settings, true),
+        Some(DiffLayoutMode::Unified)
+    );
+    assert_eq!(layout_override_from_settings(&settings, false), None);
+
+    let settings = SyntaxSettings {
+        layout: Some(LayoutSetting::Dynamic),
+        ..SyntaxSettings::default()
+    };
+    assert_eq!(layout_override_from_settings(&settings, true), None);
+}
+
+#[test]
 fn syntax_runtime_start_error_disables_syntax_with_visible_diagnostic() {
     let mut error_log = Some("syntax settings ignored: bad theme".to_owned());
 
@@ -1624,10 +1646,10 @@ fn responsive_layout_preserves_options_menu_unified_choice_on_wide_resize() {
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Split);
 
     app.open_options_menu();
-    app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
-        .expect("space should toggle layout draft");
-    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
-        .expect("enter should apply options");
+    app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE))
+        .expect("right should select split layout");
+    app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE))
+        .expect("right should select unified layout");
     assert_eq!(app.layout, DiffLayoutMode::Unified);
     assert_eq!(app.layout_override, Some(DiffLayoutMode::Unified));
 
@@ -1637,15 +1659,38 @@ fn responsive_layout_preserves_options_menu_unified_choice_on_wide_resize() {
 }
 
 #[test]
-fn responsive_layout_remembers_manual_split_after_narrow_resize() {
+fn options_menu_dynamic_layout_tracks_terminal_width() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Split);
+    app.set_manual_layout(DiffLayoutMode::Unified);
+    app.set_viewport_width(usize::from(MIN_SPLIT_WIDTH) + 40);
+
+    app.open_options_menu();
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("enter should select dynamic layout");
+
+    assert_eq!(app.layout_override, None);
+    assert_eq!(app.layout, DiffLayoutMode::Split);
+
+    app.apply_responsive_layout(MIN_SPLIT_WIDTH - 1);
+    assert_eq!(app.layout, DiffLayoutMode::Unified);
+
+    app.apply_responsive_layout(MIN_SPLIT_WIDTH + 40);
+    assert_eq!(app.layout, DiffLayoutMode::Split);
+}
+
+#[test]
+fn responsive_layout_preserves_manual_split_choice_on_narrow_resize() {
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
 
     app.toggle_layout();
     assert_eq!(app.layout, DiffLayoutMode::Split);
+    assert_eq!(app.layout_override, Some(DiffLayoutMode::Split));
 
     app.apply_responsive_layout(MIN_SPLIT_WIDTH - 1);
-    assert_eq!(app.layout, DiffLayoutMode::Unified);
+    assert_eq!(app.layout, DiffLayoutMode::Split);
+    assert_eq!(app.layout_override, Some(DiffLayoutMode::Split));
 
     app.apply_responsive_layout(MIN_SPLIT_WIDTH + 40);
     assert_eq!(app.layout, DiffLayoutMode::Split);
@@ -2077,6 +2122,33 @@ fn n_and_p_navigate_grep_by_line_not_match_count() {
 }
 
 #[test]
+fn wrapped_grep_selection_stays_on_visible_continuation_row() {
+    let changeset = changeset_with_line_texts(&["needle abcdefghijkl", "other", "needle second"]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.line_wrapping = true;
+    app.set_viewport_width(18);
+    app.set_viewport_rows(2);
+    app.grep_filter = "needle".to_owned();
+    app.apply_filters(true);
+
+    assert_eq!(app.grep_matches.len(), 2);
+    let first = app.grep_matches[0];
+    let second = app.grep_matches[1];
+    let continuation_scroll = app
+        .wrapped_visual_scroll_for_model_row(first)
+        .saturating_add(1);
+
+    app.set_scroll(continuation_scroll);
+
+    assert_eq!(app.current_grep_match_row(), Some(first));
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE))
+        .expect("n should move to the next grep match");
+
+    assert_eq!(app.current_grep_match_row(), Some(second));
+}
+
+#[test]
 fn grep_match_stays_centered_after_viewport_rows_are_known() {
     let changeset = changeset_with_line_texts(&[
         "other 0", "other 1", "other 2", "other 3", "other 4", "needle", "other 6", "other 7",
@@ -2138,6 +2210,32 @@ fn grep_highlight_ignores_unified_gutter_numbers() {
             .iter()
             .all(|span| span.style.bg != Some(app.theme.search_match_bg)),
         "grep should not highlight line numbers when only the gutter matches"
+    );
+}
+
+#[test]
+fn wrapped_split_context_line_highlights_grep_on_continuation_rows() {
+    let theme = DiffTheme::default();
+    let line = DiffLine {
+        kind: DiffLineKind::Context,
+        old_line: Some(12),
+        new_line: Some(12),
+        text: "prefix needle suffix".to_owned(),
+    };
+
+    let lines = render_split_context_line_wrapped(&line, None, 0, 30, theme, "needle");
+    let highlighted_line = lines
+        .iter()
+        .find(|line| line_text(line).contains("needle"))
+        .expect("wrapped context line should render the grep match");
+
+    assert!(
+        highlighted_line
+            .spans
+            .iter()
+            .any(|span| span.content.contains("needle")
+                && span.style.bg == Some(theme.search_match_bg)),
+        "grep match should be highlighted in wrapped split context lines"
     );
 }
 
@@ -3309,13 +3407,32 @@ fn statusline_header_right_aligns_current_file() {
     assert!(text.ends_with("% "));
 
     let selector = line.spans.first().expect("selector block should render");
-    assert_eq!(selector.style.fg, Some(STATUSLINE_ACCENT_FG));
-    assert_eq!(selector.style.bg, Some(STATUSLINE_ACCENT_BG));
+    assert_eq!(selector.style.fg, Some(app.theme.statusline_accent_fg));
+    assert_eq!(selector.style.bg, Some(app.theme.statusline_accent_bg));
 
     let file = line.spans.last().expect("file block should render");
-    assert_eq!(file.style.fg, Some(STATUSLINE_INFO_FG));
-    assert_eq!(file.style.bg, Some(STATUSLINE_INFO_BG));
+    assert_eq!(file.style.fg, Some(app.theme.statusline_info_fg));
+    assert_eq!(file.style.bg, Some(app.theme.statusline_info_bg));
     assert!(file.style.add_modifier.contains(Modifier::BOLD));
+}
+
+#[test]
+fn statusline_header_uses_theme_statusline_colors() {
+    let changeset = changeset_with_files(&["src/lib.rs"]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.theme.statusline_accent_fg = Color::Rgb(1, 2, 3);
+    app.theme.statusline_accent_bg = Color::Rgb(4, 5, 6);
+    app.theme.statusline_info_fg = Color::Rgb(7, 8, 9);
+    app.theme.statusline_info_bg = Color::Rgb(10, 11, 12);
+
+    let line = statusline_header_line(&app, 80);
+    let selector = line.spans.first().expect("selector block should render");
+    let file = line.spans.last().expect("file block should render");
+
+    assert_eq!(selector.style.fg, Some(Color::Rgb(1, 2, 3)));
+    assert_eq!(selector.style.bg, Some(Color::Rgb(4, 5, 6)));
+    assert_eq!(file.style.fg, Some(Color::Rgb(7, 8, 9)));
+    assert_eq!(file.style.bg, Some(Color::Rgb(10, 11, 12)));
 }
 
 #[test]
@@ -3806,6 +3923,152 @@ fn options_menu_toggles_setting_on_enter() {
 }
 
 #[test]
+fn options_menu_draft_persists_only_changed_setting() {
+    let dir = temp_test_dir("settings-menu-persist-changed-only");
+    let path = dir.join("config.toml");
+    fs::create_dir_all(&dir).expect("test dir should be created");
+    fs::write(
+        &path,
+        r#"
+mode = "enabled"
+layout = "split"
+live_reload = true
+syntax_highlighting = true
+line_wrapping = false
+colorscheme = "system"
+
+[diff]
+line_background = "none"
+context_expand = 7
+"#,
+    )
+    .expect("settings file should be written");
+
+    persist_options_menu_draft_to_path(
+        &path,
+        OptionsDraft {
+            layout: LayoutSetting::Split,
+            live_updates_enabled: false,
+            context_expansion: DiffContextExpansion::Full,
+            syntax_enabled: false,
+            line_wrapping: true,
+            color_scheme: ColorSchemeChoice::Tokyonight,
+        },
+        OptionsMenuItem::LiveReload,
+    )
+    .expect("settings draft should persist");
+
+    let saved = fs::read_to_string(&path).expect("settings file should be readable");
+    let saved: toml::Value = toml::from_str(&saved).expect("settings should stay valid toml");
+    let diff = saved["diff"].as_table().expect("diff should stay a table");
+
+    assert_eq!(saved["mode"].as_str(), Some("enabled"));
+    assert_eq!(saved["layout"].as_str(), Some("split"));
+    assert_eq!(saved["live_reload"].as_bool(), Some(false));
+    assert_eq!(saved["syntax_highlighting"].as_bool(), Some(true));
+    assert_eq!(saved["line_wrapping"].as_bool(), Some(false));
+    assert_eq!(saved["colorscheme"].as_str(), Some("system"));
+    assert_eq!(
+        diff.get("line_background").and_then(toml::Value::as_str),
+        Some("none")
+    );
+    assert_eq!(
+        diff.get("context_expand").and_then(toml::Value::as_integer),
+        Some(7)
+    );
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn options_menu_context_persistence_removes_context_aliases() {
+    let dir = temp_test_dir("settings-menu-persist-context-aliases");
+    let path = dir.join("config.toml");
+    fs::create_dir_all(&dir).expect("test dir should be created");
+    fs::write(
+        &path,
+        r#"
+[diff]
+line_background = "none"
+context_expansion = 5
+context_lines = 7
+expand_context = 9
+"#,
+    )
+    .expect("settings file should be written");
+
+    persist_options_menu_draft_to_path(
+        &path,
+        OptionsDraft {
+            layout: LayoutSetting::Split,
+            live_updates_enabled: false,
+            context_expansion: DiffContextExpansion::Full,
+            syntax_enabled: false,
+            line_wrapping: true,
+            color_scheme: ColorSchemeChoice::Tokyonight,
+        },
+        OptionsMenuItem::ContextExpansion,
+    )
+    .expect("settings draft should persist");
+
+    let saved = fs::read_to_string(&path).expect("settings file should be readable");
+    let saved: toml::Value = toml::from_str(&saved).expect("settings should stay valid toml");
+    let diff = saved["diff"].as_table().expect("diff should stay a table");
+
+    assert_eq!(
+        diff.get("line_background").and_then(toml::Value::as_str),
+        Some("none")
+    );
+    assert_eq!(
+        diff.get("context_expand").and_then(toml::Value::as_str),
+        Some("full")
+    );
+    assert!(diff.get("context_expansion").is_none());
+    assert!(diff.get("context_lines").is_none());
+    assert!(diff.get("expand_context").is_none());
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn options_menu_line_wrapping_persistence_removes_line_wrapping_aliases() {
+    let dir = temp_test_dir("settings-menu-persist-line-wrapping-aliases");
+    let path = dir.join("config.toml");
+    fs::create_dir_all(&dir).expect("test dir should be created");
+    fs::write(
+        &path,
+        r#"
+word_wrap = false
+wrap_lines = false
+"#,
+    )
+    .expect("settings file should be written");
+
+    persist_options_menu_draft_to_path(
+        &path,
+        OptionsDraft {
+            layout: LayoutSetting::Split,
+            live_updates_enabled: false,
+            context_expansion: DiffContextExpansion::Full,
+            syntax_enabled: false,
+            line_wrapping: true,
+            color_scheme: ColorSchemeChoice::Tokyonight,
+        },
+        OptionsMenuItem::LineWrapping,
+    )
+    .expect("settings draft should persist");
+
+    let saved = fs::read_to_string(&path).expect("settings file should be readable");
+    let saved: toml::Value = toml::from_str(&saved).expect("settings should stay valid toml");
+
+    assert_eq!(saved["line_wrapping"].as_bool(), Some(true));
+    assert!(saved.get("word_wrap").is_none());
+    assert!(saved.get("wrap_lines").is_none());
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn options_menu_plain_letters_filter_input() {
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
@@ -3817,10 +4080,7 @@ fn options_menu_plain_letters_filter_input() {
     assert!(app.options_menu_open);
     assert_eq!(app.options_menu_input, "x");
     assert_eq!(app.layout, DiffLayoutMode::Unified);
-    assert_eq!(
-        app.highlighted_option(),
-        Some(OptionsMenuItem::IncludeUntracked)
-    );
+    assert_eq!(app.highlighted_option(), Some(OptionsMenuItem::LiveReload));
 }
 
 #[test]
@@ -3838,7 +4098,7 @@ fn options_menu_toggles_syntax_highlighting() {
     )));
 
     app.open_options_menu();
-    app.move_options_menu_selection(5);
+    app.move_options_menu_selection(3);
     assert_eq!(
         app.highlighted_option(),
         Some(OptionsMenuItem::SyntaxHighlighting)
@@ -3850,6 +4110,242 @@ fn options_menu_toggles_syntax_highlighting() {
 
     assert!(app.syntax.is_none());
     assert_eq!(app.option_value(OptionsMenuItem::SyntaxHighlighting), "[ ]");
+}
+
+#[test]
+fn options_menu_persists_post_apply_syntax_state_when_enable_fails() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new_with_syntax(
+        DiffOptions::default(),
+        changeset,
+        DiffLayoutMode::Unified,
+        SyntaxStartupMode::Languages(Vec::new()),
+    );
+
+    app.open_options_menu();
+    app.move_options_menu_selection(3);
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("enter should try to enable syntax highlighting");
+
+    assert!(app.syntax.is_none());
+    assert!(!app.options_menu_draft.syntax_enabled);
+    assert_eq!(
+        app.last_persisted_options_menu_draft,
+        Some((
+            OptionsDraft {
+                syntax_enabled: false,
+                ..app.options_menu_draft
+            },
+            OptionsMenuItem::SyntaxHighlighting,
+        ))
+    );
+}
+
+#[test]
+fn options_menu_toggles_line_wrapping_and_clamps_horizontal_scroll() {
+    let changeset = changeset_with_line_text(&"a".repeat(120));
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_width(40);
+    app.set_horizontal_scroll(HORIZONTAL_SCROLL_STEP);
+    assert_eq!(app.horizontal_scroll, HORIZONTAL_SCROLL_STEP);
+
+    app.open_options_menu();
+    app.move_options_menu_selection(4);
+    assert_eq!(
+        app.highlighted_option(),
+        Some(OptionsMenuItem::LineWrapping)
+    );
+    assert_eq!(app.option_value(OptionsMenuItem::LineWrapping), "[ ]");
+
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("enter should toggle line wrapping");
+
+    assert!(app.line_wrapping);
+    assert_eq!(app.horizontal_scroll, 0);
+    assert_eq!(app.max_horizontal_scroll(), 0);
+    assert_eq!(app.option_value(OptionsMenuItem::LineWrapping), "[x]");
+}
+
+#[test]
+fn line_wrapping_wraps_long_unified_rows() {
+    let changeset = changeset_with_line_text("abcdefghijkl");
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.line_wrapping = true;
+
+    let row_index = 2;
+    let row = app.model.row(row_index).expect("diff line should exist");
+    let lines = render_row_wrapped_with_focus(&mut app, row_index, row, 18, None);
+    let rendered = lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(rendered.len(), 3);
+    assert!(rendered[0].contains("abcd"));
+    assert!(rendered[1].contains("efgh"));
+    assert!(rendered[2].contains("ijkl"));
+}
+
+#[test]
+fn line_wrapping_preserves_wide_glyphs_at_unified_wrap_boundary() {
+    let changeset = changeset_with_line_text("abc界def");
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.line_wrapping = true;
+
+    let row_index = 2;
+    let row = app.model.row(row_index).expect("diff line should exist");
+    let lines = render_row_wrapped_with_focus(&mut app, row_index, row, 18, None);
+    let rendered = lines.iter().map(line_text).collect::<Vec<_>>();
+
+    assert_eq!(rendered.len(), 3);
+    assert!(rendered[0].contains("abc"));
+    assert!(rendered[1].contains("界de"));
+    assert!(rendered[2].contains('f'));
+}
+
+#[test]
+fn line_wrapping_preserves_wide_glyphs_at_split_wrap_boundary() {
+    let changeset = changeset_with_line_text("abc界def");
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Split);
+    app.line_wrapping = true;
+
+    let row_index = 2;
+    let row = app.model.row(row_index).expect("diff line should exist");
+    let lines = render_row_wrapped_with_focus(&mut app, row_index, row, 24, None);
+    let rendered = lines.iter().map(line_text).collect::<Vec<_>>();
+
+    assert_eq!(rendered.len(), 3);
+    assert!(rendered[0].contains("abc"));
+    assert!(rendered[1].contains("界de"));
+    assert!(rendered[2].contains('f'));
+}
+
+#[test]
+fn line_wrapping_scrolls_through_continuation_rows() {
+    let changeset = changeset_with_line_text("abcdefghijklmnopqrstuvwx");
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.line_wrapping = true;
+    app.set_viewport_width(18);
+    app.set_viewport_rows(4);
+
+    assert_eq!(app.model.len(), 3);
+    assert_eq!(app.max_scroll(), 4);
+
+    app.set_scroll(app.max_scroll());
+    let lines = wrapped_diff_lines_for_viewport(&mut app, 18, 4);
+    let rendered = lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(rendered.len(), 4);
+    assert!(rendered[0].contains("ijkl"));
+    assert!(rendered[3].contains("uvwx"));
+}
+
+#[test]
+fn line_wrapping_recomputes_scroll_bounds_after_width_change() {
+    let changeset = changeset_with_line_text("abcdefghijkl");
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.line_wrapping = true;
+    app.set_viewport_rows(1);
+
+    app.set_viewport_width(18);
+    assert_eq!(app.max_scroll(), 4);
+
+    app.set_viewport_width(22);
+    assert_eq!(app.max_scroll(), 3);
+}
+
+#[test]
+fn select_file_scrolls_to_visual_file_start_for_wrapped_no_hunk_file() {
+    let mut changeset = changeset_with_wrapped_leading_file();
+    changeset.files[1].hunks.clear();
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.line_wrapping = true;
+    app.set_viewport_width(18);
+
+    app.select_file(1);
+
+    assert_eq!(app.selected_file, 1);
+    assert_eq!(app.scroll, wrapped_file_start_scroll(&app, 1));
+}
+
+#[test]
+fn replace_loaded_diff_preserves_wrapped_file_relative_scroll() {
+    let mut app = DiffApp::new(
+        DiffOptions::default(),
+        changeset_with_wrapped_leading_file(),
+        DiffLayoutMode::Unified,
+    );
+    let relative_scroll = 1;
+    set_wrapped_scroll_relative_to_file_start(&mut app, 1, relative_scroll);
+    let mut replacement = changeset_with_wrapped_leading_file();
+    replacement.files[1].hunks[0].lines[0].text = "updated target".to_owned();
+
+    app.replace_loaded_diff(DiffOptions::default(), replacement);
+
+    assert_eq!(
+        app.scroll,
+        wrapped_file_start_scroll(&app, 1).saturating_add(relative_scroll)
+    );
+}
+
+#[test]
+fn replace_path_changeset_preserves_wrapped_file_relative_scroll() {
+    let mut app = DiffApp::new(
+        DiffOptions::default(),
+        changeset_with_wrapped_leading_file(),
+        DiffLayoutMode::Unified,
+    );
+    let relative_scroll = 1;
+    set_wrapped_scroll_relative_to_file_start(&mut app, 1, relative_scroll);
+    let replacement = changeset_with_files(&["target.rs"]);
+
+    app.replace_path_changeset(Path::new("target.rs"), replacement);
+
+    assert_eq!(
+        app.scroll,
+        wrapped_file_start_scroll(&app, 1).saturating_add(relative_scroll)
+    );
+}
+
+#[test]
+fn replace_cached_diff_preserves_wrapped_file_relative_scroll() {
+    let mut app = DiffApp::new(
+        DiffOptions::default(),
+        changeset_with_wrapped_leading_file(),
+        DiffLayoutMode::Unified,
+    );
+    let relative_scroll = 1;
+    set_wrapped_scroll_relative_to_file_start(&mut app, 1, relative_scroll);
+    let options = DiffOptions {
+        scope: DiffScope::Staged,
+        ..DiffOptions::default()
+    };
+    let mut replacement = changeset_with_wrapped_leading_file();
+    replacement.files[1].hunks[0].lines[0].text = "cached target".to_owned();
+
+    app.replace_cached_diff(
+        options.clone(),
+        diff_cache_entry(options, replacement),
+        false,
+    );
+
+    assert_eq!(
+        app.scroll,
+        wrapped_file_start_scroll(&app, 1).saturating_add(relative_scroll)
+    );
 }
 
 #[test]
@@ -3874,12 +4370,11 @@ fn options_menu_clamps_selection_after_toggle_leaves_filter() {
     assert_eq!(
         app.filtered_options_menu_items(),
         vec![
-            OptionsMenuItem::IncludeUntracked,
             OptionsMenuItem::LiveReload,
             OptionsMenuItem::SyntaxHighlighting,
         ]
     );
-    app.set_options_menu_selection(2);
+    app.set_options_menu_selection(1);
     assert_eq!(
         app.highlighted_option(),
         Some(OptionsMenuItem::SyntaxHighlighting)
@@ -3891,69 +4386,14 @@ fn options_menu_clamps_selection_after_toggle_leaves_filter() {
     assert!(app.syntax.is_none());
     assert_eq!(
         app.filtered_options_menu_items(),
-        vec![
-            OptionsMenuItem::IncludeUntracked,
-            OptionsMenuItem::LiveReload
-        ]
+        vec![OptionsMenuItem::LiveReload]
     );
-    assert_eq!(app.options_menu_selected, 1);
+    assert_eq!(app.options_menu_selected, 0);
     assert_eq!(app.highlighted_option(), Some(OptionsMenuItem::LiveReload));
 
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .expect("enter should activate the rendered highlighted setting");
     assert!(!app.live_updates_enabled);
-}
-
-#[test]
-fn options_menu_include_untracked_applies_with_single_reload() {
-    let changeset = changeset_with_context_lines(1);
-    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
-    assert!(app.options.include_untracked);
-
-    app.open_options_menu();
-    app.move_options_menu_selection(2);
-    assert_eq!(
-        app.highlighted_option(),
-        Some(OptionsMenuItem::IncludeUntracked)
-    );
-    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
-        .expect("enter should toggle include-untracked");
-
-    let load = app
-        .pending_diff_load
-        .as_ref()
-        .expect("include-untracked should queue reload");
-    assert!(!load.options.include_untracked);
-}
-
-#[test]
-fn options_menu_include_untracked_toggle_back_cancels_stale_reload() {
-    let changeset = changeset_with_context_lines(1);
-    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
-    assert!(app.options.include_untracked);
-
-    app.open_options_menu();
-    app.move_options_menu_selection(2);
-    assert_eq!(
-        app.highlighted_option(),
-        Some(OptionsMenuItem::IncludeUntracked)
-    );
-
-    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
-        .expect("enter should toggle include-untracked off");
-    let load = app
-        .pending_diff_load
-        .as_ref()
-        .expect("include-untracked should queue reload");
-    assert!(!load.options.include_untracked);
-
-    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
-        .expect("enter should toggle include-untracked back on");
-
-    assert!(app.pending_diff_load.is_none());
-    assert!(app.options_menu_open);
-    assert!(app.options.include_untracked);
-    assert!(app.options_menu_draft.include_untracked);
 }
 
 #[test]
@@ -3964,20 +4404,25 @@ fn options_menu_colorscheme_input_selects_draft_and_applies_on_enter() {
     app.theme = DiffTheme::system();
 
     app.open_options_menu();
-    app.move_options_menu_selection(6);
+    app.move_options_menu_selection(5);
     assert_eq!(app.highlighted_option(), Some(OptionsMenuItem::ColorScheme));
 
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .expect("enter should open colorscheme input");
     assert!(app.color_scheme_picker_open);
-    for character in ['d', 'a', 'r', 'k'] {
+    for character in ['t', 'o', 'k', 'y', 'o'] {
         app.handle_key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE))
             .expect("typing should filter colorschemes");
     }
-    assert_eq!(app.color_scheme, ColorSchemeChoice::System);
+    assert_eq!(app.color_scheme, ColorSchemeChoice::Tokyonight);
+    assert_eq!(app.theme.background, DiffTheme::tokyonight().background);
+    assert_eq!(
+        app.options_menu_draft.color_scheme,
+        ColorSchemeChoice::System
+    );
     assert_eq!(
         app.filtered_color_schemes(),
-        vec![ColorSchemeChoice::TerminalDark]
+        vec![ColorSchemeChoice::Tokyonight]
     );
 
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
@@ -3986,10 +4431,10 @@ fn options_menu_colorscheme_input_selects_draft_and_applies_on_enter() {
     assert!(app.options_menu_open);
     assert_eq!(
         app.options_menu_draft.color_scheme,
-        ColorSchemeChoice::TerminalDark
+        ColorSchemeChoice::Tokyonight
     );
-    assert_eq!(app.color_scheme, ColorSchemeChoice::TerminalDark);
-    assert_eq!(app.theme.background, DiffTheme::terminal_dark().background);
+    assert_eq!(app.color_scheme, ColorSchemeChoice::Tokyonight);
+    assert_eq!(app.theme.background, DiffTheme::tokyonight().background);
     assert!(app.pending_diff_load.is_none());
 }
 
@@ -3999,7 +4444,7 @@ fn colorscheme_picker_mouse_dismiss_keeps_options_menu_open() {
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
 
     app.open_options_menu();
-    app.move_options_menu_selection(6);
+    app.move_options_menu_selection(5);
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .expect("enter should open colorscheme picker");
     assert!(app.color_scheme_picker_open);
@@ -4039,11 +4484,10 @@ fn options_menu_omits_branch_options_for_branch_diff() {
         app.options_menu_items(),
         [
             OptionsMenuItem::Layout,
-            OptionsMenuItem::FileSidebar,
-            OptionsMenuItem::IncludeUntracked,
             OptionsMenuItem::LiveReload,
             OptionsMenuItem::ContextExpansion,
             OptionsMenuItem::SyntaxHighlighting,
+            OptionsMenuItem::LineWrapping,
             OptionsMenuItem::ColorScheme,
         ]
     );
@@ -4079,7 +4523,7 @@ fn options_menu_live_reload_toggles_without_reloading_diff() {
     assert!(app.live_updates_enabled);
 
     app.open_options_menu();
-    app.move_options_menu_selection(3);
+    app.move_options_menu_selection(1);
     assert_eq!(app.highlighted_option(), Some(OptionsMenuItem::LiveReload));
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .expect("enter should toggle live reload");
@@ -4095,7 +4539,7 @@ fn options_menu_reenabling_live_reload_reloads_diff() {
     app.live_updates_enabled = false;
 
     app.open_options_menu();
-    app.move_options_menu_selection(3);
+    app.move_options_menu_selection(1);
     assert_eq!(app.highlighted_option(), Some(OptionsMenuItem::LiveReload));
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .expect("enter should toggle live reload");
@@ -4116,7 +4560,7 @@ fn options_menu_does_not_enable_live_reload_when_watch_is_disabled() {
     app.live_updates_enabled = false;
 
     app.open_options_menu();
-    app.move_options_menu_selection(3);
+    app.move_options_menu_selection(1);
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .expect("enter should be handled");
 
@@ -4160,25 +4604,19 @@ fn options_menu_draws_centered_floating_menu() {
     assert!(title.1 > 30 && title.1 < 48, "title column was {}", title.1);
     assert!(rows.iter().any(|row| row.contains("> │")));
     assert!(rows.iter().any(|row| row.contains("Layout")));
-    assert!(rows.iter().any(|row| row.contains("Include untracked")));
     assert!(rows.iter().any(|row| row.contains("Live reload")));
     assert!(rows.iter().any(|row| row.contains("Syntax highlighting")));
     assert!(rows.iter().any(|row| row.contains("Colorscheme")));
 
     let layout_row = rows
         .iter()
-        .find(|row| row.contains("Layout") && row.contains("[unified]"))
+        .find(|row| row.contains("Layout") && row.contains("[dynamic]"))
         .expect("layout row should show current value");
     let label_column = layout_row.find("Layout").expect("label should render");
-    let value_column = layout_row.rfind("[unified]").expect("value should render");
+    let value_column = layout_row.rfind("[dynamic]").expect("value should render");
     assert!(
         value_column > label_column + 20,
         "setting value should be right aligned: {layout_row}"
-    );
-
-    assert!(
-        rows.iter()
-            .any(|row| row.contains("Include untracked") && row.contains("[x]"))
     );
 }
 
@@ -4187,7 +4625,7 @@ fn options_menu_scrolls_selected_setting_into_short_terminal() {
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
     app.open_options_menu();
-    app.set_options_menu_selection(6);
+    app.set_options_menu_selection(5);
     let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 5))
         .expect("test terminal should be created");
 
@@ -4252,10 +4690,10 @@ fn colorscheme_picker_draws_input_dropdown() {
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
     app.open_options_menu();
-    app.move_options_menu_selection(6);
+    app.move_options_menu_selection(5);
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .expect("enter should open colorscheme picker");
-    app.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE))
+    app.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE))
         .expect("typing should filter colorschemes");
     let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 20))
         .expect("test terminal should be created");
@@ -4274,8 +4712,72 @@ fn colorscheme_picker_draws_input_dropdown() {
         .collect();
 
     assert!(rows.iter().any(|row| row.contains("Colorscheme")));
-    assert!(rows.iter().any(|row| row.contains("> d│")));
-    assert!(rows.iter().any(|row| row.contains("terminal-dark")));
+    assert!(rows.iter().any(|row| row.contains("> g│")));
+    assert!(rows.iter().any(|row| row.contains("system")));
+    assert!(rows.iter().any(|row| row.contains("gruvbox-dark")));
+    assert!(!rows.iter().any(|row| row.contains("current")));
+
+    let (row, column) = rows
+        .iter()
+        .enumerate()
+        .find_map(|(row, text)| {
+            text.find("system")
+                .map(|column| (row as u16, column as u16))
+        })
+        .expect("current colorscheme should render");
+    assert_eq!(
+        buffer.cell((column, row)).expect("cell should exist").fg,
+        app.theme.muted
+    );
+}
+
+#[test]
+fn colorscheme_picker_previews_hovered_theme_and_reverts_on_close() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.open_options_menu();
+    app.move_options_menu_selection(5);
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("enter should open colorscheme picker");
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 20))
+        .expect("test terminal should be created");
+
+    terminal
+        .draw(|frame| crate::render::draw(frame, &mut app))
+        .expect("colorscheme picker draw should succeed");
+
+    let buffer = terminal.backend().buffer();
+    let (row, column) = (0..buffer.area.height)
+        .find_map(|y| {
+            let text: String = (0..buffer.area.width)
+                .map(|x| buffer.cell((x, y)).expect("cell should exist").symbol())
+                .collect();
+            text.find("gruvbox-dark").map(|column| (y, column as u16))
+        })
+        .expect("gruvbox row should render");
+
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Moved,
+        column,
+        row,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("hover should preview colorscheme");
+
+    assert_eq!(app.color_scheme, ColorSchemeChoice::GruvboxDark);
+    assert_eq!(app.theme.background, DiffTheme::gruvbox_dark().background);
+
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: 0,
+        row: 0,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("outside click should close colorscheme picker");
+
+    assert!(!app.color_scheme_picker_open);
+    assert_eq!(app.color_scheme, ColorSchemeChoice::System);
+    assert_eq!(app.theme, DiffTheme::system());
 }
 
 #[test]
@@ -5315,6 +5817,83 @@ fn split_empty_cells_use_default_gutter_and_hatched_fill() {
 }
 
 #[test]
+fn split_wrapped_empty_cells_follow_visual_rows() {
+    let changeset = Changeset {
+        repo: PathBuf::from("/repo"),
+        title: "test".to_owned(),
+        files: vec![mark_diff::DiffFile {
+            old_path: Some("file.rs".to_owned()),
+            new_path: Some("file.rs".to_owned()),
+            status: FileStatus::Modified,
+            hunks: vec![mark_diff::DiffHunk {
+                header: "@@ -0,0 +1,2 @@".to_owned(),
+                old_start: 0,
+                old_count: 0,
+                new_start: 1,
+                new_count: 2,
+                lines: vec![
+                    DiffLine {
+                        kind: DiffLineKind::Addition,
+                        old_line: None,
+                        new_line: Some(1),
+                        text: "abcdefgh".to_owned(),
+                    },
+                    DiffLine {
+                        kind: DiffLineKind::Addition,
+                        old_line: None,
+                        new_line: Some(2),
+                        text: "ijkl".to_owned(),
+                    },
+                ],
+            }],
+            additions: 2,
+            deletions: 0,
+            is_binary: false,
+        }],
+        raw_patch: Vec::new(),
+    };
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Split);
+    app.line_wrapping = true;
+    app.set_viewport_width(24);
+
+    let first_row = app.model.row(2).expect("first addition row should exist");
+    let second_row = app.model.row(3).expect("second addition row should exist");
+    let first = render_row_wrapped_with_focus(&mut app, 2, first_row, 24, None);
+    let second = render_row_wrapped_with_focus(&mut app, 3, second_row, 24, None);
+
+    let left_width = 12usize;
+    let content_offset = 1 + GUTTER_WIDTH.min(left_width.saturating_sub(1));
+    let content_width = split_cell_content_width(left_width);
+    let left_fill = |line: &Line<'_>| {
+        line_text(line)
+            .chars()
+            .skip(content_offset)
+            .take(content_width)
+            .collect::<String>()
+    };
+    let first_visual_row = app.wrapped_visual_scroll_for_model_row(2);
+    let second_visual_row = app.wrapped_visual_scroll_for_model_row(3);
+
+    assert_eq!(first.len(), 2);
+    assert_eq!(second.len(), 1);
+    assert_eq!(first_visual_row, 2);
+    assert_eq!(second_visual_row, 4);
+    assert_eq!(
+        left_fill(&first[0]),
+        empty_diff_fill_from(content_width, first_visual_row, content_offset)
+    );
+    assert_eq!(
+        left_fill(&first[1]),
+        empty_diff_fill_from(content_width, first_visual_row + 1, content_offset)
+    );
+    assert_eq!(
+        left_fill(&second[0]),
+        empty_diff_fill_from(content_width, second_visual_row, content_offset)
+    );
+    assert_ne!(left_fill(&first[0]), left_fill(&first[1]));
+}
+
+#[test]
 fn line_gutters_use_theme_background() {
     let theme = DiffTheme::default();
     let line = DiffLine {
@@ -5526,6 +6105,8 @@ fn color_overrides_layer_on_colorscheme() {
             cursor: Some("white".to_owned()),
             search_match_fg: Some("#112233".to_owned()),
             search_match_bg: Some("#223344".to_owned()),
+            statusline_accent_bg: Some("#334455".to_owned()),
+            statusline_info_fg: Some("#445566".to_owned()),
             keyword: Some("ansi-13".to_owned()),
             ..ColorOverrides::default()
         })
@@ -5540,6 +6121,8 @@ fn color_overrides_layer_on_colorscheme() {
     assert_eq!(theme.cursor, Color::White);
     assert_eq!(theme.search_match_fg, Color::Rgb(0x11, 0x22, 0x33));
     assert_eq!(theme.search_match_bg, Color::Rgb(0x22, 0x33, 0x44));
+    assert_eq!(theme.statusline_accent_bg, Color::Rgb(0x33, 0x44, 0x55));
+    assert_eq!(theme.statusline_info_fg, Color::Rgb(0x44, 0x55, 0x66));
     assert_eq!(
         theme.syntax.color(SyntaxClass::Keyword),
         Some(Color::Indexed(13))
@@ -5547,20 +6130,208 @@ fn color_overrides_layer_on_colorscheme() {
 }
 
 #[test]
-fn packaged_popular_themes_are_available() {
-    for name in ["catppuccin-mocha", "gruvbox-dark", "tokyonight", "dracula"] {
+fn packaged_builtin_themes_are_available() {
+    for name in [
+        "system",
+        "catppuccin-latte",
+        "catppuccin-frappe",
+        "catppuccin-macchiato",
+        "catppuccin-mocha",
+        "gruvbox-dark",
+        "gruvbox-light",
+        "github-dark",
+        "github-dark-high-contrast",
+        "github-light",
+        "github-light-high-contrast",
+        "tokyonight",
+    ] {
         let theme = builtin_diff_theme(Some(name)).expect("built-in theme should load");
 
-        assert_ne!(
-            theme.file,
-            Color::Reset,
-            "{name} should set file foreground"
-        );
+        assert_ne!(theme.statusline_accent_bg, Color::Reset);
         assert!(
             theme.syntax.color(SyntaxClass::Keyword).is_some(),
             "{name} should set syntax keyword foreground"
         );
     }
+}
+
+#[test]
+fn builtin_syntax_palettes_match_upstream_theme_scopes() {
+    // These expectations mirror the upstream TextMate scopes used by the
+    // Catppuccin, Gruvbox, and GitHub VS Code/Shiki themes for the closest
+    // matching Mark syntax classes.
+    for (theme, comment, operator, tag, attribute) in [
+        (
+            DiffTheme::catppuccin_latte(),
+            Color::Rgb(0x7c, 0x7f, 0x93),
+            Color::Rgb(0x17, 0x92, 0x99),
+            Color::Rgb(0x1e, 0x66, 0xf5),
+            Color::Rgb(0xdf, 0x8e, 0x1d),
+        ),
+        (
+            DiffTheme::catppuccin_frappe(),
+            Color::Rgb(0x94, 0x9c, 0xbb),
+            Color::Rgb(0x81, 0xc8, 0xbe),
+            Color::Rgb(0x8c, 0xaa, 0xee),
+            Color::Rgb(0xe5, 0xc8, 0x90),
+        ),
+        (
+            DiffTheme::catppuccin_macchiato(),
+            Color::Rgb(0x93, 0x9a, 0xb7),
+            Color::Rgb(0x8b, 0xd5, 0xca),
+            Color::Rgb(0x8a, 0xad, 0xf4),
+            Color::Rgb(0xee, 0xd4, 0x9f),
+        ),
+        (
+            DiffTheme::catppuccin_mocha(),
+            Color::Rgb(0x93, 0x99, 0xb2),
+            Color::Rgb(0x94, 0xe2, 0xd5),
+            Color::Rgb(0x89, 0xb4, 0xfa),
+            Color::Rgb(0xf9, 0xe2, 0xaf),
+        ),
+    ] {
+        assert_eq!(theme.syntax.color(SyntaxClass::Comment), Some(comment));
+        assert_eq!(theme.syntax.color(SyntaxClass::Operator), Some(operator));
+        assert_eq!(theme.syntax.color(SyntaxClass::Property), Some(operator));
+        assert_eq!(theme.syntax.color(SyntaxClass::Tag), Some(tag));
+        assert_eq!(theme.syntax.color(SyntaxClass::Attribute), Some(attribute));
+        assert_eq!(theme.syntax.color(SyntaxClass::Module), Some(attribute));
+        assert_eq!(theme.syntax.color(SyntaxClass::Variable), None);
+    }
+
+    for (theme, constant, function, operator, variable, punctuation, property) in [
+        (
+            DiffTheme::gruvbox_dark(),
+            Color::Rgb(0xd3, 0x86, 0x9b),
+            Color::Rgb(0xfa, 0xbd, 0x2f),
+            Color::Rgb(0x8e, 0xc0, 0x7c),
+            Color::Rgb(0x83, 0xa5, 0x98),
+            Color::Rgb(0xa8, 0x99, 0x84),
+            Color::Rgb(0x68, 0x9d, 0x6a),
+        ),
+        (
+            DiffTheme::gruvbox_light(),
+            Color::Rgb(0x8f, 0x3f, 0x71),
+            Color::Rgb(0xb5, 0x76, 0x14),
+            Color::Rgb(0x42, 0x7b, 0x58),
+            Color::Rgb(0x07, 0x66, 0x78),
+            Color::Rgb(0x7c, 0x6f, 0x64),
+            Color::Rgb(0x68, 0x9d, 0x6a),
+        ),
+    ] {
+        assert_eq!(
+            theme.syntax.color(SyntaxClass::Comment),
+            Some(Color::Rgb(0x92, 0x83, 0x74))
+        );
+        assert_eq!(theme.syntax.color(SyntaxClass::Constant), Some(constant));
+        assert_eq!(theme.syntax.color(SyntaxClass::Function), Some(function));
+        assert_eq!(theme.syntax.color(SyntaxClass::Type), Some(function));
+        assert_eq!(theme.syntax.color(SyntaxClass::Operator), Some(operator));
+        assert_eq!(theme.syntax.color(SyntaxClass::Tag), Some(operator));
+        assert_eq!(theme.syntax.color(SyntaxClass::Variable), Some(variable));
+        assert_eq!(
+            theme.syntax.color(SyntaxClass::Punctuation),
+            Some(punctuation)
+        );
+        assert_eq!(theme.syntax.color(SyntaxClass::Property), Some(property));
+    }
+
+    for (theme, comment, constant, function, tag, string, variable) in [
+        (
+            DiffTheme::github_light(),
+            Color::Rgb(0x6e, 0x77, 0x81),
+            Color::Rgb(0x05, 0x50, 0xae),
+            Color::Rgb(0x82, 0x50, 0xdf),
+            Color::Rgb(0x11, 0x63, 0x29),
+            Color::Rgb(0x0a, 0x30, 0x69),
+            Color::Rgb(0x95, 0x38, 0x00),
+        ),
+        (
+            DiffTheme::github_dark(),
+            Color::Rgb(0x8b, 0x94, 0x9e),
+            Color::Rgb(0x79, 0xc0, 0xff),
+            Color::Rgb(0xd2, 0xa8, 0xff),
+            Color::Rgb(0x7e, 0xe7, 0x87),
+            Color::Rgb(0xa5, 0xd6, 0xff),
+            Color::Rgb(0xff, 0xa6, 0x57),
+        ),
+        (
+            DiffTheme::github_light_high_contrast(),
+            Color::Rgb(0x66, 0x70, 0x7b),
+            Color::Rgb(0x02, 0x3b, 0x95),
+            Color::Rgb(0x62, 0x2c, 0xbc),
+            Color::Rgb(0x02, 0x4c, 0x1a),
+            Color::Rgb(0x03, 0x25, 0x63),
+            Color::Rgb(0x70, 0x2c, 0x00),
+        ),
+        (
+            DiffTheme::github_dark_high_contrast(),
+            Color::Rgb(0xbd, 0xc4, 0xcc),
+            Color::Rgb(0x91, 0xcb, 0xff),
+            Color::Rgb(0xdb, 0xb7, 0xff),
+            Color::Rgb(0x72, 0xf0, 0x88),
+            Color::Rgb(0xad, 0xdc, 0xff),
+            Color::Rgb(0xff, 0xb7, 0x57),
+        ),
+    ] {
+        assert_eq!(theme.syntax.color(SyntaxClass::Attribute), None);
+        assert_eq!(theme.syntax.color(SyntaxClass::Comment), Some(comment));
+        assert_eq!(theme.syntax.color(SyntaxClass::Constant), Some(constant));
+        assert_eq!(theme.syntax.color(SyntaxClass::Function), Some(function));
+        assert_eq!(theme.syntax.color(SyntaxClass::Tag), Some(tag));
+        assert_eq!(theme.syntax.color(SyntaxClass::String), Some(string));
+        assert_eq!(theme.syntax.color(SyntaxClass::Variable), Some(variable));
+        assert_eq!(theme.syntax.color(SyntaxClass::Type), Some(variable));
+        assert_eq!(theme.syntax.color(SyntaxClass::Property), Some(constant));
+        assert_eq!(theme.syntax.color(SyntaxClass::Punctuation), None);
+    }
+
+    let theme = DiffTheme::tokyonight();
+    assert_eq!(
+        theme.syntax.color(SyntaxClass::Comment),
+        Some(Color::Rgb(0x51, 0x59, 0x7d))
+    );
+    assert_eq!(
+        theme.syntax.color(SyntaxClass::Attribute),
+        Some(Color::Rgb(0xbb, 0x9a, 0xf7))
+    );
+    assert_eq!(
+        theme.syntax.color(SyntaxClass::Operator),
+        Some(Color::Rgb(0x89, 0xdd, 0xff))
+    );
+    assert_eq!(
+        theme.syntax.color(SyntaxClass::Property),
+        Some(Color::Rgb(0x7d, 0xcf, 0xff))
+    );
+    assert_eq!(
+        theme.syntax.color(SyntaxClass::Type),
+        Some(Color::Rgb(0x0d, 0xb9, 0xd7))
+    );
+    assert_eq!(
+        theme.syntax.color(SyntaxClass::Tag),
+        Some(Color::Rgb(0xf7, 0x76, 0x8e))
+    );
+}
+
+#[test]
+fn color_scheme_picker_lists_supported_builtin_themes_only() {
+    assert_eq!(
+        COLOR_SCHEME_CHOICES,
+        &[
+            ColorSchemeChoice::System,
+            ColorSchemeChoice::CatppuccinLatte,
+            ColorSchemeChoice::CatppuccinFrappe,
+            ColorSchemeChoice::CatppuccinMacchiato,
+            ColorSchemeChoice::CatppuccinMocha,
+            ColorSchemeChoice::GruvboxDark,
+            ColorSchemeChoice::GruvboxLight,
+            ColorSchemeChoice::GithubDark,
+            ColorSchemeChoice::GithubDarkHighContrast,
+            ColorSchemeChoice::GithubLight,
+            ColorSchemeChoice::GithubLightHighContrast,
+            ColorSchemeChoice::Tokyonight,
+        ]
+    );
 }
 
 #[test]
@@ -6446,6 +7217,31 @@ fn changeset_with_line_texts(texts: &[&str]) -> Changeset {
         }],
         raw_patch: Vec::new(),
     }
+}
+
+fn changeset_with_wrapped_leading_file() -> Changeset {
+    let mut changeset = changeset_with_files(&["wide.rs", "target.rs"]);
+    changeset.files[0].hunks[0].lines[0].text = "a".repeat(96);
+    changeset
+}
+
+fn set_wrapped_scroll_relative_to_file_start(
+    app: &mut DiffApp,
+    file: usize,
+    relative_scroll: usize,
+) {
+    app.line_wrapping = true;
+    app.set_viewport_width(18);
+    app.set_scroll(wrapped_file_start_scroll(app, file).saturating_add(relative_scroll));
+    assert_eq!(app.selected_file, file);
+}
+
+fn wrapped_file_start_scroll(app: &DiffApp, file: usize) -> usize {
+    let row = app
+        .model
+        .file_start_row(file)
+        .expect("file should be visible");
+    app.wrapped_visual_scroll_for_model_row(row)
 }
 
 fn changeset_with_hunk_at(repo: PathBuf, line_number: usize) -> Changeset {

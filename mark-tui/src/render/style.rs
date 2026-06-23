@@ -2,7 +2,7 @@ use mark_diff::{DiffLineKind, FileStatus};
 use mark_syntax::DiffSignStyle;
 use ratatui::prelude::{Color, Modifier, Span, Style};
 
-use crate::theme::{DIFF_INDICATOR, DiffTheme, STATUSLINE_BG, line_gutter_bg};
+use crate::theme::{DIFF_INDICATOR, DiffTheme, line_gutter_bg};
 
 pub(crate) fn file_sidebar_style(status: FileStatus, theme: DiffTheme) -> Style {
     let color = match status {
@@ -74,6 +74,6 @@ pub(crate) fn statusline_bg(theme: DiffTheme) -> Color {
     if theme.transparent_background {
         Color::Reset
     } else {
-        STATUSLINE_BG
+        theme.statusline_bg
     }
 }

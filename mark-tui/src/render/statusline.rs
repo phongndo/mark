@@ -15,10 +15,7 @@ use crate::{
         style::{base_bg, statusline_bg},
         text::{fit, fit_with_ellipsis, format_count, progress_label},
     },
-    theme::{
-        BRANCH_COMPARISON_SEPARATOR, STATUSLINE_ACCENT_BG, STATUSLINE_ACCENT_FG,
-        STATUSLINE_INFO_BG, STATUSLINE_INFO_FG, STATUSLINE_SELECTOR_GAP,
-    },
+    theme::{BRANCH_COMPARISON_SEPARATOR, STATUSLINE_SELECTOR_GAP},
 };
 
 pub(crate) fn draw_header(frame: &mut Frame<'_>, app: &DiffApp, area: Rect) {
@@ -246,7 +243,7 @@ pub(crate) fn push_file_filter_bar_spans(
         spans,
         "@",
         Style::default()
-            .fg(app.theme.foreground)
+            .fg(app.theme.statusline_fg)
             .bg(bg)
             .add_modifier(Modifier::BOLD),
         remaining,
@@ -254,7 +251,7 @@ pub(crate) fn push_file_filter_bar_spans(
     push_filter_bar_span(
         spans,
         query,
-        Style::default().fg(app.theme.foreground).bg(bg),
+        Style::default().fg(app.theme.statusline_fg).bg(bg),
         remaining,
     );
     if active {
@@ -274,7 +271,7 @@ pub(crate) fn push_grep_filter_bar_spans(
         spans,
         "/",
         Style::default()
-            .fg(app.theme.foreground)
+            .fg(app.theme.statusline_fg)
             .bg(bg)
             .add_modifier(Modifier::BOLD),
         remaining,
@@ -282,7 +279,7 @@ pub(crate) fn push_grep_filter_bar_spans(
     push_filter_bar_span(
         spans,
         query,
-        Style::default().fg(app.theme.foreground).bg(bg),
+        Style::default().fg(app.theme.statusline_fg).bg(bg),
         remaining,
     );
     if active {
@@ -357,8 +354,8 @@ pub(crate) fn statusline_header_line(app: &DiffApp, width: usize) -> Line<'stati
         spans.push(Span::styled(
             right,
             Style::default()
-                .fg(STATUSLINE_INFO_FG)
-                .bg(STATUSLINE_INFO_BG)
+                .fg(app.theme.statusline_info_fg)
+                .bg(app.theme.statusline_info_bg)
                 .add_modifier(Modifier::BOLD),
         ));
     }
@@ -375,8 +372,8 @@ pub(crate) fn push_statusline_left_spans(
         spans,
         diff_selector_text(&app.options),
         Style::default()
-            .fg(STATUSLINE_ACCENT_FG)
-            .bg(STATUSLINE_ACCENT_BG)
+            .fg(app.theme.statusline_accent_fg)
+            .bg(app.theme.statusline_accent_bg)
             .add_modifier(Modifier::BOLD),
         remaining,
     );

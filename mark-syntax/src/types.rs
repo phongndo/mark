@@ -207,6 +207,11 @@ pub(crate) struct StoredSyntaxSettings {
     pub(crate) mode: Option<SyntaxMode>,
     pub(crate) colorscheme: Option<StoredSyntaxThemeConfig>,
     pub(crate) theme: Option<StoredSyntaxThemeConfig>,
+    pub(crate) layout: Option<LayoutSetting>,
+    pub(crate) live_reload: Option<bool>,
+    pub(crate) syntax_highlighting: Option<bool>,
+    #[serde(default, alias = "word_wrap", alias = "wrap_lines")]
+    pub(crate) line_wrapping: bool,
     #[serde(default)]
     pub(crate) colors: ColorOverrides,
     #[serde(default, flatten)]
@@ -275,6 +280,10 @@ pub(crate) struct StoredSyntaxLimits {
 pub struct SyntaxSettings {
     pub mode: SyntaxMode,
     pub theme: SyntaxThemeConfig,
+    pub layout: Option<LayoutSetting>,
+    pub live_reload: bool,
+    pub syntax_highlighting: bool,
+    pub line_wrapping: bool,
     pub colors: ColorOverrides,
     pub transparent_background: bool,
     pub diff: DiffSettings,
@@ -286,6 +295,10 @@ impl Default for SyntaxSettings {
         Self {
             mode: SyntaxMode::Enabled,
             theme: SyntaxThemeConfig::default(),
+            layout: None,
+            live_reload: true,
+            syntax_highlighting: true,
+            line_wrapping: false,
             colors: ColorOverrides::default(),
             transparent_background: false,
             diff: DiffSettings::default(),
@@ -310,6 +323,12 @@ pub struct ColorOverrides {
     pub empty_diff: Option<String>,
     pub search_match_fg: Option<String>,
     pub search_match_bg: Option<String>,
+    pub statusline_fg: Option<String>,
+    pub statusline_bg: Option<String>,
+    pub statusline_accent_fg: Option<String>,
+    pub statusline_accent_bg: Option<String>,
+    pub statusline_info_fg: Option<String>,
+    pub statusline_info_bg: Option<String>,
     pub addition_fg: Option<String>,
     pub addition_gutter_bg: Option<String>,
     pub addition_bg: Option<String>,
@@ -351,6 +370,12 @@ impl ColorOverrides {
             empty_diff: overrides.empty_diff.or(self.empty_diff),
             search_match_fg: overrides.search_match_fg.or(self.search_match_fg),
             search_match_bg: overrides.search_match_bg.or(self.search_match_bg),
+            statusline_fg: overrides.statusline_fg.or(self.statusline_fg),
+            statusline_bg: overrides.statusline_bg.or(self.statusline_bg),
+            statusline_accent_fg: overrides.statusline_accent_fg.or(self.statusline_accent_fg),
+            statusline_accent_bg: overrides.statusline_accent_bg.or(self.statusline_accent_bg),
+            statusline_info_fg: overrides.statusline_info_fg.or(self.statusline_info_fg),
+            statusline_info_bg: overrides.statusline_info_bg.or(self.statusline_info_bg),
             addition_fg: overrides.addition_fg.or(self.addition_fg),
             addition_gutter_bg: overrides.addition_gutter_bg.or(self.addition_gutter_bg),
             addition_bg: overrides.addition_bg.or(self.addition_bg),
@@ -438,6 +463,15 @@ pub enum DiffSignStyle {
     Normal,
     #[default]
     Bold,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LayoutSetting {
+    #[serde(alias = "auto", alias = "responsive")]
+    Dynamic,
+    Split,
+    Unified,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
