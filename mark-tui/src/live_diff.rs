@@ -29,6 +29,8 @@ const REPO_GIT_STATE_PATHS: &[&str] = &[
     "config",
 ];
 const GITLINK_GIT_STATE_PATHS: &[&str] = &[
+    "index",
+    "index.lock",
     "HEAD",
     "HEAD.lock",
     "refs",

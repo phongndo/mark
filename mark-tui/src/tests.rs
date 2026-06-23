@@ -5006,12 +5006,14 @@ fn live_diff_filter_ignores_non_state_git_paths() {
     assert!(filter.is_relevant_path(&repo.join("vendor/nested/.git/HEAD")));
     assert!(filter.is_relevant_path(&repo.join("vendor/nested/.git/refs/heads/main")));
     assert!(filter.is_relevant_path(&repo.join("vendor/nested/.git/packed-refs")));
-    assert!(!filter.is_relevant_path(&repo.join("vendor/nested/.git/index.lock")));
+    assert!(filter.is_relevant_path(&repo.join("vendor/nested/.git/index")));
+    assert!(filter.is_relevant_path(&repo.join("vendor/nested/.git/index.lock")));
     assert!(!filter.is_relevant_path(&repo.join("vendor/nested/.git/config")));
     assert!(filter.is_relevant_path(&modules.join("vendor/added-after-start/HEAD")));
     assert!(filter.is_relevant_path(&modules.join("vendor/added-after-start/refs/heads/main")));
     assert!(filter.is_relevant_path(&modules.join("vendor/added-after-start/packed-refs")));
-    assert!(!filter.is_relevant_path(&modules.join("vendor/added-after-start/index.lock")));
+    assert!(filter.is_relevant_path(&modules.join("vendor/added-after-start/index")));
+    assert!(filter.is_relevant_path(&modules.join("vendor/added-after-start/index.lock")));
     assert!(!filter.is_relevant_path(&modules.join("vendor/added-after-start/config")));
     assert!(!filter.is_relevant_path(&other.join("file.rs")));
 }
@@ -5043,6 +5045,8 @@ fn live_diff_watch_spec_keeps_nested_git_state_relevant() {
     let added_submodule_ref =
         mark_git::git_path(&repo, "modules/vendor/added-after-start/refs/heads/main")
             .expect("future submodule ref path should resolve");
+    let added_submodule_index = mark_git::git_path(&repo, "modules/vendor/added-after-start/index")
+        .expect("future submodule index path should resolve");
     let added_submodule_index_lock =
         mark_git::git_path(&repo, "modules/vendor/added-after-start/index.lock")
             .expect("future submodule index path should resolve");
@@ -5054,9 +5058,9 @@ fn live_diff_watch_spec_keeps_nested_git_state_relevant() {
         spec.filter
             .is_relevant_path(&nested.join(".git/refs/heads/main"))
     );
+    assert!(spec.filter.is_relevant_path(&nested.join(".git/index")));
     assert!(
-        !spec
-            .filter
+        spec.filter
             .is_relevant_path(&nested.join(".git/index.lock"))
     );
     assert!(
@@ -5068,8 +5072,11 @@ fn live_diff_watch_spec_keeps_nested_git_state_relevant() {
             .is_relevant_path(&untracked_nested.join(".git/refs/heads/main"))
     );
     assert!(
-        !spec
-            .filter
+        spec.filter
+            .is_relevant_path(&untracked_nested.join(".git/index"))
+    );
+    assert!(
+        spec.filter
             .is_relevant_path(&untracked_nested.join(".git/index.lock"))
     );
     assert!(
@@ -5078,7 +5085,8 @@ fn live_diff_watch_spec_keeps_nested_git_state_relevant() {
     );
     assert!(spec.filter.is_relevant_path(&added_submodule_head));
     assert!(spec.filter.is_relevant_path(&added_submodule_ref));
-    assert!(!spec.filter.is_relevant_path(&added_submodule_index_lock));
+    assert!(spec.filter.is_relevant_path(&added_submodule_index));
+    assert!(spec.filter.is_relevant_path(&added_submodule_index_lock));
 
     fs::remove_dir_all(repo).expect("repo directory should be removed");
 }
