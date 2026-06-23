@@ -1361,34 +1361,35 @@ impl DiffApp {
     }
 
     pub(crate) fn handle_diff_menu_key(&mut self, key: KeyEvent) -> DxResult<bool> {
-        if key.code == KeyCode::Esc {
+        if self.keymap.matches_menu(MenuAction::Close, key) {
             self.close_diff_menu();
             return Ok(false);
         }
 
-        match key.code {
-            KeyCode::Enter => self.select_highlighted_diff_choice(),
-            KeyCode::Down | KeyCode::Tab => self.move_diff_menu_selection(1),
-            KeyCode::Up | KeyCode::BackTab => self.move_diff_menu_selection(-1),
-            KeyCode::Home => self.set_diff_menu_selection(0),
-            KeyCode::End => self.set_diff_menu_selection(usize::MAX),
-            KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.move_diff_menu_selection(1);
+        if self.keymap.matches_menu(MenuAction::Down, key) {
+            self.move_diff_menu_selection(1);
+        } else if self.keymap.matches_menu(MenuAction::Up, key) {
+            self.move_diff_menu_selection(-1);
+        } else if self.keymap.matches_menu(MenuAction::Select, key)
+            || self.keymap.matches_menu(MenuAction::Confirm, key)
+        {
+            self.select_highlighted_diff_choice();
+        } else {
+            match key.code {
+                KeyCode::Home => self.set_diff_menu_selection(0),
+                KeyCode::End => self.set_diff_menu_selection(usize::MAX),
+                KeyCode::Backspace => self.pop_diff_menu_input(),
+                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.clear_diff_menu_input();
+                }
+                KeyCode::Char(character)
+                    if !key.modifiers.contains(KeyModifiers::CONTROL)
+                        && !key.modifiers.contains(KeyModifiers::ALT) =>
+                {
+                    self.push_diff_menu_input(character);
+                }
+                _ => {}
             }
-            KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.move_diff_menu_selection(-1);
-            }
-            KeyCode::Backspace => self.pop_diff_menu_input(),
-            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.clear_diff_menu_input();
-            }
-            KeyCode::Char(character)
-                if !key.modifiers.contains(KeyModifiers::CONTROL)
-                    && !key.modifiers.contains(KeyModifiers::ALT) =>
-            {
-                self.push_diff_menu_input(character);
-            }
-            _ => {}
         }
 
         Ok(false)
@@ -3068,7 +3069,23 @@ impl DiffApp {
             self.invalidate_diff_cache();
             self.start_uncached_diff_load(self.options.clone(), "reload failed");
         } else {
+            self.cancel_stale_include_untracked_load();
             self.dirty = true;
+        }
+    }
+
+    fn cancel_stale_include_untracked_load(&mut self) {
+        let Some(pending) = &self.pending_diff_load else {
+            return;
+        };
+        if pending.options.include_untracked == self.options.include_untracked {
+            return;
+        }
+
+        let mut pending_options = pending.options.clone();
+        pending_options.include_untracked = self.options.include_untracked;
+        if pending_options == self.options {
+            self.pending_diff_load = None;
         }
     }
 

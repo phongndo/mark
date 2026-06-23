@@ -3457,6 +3457,58 @@ fn diff_menu_keyboard_selects_diff_choice() {
 }
 
 #[test]
+fn diff_menu_uses_configured_menu_keymap() {
+    let mut app = DiffApp::new(
+        DiffOptions::default(),
+        changeset_with_context_lines(1),
+        DiffLayoutMode::Unified,
+    );
+    app.branch_base = Some("main".to_owned());
+    app.branch_head = Some("feature".to_owned());
+    app.current_head = Some("feature".to_owned());
+    app.keymap = Keymap::parse(
+        r#"
+        [keymap.menu]
+        down = "j"
+        up = "k"
+        confirm = "space"
+        close = "q"
+        "#,
+    )
+    .expect("keymap should parse");
+
+    app.open_diff_menu();
+    assert_eq!(app.highlighted_diff_choice(), Some(DiffChoice::Branch));
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE))
+        .expect("configured down key should move menu selection");
+    assert_eq!(app.diff_menu_input, "");
+    assert_eq!(app.highlighted_diff_choice(), Some(DiffChoice::Unstaged));
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE))
+        .expect("configured up key should move menu selection");
+    assert_eq!(app.diff_menu_input, "");
+    assert_eq!(app.highlighted_diff_choice(), Some(DiffChoice::Branch));
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE))
+        .expect("configured close key should close menu");
+    assert!(!app.diff_menu_open);
+    assert_eq!(app.diff_menu_input, "");
+
+    app.open_diff_menu();
+    app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
+        .expect("configured confirm key should select menu item");
+
+    assert!(!app.diff_menu_open);
+    let load = app
+        .pending_diff_load
+        .as_ref()
+        .expect("menu selection should queue diff load");
+    assert_eq!(load.options.source, DiffSource::Base("main".to_owned()));
+    assert_eq!(load.options.scope, DiffScope::All);
+}
+
+#[test]
 fn diff_menu_ctrl_n_and_ctrl_p_move_selection() {
     let mut app = DiffApp::new(
         DiffOptions::default(),
@@ -3755,6 +3807,36 @@ fn options_menu_include_untracked_applies_with_single_reload() {
         .as_ref()
         .expect("include-untracked should queue reload");
     assert!(!load.options.include_untracked);
+}
+
+#[test]
+fn options_menu_include_untracked_toggle_back_cancels_stale_reload() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    assert!(app.options.include_untracked);
+
+    app.open_options_menu();
+    app.move_options_menu_selection(2);
+    assert_eq!(
+        app.highlighted_option(),
+        Some(OptionsMenuItem::IncludeUntracked)
+    );
+
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("enter should toggle include-untracked off");
+    let load = app
+        .pending_diff_load
+        .as_ref()
+        .expect("include-untracked should queue reload");
+    assert!(!load.options.include_untracked);
+
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("enter should toggle include-untracked back on");
+
+    assert!(app.pending_diff_load.is_none());
+    assert!(app.options_menu_open);
+    assert!(app.options.include_untracked);
+    assert!(app.options_menu_draft.include_untracked);
 }
 
 #[test]
