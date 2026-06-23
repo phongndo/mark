@@ -17,6 +17,24 @@ use crate::theme::LIVE_RELOAD_DEBOUNCE;
 
 const LIVE_DIFF_CONTROL_CHANNEL_CAPACITY: usize = 64;
 const LIVE_DIFF_RELOAD_CHANNEL_CAPACITY: usize = 4;
+const REPO_GIT_STATE_PATHS: &[&str] = &[
+    "index",
+    "index.lock",
+    "HEAD",
+    "HEAD.lock",
+    "refs",
+    "packed-refs",
+    "packed-refs.lock",
+    "info/exclude",
+    "config",
+];
+const GITLINK_GIT_STATE_PATHS: &[&str] = &[
+    "HEAD",
+    "HEAD.lock",
+    "refs",
+    "packed-refs",
+    "packed-refs.lock",
+];
 
 pub(crate) struct LiveDiff {
     pub(crate) options: DiffOptions,
@@ -153,6 +171,7 @@ impl LiveDiffWatchSpec {
             filter: LiveDiffFilter {
                 repo: repo.to_path_buf(),
                 git_state_paths: Vec::new(),
+                git_modules_paths: Vec::new(),
                 exact_paths: Vec::new(),
             },
         };
@@ -166,6 +185,7 @@ impl LiveDiffWatchSpec {
             filter: LiveDiffFilter {
                 repo: repo.to_path_buf(),
                 git_state_paths: Vec::new(),
+                git_modules_paths: Vec::new(),
                 exact_paths: Vec::new(),
             },
         }
@@ -179,6 +199,17 @@ impl LiveDiffWatchSpec {
             .any(|known| known == &path)
         {
             self.filter.git_state_paths.push(path);
+        }
+    }
+
+    pub(crate) fn add_git_modules_path(&mut self, path: PathBuf) {
+        if !self
+            .filter
+            .git_modules_paths
+            .iter()
+            .any(|known| known == &path)
+        {
+            self.filter.git_modules_paths.push(path);
         }
     }
 
@@ -209,12 +240,22 @@ impl LiveDiffWatchSpec {
             self.add_watch_path(parent.to_path_buf(), false);
         }
     }
+
+    pub(crate) fn add_git_modules(&mut self, path: PathBuf) {
+        self.add_git_modules_path(path.clone());
+        if path.is_dir() {
+            self.add_watch_path(path, true);
+        } else if let Some(parent) = path.parent() {
+            self.add_watch_path(parent.to_path_buf(), true);
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct LiveDiffFilter {
     pub(crate) repo: PathBuf,
     pub(crate) git_state_paths: Vec<PathBuf>,
+    pub(crate) git_modules_paths: Vec<PathBuf>,
     pub(crate) exact_paths: Vec<PathBuf>,
 }
 
@@ -248,6 +289,14 @@ impl LiveDiffFilter {
             return true;
         }
 
+        if self.is_git_modules_state_path(path) {
+            return true;
+        }
+
+        if self.is_nested_git_state_path(path) {
+            return true;
+        }
+
         if self.is_inside_dot_git(path) {
             return false;
         }
@@ -273,6 +322,39 @@ impl LiveDiffFilter {
         })
     }
 
+    pub(crate) fn is_git_modules_state_path(&self, path: &Path) -> bool {
+        self.git_modules_paths.iter().any(|modules_path| {
+            let Ok(relative) = path.strip_prefix(modules_path) else {
+                return false;
+            };
+
+            let mut components = relative.components();
+            while components.next().is_some() {
+                if is_gitlink_git_state_path(components.as_path()) {
+                    return true;
+                }
+            }
+
+            false
+        })
+    }
+
+    pub(crate) fn is_nested_git_state_path(&self, path: &Path) -> bool {
+        let Ok(relative) = path.strip_prefix(&self.repo) else {
+            return false;
+        };
+
+        let mut components = relative.components();
+        let mut depth = 0;
+        while let Some(component) = components.next() {
+            if component.as_os_str() == OsStr::new(".git") {
+                return depth > 0 && is_gitlink_git_state_path(components.as_path());
+            }
+            depth += 1;
+        }
+        false
+    }
+
     pub(crate) fn is_inside_dot_git(&self, path: &Path) -> bool {
         let Ok(relative) = path.strip_prefix(&self.repo) else {
             return false;
@@ -282,6 +364,13 @@ impl LiveDiffFilter {
             .components()
             .any(|component| component.as_os_str() == OsStr::new(".git"))
     }
+}
+
+fn is_gitlink_git_state_path(path: &Path) -> bool {
+    GITLINK_GIT_STATE_PATHS.iter().any(|git_path| {
+        let git_path = Path::new(*git_path);
+        path == git_path || path.starts_with(git_path)
+    })
 }
 
 pub(crate) fn live_diff_supported(options: &DiffOptions) -> bool {
@@ -305,20 +394,24 @@ pub(crate) fn live_diff_watch_spec_for_options(
 
 pub(crate) fn live_diff_watch_spec(repo: &Path) -> MarkResult<LiveDiffWatchSpec> {
     let mut spec = LiveDiffWatchSpec::new(repo);
-    for git_path in [
-        "index",
-        "index.lock",
-        "HEAD",
-        "HEAD.lock",
-        "refs",
-        "packed-refs",
-        "packed-refs.lock",
-        "info/exclude",
-        "config",
-    ] {
+    for git_path in REPO_GIT_STATE_PATHS {
         spec.add_git_state(mark_git::git_path(repo, git_path)?);
     }
+    spec.add_git_modules(mark_git::git_path(repo, "modules")?);
+    add_gitlink_git_state(&mut spec, repo)?;
     Ok(spec)
+}
+
+fn add_gitlink_git_state(spec: &mut LiveDiffWatchSpec, repo: &Path) -> MarkResult<()> {
+    for gitlink in mark_git::gitlink_paths(repo)? {
+        let gitlink_repo = repo.join(gitlink);
+        for git_path in GITLINK_GIT_STATE_PATHS {
+            if let Ok(path) = mark_git::git_path(&gitlink_repo, git_path) {
+                spec.add_git_state(path);
+            }
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn live_diff_difftool_watch_spec(

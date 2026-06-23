@@ -408,6 +408,20 @@ fn untracked_paths(repo: &Path) -> MarkResult<Vec<PathBuf>> {
     Ok(parse_untracked_paths(&output.stdout))
 }
 
+pub fn gitlink_paths(repo: &Path) -> MarkResult<Vec<PathBuf>> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["ls-files", "-s", "-z"])
+        .output()?;
+
+    if !output.status.success() {
+        return Err(git_error("failed to list gitlink paths", &output));
+    }
+
+    Ok(parse_gitlink_paths(&output.stdout))
+}
+
 pub fn git_path(repo: &Path, path: &str) -> MarkResult<PathBuf> {
     let output = Command::new("git")
         .arg("-C")
@@ -504,6 +518,20 @@ fn parse_untracked_paths(output: &[u8]) -> Vec<PathBuf> {
         .split(|byte| *byte == 0)
         .filter(|path| !path.is_empty())
         .map(path_from_git_bytes)
+        .collect()
+}
+
+fn parse_gitlink_paths(output: &[u8]) -> Vec<PathBuf> {
+    output
+        .split(|byte| *byte == 0)
+        .filter_map(|record| {
+            let tab = record.iter().position(|byte| *byte == b'\t')?;
+            if record.starts_with(b"160000 ") {
+                Some(path_from_git_bytes(&record[tab + 1..]))
+            } else {
+                None
+            }
+        })
         .collect()
 }
 
@@ -681,6 +709,18 @@ mod tests {
         );
     }
 
+    #[test]
+    fn gitlink_paths_read_nul_records() {
+        assert_eq!(
+            parse_gitlink_paths(
+                b"100644 1111111111111111111111111111111111111111 0\tfile.txt\0\
+                  160000 2222222222222222222222222222222222222222 0\tvendor/nested\0\
+                  160000 3333333333333333333333333333333333333333 0\tline\nbreak\0",
+            ),
+            vec![PathBuf::from("vendor/nested"), PathBuf::from("line\nbreak")]
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn untracked_paths_preserve_non_utf8_paths() {
@@ -692,6 +732,38 @@ mod tests {
                 b"invalid-\xff.txt".to_vec()
             ))]
         );
+    }
+
+    #[test]
+    fn gitlink_paths_read_tracked_nested_repositories() {
+        let test_dir = env::temp_dir().join(format!(
+            "mark-git-gitlink-paths-test-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system time should be after unix epoch")
+                .as_nanos()
+        ));
+        let repo = test_dir.join("repo");
+        let nested = repo.join("vendor/nested");
+        fs::create_dir_all(&nested).expect("test directory should be created");
+
+        git(["init", "-q", repo.to_str().unwrap()], &test_dir);
+        git(["config", "user.email", "test@example.com"], &repo);
+        git(["config", "user.name", "Test"], &repo);
+        git(["init", "-q"], &nested);
+        git(["config", "user.email", "test@example.com"], &nested);
+        git(["config", "user.name", "Test"], &nested);
+        fs::write(nested.join("file.txt"), "nested\n").expect("nested file should be written");
+        git(["add", "file.txt"], &nested);
+        git(["commit", "-q", "-m", "nested"], &nested);
+        git(["add", "vendor/nested"], &repo);
+
+        assert_eq!(
+            gitlink_paths(&repo).expect("gitlink paths should be listed"),
+            vec![PathBuf::from("vendor/nested")]
+        );
+
+        fs::remove_dir_all(test_dir).expect("test directory should be removed");
     }
 
     #[test]
