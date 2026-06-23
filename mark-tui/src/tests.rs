@@ -3,7 +3,7 @@ use crate::render::{
         SplitCellRender, SplitLineRender, SplitSide, content_spans_at_scroll, context_hide_line,
         context_show_line, empty_diff_fill_from, inline_bg, render_row, render_row_with_focus,
         render_row_wrapped_with_focus, render_split_line_with_focus, render_unified_line_at_scroll,
-        row_bg, split_cell_spans_at_scroll, syntax_fg,
+        row_bg, split_cell_spans_at_scroll, syntax_fg, wrapped_diff_lines_for_viewport,
     },
     grep::{grep_highlight_target_for_columns, highlighted_grep_text_line},
     headers::{file_header_line, file_separator_line, hunk_header_line, hunk_header_spans},
@@ -4075,6 +4075,34 @@ fn line_wrapping_wraps_long_unified_rows() {
     assert!(rendered[0].contains("abcd"));
     assert!(rendered[1].contains("efgh"));
     assert!(rendered[2].contains("ijkl"));
+}
+
+#[test]
+fn line_wrapping_scrolls_through_continuation_rows() {
+    let changeset = changeset_with_line_text("abcdefghijklmnopqrstuvwx");
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.line_wrapping = true;
+    app.set_viewport_width(18);
+    app.set_viewport_rows(4);
+
+    assert_eq!(app.model.len(), 3);
+    assert_eq!(app.max_scroll(), 4);
+
+    app.set_scroll(app.max_scroll());
+    let lines = wrapped_diff_lines_for_viewport(&mut app, 18, 4);
+    let rendered = lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(rendered.len(), 4);
+    assert!(rendered[0].contains("ijkl"));
+    assert!(rendered[3].contains("uvwx"));
 }
 
 #[test]

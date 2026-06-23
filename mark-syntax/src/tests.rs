@@ -438,6 +438,37 @@ fn syntax_settings_default_to_enabled_system_colorscheme() {
 }
 
 #[test]
+fn settings_write_path_preserves_legacy_settings_source() {
+    let dir = temp_syntax_test_dir("settings-write-path");
+    let settings_path = dir.join("config.toml");
+    let legacy_settings_path = dir.join("syntax.toml");
+
+    assert_eq!(
+        crate::paths::settings_write_path_from_paths(
+            settings_path.clone(),
+            legacy_settings_path.clone()
+        ),
+        settings_path
+    );
+
+    fs::write(&legacy_settings_path, "colorscheme = \"ansi\"\n")
+        .expect("legacy settings should be written");
+    assert_eq!(
+        crate::paths::settings_write_path_from_paths(
+            settings_path.clone(),
+            legacy_settings_path.clone()
+        ),
+        legacy_settings_path
+    );
+
+    fs::write(&settings_path, "line_wrapping = true\n").expect("settings should be written");
+    assert_eq!(
+        crate::paths::settings_write_path_from_paths(settings_path.clone(), legacy_settings_path),
+        settings_path
+    );
+}
+
+#[test]
 fn syntax_settings_supports_persistent_ui_settings() {
     let settings = parse_settings(
         r#"

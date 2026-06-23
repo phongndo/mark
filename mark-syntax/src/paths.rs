@@ -14,8 +14,26 @@ pub fn settings_path() -> MarkResult<PathBuf> {
     config_home().map(|path| path.join(CONFIG_DIR).join(SETTINGS_FILE))
 }
 
+pub fn settings_write_path() -> MarkResult<PathBuf> {
+    Ok(settings_write_path_from_paths(
+        settings_path()?,
+        legacy_settings_path()?,
+    ))
+}
+
 pub(crate) fn legacy_settings_path() -> MarkResult<PathBuf> {
     config_home().map(|path| path.join(CONFIG_DIR).join(LEGACY_SETTINGS_FILE))
+}
+
+pub(crate) fn settings_write_path_from_paths(
+    settings_path: PathBuf,
+    legacy_settings_path: PathBuf,
+) -> PathBuf {
+    if !settings_path.exists() && legacy_settings_path.exists() {
+        legacy_settings_path
+    } else {
+        settings_path
+    }
 }
 
 pub fn colorscheme_dir() -> MarkResult<PathBuf> {

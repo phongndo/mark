@@ -2517,7 +2517,10 @@ impl DiffApp {
             return false;
         }
 
-        let row_index = self.scroll.saturating_add(usize::from(row - 1));
+        let visual_row = self.scroll.saturating_add(usize::from(row - 1));
+        let Some((row_index, _)) = self.model_row_at_scroll(visual_row) else {
+            return false;
+        };
         self.handle_context_at_row(row_index)
     }
 
@@ -3226,7 +3229,15 @@ impl DiffApp {
             self.set_syntax_enabled(draft.syntax_enabled);
         }
         if draft.line_wrapping != self.line_wrapping {
+            let next_scroll = if draft.line_wrapping {
+                self.wrapped_visual_scroll_for_model_row(self.scroll)
+            } else {
+                self.model_row_at_scroll(self.scroll)
+                    .map(|(row, _)| row)
+                    .unwrap_or_default()
+            };
             self.line_wrapping = draft.line_wrapping;
+            self.set_scroll(next_scroll);
             self.set_horizontal_scroll(self.horizontal_scroll);
             self.dirty = true;
         }
@@ -3246,7 +3257,7 @@ impl DiffApp {
             return;
         }
 
-        let result = mark_syntax::settings_path()
+        let result = mark_syntax::settings_write_path()
             .and_then(|path| persist_options_menu_draft_to_path(&path, draft, changed_item));
         if let Err(error) = result {
             self.set_error_log(format!("settings not saved: {error}"));
@@ -4077,6 +4088,153 @@ impl DiffApp {
         self.set_scroll_with_grep_sync(scroll, true, HunkFocusScrollBehavior::ClearOnScroll);
     }
 
+    fn cached_context_line_text(
+        &self,
+        file: usize,
+        old_line: usize,
+        new_line: usize,
+    ) -> Option<&str> {
+        for side in [DiffSide::New, DiffSide::Old] {
+            let key = ContextSourceKey { file, side };
+            match self.context_cache.get(&key) {
+                Some(ContextSourceEntry::Lines(lines)) => {
+                    let line_number = match side {
+                        DiffSide::Old => old_line,
+                        DiffSide::New => new_line,
+                    };
+                    let Some(line_index) = line_number.checked_sub(1) else {
+                        return Some("");
+                    };
+                    return Some(lines.get(line_index).map(String::as_str).unwrap_or(""));
+                }
+                Some(ContextSourceEntry::Unavailable) => continue,
+                None if self.has_context_source(file, side) => return None,
+                None => {}
+            }
+        }
+        None
+    }
+
+    fn wrapped_visual_height_for_text(&self, text: &str) -> usize {
+        match self.layout {
+            DiffLayoutMode::Unified => {
+                wrapped_line_count(text, unified_content_width(self.viewport_width))
+            }
+            DiffLayoutMode::Split => {
+                let left_width = self.viewport_width / 2;
+                let right_width = self.viewport_width.saturating_sub(left_width);
+                wrapped_line_count(text, split_cell_content_width(left_width)).max(
+                    wrapped_line_count(text, split_cell_content_width(right_width)),
+                )
+            }
+        }
+    }
+
+    fn wrapped_visual_height_for_row(&self, row: UiRow) -> usize {
+        match row {
+            UiRow::ContextLine {
+                file,
+                old_line,
+                new_line,
+            } => self
+                .cached_context_line_text(file, old_line, new_line)
+                .map(|text| self.wrapped_visual_height_for_text(text))
+                .unwrap_or(1),
+            UiRow::UnifiedLine { file, hunk, line } | UiRow::MetaLine { file, hunk, line } => {
+                let text = &self.changeset.files[file].hunks[hunk].lines[line].text;
+                wrapped_line_count(text, unified_content_width(self.viewport_width))
+            }
+            UiRow::SplitLine {
+                file,
+                hunk,
+                left,
+                right,
+            } => {
+                let lines = &self.changeset.files[file].hunks[hunk].lines;
+                let left_width = self.viewport_width / 2;
+                let right_width = self.viewport_width.saturating_sub(left_width);
+                let left_content_width = split_cell_content_width(left_width);
+                let right_content_width = split_cell_content_width(right_width);
+                let left_rows = left
+                    .and_then(|index| lines.get(index))
+                    .map(|line| wrapped_line_count(&line.text, left_content_width))
+                    .unwrap_or(1);
+                let right_rows = right
+                    .and_then(|index| lines.get(index))
+                    .map(|line| wrapped_line_count(&line.text, right_content_width))
+                    .unwrap_or(1);
+                left_rows.max(right_rows).max(1)
+            }
+            UiRow::FileSeparator
+            | UiRow::FileHeader(_)
+            | UiRow::BinaryFile(_)
+            | UiRow::Collapsed { .. }
+            | UiRow::ContextHide { .. }
+            | UiRow::HunkHeader { .. } => 1,
+        }
+    }
+
+    fn wrapped_visual_row_count(&self) -> usize {
+        (0..self.model.len())
+            .filter_map(|row_index| self.model.row(row_index))
+            .map(|row| self.wrapped_visual_height_for_row(row))
+            .sum()
+    }
+
+    pub(crate) fn wrapped_visual_scroll_for_model_row(&self, row_index: usize) -> usize {
+        (0..row_index.min(self.model.len()))
+            .filter_map(|row_index| self.model.row(row_index))
+            .map(|row| self.wrapped_visual_height_for_row(row))
+            .sum()
+    }
+
+    pub(crate) fn model_row_at_scroll(&self, scroll: usize) -> Option<(usize, usize)> {
+        if !self.line_wrapping {
+            return self.model.row(scroll).map(|_| (scroll, 0));
+        }
+
+        let mut remaining = scroll;
+        for row_index in 0..self.model.len() {
+            let row = self.model.row(row_index)?;
+            let height = self.wrapped_visual_height_for_row(row);
+            if remaining < height {
+                return Some((row_index, remaining));
+            }
+            remaining = remaining.saturating_sub(height);
+        }
+        None
+    }
+
+    fn scroll_for_model_row(&self, row: usize) -> usize {
+        if self.line_wrapping {
+            self.wrapped_visual_scroll_for_model_row(row)
+        } else {
+            row
+        }
+    }
+
+    fn visible_model_range_for_viewport(&self, visible_rows: usize) -> Option<Range<usize>> {
+        if visible_rows == 0 || self.model.is_empty() {
+            return None;
+        }
+
+        if !self.line_wrapping {
+            let visible_start = self.scroll.min(self.model.len());
+            let visible_end = visible_start
+                .saturating_add(visible_rows)
+                .min(self.model.len());
+            return (visible_start < visible_end).then_some(visible_start..visible_end);
+        }
+
+        let visible_start = self.model_row_at_scroll(self.scroll).map(|(row, _)| row)?;
+        let visible_end = self
+            .model_row_at_scroll(self.scroll.saturating_add(visible_rows - 1))
+            .map(|(row, _)| row.saturating_add(1))
+            .unwrap_or_else(|| self.model.len());
+
+        (visible_start < visible_end).then_some(visible_start..visible_end)
+    }
+
     fn clear_manual_hunk_focus(&mut self) {
         self.manual_hunk_focus = None;
     }
@@ -4103,7 +4261,7 @@ impl DiffApp {
     pub(crate) fn set_scroll_centered_on(&mut self, row: usize) {
         let center_offset = viewport_center_offset(self.viewport_rows);
         self.set_scroll_with_grep_sync(
-            row.saturating_sub(center_offset),
+            self.scroll_for_model_row(row).saturating_sub(center_offset),
             false,
             HunkFocusScrollBehavior::ClearOnScroll,
         );
@@ -4114,18 +4272,23 @@ impl DiffApp {
             return;
         };
 
-        let focus_rows = range.end.saturating_sub(range.start).max(1);
+        let focus_start = self.scroll_for_model_row(range.start);
+        let focus_end = self
+            .scroll_for_model_row(range.end)
+            .max(focus_start.saturating_add(1));
+        let hunk_start = self.scroll_for_model_row(hunk_start);
+        let focus_rows = focus_end.saturating_sub(focus_start).max(1);
         let scroll = if focus_rows > self.viewport_rows {
             // Oversized focus ranges cannot be fully centered. Keep the first
             // useful context row when possible, but never so much context that
             // the hunk header itself falls below the viewport.
-            range.start.max(
+            focus_start.max(
                 hunk_start
                     .saturating_add(1)
                     .saturating_sub(self.viewport_rows),
             )
         } else {
-            let focus_center = range.start.saturating_add(focus_rows.saturating_sub(1) / 2);
+            let focus_center = focus_start.saturating_add(focus_rows.saturating_sub(1) / 2);
             focus_center.saturating_sub(viewport_center_offset(self.viewport_rows))
         };
         self.set_scroll_with_grep_sync(scroll, false, HunkFocusScrollBehavior::Preserve);
@@ -4169,7 +4332,12 @@ impl DiffApp {
         {
             self.clear_manual_hunk_focus();
         }
-        if let Some(file) = self.model.file_at_row(self.scroll) {
+        if let Some(file) = if self.line_wrapping {
+            self.model_row_at_scroll(self.scroll)
+                .and_then(|(row, _)| self.model.file_at_row(row))
+        } else {
+            self.model.file_at_row(self.scroll)
+        } {
             self.selected_file = file;
         }
         if sync_grep && self.scroll != previous_scroll {
@@ -4181,7 +4349,12 @@ impl DiffApp {
     }
 
     pub(crate) fn max_scroll(&self) -> usize {
-        max_scroll_for_viewport(self.model.len(), self.viewport_rows)
+        let row_count = if self.line_wrapping {
+            self.wrapped_visual_row_count()
+        } else {
+            self.model.len()
+        };
+        max_scroll_for_viewport(row_count, self.viewport_rows)
     }
 
     pub(crate) fn max_horizontal_scroll(&self) -> usize {
@@ -4194,13 +4367,9 @@ impl DiffApp {
     }
 
     pub(crate) fn focused_hunk_for_viewport(&self, visible_rows: usize) -> Option<(usize, usize)> {
-        let visible_start = self.scroll;
-        let visible_end = visible_start
-            .saturating_add(visible_rows)
-            .min(self.model.len());
-        if visible_start >= visible_end {
-            return None;
-        }
+        let visible_range = self.visible_model_range_for_viewport(visible_rows)?;
+        let visible_start = visible_range.start;
+        let visible_end = visible_range.end;
 
         if let Some((file, hunk)) = self.manual_hunk_focus
             && let Some(row) = self.model.hunk_start_row(file, hunk)
@@ -4210,10 +4379,26 @@ impl DiffApp {
             return Some((file, hunk));
         }
 
-        let search = if max_scroll_for_viewport(self.model.len(), visible_rows) == 0 {
+        let row_count = if self.line_wrapping {
+            self.wrapped_visual_row_count()
+        } else {
+            self.model.len()
+        };
+        let search = if max_scroll_for_viewport(row_count, visible_rows) == 0 {
             // When the whole diff fits, start at the first visible hunk; explicit hunk
             // navigation is tracked separately with manual_hunk_focus.
             HunkFocusSearch::FirstVisible
+        } else if self.line_wrapping {
+            let focus_visual_row = self.scroll.saturating_add(viewport_focus_offset(
+                self.scroll,
+                row_count,
+                visible_rows,
+            ));
+            HunkFocusSearch::NearestTo(
+                self.model_row_at_scroll(focus_visual_row)
+                    .map(|(row, _)| row)
+                    .unwrap_or(visible_start),
+            )
         } else {
             HunkFocusSearch::NearestTo(
                 visible_start
@@ -4263,17 +4448,11 @@ impl DiffApp {
     }
 
     pub(crate) fn focused_hunk_editor_line(&self, file: usize, hunk: usize) -> Option<usize> {
-        let visible_start = self.scroll;
-        let visible_end = visible_start
-            .saturating_add(self.viewport_rows)
-            .min(self.model.len());
-        if visible_start >= visible_end {
-            return None;
-        }
+        let visible_range = self.visible_model_range_for_viewport(self.viewport_rows)?;
 
         find_visible_row_outward(
-            visible_start,
-            visible_end,
+            visible_range.start,
+            visible_range.end,
             self.viewport_focus_row(),
             |row_index| self.editor_line_at_hunk_row(row_index, file, hunk),
         )
@@ -4491,6 +4670,19 @@ impl DiffApp {
     }
 
     pub(crate) fn viewport_focus_row(&self) -> usize {
+        if self.line_wrapping {
+            let row_count = self.wrapped_visual_row_count();
+            let focus_scroll = self.scroll.saturating_add(viewport_focus_offset(
+                self.scroll,
+                row_count,
+                self.viewport_rows,
+            ));
+            return self
+                .model_row_at_scroll(focus_scroll)
+                .map(|(row, _)| row)
+                .unwrap_or_else(|| self.model.len().saturating_sub(1));
+        }
+
         self.scroll
             .saturating_add(viewport_focus_offset(
                 self.scroll,
@@ -4529,8 +4721,23 @@ impl DiffApp {
             return;
         }
 
+        let wrapped_position = self
+            .line_wrapping
+            .then(|| self.model_row_at_scroll(self.scroll))
+            .flatten();
         self.viewport_width = width;
         self.set_horizontal_scroll(self.horizontal_scroll);
+        if let Some((row, row_offset)) = wrapped_position {
+            let row_scroll = self.wrapped_visual_scroll_for_model_row(row);
+            let row_height = self
+                .model
+                .row(row)
+                .map(|row| self.wrapped_visual_height_for_row(row))
+                .unwrap_or(1);
+            self.set_scroll(
+                row_scroll.saturating_add(row_offset.min(row_height.saturating_sub(1))),
+            );
+        }
     }
 
     pub(crate) fn scroll_file_sidebar_by(&mut self, delta: isize) {
@@ -4582,10 +4789,11 @@ impl DiffApp {
         let mut requested = HashSet::new();
         let mut requested_files = HashSet::new();
 
-        let visible_start = self.scroll;
-        let visible_end = visible_start
-            .saturating_add(visible_rows)
-            .min(self.model.len());
+        let Some(visible_range) = self.visible_model_range_for_viewport(visible_rows) else {
+            return;
+        };
+        let visible_start = visible_range.start;
+        let visible_end = visible_range.end;
         self.prepare_syntax_for_range(
             visible_start,
             visible_end,
@@ -4888,7 +5096,7 @@ impl DiffApp {
         let relative_scroll = self
             .model
             .file_start_row(self.selected_file)
-            .map(|start| self.scroll.saturating_sub(start))
+            .map(|start| self.scroll.saturating_sub(self.scroll_for_model_row(start)))
             .unwrap_or_default();
 
         let search_result = self.search_index.search_with_grep_match_limit(
@@ -5014,7 +5222,7 @@ impl DiffApp {
         let relative_scroll = self
             .model
             .file_start_row(self.selected_file)
-            .map(|start| self.scroll.saturating_sub(start))
+            .map(|start| self.scroll.saturating_sub(self.scroll_for_model_row(start)))
             .unwrap_or_default();
 
         self.replace_visible_files(
@@ -5062,7 +5270,10 @@ impl DiffApp {
         let scroll = self
             .model
             .file_start_row(self.selected_file)
-            .map(|start| start.saturating_add(relative_scroll))
+            .map(|start| {
+                self.scroll_for_model_row(start)
+                    .saturating_add(relative_scroll)
+            })
             .unwrap_or_default();
         let scroll_behavior = match hunk_focus_behavior {
             HunkFocusModelBehavior::PreserveIfValid => HunkFocusScrollBehavior::Preserve,
@@ -5109,7 +5320,14 @@ impl DiffApp {
         self.selected_grep_match = self
             .grep_matches
             .iter()
-            .position(|row| *row >= self.scroll)
+            .position(|row| {
+                let scroll = if self.line_wrapping {
+                    self.wrapped_visual_scroll_for_model_row(*row)
+                } else {
+                    *row
+                };
+                scroll >= self.scroll
+            })
             .or_else(|| self.grep_matches.len().checked_sub(1));
     }
 
@@ -5129,7 +5347,14 @@ impl DiffApp {
         let current = self.selected_grep_match.unwrap_or_else(|| {
             self.grep_matches
                 .iter()
-                .position(|row| *row >= self.scroll)
+                .position(|row| {
+                    let scroll = if self.line_wrapping {
+                        self.wrapped_visual_scroll_for_model_row(*row)
+                    } else {
+                        *row
+                    };
+                    scroll >= self.scroll
+                })
                 .unwrap_or(0)
         });
         let next = if delta < 0 {
@@ -5373,13 +5598,12 @@ impl DiffApp {
 
         self.set_scroll_focused_on_hunk(file, hunk);
 
-        let visible_start = self.scroll;
-        let visible_end = visible_start
-            .saturating_add(self.viewport_rows)
-            .min(self.model.len());
+        let Some(visible_range) = self.visible_model_range_for_viewport(self.viewport_rows) else {
+            return;
+        };
         if let Some(row) = self.model.hunk_start_row(file, hunk)
-            && row >= visible_start
-            && row < visible_end
+            && row >= visible_range.start
+            && row < visible_range.end
         {
             let previous_file = self.selected_file;
             self.manual_hunk_focus = Some((file, hunk));
@@ -5435,6 +5659,7 @@ impl DiffApp {
         let scroll = self
             .model
             .file_start_row(self.selected_file)
+            .map(|row| self.scroll_for_model_row(row))
             .unwrap_or_default();
         self.set_scroll(scroll);
         self.sync_grep_match_selection_to_scroll();
@@ -5898,4 +6123,12 @@ pub(crate) fn split_cell_content_width(width: usize) -> usize {
     let indicator_width = 1.min(width);
     let gutter_width = GUTTER_WIDTH.min(width.saturating_sub(indicator_width));
     width.saturating_sub(indicator_width + gutter_width)
+}
+
+pub(crate) fn wrapped_line_count(text: &str, content_width: usize) -> usize {
+    if content_width == 0 {
+        return 1;
+    }
+
+    (text.width().saturating_add(content_width - 1) / content_width.max(1)).max(1)
 }

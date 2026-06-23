@@ -6,10 +6,9 @@ use ratatui::{
     prelude::{Color, Line, Modifier, Span, Style, Text},
     widgets::Paragraph,
 };
-use unicode_width::UnicodeWidthStr;
 
 use crate::{
-    app::{DiffApp, split_cell_content_width, unified_content_width},
+    app::{DiffApp, split_cell_content_width, unified_content_width, wrapped_line_count},
     controls::DiffLayoutMode,
     model::UiRow,
     render::{
@@ -82,26 +81,34 @@ pub(crate) fn draw_diff(frame: &mut Frame<'_>, app: &mut DiffApp, area: Rect) {
 }
 
 fn draw_wrapped_diff(frame: &mut Frame<'_>, app: &mut DiffApp, area: Rect, visible_rows: usize) {
+    let lines = wrapped_diff_lines_for_viewport(app, area.width as usize, visible_rows);
+    frame.render_widget(
+        Paragraph::new(Text::from(lines)).style(Style::default().bg(base_bg(app.theme))),
+        area,
+    );
+}
+
+pub(crate) fn wrapped_diff_lines_for_viewport(
+    app: &mut DiffApp,
+    width: usize,
+    visible_rows: usize,
+) -> Vec<Line<'static>> {
     let mut lines = Vec::with_capacity(visible_rows);
     let focused_hunk = app.focused_hunk_for_viewport(visible_rows);
-    let mut row_index = app.scroll;
+    let Some((mut row_index, mut row_offset)) = app.model_row_at_scroll(app.scroll) else {
+        return lines;
+    };
     while lines.len() < visible_rows {
         let Some(row) = app.model.row(row_index) else {
             break;
         };
         let remaining = visible_rows.saturating_sub(lines.len());
-        lines.extend(
-            render_row_wrapped_with_focus(app, row_index, row, area.width as usize, focused_hunk)
-                .into_iter()
-                .take(remaining),
-        );
+        let rendered = render_row_wrapped_with_focus(app, row_index, row, width, focused_hunk);
+        lines.extend(rendered.into_iter().skip(row_offset).take(remaining));
+        row_offset = 0;
         row_index = row_index.saturating_add(1);
     }
-
-    frame.render_widget(
-        Paragraph::new(Text::from(lines)).style(Style::default().bg(base_bg(app.theme))),
-        area,
-    );
+    lines
 }
 
 pub(crate) fn render_row(
@@ -688,14 +695,6 @@ fn highlight_wrapped_unified_grep_line(
     .into_iter()
     .collect();
     highlighted_grep_text_line(rendered, query, targets, theme)
-}
-
-fn wrapped_line_count(text: &str, content_width: usize) -> usize {
-    if content_width == 0 {
-        return 1;
-    }
-
-    (text.width().saturating_add(content_width - 1) / content_width.max(1)).max(1)
 }
 
 pub(crate) fn diff_indicator_span_for_focus(
