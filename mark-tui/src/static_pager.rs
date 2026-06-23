@@ -79,6 +79,9 @@ pub fn render_static_changeset(
             DiffApp::new_with_explicit_layout(diff_options, changeset, layout, syntax_mode)
         }
     };
+    if pager_options.layout == StaticPagerLayout::Auto {
+        apply_static_auto_layout(&mut app, width);
+    }
     configure_static_app(&mut app, width);
     settle_static_syntax(&mut app, pager_options.syntax_timeout);
 
@@ -99,14 +102,20 @@ fn configure_static_app(app: &mut DiffApp, width: usize) {
     app.set_viewport_rows(app.model.len().max(1));
 }
 
+fn apply_static_auto_layout(app: &mut DiffApp, width: usize) {
+    app.apply_responsive_layout(static_width_for_layout(width));
+}
+
 fn resolve_static_layout(layout: StaticPagerLayout, width: usize) -> DiffLayoutMode {
     match layout {
-        StaticPagerLayout::Auto => {
-            default_layout_for_width(width.min(usize::from(u16::MAX)) as u16)
-        }
+        StaticPagerLayout::Auto => default_layout_for_width(static_width_for_layout(width)),
         StaticPagerLayout::Split => DiffLayoutMode::Split,
         StaticPagerLayout::Unified => DiffLayoutMode::Unified,
     }
+}
+
+fn static_width_for_layout(width: usize) -> u16 {
+    width.min(usize::from(u16::MAX)) as u16
 }
 
 fn settle_static_syntax(app: &mut DiffApp, timeout: Duration) {
@@ -245,7 +254,7 @@ mod tests {
     use super::*;
     use crate::{
         syntax::{LruCache, SyntaxRuntime, SyntaxWorkerQueue},
-        theme::SyntaxBenchmarkReport,
+        theme::{MIN_SPLIT_WIDTH, SyntaxBenchmarkReport},
     };
 
     #[test]
@@ -296,6 +305,26 @@ mod tests {
         assert_ne!(unified, split);
         assert!(split.contains("old"));
         assert!(split.contains("new"));
+    }
+
+    #[test]
+    fn static_auto_layout_clamps_saved_split_preference_when_narrow() {
+        let mut app = DiffApp::new_with_syntax(
+            DiffOptions::default(),
+            fixture_changeset(),
+            DiffLayoutMode::Split,
+            SyntaxStartupMode::Disabled,
+        );
+        app.layout_override = Some(DiffLayoutMode::Split);
+
+        apply_static_auto_layout(&mut app, usize::from(MIN_SPLIT_WIDTH - 1));
+
+        assert_eq!(app.layout, DiffLayoutMode::Unified);
+        assert_eq!(app.layout_override, Some(DiffLayoutMode::Split));
+
+        apply_static_auto_layout(&mut app, usize::from(MIN_SPLIT_WIDTH));
+
+        assert_eq!(app.layout, DiffLayoutMode::Split);
     }
 
     #[test]
