@@ -1104,72 +1104,7 @@ impl DiffApp {
         }
 
         if self.branch_menu_open.is_some() {
-            match key.code {
-                KeyCode::Esc => {
-                    self.close_branch_menu();
-                    return Ok(false);
-                }
-                KeyCode::Enter => {
-                    self.select_highlighted_branch_match();
-                    return Ok(false);
-                }
-                KeyCode::Tab => {
-                    self.cycle_branch_completion(1);
-                    return Ok(false);
-                }
-                KeyCode::BackTab => {
-                    self.cycle_branch_completion(-1);
-                    return Ok(false);
-                }
-                KeyCode::Backspace => {
-                    self.pop_branch_input();
-                    return Ok(false);
-                }
-                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    self.clear_branch_input();
-                    return Ok(false);
-                }
-                KeyCode::Down => {
-                    self.move_branch_selection(1);
-                    return Ok(false);
-                }
-                KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    self.cycle_branch_completion(1);
-                    return Ok(false);
-                }
-                KeyCode::Up => {
-                    self.move_branch_selection(-1);
-                    return Ok(false);
-                }
-                KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    self.cycle_branch_completion(-1);
-                    return Ok(false);
-                }
-                KeyCode::PageDown => {
-                    self.move_branch_selection(MAX_BRANCH_MENU_ROWS as isize);
-                    return Ok(false);
-                }
-                KeyCode::PageUp => {
-                    self.move_branch_selection(-(MAX_BRANCH_MENU_ROWS as isize));
-                    return Ok(false);
-                }
-                KeyCode::Home => {
-                    self.set_branch_selection(0);
-                    return Ok(false);
-                }
-                KeyCode::End => {
-                    self.set_branch_selection(usize::MAX);
-                    return Ok(false);
-                }
-                KeyCode::Char(character)
-                    if !key.modifiers.contains(KeyModifiers::CONTROL)
-                        && !key.modifiers.contains(KeyModifiers::ALT) =>
-                {
-                    self.push_branch_input(character);
-                    return Ok(false);
-                }
-                _ => {}
-            }
+            return self.handle_branch_menu_key(key);
         }
 
         if self.diff_menu_open {
@@ -1387,6 +1322,43 @@ impl DiffApp {
                         && !key.modifiers.contains(KeyModifiers::ALT) =>
                 {
                     self.push_diff_menu_input(character);
+                }
+                _ => {}
+            }
+        }
+
+        Ok(false)
+    }
+
+    pub(crate) fn handle_branch_menu_key(&mut self, key: KeyEvent) -> DxResult<bool> {
+        if self.keymap.matches_menu(MenuAction::Close, key) {
+            self.close_branch_menu();
+            return Ok(false);
+        }
+
+        if self.keymap.matches_menu(MenuAction::Down, key) {
+            self.cycle_branch_completion(1);
+        } else if self.keymap.matches_menu(MenuAction::Up, key) {
+            self.cycle_branch_completion(-1);
+        } else if self.keymap.matches_menu(MenuAction::Select, key)
+            || self.keymap.matches_menu(MenuAction::Confirm, key)
+        {
+            self.select_highlighted_branch_match();
+        } else {
+            match key.code {
+                KeyCode::PageDown => self.move_branch_selection(MAX_BRANCH_MENU_ROWS as isize),
+                KeyCode::PageUp => self.move_branch_selection(-(MAX_BRANCH_MENU_ROWS as isize)),
+                KeyCode::Home => self.set_branch_selection(0),
+                KeyCode::End => self.set_branch_selection(usize::MAX),
+                KeyCode::Backspace => self.pop_branch_input(),
+                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.clear_branch_input();
+                }
+                KeyCode::Char(character)
+                    if !key.modifiers.contains(KeyModifiers::CONTROL)
+                        && !key.modifiers.contains(KeyModifiers::ALT) =>
+                {
+                    self.push_branch_input(character);
                 }
                 _ => {}
             }
@@ -2155,6 +2127,10 @@ impl DiffApp {
                 }
                 MouseEventKind::ScrollUp => {
                     self.move_color_scheme_selection(-1);
+                    return Ok(());
+                }
+                MouseEventKind::Down(MouseButton::Left) => {
+                    self.close_color_scheme_picker();
                     return Ok(());
                 }
                 _ => {}

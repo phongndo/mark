@@ -3509,6 +3509,71 @@ fn diff_menu_uses_configured_menu_keymap() {
 }
 
 #[test]
+fn branch_menu_uses_configured_menu_keymap() {
+    let options = DiffOptions {
+        source: DiffSource::Base("main".to_owned()),
+        ..DiffOptions::default()
+    };
+    let mut app = DiffApp::new(
+        options,
+        changeset_with_context_lines(1),
+        DiffLayoutMode::Unified,
+    );
+    app.branch_base = Some("main".to_owned());
+    app.branch_head = Some("feature".to_owned());
+    app.current_head = Some("feature".to_owned());
+    app.comparison_branches = vec!["main".to_owned(), "feature".to_owned(), "topic".to_owned()];
+    app.keymap = Keymap::parse(
+        r#"
+        [keymap.menu]
+        down = "j"
+        up = "k"
+        confirm = "space"
+        close = "q"
+        "#,
+    )
+    .expect("keymap should parse");
+
+    app.toggle_branch_menu(BranchMenu::Head);
+    assert_eq!(app.branch_menu_selected, 0);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE))
+        .expect("configured down key should move branch selection");
+    assert_eq!(app.branch_menu_input, "");
+    assert_eq!(app.branch_menu_selected, 1);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE))
+        .expect("configured up key should move branch selection");
+    assert_eq!(app.branch_menu_input, "");
+    assert_eq!(app.branch_menu_selected, 0);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE))
+        .expect("configured close key should close branch menu");
+    assert!(app.branch_menu_open.is_none());
+    assert_eq!(app.branch_menu_input, "");
+
+    app.toggle_branch_menu(BranchMenu::Head);
+    app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE))
+        .expect("configured down key should move branch selection");
+    app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
+        .expect("configured confirm key should select branch");
+
+    assert!(app.branch_menu_open.is_none());
+    let load = app
+        .pending_diff_load
+        .as_ref()
+        .expect("branch selection should queue diff load");
+    assert_eq!(
+        load.options.source,
+        DiffSource::Branch {
+            base: "main".to_owned(),
+            head: "topic".to_owned()
+        }
+    );
+    assert_eq!(load.options.scope, DiffScope::All);
+}
+
+#[test]
 fn diff_menu_ctrl_n_and_ctrl_p_move_selection() {
     let mut app = DiffApp::new(
         DiffOptions::default(),
@@ -3874,6 +3939,29 @@ fn options_menu_colorscheme_input_selects_draft_and_applies_on_enter() {
     assert_eq!(app.color_scheme, ColorSchemeChoice::TerminalDark);
     assert_eq!(app.theme.background, DiffTheme::terminal_dark().background);
     assert!(app.pending_diff_load.is_none());
+}
+
+#[test]
+fn colorscheme_picker_mouse_dismiss_keeps_options_menu_open() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+
+    app.open_options_menu();
+    app.move_options_menu_selection(6);
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("enter should open colorscheme picker");
+    assert!(app.color_scheme_picker_open);
+
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: 0,
+        row: 0,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("mouse click should dismiss colorscheme picker");
+
+    assert!(!app.color_scheme_picker_open);
+    assert!(app.options_menu_open);
 }
 
 #[test]
