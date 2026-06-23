@@ -308,7 +308,7 @@ mod tests {
     }
 
     #[test]
-    fn static_auto_layout_clamps_saved_split_preference_when_narrow() {
+    fn static_auto_layout_respects_saved_split_preference_when_narrow() {
         let mut app = DiffApp::new_with_syntax(
             DiffOptions::default(),
             fixture_changeset(),
@@ -319,7 +319,7 @@ mod tests {
 
         apply_static_auto_layout(&mut app, usize::from(MIN_SPLIT_WIDTH - 1));
 
-        assert_eq!(app.layout, DiffLayoutMode::Unified);
+        assert_eq!(app.layout, DiffLayoutMode::Split);
         assert_eq!(app.layout_override, Some(DiffLayoutMode::Split));
 
         apply_static_auto_layout(&mut app, usize::from(MIN_SPLIT_WIDTH));

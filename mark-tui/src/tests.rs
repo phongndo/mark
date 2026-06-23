@@ -2,8 +2,9 @@ use crate::render::{
     diff::{
         SplitCellRender, SplitLineRender, SplitSide, content_spans_at_scroll, context_hide_line,
         context_show_line, empty_diff_fill_from, inline_bg, render_row, render_row_with_focus,
-        render_row_wrapped_with_focus, render_split_line_with_focus, render_unified_line_at_scroll,
-        row_bg, split_cell_spans_at_scroll, syntax_fg, wrapped_diff_lines_for_viewport,
+        render_row_wrapped_with_focus, render_split_context_line_wrapped,
+        render_split_line_with_focus, render_unified_line_at_scroll, row_bg,
+        split_cell_spans_at_scroll, syntax_fg, wrapped_diff_lines_for_viewport,
     },
     grep::{grep_highlight_target_for_columns, highlighted_grep_text_line},
     headers::{file_header_line, file_separator_line, hunk_header_line, hunk_header_spans},
@@ -1679,15 +1680,17 @@ fn options_menu_dynamic_layout_tracks_terminal_width() {
 }
 
 #[test]
-fn responsive_layout_remembers_manual_split_after_narrow_resize() {
+fn responsive_layout_preserves_manual_split_choice_on_narrow_resize() {
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
 
     app.toggle_layout();
     assert_eq!(app.layout, DiffLayoutMode::Split);
+    assert_eq!(app.layout_override, Some(DiffLayoutMode::Split));
 
     app.apply_responsive_layout(MIN_SPLIT_WIDTH - 1);
-    assert_eq!(app.layout, DiffLayoutMode::Unified);
+    assert_eq!(app.layout, DiffLayoutMode::Split);
+    assert_eq!(app.layout_override, Some(DiffLayoutMode::Split));
 
     app.apply_responsive_layout(MIN_SPLIT_WIDTH + 40);
     assert_eq!(app.layout, DiffLayoutMode::Split);
@@ -2207,6 +2210,32 @@ fn grep_highlight_ignores_unified_gutter_numbers() {
             .iter()
             .all(|span| span.style.bg != Some(app.theme.search_match_bg)),
         "grep should not highlight line numbers when only the gutter matches"
+    );
+}
+
+#[test]
+fn wrapped_split_context_line_highlights_grep_on_continuation_rows() {
+    let theme = DiffTheme::default();
+    let line = DiffLine {
+        kind: DiffLineKind::Context,
+        old_line: Some(12),
+        new_line: Some(12),
+        text: "prefix needle suffix".to_owned(),
+    };
+
+    let lines = render_split_context_line_wrapped(&line, None, 0, 30, theme, "needle");
+    let highlighted_line = lines
+        .iter()
+        .find(|line| line_text(line).contains("needle"))
+        .expect("wrapped context line should render the grep match");
+
+    assert!(
+        highlighted_line
+            .spans
+            .iter()
+            .any(|span| span.content.contains("needle")
+                && span.style.bg == Some(theme.search_match_bg)),
+        "grep match should be highlighted in wrapped split context lines"
     );
 }
 
@@ -4081,6 +4110,35 @@ fn options_menu_toggles_syntax_highlighting() {
 
     assert!(app.syntax.is_none());
     assert_eq!(app.option_value(OptionsMenuItem::SyntaxHighlighting), "[ ]");
+}
+
+#[test]
+fn options_menu_persists_post_apply_syntax_state_when_enable_fails() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new_with_syntax(
+        DiffOptions::default(),
+        changeset,
+        DiffLayoutMode::Unified,
+        SyntaxStartupMode::Languages(Vec::new()),
+    );
+
+    app.open_options_menu();
+    app.move_options_menu_selection(3);
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("enter should try to enable syntax highlighting");
+
+    assert!(app.syntax.is_none());
+    assert!(!app.options_menu_draft.syntax_enabled);
+    assert_eq!(
+        app.last_persisted_options_menu_draft,
+        Some((
+            OptionsDraft {
+                syntax_enabled: false,
+                ..app.options_menu_draft
+            },
+            OptionsMenuItem::SyntaxHighlighting,
+        ))
+    );
 }
 
 #[test]

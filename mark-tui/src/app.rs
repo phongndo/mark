@@ -1000,6 +1000,8 @@ pub(crate) struct DiffApp {
     pub(crate) theme_color_overrides: ColorOverrides,
     pub(crate) theme_transparent_background: bool,
     pub(crate) settings_persistence_enabled: bool,
+    #[cfg(test)]
+    pub(crate) last_persisted_options_menu_draft: Option<(OptionsDraft, OptionsMenuItem)>,
     pub(crate) context_expansions: HashMap<ContextKey, usize>,
     pub(crate) context_cache: HashMap<ContextSourceKey, ContextSourceEntry>,
     pub(crate) syntax_settings: SyntaxSettings,
@@ -1274,6 +1276,8 @@ impl DiffApp {
             theme_color_overrides,
             theme_transparent_background,
             settings_persistence_enabled: !cfg!(test),
+            #[cfg(test)]
+            last_persisted_options_menu_draft: None,
             context_expansions,
             context_cache,
             syntax_settings: settings,
@@ -3290,7 +3294,7 @@ impl DiffApp {
             self.set_horizontal_scroll(self.horizontal_scroll);
             self.dirty = true;
         }
-        self.persist_options_menu_draft(draft, changed_item);
+        self.persist_options_menu_draft(changed_item);
 
         if live_reload_reenabled {
             self.invalidate_diff_cache();
@@ -3301,7 +3305,13 @@ impl DiffApp {
         self.clamp_options_menu_selection_to_filtered_items();
     }
 
-    fn persist_options_menu_draft(&mut self, draft: OptionsDraft, changed_item: OptionsMenuItem) {
+    fn persist_options_menu_draft(&mut self, changed_item: OptionsMenuItem) {
+        let draft = self.options_menu_draft;
+        #[cfg(test)]
+        {
+            self.last_persisted_options_menu_draft = Some((draft, changed_item));
+        }
+
         if !self.settings_persistence_enabled {
             return;
         }
@@ -5747,13 +5757,7 @@ impl DiffApp {
         self.viewport_width = (width as usize).max(1);
         self.invalidate_wrapped_visual_layout();
         let responsive_layout = default_layout_for_width(width);
-        let layout = match self.layout_override {
-            Some(DiffLayoutMode::Split) if responsive_layout == DiffLayoutMode::Unified => {
-                DiffLayoutMode::Unified
-            }
-            Some(layout) => layout,
-            None => responsive_layout,
-        };
+        let layout = self.layout_override.unwrap_or(responsive_layout);
         self.set_layout(layout);
         self.set_horizontal_scroll(self.horizontal_scroll);
         self.dirty = true;

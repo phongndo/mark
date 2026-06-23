@@ -438,6 +438,7 @@ pub(crate) fn render_context_line_wrapped(
                 visual_row_start,
                 width,
                 theme,
+                &app.grep_filter,
             )
         }
     }
@@ -490,6 +491,7 @@ pub(crate) fn render_split_context_line_wrapped(
     row_index: usize,
     width: usize,
     theme: DiffTheme,
+    grep_filter: &str,
 ) -> Vec<Line<'static>> {
     if width == 0 {
         return vec![Line::default()];
@@ -536,7 +538,18 @@ pub(crate) fn render_split_context_line_wrapped(
             false,
             wrap_index > 0,
         ));
-        lines.push(Line::from(spans));
+        lines.push(highlight_wrapped_split_grep_line(
+            Line::from(spans),
+            Some(line),
+            Some(line),
+            SplitGrepRender {
+                query: grep_filter,
+                width,
+                left_scroll,
+                right_scroll,
+                theme,
+            },
+        ));
     }
     lines
 }
