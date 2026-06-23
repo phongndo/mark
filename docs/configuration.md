@@ -27,7 +27,7 @@ mark syntax path
 mode = "enabled"
 colorscheme = "system"
 transparent_background = false
-layout = "unified"
+layout = "dynamic"
 live_reload = true
 syntax_highlighting = true
 line_wrapping = false
@@ -142,11 +142,16 @@ Top-level UI settings mirror the interactive settings menu and are persisted
 when changed there:
 
 ```toml
-layout = "unified"           # unified, split
+layout = "dynamic"           # dynamic, unified, split
 live_reload = true
 syntax_highlighting = true
 line_wrapping = false
 ```
+
+`layout = "dynamic"` uses split when the terminal is wide enough and unified
+when it is narrow.
+Changing Layout in the settings menu persists this value; the layout keybinding
+only toggles split/unified for the current session.
 
 `[diff]` controls visual emphasis:
 

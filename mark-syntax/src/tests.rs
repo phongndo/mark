@@ -484,6 +484,9 @@ line_wrapping = true
     assert!(!settings.live_reload);
     assert!(!settings.syntax_highlighting);
     assert!(settings.line_wrapping);
+
+    let settings = parse_settings("layout = \"dynamic\"\n").expect("settings should parse");
+    assert_eq!(settings.layout, Some(LayoutSetting::Dynamic));
 }
 
 #[test]

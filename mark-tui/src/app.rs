@@ -554,18 +554,44 @@ pub(crate) fn color_scheme_config(choice: ColorSchemeChoice) -> Option<SyntaxThe
     }
 }
 
-pub(crate) fn layout_from_setting(setting: LayoutSetting) -> DiffLayoutMode {
+pub(crate) fn layout_override_from_setting(setting: LayoutSetting) -> Option<DiffLayoutMode> {
     match setting {
-        LayoutSetting::Split => DiffLayoutMode::Split,
-        LayoutSetting::Unified => DiffLayoutMode::Unified,
+        LayoutSetting::Dynamic => None,
+        LayoutSetting::Split => Some(DiffLayoutMode::Split),
+        LayoutSetting::Unified => Some(DiffLayoutMode::Unified),
     }
 }
 
-pub(crate) fn layout_setting_label(layout: DiffLayoutMode) -> &'static str {
-    match layout {
-        DiffLayoutMode::Split => "split",
-        DiffLayoutMode::Unified => "unified",
+pub(crate) fn layout_setting_from_override(
+    layout_override: Option<DiffLayoutMode>,
+) -> LayoutSetting {
+    match layout_override {
+        Some(DiffLayoutMode::Split) => LayoutSetting::Split,
+        Some(DiffLayoutMode::Unified) => LayoutSetting::Unified,
+        None => LayoutSetting::Dynamic,
     }
+}
+
+pub(crate) fn layout_setting_label(layout: LayoutSetting) -> &'static str {
+    match layout {
+        LayoutSetting::Dynamic => "dynamic",
+        LayoutSetting::Split => "split",
+        LayoutSetting::Unified => "unified",
+    }
+}
+
+pub(crate) fn next_layout_setting(setting: LayoutSetting, delta: isize) -> LayoutSetting {
+    let settings = [
+        LayoutSetting::Dynamic,
+        LayoutSetting::Split,
+        LayoutSetting::Unified,
+    ];
+    let current = settings
+        .iter()
+        .position(|candidate| *candidate == setting)
+        .unwrap_or_default();
+    let next = (current as isize + delta).rem_euclid(settings.len() as isize) as usize;
+    settings[next]
 }
 
 pub(crate) fn diff_cache_entry(options: DiffOptions, changeset: Changeset) -> DiffCacheEntry {
@@ -765,7 +791,7 @@ fn on_off_search(enabled: bool) -> String {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct OptionsDraft {
-    pub(crate) layout: DiffLayoutMode,
+    pub(crate) layout: LayoutSetting,
     pub(crate) live_updates_enabled: bool,
     pub(crate) context_expansion: DiffContextExpansion,
     pub(crate) syntax_enabled: bool,
@@ -1028,7 +1054,7 @@ pub(crate) fn layout_override_from_settings(
     honor_settings_layout
         .then_some(settings.layout)
         .flatten()
-        .map(layout_from_setting)
+        .and_then(layout_override_from_setting)
 }
 
 impl DiffApp {
@@ -1170,7 +1196,7 @@ impl DiffApp {
             options_menu_selected: 0,
             options_menu_scroll: 0,
             options_menu_draft: OptionsDraft {
-                layout,
+                layout: layout_setting_from_override(layout_override),
                 live_updates_enabled: settings.live_reload,
                 context_expansion,
                 syntax_enabled: syntax.is_some(),
@@ -2765,7 +2791,7 @@ impl DiffApp {
 
     pub(crate) fn open_options_menu(&mut self) {
         self.options_menu_draft = OptionsDraft {
-            layout: self.layout,
+            layout: layout_setting_from_override(self.layout_override),
             live_updates_enabled: self.live_updates_enabled,
             context_expansion: self.theme.diff.context_expansion,
             syntax_enabled: self.syntax.is_some(),
@@ -2909,10 +2935,9 @@ impl DiffApp {
 
     pub(crate) fn option_search_value(&self, item: OptionsMenuItem) -> String {
         match item {
-            OptionsMenuItem::Layout => match self.options_menu_draft.layout {
-                DiffLayoutMode::Split => "split".to_owned(),
-                DiffLayoutMode::Unified => "unified".to_owned(),
-            },
+            OptionsMenuItem::Layout => {
+                layout_setting_label(self.options_menu_draft.layout).to_owned()
+            }
             OptionsMenuItem::LiveReload if !self.live_updates_allowed => "off disabled".to_owned(),
             OptionsMenuItem::LiveReload => {
                 on_off_search(self.options_menu_draft.live_updates_enabled)
@@ -2932,10 +2957,9 @@ impl DiffApp {
 
     pub(crate) fn option_value(&self, item: OptionsMenuItem) -> String {
         match item {
-            OptionsMenuItem::Layout => match self.options_menu_draft.layout {
-                DiffLayoutMode::Split => "[split]".to_owned(),
-                DiffLayoutMode::Unified => "[unified]".to_owned(),
-            },
+            OptionsMenuItem::Layout => {
+                format!("[{}]", layout_setting_label(self.options_menu_draft.layout))
+            }
             OptionsMenuItem::LiveReload if !self.live_updates_allowed => "[ ] disabled".to_owned(),
             OptionsMenuItem::LiveReload => checkbox(self.options_menu_draft.live_updates_enabled),
             OptionsMenuItem::ContextExpansion => {
@@ -3169,7 +3193,8 @@ impl DiffApp {
 
         match changed_item {
             OptionsMenuItem::Layout => {
-                self.options_menu_draft.layout = self.options_menu_draft.layout.toggled();
+                self.options_menu_draft.layout =
+                    next_layout_setting(self.options_menu_draft.layout, delta);
             }
             OptionsMenuItem::LiveReload => {
                 if !self.live_updates_allowed {
@@ -3210,8 +3235,8 @@ impl DiffApp {
         let draft = self.options_menu_draft;
         let live_reload_reenabled = draft.live_updates_enabled && !self.live_updates_enabled;
 
-        if draft.layout != self.layout {
-            self.set_manual_layout(draft.layout);
+        if draft.layout != layout_setting_from_override(self.layout_override) {
+            self.set_layout_setting(draft.layout);
         }
         if draft.live_updates_enabled != self.live_updates_enabled {
             self.live_updates_enabled = draft.live_updates_enabled;
@@ -5623,6 +5648,18 @@ impl DiffApp {
     pub(crate) fn set_manual_layout(&mut self, layout: DiffLayoutMode) {
         self.layout_override = Some(layout);
         self.set_layout(layout);
+    }
+
+    pub(crate) fn set_layout_setting(&mut self, setting: LayoutSetting) {
+        match layout_override_from_setting(setting) {
+            Some(layout) => self.set_manual_layout(layout),
+            None => {
+                self.layout_override = None;
+                self.set_layout(default_layout_for_width(
+                    self.viewport_width.min(u16::MAX as usize) as u16,
+                ));
+            }
+        }
     }
 
     pub(crate) fn apply_responsive_layout(&mut self, width: u16) {

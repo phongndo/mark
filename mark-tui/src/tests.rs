@@ -1166,6 +1166,12 @@ fn explicit_layout_ignores_saved_layout_preference() {
         Some(DiffLayoutMode::Unified)
     );
     assert_eq!(layout_override_from_settings(&settings, false), None);
+
+    let settings = SyntaxSettings {
+        layout: Some(LayoutSetting::Dynamic),
+        ..SyntaxSettings::default()
+    };
+    assert_eq!(layout_override_from_settings(&settings, true), None);
 }
 
 #[test]
@@ -1639,16 +1645,37 @@ fn responsive_layout_preserves_options_menu_unified_choice_on_wide_resize() {
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Split);
 
     app.open_options_menu();
-    app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
-        .expect("space should toggle layout draft");
-    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
-        .expect("enter should apply options");
+    app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE))
+        .expect("right should select split layout");
+    app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE))
+        .expect("right should select unified layout");
     assert_eq!(app.layout, DiffLayoutMode::Unified);
     assert_eq!(app.layout_override, Some(DiffLayoutMode::Unified));
 
     app.apply_responsive_layout(MIN_SPLIT_WIDTH + 40);
 
     assert_eq!(app.layout, DiffLayoutMode::Unified);
+}
+
+#[test]
+fn options_menu_dynamic_layout_tracks_terminal_width() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Split);
+    app.set_manual_layout(DiffLayoutMode::Unified);
+    app.set_viewport_width(usize::from(MIN_SPLIT_WIDTH) + 40);
+
+    app.open_options_menu();
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("enter should select dynamic layout");
+
+    assert_eq!(app.layout_override, None);
+    assert_eq!(app.layout, DiffLayoutMode::Split);
+
+    app.apply_responsive_layout(MIN_SPLIT_WIDTH - 1);
+    assert_eq!(app.layout, DiffLayoutMode::Unified);
+
+    app.apply_responsive_layout(MIN_SPLIT_WIDTH + 40);
+    assert_eq!(app.layout, DiffLayoutMode::Split);
 }
 
 #[test]
@@ -3891,7 +3918,7 @@ context_expand = 7
     persist_options_menu_draft_to_path(
         &path,
         OptionsDraft {
-            layout: DiffLayoutMode::Split,
+            layout: LayoutSetting::Split,
             live_updates_enabled: false,
             context_expansion: DiffContextExpansion::Full,
             syntax_enabled: false,
@@ -3944,7 +3971,7 @@ expand_context = 9
     persist_options_menu_draft_to_path(
         &path,
         OptionsDraft {
-            layout: DiffLayoutMode::Split,
+            layout: LayoutSetting::Split,
             live_updates_enabled: false,
             context_expansion: DiffContextExpansion::Full,
             syntax_enabled: false,
@@ -3991,7 +4018,7 @@ wrap_lines = false
     persist_options_menu_draft_to_path(
         &path,
         OptionsDraft {
-            layout: DiffLayoutMode::Split,
+            layout: LayoutSetting::Split,
             live_updates_enabled: false,
             context_expansion: DiffContextExpansion::Full,
             syntax_enabled: false,
@@ -4511,10 +4538,10 @@ fn options_menu_draws_centered_floating_menu() {
 
     let layout_row = rows
         .iter()
-        .find(|row| row.contains("Layout") && row.contains("[unified]"))
+        .find(|row| row.contains("Layout") && row.contains("[dynamic]"))
         .expect("layout row should show current value");
     let label_column = layout_row.find("Layout").expect("label should render");
-    let value_column = layout_row.rfind("[unified]").expect("value should render");
+    let value_column = layout_row.rfind("[dynamic]").expect("value should render");
     assert!(
         value_column > label_column + 20,
         "setting value should be right aligned: {layout_row}"

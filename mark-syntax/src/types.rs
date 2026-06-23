@@ -468,6 +468,8 @@ pub enum DiffSignStyle {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum LayoutSetting {
+    #[serde(alias = "auto", alias = "responsive")]
+    Dynamic,
     Split,
     Unified,
 }
