@@ -5000,6 +5000,9 @@ fn live_diff_filter_ignores_non_state_git_paths() {
     assert!(filter.is_relevant_path(&repo.join(".git/index.lock")));
     assert!(filter.is_relevant_path(&repo.join(".git/refs/heads/main")));
     assert!(!filter.is_relevant_path(&repo.join(".git/logs/HEAD")));
+    assert!(filter.is_relevant_path(&repo.join("vendor/nested/src/lib.rs")));
+    assert!(!filter.is_relevant_path(&repo.join("vendor/nested/.git/index.lock")));
+    assert!(!filter.is_relevant_path(&repo.join("vendor/nested/.git/config")));
     assert!(!filter.is_relevant_path(&other.join("file.rs")));
 }
 

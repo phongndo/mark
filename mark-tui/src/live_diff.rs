@@ -248,7 +248,7 @@ impl LiveDiffFilter {
             return true;
         }
 
-        if self.is_inside_repo_dot_git(path) {
+        if self.is_inside_dot_git(path) {
             return false;
         }
 
@@ -273,15 +273,14 @@ impl LiveDiffFilter {
         })
     }
 
-    pub(crate) fn is_inside_repo_dot_git(&self, path: &Path) -> bool {
+    pub(crate) fn is_inside_dot_git(&self, path: &Path) -> bool {
         let Ok(relative) = path.strip_prefix(&self.repo) else {
             return false;
         };
 
         relative
             .components()
-            .next()
-            .is_some_and(|component| component.as_os_str() == OsStr::new(".git"))
+            .any(|component| component.as_os_str() == OsStr::new(".git"))
     }
 }
 
