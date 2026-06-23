@@ -14,11 +14,11 @@ use std::os::unix::fs::MetadataExt;
 use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
-use mark_core::MarkResult;
+use mark_core::{MarkError, MarkResult};
 use mark_diff::{Changeset, DiffOptions, DiffScope, DiffSource, DiffStats};
 use mark_syntax::{
-    ColorOverrides, DiffContextExpansion, HighlightedLine, SyntaxLimits, SyntaxSettings,
-    SyntaxThemeConfig, SyntaxThemeSource,
+    ColorOverrides, DiffContextExpansion, HighlightedLine, LayoutSetting, SyntaxLimits,
+    SyntaxSettings, SyntaxThemeConfig, SyntaxThemeSource,
 };
 use ratatui::layout::Rect;
 use tokio::sync::{mpsc::Receiver, oneshot};
@@ -41,7 +41,10 @@ use crate::{
     },
     render::{
         draw,
-        menus::{branch_menu_block, branch_menu_width, diff_menu_block, diff_selector_width},
+        menus::{
+            branch_menu_block, branch_menu_width, color_scheme_picker_block, diff_menu_block,
+            diff_selector_width,
+        },
         sidebar::max_file_sidebar_width,
     },
     runtime,
@@ -462,47 +465,55 @@ pub(crate) fn context_expansion_label(expansion: DiffContextExpansion) -> String
 pub(crate) enum ColorSchemeChoice {
     Custom,
     System,
-    TerminalDark,
-    TerminalLight,
-    Minimal,
-    Ansi,
-    Catppuccin,
-    Gruvbox,
+    CatppuccinLatte,
+    CatppuccinFrappe,
+    CatppuccinMacchiato,
+    CatppuccinMocha,
+    GruvboxDark,
+    GruvboxLight,
+    GithubDark,
+    GithubDarkHighContrast,
+    GithubLight,
+    GithubLightHighContrast,
     Tokyonight,
-    Dracula,
 }
 
 pub(crate) const COLOR_SCHEME_CHOICES: &[ColorSchemeChoice] = &[
     ColorSchemeChoice::System,
-    ColorSchemeChoice::TerminalDark,
-    ColorSchemeChoice::TerminalLight,
-    ColorSchemeChoice::Minimal,
-    ColorSchemeChoice::Ansi,
-    ColorSchemeChoice::Catppuccin,
-    ColorSchemeChoice::Gruvbox,
+    ColorSchemeChoice::CatppuccinLatte,
+    ColorSchemeChoice::CatppuccinFrappe,
+    ColorSchemeChoice::CatppuccinMacchiato,
+    ColorSchemeChoice::CatppuccinMocha,
+    ColorSchemeChoice::GruvboxDark,
+    ColorSchemeChoice::GruvboxLight,
+    ColorSchemeChoice::GithubDark,
+    ColorSchemeChoice::GithubDarkHighContrast,
+    ColorSchemeChoice::GithubLight,
+    ColorSchemeChoice::GithubLightHighContrast,
     ColorSchemeChoice::Tokyonight,
-    ColorSchemeChoice::Dracula,
 ];
 
 pub(crate) fn color_scheme_label(choice: ColorSchemeChoice) -> &'static str {
     match choice {
         ColorSchemeChoice::Custom => "custom",
         ColorSchemeChoice::System => "system",
-        ColorSchemeChoice::TerminalDark => "terminal-dark",
-        ColorSchemeChoice::TerminalLight => "terminal-light",
-        ColorSchemeChoice::Minimal => "minimal",
-        ColorSchemeChoice::Ansi => "ansi",
-        ColorSchemeChoice::Catppuccin => "catppuccin",
-        ColorSchemeChoice::Gruvbox => "gruvbox",
+        ColorSchemeChoice::CatppuccinLatte => "catppuccin-latte",
+        ColorSchemeChoice::CatppuccinFrappe => "catppuccin-frappe",
+        ColorSchemeChoice::CatppuccinMacchiato => "catppuccin-macchiato",
+        ColorSchemeChoice::CatppuccinMocha => "catppuccin-mocha",
+        ColorSchemeChoice::GruvboxDark => "gruvbox-dark",
+        ColorSchemeChoice::GruvboxLight => "gruvbox-light",
+        ColorSchemeChoice::GithubDark => "github-dark",
+        ColorSchemeChoice::GithubDarkHighContrast => "github-dark-high-contrast",
+        ColorSchemeChoice::GithubLight => "github-light",
+        ColorSchemeChoice::GithubLightHighContrast => "github-light-high-contrast",
         ColorSchemeChoice::Tokyonight => "tokyonight",
-        ColorSchemeChoice::Dracula => "dracula",
     }
 }
 
 pub(crate) fn color_scheme_from_config(config: &SyntaxThemeConfig) -> ColorSchemeChoice {
     match config.source {
-        SyntaxThemeSource::Ansi => ColorSchemeChoice::Ansi,
-        SyntaxThemeSource::Base16 => ColorSchemeChoice::Custom,
+        SyntaxThemeSource::Ansi | SyntaxThemeSource::Base16 => ColorSchemeChoice::Custom,
         SyntaxThemeSource::Builtin => color_scheme_from_name(config.name.as_deref()),
     }
 }
@@ -515,13 +526,19 @@ pub(crate) fn color_scheme_from_name(name: Option<&str>) -> ColorSchemeChoice {
         .as_str()
     {
         "system" | "default" | "" => ColorSchemeChoice::System,
-        "terminal-dark" | "mark-dark" | "dark" => ColorSchemeChoice::TerminalDark,
-        "terminal-light" | "mark-light" | "light" => ColorSchemeChoice::TerminalLight,
-        "minimal" => ColorSchemeChoice::Minimal,
-        "catppuccin" | "catppuccin-mocha" | "mocha" => ColorSchemeChoice::Catppuccin,
-        "gruvbox" | "gruvbox-dark" => ColorSchemeChoice::Gruvbox,
+        "catppuccin-latte" | "latte" => ColorSchemeChoice::CatppuccinLatte,
+        "catppuccin-frappe" | "frappe" => ColorSchemeChoice::CatppuccinFrappe,
+        "catppuccin-macchiato" | "macchiato" => ColorSchemeChoice::CatppuccinMacchiato,
+        "catppuccin" | "catppuccin-mocha" | "mocha" => ColorSchemeChoice::CatppuccinMocha,
+        "gruvbox" | "gruvbox-dark" => ColorSchemeChoice::GruvboxDark,
+        "gruvbox-light" => ColorSchemeChoice::GruvboxLight,
+        "github" | "github-dark" => ColorSchemeChoice::GithubDark,
+        "github-dark-high-contrast" | "github-high-contrast" => {
+            ColorSchemeChoice::GithubDarkHighContrast
+        }
+        "github-light" => ColorSchemeChoice::GithubLight,
+        "github-light-high-contrast" => ColorSchemeChoice::GithubLightHighContrast,
         "tokyonight" | "tokyo-night" | "tokyonight-night" => ColorSchemeChoice::Tokyonight,
-        "dracula" => ColorSchemeChoice::Dracula,
         _ => ColorSchemeChoice::Custom,
     }
 }
@@ -529,16 +546,25 @@ pub(crate) fn color_scheme_from_name(name: Option<&str>) -> ColorSchemeChoice {
 pub(crate) fn color_scheme_config(choice: ColorSchemeChoice) -> Option<SyntaxThemeConfig> {
     match choice {
         ColorSchemeChoice::Custom => None,
-        ColorSchemeChoice::Ansi => Some(SyntaxThemeConfig {
-            source: SyntaxThemeSource::Ansi,
-            name: None,
-            path: None,
-        }),
         choice => Some(SyntaxThemeConfig {
             source: SyntaxThemeSource::Builtin,
             name: Some(color_scheme_label(choice).to_owned()),
             path: None,
         }),
+    }
+}
+
+pub(crate) fn layout_from_setting(setting: LayoutSetting) -> DiffLayoutMode {
+    match setting {
+        LayoutSetting::Split => DiffLayoutMode::Split,
+        LayoutSetting::Unified => DiffLayoutMode::Unified,
+    }
+}
+
+pub(crate) fn layout_setting_label(layout: DiffLayoutMode) -> &'static str {
+    match layout {
+        DiffLayoutMode::Split => "split",
+        DiffLayoutMode::Unified => "unified",
     }
 }
 
@@ -702,32 +728,29 @@ enum HunkFocusSearch {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum OptionsMenuItem {
     Layout,
-    FileSidebar,
-    IncludeUntracked,
     LiveReload,
     ContextExpansion,
     SyntaxHighlighting,
+    LineWrapping,
     ColorScheme,
 }
 
 pub(crate) const COMMON_OPTIONS_MENU_ITEMS: &[OptionsMenuItem] = &[
     OptionsMenuItem::Layout,
-    OptionsMenuItem::FileSidebar,
-    OptionsMenuItem::IncludeUntracked,
     OptionsMenuItem::LiveReload,
     OptionsMenuItem::ContextExpansion,
     OptionsMenuItem::SyntaxHighlighting,
+    OptionsMenuItem::LineWrapping,
     OptionsMenuItem::ColorScheme,
 ];
 
 pub(crate) fn option_label(item: OptionsMenuItem) -> &'static str {
     match item {
         OptionsMenuItem::Layout => "Layout",
-        OptionsMenuItem::FileSidebar => "File sidebar",
-        OptionsMenuItem::IncludeUntracked => "Include untracked",
         OptionsMenuItem::LiveReload => "Live reload",
         OptionsMenuItem::ContextExpansion => "Context expand",
         OptionsMenuItem::SyntaxHighlighting => "Syntax highlighting",
+        OptionsMenuItem::LineWrapping => "Line wrapping",
         OptionsMenuItem::ColorScheme => "Colorscheme",
     }
 }
@@ -743,12 +766,101 @@ fn on_off_search(enabled: bool) -> String {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct OptionsDraft {
     pub(crate) layout: DiffLayoutMode,
-    pub(crate) file_sidebar_open: bool,
-    pub(crate) include_untracked: bool,
     pub(crate) live_updates_enabled: bool,
     pub(crate) context_expansion: DiffContextExpansion,
     pub(crate) syntax_enabled: bool,
+    pub(crate) line_wrapping: bool,
     pub(crate) color_scheme: ColorSchemeChoice,
+}
+
+pub(crate) fn persist_options_menu_draft_to_path(
+    path: &Path,
+    draft: OptionsDraft,
+    changed_item: OptionsMenuItem,
+) -> MarkResult<()> {
+    let mut table = if path.exists() {
+        let contents = fs::read_to_string(path)?;
+        if contents.trim().is_empty() {
+            toml::Table::new()
+        } else {
+            contents.parse::<toml::Table>().map_err(|error| {
+                MarkError::Usage(format!("failed to parse {}: {error}", path.display()))
+            })?
+        }
+    } else {
+        toml::Table::new()
+    };
+
+    match changed_item {
+        OptionsMenuItem::Layout => {
+            table.insert(
+                "layout".to_owned(),
+                toml::Value::String(layout_setting_label(draft.layout).to_owned()),
+            );
+        }
+        OptionsMenuItem::LiveReload => {
+            table.insert(
+                "live_reload".to_owned(),
+                toml::Value::Boolean(draft.live_updates_enabled),
+            );
+        }
+        OptionsMenuItem::ContextExpansion => {
+            let mut diff = match table.remove("diff") {
+                Some(toml::Value::Table(diff)) => diff,
+                Some(_) => {
+                    return Err(MarkError::Usage(format!(
+                        "failed to update {}: diff must be a table",
+                        path.display()
+                    )));
+                }
+                None => toml::Table::new(),
+            };
+            diff.remove("context_lines");
+            diff.remove("expand_context");
+            diff.insert(
+                "context_expand".to_owned(),
+                context_expansion_config_value(draft.context_expansion),
+            );
+            table.insert("diff".to_owned(), toml::Value::Table(diff));
+        }
+        OptionsMenuItem::SyntaxHighlighting => {
+            table.insert(
+                "syntax_highlighting".to_owned(),
+                toml::Value::Boolean(draft.syntax_enabled),
+            );
+        }
+        OptionsMenuItem::LineWrapping => {
+            table.remove("word_wrap");
+            table.remove("wrap_lines");
+            table.insert(
+                "line_wrapping".to_owned(),
+                toml::Value::Boolean(draft.line_wrapping),
+            );
+        }
+        OptionsMenuItem::ColorScheme => {
+            if let Some(config) = color_scheme_config(draft.color_scheme)
+                && config.source == SyntaxThemeSource::Builtin
+                && let Some(name) = config.name
+            {
+                table.insert("colorscheme".to_owned(), toml::Value::String(name));
+            }
+        }
+    }
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let contents = toml::to_string_pretty(&table)
+        .map_err(|error| MarkError::Usage(format!("failed to serialize settings: {error}")))?;
+    fs::write(path, contents)?;
+    Ok(())
+}
+
+fn context_expansion_config_value(expansion: DiffContextExpansion) -> toml::Value {
+    match expansion {
+        DiffContextExpansion::Lines(lines) => toml::Value::Integer(lines as i64),
+        DiffContextExpansion::Full => toml::Value::String("full".to_owned()),
+    }
 }
 
 #[derive(Debug)]
@@ -764,6 +876,7 @@ pub(crate) struct DiffApp {
     pub(crate) layout_override: Option<DiffLayoutMode>,
     pub(crate) scroll: usize,
     pub(crate) horizontal_scroll: usize,
+    pub(crate) line_wrapping: bool,
     pub(crate) viewport_rows: usize,
     pub(crate) viewport_width: usize,
     pub(crate) max_line_width: usize,
@@ -776,6 +889,7 @@ pub(crate) struct DiffApp {
     pub(crate) file_sidebar_resizing: bool,
     pub(crate) rendered_diff_menu_area: Option<Rect>,
     pub(crate) rendered_branch_menu_area: Option<Rect>,
+    pub(crate) rendered_color_scheme_picker_area: Option<Rect>,
     pub(crate) leader_pending: bool,
     pub(crate) help_menu_open: bool,
     pub(crate) help_menu_input: String,
@@ -793,6 +907,7 @@ pub(crate) struct DiffApp {
     pub(crate) color_scheme_input: String,
     pub(crate) color_scheme_scroll: usize,
     pub(crate) color_scheme_selected: usize,
+    pub(crate) color_scheme_preview_original: Option<(ColorSchemeChoice, DiffTheme)>,
     pub(crate) filter_input: Option<DiffFilterKind>,
     pub(crate) file_filter: String,
     pub(crate) file_filter_input: String,
@@ -836,6 +951,7 @@ pub(crate) struct DiffApp {
     pub(crate) color_scheme: ColorSchemeChoice,
     pub(crate) theme_color_overrides: ColorOverrides,
     pub(crate) theme_transparent_background: bool,
+    pub(crate) settings_persistence_enabled: bool,
     pub(crate) context_expansions: HashMap<ContextKey, usize>,
     pub(crate) context_cache: HashMap<ContextSourceKey, ContextSourceEntry>,
     pub(crate) syntax_settings: SyntaxSettings,
@@ -904,6 +1020,16 @@ pub(crate) fn load_keymap_for_diff(load_user_settings: bool) -> (Keymap, Option<
     }
 }
 
+pub(crate) fn layout_override_from_settings(
+    settings: &SyntaxSettings,
+    honor_settings_layout: bool,
+) -> Option<DiffLayoutMode> {
+    honor_settings_layout
+        .then_some(settings.layout)
+        .flatten()
+        .map(layout_from_setting)
+}
+
 impl DiffApp {
     #[cfg(test)]
     pub(crate) fn new(options: DiffOptions, changeset: Changeset, layout: DiffLayoutMode) -> Self {
@@ -916,8 +1042,36 @@ impl DiffApp {
         layout: DiffLayoutMode,
         syntax_mode: SyntaxStartupMode,
     ) -> Self {
+        Self::new_with_syntax_and_layout_settings(options, changeset, layout, syntax_mode, true)
+    }
+
+    pub(crate) fn new_with_explicit_layout(
+        options: DiffOptions,
+        changeset: Changeset,
+        layout: DiffLayoutMode,
+        syntax_mode: SyntaxStartupMode,
+    ) -> Self {
+        Self::new_with_syntax_and_layout_settings(options, changeset, layout, syntax_mode, false)
+    }
+
+    fn new_with_syntax_and_layout_settings(
+        options: DiffOptions,
+        changeset: Changeset,
+        mut layout: DiffLayoutMode,
+        syntax_mode: SyntaxStartupMode,
+        honor_settings_layout: bool,
+    ) -> Self {
         let context_expansions = HashMap::new();
         let context_cache = HashMap::new();
+        let load_user_settings = matches!(
+            syntax_mode,
+            SyntaxStartupMode::Config | SyntaxStartupMode::Disabled
+        ) && !cfg!(test);
+        let (settings, mut startup_error_log) = load_syntax_settings_for_diff(load_user_settings);
+        let layout_override = layout_override_from_settings(&settings, honor_settings_layout);
+        if let Some(setting_layout) = layout_override {
+            layout = setting_layout;
+        }
         let model = UiModel::new(&changeset, layout, &context_expansions);
         let search_index = Arc::new(DiffSearchIndex::new(&changeset));
         let manual_hunk_focus = model
@@ -937,14 +1091,7 @@ impl DiffApp {
                 branch_base.as_deref(),
             ],
         );
-        let (settings, mut startup_error_log) = load_syntax_settings_for_diff(matches!(
-            syntax_mode,
-            SyntaxStartupMode::Config | SyntaxStartupMode::Disabled
-        ));
-        let (keymap, keymap_notice) = load_keymap_for_diff(matches!(
-            syntax_mode,
-            SyntaxStartupMode::Config | SyntaxStartupMode::Disabled
-        ));
+        let (keymap, keymap_notice) = load_keymap_for_diff(load_user_settings);
         if let Some(message) = keymap_notice {
             push_startup_error_log(&mut startup_error_log, message);
         }
@@ -969,14 +1116,14 @@ impl DiffApp {
             }
         };
         let syntax_limits = settings.limits;
-        let include_untracked = options.include_untracked;
         let context_expansion = theme.diff.context_expansion;
         let theme_color_overrides = settings.colors.clone();
         let theme_transparent_background = settings.transparent_background;
         let syntax = match &syntax_mode {
-            SyntaxStartupMode::Config => {
+            SyntaxStartupMode::Config if settings.syntax_highlighting => {
                 syntax_runtime_for_diff(SyntaxRuntime::start(&settings), &mut startup_error_log)
             }
+            SyntaxStartupMode::Config => None,
             SyntaxStartupMode::Disabled => None,
             SyntaxStartupMode::Languages(languages) => {
                 SyntaxRuntime::start_with_languages(languages.clone(), syntax_limits)
@@ -992,9 +1139,10 @@ impl DiffApp {
             stats,
             model,
             layout,
-            layout_override: None,
+            layout_override,
             scroll: 0,
             horizontal_scroll: 0,
+            line_wrapping: settings.line_wrapping,
             viewport_rows: 1,
             viewport_width: 1,
             max_line_width,
@@ -1007,6 +1155,7 @@ impl DiffApp {
             file_sidebar_resizing: false,
             rendered_diff_menu_area: None,
             rendered_branch_menu_area: None,
+            rendered_color_scheme_picker_area: None,
             leader_pending: false,
             help_menu_open: false,
             help_menu_input: String::new(),
@@ -1021,17 +1170,17 @@ impl DiffApp {
             options_menu_scroll: 0,
             options_menu_draft: OptionsDraft {
                 layout,
-                file_sidebar_open: false,
-                include_untracked,
-                live_updates_enabled: true,
+                live_updates_enabled: settings.live_reload,
                 context_expansion,
                 syntax_enabled: syntax.is_some(),
+                line_wrapping: settings.line_wrapping,
                 color_scheme,
             },
             color_scheme_picker_open: false,
             color_scheme_input: String::new(),
             color_scheme_scroll: 0,
             color_scheme_selected: 0,
+            color_scheme_preview_original: None,
             filter_input: None,
             file_filter: String::new(),
             file_filter_input: String::new(),
@@ -1053,7 +1202,7 @@ impl DiffApp {
             pending_editor_reload: None,
             post_editor_quit_key_ignore_until: None,
             live_updates_allowed: true,
-            live_updates_enabled: true,
+            live_updates_enabled: settings.live_reload,
             live_reload_pending: false,
             pending_diff_load: None,
             diff_cache: Vec::new(),
@@ -1075,6 +1224,7 @@ impl DiffApp {
             color_scheme,
             theme_color_overrides,
             theme_transparent_background,
+            settings_persistence_enabled: !cfg!(test),
             context_expansions,
             context_cache,
             syntax_settings: settings,
@@ -2129,8 +2279,22 @@ impl DiffApp {
                     self.move_color_scheme_selection(-1);
                     return Ok(());
                 }
+                MouseEventKind::Moved | MouseEventKind::Drag(MouseButton::Left) => {
+                    if let Some(index) = self.color_scheme_index_at(mouse.column, mouse.row) {
+                        self.set_color_scheme_selection(index);
+                    }
+                    return Ok(());
+                }
                 MouseEventKind::Down(MouseButton::Left) => {
-                    self.close_color_scheme_picker();
+                    if let Some(index) = self.color_scheme_index_at(mouse.column, mouse.row) {
+                        self.set_color_scheme_selection(index);
+                        self.select_highlighted_color_scheme();
+                    } else if self.is_rendered_color_scheme_picker_position(mouse.column, mouse.row)
+                    {
+                        self.dirty = true;
+                    } else {
+                        self.close_color_scheme_picker();
+                    }
                     return Ok(());
                 }
                 _ => {}
@@ -2577,7 +2741,7 @@ impl DiffApp {
         self.diff_menu_selected = 0;
         self.diff_menu_open = true;
         self.options_menu_open = false;
-        self.color_scheme_picker_open = false;
+        self.close_color_scheme_picker();
         self.branch_menu_open = None;
         self.rendered_branch_menu_area = None;
         self.dirty = true;
@@ -2598,11 +2762,10 @@ impl DiffApp {
     pub(crate) fn open_options_menu(&mut self) {
         self.options_menu_draft = OptionsDraft {
             layout: self.layout,
-            file_sidebar_open: self.file_sidebar_open,
-            include_untracked: self.options.include_untracked,
             live_updates_enabled: self.live_updates_enabled,
             context_expansion: self.theme.diff.context_expansion,
             syntax_enabled: self.syntax.is_some(),
+            line_wrapping: self.line_wrapping,
             color_scheme: self.color_scheme,
         };
         self.options_menu_selected = self
@@ -2611,7 +2774,7 @@ impl DiffApp {
         self.options_menu_input.clear();
         self.options_menu_scroll = 0;
         self.options_menu_open = true;
-        self.color_scheme_picker_open = false;
+        self.close_color_scheme_picker();
         self.diff_menu_open = false;
         self.diff_menu_input.clear();
         self.rendered_diff_menu_area = None;
@@ -2629,7 +2792,7 @@ impl DiffApp {
             self.options_menu_input.clear();
             self.options_menu_selected = 0;
             self.options_menu_scroll = 0;
-            self.color_scheme_picker_open = false;
+            self.close_color_scheme_picker();
             self.dirty = true;
         }
     }
@@ -2746,12 +2909,6 @@ impl DiffApp {
                 DiffLayoutMode::Split => "split".to_owned(),
                 DiffLayoutMode::Unified => "unified".to_owned(),
             },
-            OptionsMenuItem::FileSidebar => {
-                on_off_search(self.options_menu_draft.file_sidebar_open)
-            }
-            OptionsMenuItem::IncludeUntracked => {
-                on_off_search(self.options_menu_draft.include_untracked)
-            }
             OptionsMenuItem::LiveReload if !self.live_updates_allowed => "off disabled".to_owned(),
             OptionsMenuItem::LiveReload => {
                 on_off_search(self.options_menu_draft.live_updates_enabled)
@@ -2762,6 +2919,7 @@ impl DiffApp {
             OptionsMenuItem::SyntaxHighlighting => {
                 on_off_search(self.options_menu_draft.syntax_enabled)
             }
+            OptionsMenuItem::LineWrapping => on_off_search(self.options_menu_draft.line_wrapping),
             OptionsMenuItem::ColorScheme => {
                 color_scheme_label(self.options_menu_draft.color_scheme).to_owned()
             }
@@ -2774,10 +2932,6 @@ impl DiffApp {
                 DiffLayoutMode::Split => "[split]".to_owned(),
                 DiffLayoutMode::Unified => "[unified]".to_owned(),
             },
-            OptionsMenuItem::FileSidebar => checkbox(self.options_menu_draft.file_sidebar_open),
-            OptionsMenuItem::IncludeUntracked => {
-                checkbox(self.options_menu_draft.include_untracked)
-            }
             OptionsMenuItem::LiveReload if !self.live_updates_allowed => "[ ] disabled".to_owned(),
             OptionsMenuItem::LiveReload => checkbox(self.options_menu_draft.live_updates_enabled),
             OptionsMenuItem::ContextExpansion => {
@@ -2787,6 +2941,7 @@ impl DiffApp {
                 )
             }
             OptionsMenuItem::SyntaxHighlighting => checkbox(self.options_menu_draft.syntax_enabled),
+            OptionsMenuItem::LineWrapping => checkbox(self.options_menu_draft.line_wrapping),
             OptionsMenuItem::ColorScheme => {
                 format!(
                     "[{}]",
@@ -2833,32 +2988,44 @@ impl DiffApp {
 
     pub(crate) fn open_color_scheme_picker(&mut self) {
         self.color_scheme_picker_open = true;
+        self.color_scheme_preview_original = Some((self.color_scheme, self.theme));
         self.color_scheme_input.clear();
         self.color_scheme_scroll = 0;
-        self.color_scheme_selected = COLOR_SCHEME_CHOICES
-            .iter()
-            .position(|choice| *choice == self.options_menu_draft.color_scheme)
-            .unwrap_or_default();
+        self.color_scheme_selected = 0;
         self.ensure_color_scheme_selection_visible();
         self.dirty = true;
     }
 
     pub(crate) fn close_color_scheme_picker(&mut self) {
         if self.color_scheme_picker_open {
+            if let Some((color_scheme, theme)) = self.color_scheme_preview_original.take() {
+                self.color_scheme = color_scheme;
+                self.theme = theme;
+            }
             self.color_scheme_picker_open = false;
             self.color_scheme_input.clear();
             self.color_scheme_scroll = 0;
+            self.rendered_color_scheme_picker_area = None;
             self.dirty = true;
         }
     }
 
+    pub(crate) fn selectable_color_schemes(&self) -> Vec<ColorSchemeChoice> {
+        COLOR_SCHEME_CHOICES
+            .iter()
+            .copied()
+            .filter(|choice| *choice != self.options_menu_draft.color_scheme)
+            .collect()
+    }
+
     pub(crate) fn filtered_color_schemes(&self) -> Vec<ColorSchemeChoice> {
+        let choices = self.selectable_color_schemes();
         let query = self.color_scheme_input.trim().to_ascii_lowercase();
         if query.is_empty() {
-            return COLOR_SCHEME_CHOICES.to_vec();
+            return choices;
         }
 
-        let mut matches: Vec<_> = COLOR_SCHEME_CHOICES
+        let mut matches: Vec<_> = choices
             .iter()
             .enumerate()
             .filter_map(|(index, choice)| {
@@ -2916,6 +3083,7 @@ impl DiffApp {
         if self.color_scheme_selected != selected {
             self.color_scheme_selected = selected;
             self.ensure_color_scheme_selection_visible();
+            self.preview_highlighted_color_scheme();
             self.dirty = true;
         }
     }
@@ -2933,6 +3101,7 @@ impl DiffApp {
         self.color_scheme_input.push(character);
         self.color_scheme_scroll = 0;
         self.color_scheme_selected = 0;
+        self.preview_highlighted_color_scheme();
         self.dirty = true;
     }
 
@@ -2940,6 +3109,7 @@ impl DiffApp {
         if self.color_scheme_input.pop().is_some() {
             self.color_scheme_scroll = 0;
             self.color_scheme_selected = 0;
+            self.preview_highlighted_color_scheme();
             self.dirty = true;
         }
     }
@@ -2952,8 +3122,21 @@ impl DiffApp {
             self.color_scheme_input.clear();
             self.color_scheme_scroll = 0;
             self.color_scheme_selected = 0;
+            self.preview_highlighted_color_scheme();
             self.dirty = true;
         }
+    }
+
+    pub(crate) fn preview_highlighted_color_scheme(&mut self) {
+        let Some(choice) = self
+            .filtered_color_schemes()
+            .get(self.color_scheme_selected)
+            .copied()
+        else {
+            return;
+        };
+
+        self.apply_color_scheme(choice);
     }
 
     pub(crate) fn select_highlighted_color_scheme(&mut self) {
@@ -2968,25 +3151,23 @@ impl DiffApp {
 
         self.options_menu_draft.color_scheme = choice;
         self.color_scheme_picker_open = false;
+        self.color_scheme_preview_original = None;
         self.color_scheme_input.clear();
         self.color_scheme_scroll = 0;
-        self.apply_options_menu_draft();
+        self.rendered_color_scheme_picker_area = None;
+        self.apply_options_menu_draft(OptionsMenuItem::ColorScheme);
     }
 
     pub(crate) fn cycle_selected_option(&mut self, delta: isize) {
-        match self.highlighted_option() {
-            Some(OptionsMenuItem::Layout) => {
+        let Some(changed_item) = self.highlighted_option() else {
+            return;
+        };
+
+        match changed_item {
+            OptionsMenuItem::Layout => {
                 self.options_menu_draft.layout = self.options_menu_draft.layout.toggled();
             }
-            Some(OptionsMenuItem::FileSidebar) => {
-                self.options_menu_draft.file_sidebar_open =
-                    !self.options_menu_draft.file_sidebar_open;
-            }
-            Some(OptionsMenuItem::IncludeUntracked) => {
-                self.options_menu_draft.include_untracked =
-                    !self.options_menu_draft.include_untracked;
-            }
-            Some(OptionsMenuItem::LiveReload) => {
+            OptionsMenuItem::LiveReload => {
                 if !self.live_updates_allowed {
                     self.set_error_log("live reload disabled by --no-watch");
                     return;
@@ -2994,17 +3175,20 @@ impl DiffApp {
                 self.options_menu_draft.live_updates_enabled =
                     !self.options_menu_draft.live_updates_enabled;
             }
-            Some(OptionsMenuItem::ContextExpansion) => {
+            OptionsMenuItem::ContextExpansion => {
                 self.options_menu_draft.context_expansion = if delta < 0 {
                     previous_context_expansion(self.options_menu_draft.context_expansion)
                 } else {
                     next_context_expansion(self.options_menu_draft.context_expansion)
                 };
             }
-            Some(OptionsMenuItem::SyntaxHighlighting) => {
+            OptionsMenuItem::SyntaxHighlighting => {
                 self.options_menu_draft.syntax_enabled = !self.options_menu_draft.syntax_enabled;
             }
-            Some(OptionsMenuItem::ColorScheme) => {
+            OptionsMenuItem::LineWrapping => {
+                self.options_menu_draft.line_wrapping = !self.options_menu_draft.line_wrapping;
+            }
+            OptionsMenuItem::ColorScheme => {
                 let choices = COLOR_SCHEME_CHOICES;
                 let current = choices
                     .iter()
@@ -3013,24 +3197,17 @@ impl DiffApp {
                 let next = (current as isize + delta).rem_euclid(choices.len() as isize) as usize;
                 self.options_menu_draft.color_scheme = choices[next];
             }
-            None => return,
         }
 
-        self.apply_options_menu_draft();
+        self.apply_options_menu_draft(changed_item);
     }
 
-    fn apply_options_menu_draft(&mut self) {
+    fn apply_options_menu_draft(&mut self, changed_item: OptionsMenuItem) {
         let draft = self.options_menu_draft;
         let live_reload_reenabled = draft.live_updates_enabled && !self.live_updates_enabled;
 
         if draft.layout != self.layout {
             self.set_manual_layout(draft.layout);
-        }
-        if draft.file_sidebar_open != self.file_sidebar_open {
-            self.file_sidebar_open = draft.file_sidebar_open;
-            self.file_sidebar_resizing = false;
-            self.ensure_file_sidebar_selection_visible(self.visible_file_sidebar_rows());
-            self.dirty = true;
         }
         if draft.live_updates_enabled != self.live_updates_enabled {
             self.live_updates_enabled = draft.live_updates_enabled;
@@ -3048,41 +3225,31 @@ impl DiffApp {
         if draft.syntax_enabled != self.syntax.is_some() {
             self.set_syntax_enabled(draft.syntax_enabled);
         }
-        if draft.include_untracked != self.options.include_untracked {
-            let mut options = self.options.clone();
-            options.include_untracked = draft.include_untracked;
-            if self
-                .pending_diff_load
-                .as_ref()
-                .is_some_and(|pending| pending.options == options)
-            {
-                self.dirty = true;
-            } else {
-                self.invalidate_diff_cache();
-                self.start_uncached_diff_load(options, "reload failed");
-            }
-        } else if live_reload_reenabled {
+        if draft.line_wrapping != self.line_wrapping {
+            self.line_wrapping = draft.line_wrapping;
+            self.set_horizontal_scroll(self.horizontal_scroll);
+            self.dirty = true;
+        }
+        self.persist_options_menu_draft(draft, changed_item);
+
+        if live_reload_reenabled {
             self.invalidate_diff_cache();
             self.start_uncached_diff_load(self.options.clone(), "reload failed");
         } else {
-            self.cancel_stale_include_untracked_load();
             self.dirty = true;
         }
         self.clamp_options_menu_selection_to_filtered_items();
     }
 
-    fn cancel_stale_include_untracked_load(&mut self) {
-        let Some(pending) = &self.pending_diff_load else {
-            return;
-        };
-        if pending.options.include_untracked == self.options.include_untracked {
+    fn persist_options_menu_draft(&mut self, draft: OptionsDraft, changed_item: OptionsMenuItem) {
+        if !self.settings_persistence_enabled {
             return;
         }
 
-        let mut pending_options = pending.options.clone();
-        pending_options.include_untracked = self.options.include_untracked;
-        if pending_options == self.options {
-            self.pending_diff_load = None;
+        let result = mark_syntax::settings_path()
+            .and_then(|path| persist_options_menu_draft_to_path(&path, draft, changed_item));
+        if let Err(error) = result {
+            self.set_error_log(format!("settings not saved: {error}"));
         }
     }
 
@@ -3180,7 +3347,7 @@ impl DiffApp {
         self.diff_menu_input.clear();
         self.rendered_diff_menu_area = None;
         self.options_menu_open = false;
-        self.color_scheme_picker_open = false;
+        self.close_color_scheme_picker();
         self.branch_menu_input.clear();
         self.branch_menu_selected = self
             .branch_ref(menu)
@@ -3581,6 +3748,29 @@ impl DiffApp {
 
     pub(crate) fn is_rendered_diff_menu_position(&self, column: u16, row: u16) -> bool {
         self.rendered_diff_menu_area
+            .is_some_and(|area| rect_contains(area, column, row))
+    }
+
+    pub(crate) fn color_scheme_index_at(&self, column: u16, row: u16) -> Option<usize> {
+        let menu_area = self.rendered_color_scheme_picker_area?;
+        let inner = color_scheme_picker_block(self.theme).inner(menu_area);
+        let choices = self.filtered_color_schemes();
+        if column < inner.x
+            || column >= inner.x.saturating_add(inner.width)
+            || row < inner.y.saturating_add(3)
+            || row >= inner.y.saturating_add(inner.height)
+        {
+            return None;
+        }
+
+        let choice_index = self
+            .color_scheme_scroll
+            .saturating_add(usize::from(row.saturating_sub(inner.y).saturating_sub(3)));
+        choices.get(choice_index).map(|_| choice_index)
+    }
+
+    pub(crate) fn is_rendered_color_scheme_picker_position(&self, column: u16, row: u16) -> bool {
+        self.rendered_color_scheme_picker_area
             .is_some_and(|area| rect_contains(area, column, row))
     }
 
@@ -3995,6 +4185,10 @@ impl DiffApp {
     }
 
     pub(crate) fn max_horizontal_scroll(&self) -> usize {
+        if self.line_wrapping {
+            return 0;
+        }
+
         self.max_line_width
             .saturating_sub(diff_content_width(self.layout, self.viewport_width))
     }
@@ -4163,7 +4357,7 @@ impl DiffApp {
         self.diff_menu_input.clear();
         self.rendered_diff_menu_area = None;
         self.options_menu_open = false;
-        self.color_scheme_picker_open = false;
+        self.close_color_scheme_picker();
         self.close_branch_menu();
         self.terminal_clear_requested = true;
         let mut paused_live_diff = false;
@@ -4561,7 +4755,7 @@ impl DiffApp {
         self.diff_menu_input.clear();
         self.rendered_diff_menu_area = None;
         self.options_menu_open = false;
-        self.color_scheme_picker_open = false;
+        self.close_color_scheme_picker();
         self.close_branch_menu();
 
         let had_filter =
@@ -5087,7 +5281,7 @@ impl DiffApp {
         self.diff_menu_input.clear();
         self.rendered_diff_menu_area = None;
         self.options_menu_open = false;
-        self.color_scheme_picker_open = false;
+        self.close_color_scheme_picker();
         self.close_branch_menu();
         self.ensure_file_sidebar_selection_visible(self.visible_file_sidebar_rows());
         self.dirty = true;

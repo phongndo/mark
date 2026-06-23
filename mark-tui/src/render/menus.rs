@@ -8,7 +8,7 @@ use ratatui::{
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
-    app::{COLOR_SCHEME_CHOICES, DiffApp, OptionsMenuItem, color_scheme_label, option_label},
+    app::{DiffApp, OptionsMenuItem, color_scheme_label, option_label},
     controls::{BranchMenu, DiffChoice, INPUT_CURSOR},
     keymap::Keymap,
     render::{
@@ -381,16 +381,18 @@ fn selector_setting_line(
     ))
 }
 
-pub(crate) fn draw_color_scheme_picker(frame: &mut Frame<'_>, app: &DiffApp, area: Rect) {
+pub(crate) fn draw_color_scheme_picker(frame: &mut Frame<'_>, app: &mut DiffApp, area: Rect) {
     if !app.color_scheme_picker_open || area.width < 28 || area.height < 6 {
+        app.rendered_color_scheme_picker_area = None;
         return;
     }
 
     let width = color_scheme_picker_width(app).min(area.width);
     let height = (app.visible_color_scheme_rows() as u16)
-        .saturating_add(4)
+        .saturating_add(5)
         .min(area.height);
     if width == 0 || height == 0 {
+        app.rendered_color_scheme_picker_area = None;
         return;
     }
 
@@ -400,6 +402,7 @@ pub(crate) fn draw_color_scheme_picker(frame: &mut Frame<'_>, app: &DiffApp, are
         width,
         height,
     };
+    app.rendered_color_scheme_picker_area = Some(picker_area);
     let block = color_scheme_picker_block(app.theme);
     let inner = block.inner(picker_area);
     let choices = app.filtered_color_schemes();
@@ -408,9 +411,15 @@ pub(crate) fn draw_color_scheme_picker(frame: &mut Frame<'_>, app: &DiffApp, are
         inner.width as usize,
         app.theme,
         choices.len(),
-        COLOR_SCHEME_CHOICES.len(),
+        app.selectable_color_schemes().len(),
     )];
     lines.push(selector_separator_line(inner.width as usize, app.theme));
+    lines.push(selector_disabled_line(
+        color_scheme_label(app.options_menu_draft.color_scheme),
+        "",
+        inner.width as usize,
+        app.theme,
+    ));
 
     let remaining_rows = inner.height.saturating_sub(lines.len() as u16) as usize;
     if choices.is_empty() {
@@ -430,10 +439,8 @@ pub(crate) fn draw_color_scheme_picker(frame: &mut Frame<'_>, app: &DiffApp, are
                 .take(remaining_rows)
                 .map(|(index, choice)| {
                     let highlighted = index == app.color_scheme_selected;
-                    let active = *choice == app.options_menu_draft.color_scheme;
                     let label = color_scheme_label(*choice);
-                    let detail = if active { "current" } else { "" };
-                    selector_entry_line(label, detail, inner.width as usize, app.theme, highlighted)
+                    selector_entry_line(label, "", inner.width as usize, app.theme, highlighted)
                 }),
         );
     }
@@ -468,10 +475,19 @@ fn color_scheme_picker_width(app: &DiffApp) -> u16 {
     let rows = app
         .filtered_color_schemes()
         .iter()
-        .map(|choice| format!(" › {}  current ", color_scheme_label(*choice)).width())
+        .map(|choice| format!(" › {} ", color_scheme_label(*choice)).width())
         .max()
         .unwrap_or_else(|| " no matching colorscheme ".width());
-    rows.max(input).max(42).saturating_add(4).min(64) as u16
+    let current = format!(
+        " {} ",
+        color_scheme_label(app.options_menu_draft.color_scheme)
+    )
+    .width();
+    rows.max(current)
+        .max(input)
+        .max(42)
+        .saturating_add(4)
+        .min(64) as u16
 }
 
 pub(crate) fn draw_branch_menu(frame: &mut Frame<'_>, app: &mut DiffApp, area: Rect) {

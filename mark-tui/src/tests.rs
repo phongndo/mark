@@ -2,8 +2,8 @@ use crate::render::{
     diff::{
         SplitCellRender, SplitLineRender, SplitSide, content_spans_at_scroll, context_hide_line,
         context_show_line, empty_diff_fill_from, inline_bg, render_row, render_row_with_focus,
-        render_split_line_with_focus, render_unified_line_at_scroll, row_bg,
-        split_cell_spans_at_scroll, syntax_fg,
+        render_row_wrapped_with_focus, render_split_line_with_focus, render_unified_line_at_scroll,
+        row_bg, split_cell_spans_at_scroll, syntax_fg,
     },
     grep::{grep_highlight_target_for_columns, highlighted_grep_text_line},
     headers::{file_header_line, file_separator_line, hunk_header_line, hunk_header_spans},
@@ -33,8 +33,9 @@ use mark_diff::{
     Changeset, DiffLine, DiffLineKind, DiffOptions, DiffScope, DiffSource, FileStatus, PatchSource,
 };
 use mark_syntax::{
-    ColorOverrides, DiffContextExpansion, DiffSettings, HighlightedLine, SyntaxClass,
-    SyntaxLanguageSet, SyntaxLimits, SyntaxSettings, SyntaxThemeConfig, SyntaxThemeSource,
+    ColorOverrides, DiffContextExpansion, DiffSettings, HighlightedLine, LayoutSetting,
+    SyntaxClass, SyntaxLanguageSet, SyntaxLimits, SyntaxSettings, SyntaxThemeConfig,
+    SyntaxThemeSource,
 };
 use ratatui::prelude::{Color, Line, Modifier, Span, Style};
 use std::{
@@ -1151,6 +1152,20 @@ fn syntax_settings_load_error_falls_back_with_visible_diagnostic() {
     let error_log = error_log.expect("settings error should be visible");
     assert!(error_log.contains("syntax settings ignored"));
     assert!(error_log.contains("bad syntax config"));
+}
+
+#[test]
+fn explicit_layout_ignores_saved_layout_preference() {
+    let settings = SyntaxSettings {
+        layout: Some(LayoutSetting::Unified),
+        ..SyntaxSettings::default()
+    };
+
+    assert_eq!(
+        layout_override_from_settings(&settings, true),
+        Some(DiffLayoutMode::Unified)
+    );
+    assert_eq!(layout_override_from_settings(&settings, false), None);
 }
 
 #[test]
@@ -3309,13 +3324,32 @@ fn statusline_header_right_aligns_current_file() {
     assert!(text.ends_with("% "));
 
     let selector = line.spans.first().expect("selector block should render");
-    assert_eq!(selector.style.fg, Some(STATUSLINE_ACCENT_FG));
-    assert_eq!(selector.style.bg, Some(STATUSLINE_ACCENT_BG));
+    assert_eq!(selector.style.fg, Some(app.theme.statusline_accent_fg));
+    assert_eq!(selector.style.bg, Some(app.theme.statusline_accent_bg));
 
     let file = line.spans.last().expect("file block should render");
-    assert_eq!(file.style.fg, Some(STATUSLINE_INFO_FG));
-    assert_eq!(file.style.bg, Some(STATUSLINE_INFO_BG));
+    assert_eq!(file.style.fg, Some(app.theme.statusline_info_fg));
+    assert_eq!(file.style.bg, Some(app.theme.statusline_info_bg));
     assert!(file.style.add_modifier.contains(Modifier::BOLD));
+}
+
+#[test]
+fn statusline_header_uses_theme_statusline_colors() {
+    let changeset = changeset_with_files(&["src/lib.rs"]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.theme.statusline_accent_fg = Color::Rgb(1, 2, 3);
+    app.theme.statusline_accent_bg = Color::Rgb(4, 5, 6);
+    app.theme.statusline_info_fg = Color::Rgb(7, 8, 9);
+    app.theme.statusline_info_bg = Color::Rgb(10, 11, 12);
+
+    let line = statusline_header_line(&app, 80);
+    let selector = line.spans.first().expect("selector block should render");
+    let file = line.spans.last().expect("file block should render");
+
+    assert_eq!(selector.style.fg, Some(Color::Rgb(1, 2, 3)));
+    assert_eq!(selector.style.bg, Some(Color::Rgb(4, 5, 6)));
+    assert_eq!(file.style.fg, Some(Color::Rgb(7, 8, 9)));
+    assert_eq!(file.style.bg, Some(Color::Rgb(10, 11, 12)));
 }
 
 #[test]
@@ -3806,6 +3840,150 @@ fn options_menu_toggles_setting_on_enter() {
 }
 
 #[test]
+fn options_menu_draft_persists_only_changed_setting() {
+    let dir = temp_test_dir("settings-menu-persist-changed-only");
+    let path = dir.join("config.toml");
+    fs::create_dir_all(&dir).expect("test dir should be created");
+    fs::write(
+        &path,
+        r#"
+mode = "enabled"
+layout = "split"
+live_reload = true
+syntax_highlighting = true
+line_wrapping = false
+colorscheme = "system"
+
+[diff]
+line_background = "none"
+context_expand = 7
+"#,
+    )
+    .expect("settings file should be written");
+
+    persist_options_menu_draft_to_path(
+        &path,
+        OptionsDraft {
+            layout: DiffLayoutMode::Split,
+            live_updates_enabled: false,
+            context_expansion: DiffContextExpansion::Full,
+            syntax_enabled: false,
+            line_wrapping: true,
+            color_scheme: ColorSchemeChoice::Tokyonight,
+        },
+        OptionsMenuItem::LiveReload,
+    )
+    .expect("settings draft should persist");
+
+    let saved = fs::read_to_string(&path).expect("settings file should be readable");
+    let saved: toml::Value = toml::from_str(&saved).expect("settings should stay valid toml");
+    let diff = saved["diff"].as_table().expect("diff should stay a table");
+
+    assert_eq!(saved["mode"].as_str(), Some("enabled"));
+    assert_eq!(saved["layout"].as_str(), Some("split"));
+    assert_eq!(saved["live_reload"].as_bool(), Some(false));
+    assert_eq!(saved["syntax_highlighting"].as_bool(), Some(true));
+    assert_eq!(saved["line_wrapping"].as_bool(), Some(false));
+    assert_eq!(saved["colorscheme"].as_str(), Some("system"));
+    assert_eq!(
+        diff.get("line_background").and_then(toml::Value::as_str),
+        Some("none")
+    );
+    assert_eq!(
+        diff.get("context_expand").and_then(toml::Value::as_integer),
+        Some(7)
+    );
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn options_menu_context_persistence_removes_context_aliases() {
+    let dir = temp_test_dir("settings-menu-persist-context-aliases");
+    let path = dir.join("config.toml");
+    fs::create_dir_all(&dir).expect("test dir should be created");
+    fs::write(
+        &path,
+        r#"
+[diff]
+line_background = "none"
+context_lines = 7
+expand_context = 9
+"#,
+    )
+    .expect("settings file should be written");
+
+    persist_options_menu_draft_to_path(
+        &path,
+        OptionsDraft {
+            layout: DiffLayoutMode::Split,
+            live_updates_enabled: false,
+            context_expansion: DiffContextExpansion::Full,
+            syntax_enabled: false,
+            line_wrapping: true,
+            color_scheme: ColorSchemeChoice::Tokyonight,
+        },
+        OptionsMenuItem::ContextExpansion,
+    )
+    .expect("settings draft should persist");
+
+    let saved = fs::read_to_string(&path).expect("settings file should be readable");
+    let saved: toml::Value = toml::from_str(&saved).expect("settings should stay valid toml");
+    let diff = saved["diff"].as_table().expect("diff should stay a table");
+
+    assert_eq!(
+        diff.get("line_background").and_then(toml::Value::as_str),
+        Some("none")
+    );
+    assert_eq!(
+        diff.get("context_expand").and_then(toml::Value::as_str),
+        Some("full")
+    );
+    assert!(diff.get("context_lines").is_none());
+    assert!(diff.get("expand_context").is_none());
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn options_menu_line_wrapping_persistence_removes_line_wrapping_aliases() {
+    let dir = temp_test_dir("settings-menu-persist-line-wrapping-aliases");
+    let path = dir.join("config.toml");
+    fs::create_dir_all(&dir).expect("test dir should be created");
+    fs::write(
+        &path,
+        r#"
+word_wrap = false
+wrap_lines = false
+"#,
+    )
+    .expect("settings file should be written");
+
+    persist_options_menu_draft_to_path(
+        &path,
+        OptionsDraft {
+            layout: DiffLayoutMode::Split,
+            live_updates_enabled: false,
+            context_expansion: DiffContextExpansion::Full,
+            syntax_enabled: false,
+            line_wrapping: true,
+            color_scheme: ColorSchemeChoice::Tokyonight,
+        },
+        OptionsMenuItem::LineWrapping,
+    )
+    .expect("settings draft should persist");
+
+    let saved = fs::read_to_string(&path).expect("settings file should be readable");
+    let saved: toml::Value = toml::from_str(&saved).expect("settings should stay valid toml");
+
+    assert_eq!(saved["line_wrapping"].as_bool(), Some(true));
+    assert!(saved.get("word_wrap").is_none());
+    assert!(saved.get("wrap_lines").is_none());
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
 fn options_menu_plain_letters_filter_input() {
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
@@ -3817,10 +3995,7 @@ fn options_menu_plain_letters_filter_input() {
     assert!(app.options_menu_open);
     assert_eq!(app.options_menu_input, "x");
     assert_eq!(app.layout, DiffLayoutMode::Unified);
-    assert_eq!(
-        app.highlighted_option(),
-        Some(OptionsMenuItem::IncludeUntracked)
-    );
+    assert_eq!(app.highlighted_option(), Some(OptionsMenuItem::LiveReload));
 }
 
 #[test]
@@ -3838,7 +4013,7 @@ fn options_menu_toggles_syntax_highlighting() {
     )));
 
     app.open_options_menu();
-    app.move_options_menu_selection(5);
+    app.move_options_menu_selection(3);
     assert_eq!(
         app.highlighted_option(),
         Some(OptionsMenuItem::SyntaxHighlighting)
@@ -3850,6 +4025,56 @@ fn options_menu_toggles_syntax_highlighting() {
 
     assert!(app.syntax.is_none());
     assert_eq!(app.option_value(OptionsMenuItem::SyntaxHighlighting), "[ ]");
+}
+
+#[test]
+fn options_menu_toggles_line_wrapping_and_clamps_horizontal_scroll() {
+    let changeset = changeset_with_line_text(&"a".repeat(120));
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_width(40);
+    app.set_horizontal_scroll(HORIZONTAL_SCROLL_STEP);
+    assert_eq!(app.horizontal_scroll, HORIZONTAL_SCROLL_STEP);
+
+    app.open_options_menu();
+    app.move_options_menu_selection(4);
+    assert_eq!(
+        app.highlighted_option(),
+        Some(OptionsMenuItem::LineWrapping)
+    );
+    assert_eq!(app.option_value(OptionsMenuItem::LineWrapping), "[ ]");
+
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("enter should toggle line wrapping");
+
+    assert!(app.line_wrapping);
+    assert_eq!(app.horizontal_scroll, 0);
+    assert_eq!(app.max_horizontal_scroll(), 0);
+    assert_eq!(app.option_value(OptionsMenuItem::LineWrapping), "[x]");
+}
+
+#[test]
+fn line_wrapping_wraps_long_unified_rows() {
+    let changeset = changeset_with_line_text("abcdefghijkl");
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.line_wrapping = true;
+
+    let row_index = 2;
+    let row = app.model.row(row_index).expect("diff line should exist");
+    let lines = render_row_wrapped_with_focus(&mut app, row_index, row, 18, None);
+    let rendered = lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(rendered.len(), 3);
+    assert!(rendered[0].contains("abcd"));
+    assert!(rendered[1].contains("efgh"));
+    assert!(rendered[2].contains("ijkl"));
 }
 
 #[test]
@@ -3874,12 +4099,11 @@ fn options_menu_clamps_selection_after_toggle_leaves_filter() {
     assert_eq!(
         app.filtered_options_menu_items(),
         vec![
-            OptionsMenuItem::IncludeUntracked,
             OptionsMenuItem::LiveReload,
             OptionsMenuItem::SyntaxHighlighting,
         ]
     );
-    app.set_options_menu_selection(2);
+    app.set_options_menu_selection(1);
     assert_eq!(
         app.highlighted_option(),
         Some(OptionsMenuItem::SyntaxHighlighting)
@@ -3891,69 +4115,14 @@ fn options_menu_clamps_selection_after_toggle_leaves_filter() {
     assert!(app.syntax.is_none());
     assert_eq!(
         app.filtered_options_menu_items(),
-        vec![
-            OptionsMenuItem::IncludeUntracked,
-            OptionsMenuItem::LiveReload
-        ]
+        vec![OptionsMenuItem::LiveReload]
     );
-    assert_eq!(app.options_menu_selected, 1);
+    assert_eq!(app.options_menu_selected, 0);
     assert_eq!(app.highlighted_option(), Some(OptionsMenuItem::LiveReload));
 
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .expect("enter should activate the rendered highlighted setting");
     assert!(!app.live_updates_enabled);
-}
-
-#[test]
-fn options_menu_include_untracked_applies_with_single_reload() {
-    let changeset = changeset_with_context_lines(1);
-    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
-    assert!(app.options.include_untracked);
-
-    app.open_options_menu();
-    app.move_options_menu_selection(2);
-    assert_eq!(
-        app.highlighted_option(),
-        Some(OptionsMenuItem::IncludeUntracked)
-    );
-    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
-        .expect("enter should toggle include-untracked");
-
-    let load = app
-        .pending_diff_load
-        .as_ref()
-        .expect("include-untracked should queue reload");
-    assert!(!load.options.include_untracked);
-}
-
-#[test]
-fn options_menu_include_untracked_toggle_back_cancels_stale_reload() {
-    let changeset = changeset_with_context_lines(1);
-    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
-    assert!(app.options.include_untracked);
-
-    app.open_options_menu();
-    app.move_options_menu_selection(2);
-    assert_eq!(
-        app.highlighted_option(),
-        Some(OptionsMenuItem::IncludeUntracked)
-    );
-
-    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
-        .expect("enter should toggle include-untracked off");
-    let load = app
-        .pending_diff_load
-        .as_ref()
-        .expect("include-untracked should queue reload");
-    assert!(!load.options.include_untracked);
-
-    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
-        .expect("enter should toggle include-untracked back on");
-
-    assert!(app.pending_diff_load.is_none());
-    assert!(app.options_menu_open);
-    assert!(app.options.include_untracked);
-    assert!(app.options_menu_draft.include_untracked);
 }
 
 #[test]
@@ -3964,20 +4133,25 @@ fn options_menu_colorscheme_input_selects_draft_and_applies_on_enter() {
     app.theme = DiffTheme::system();
 
     app.open_options_menu();
-    app.move_options_menu_selection(6);
+    app.move_options_menu_selection(5);
     assert_eq!(app.highlighted_option(), Some(OptionsMenuItem::ColorScheme));
 
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .expect("enter should open colorscheme input");
     assert!(app.color_scheme_picker_open);
-    for character in ['d', 'a', 'r', 'k'] {
+    for character in ['t', 'o', 'k', 'y', 'o'] {
         app.handle_key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE))
             .expect("typing should filter colorschemes");
     }
-    assert_eq!(app.color_scheme, ColorSchemeChoice::System);
+    assert_eq!(app.color_scheme, ColorSchemeChoice::Tokyonight);
+    assert_eq!(app.theme.background, DiffTheme::tokyonight().background);
+    assert_eq!(
+        app.options_menu_draft.color_scheme,
+        ColorSchemeChoice::System
+    );
     assert_eq!(
         app.filtered_color_schemes(),
-        vec![ColorSchemeChoice::TerminalDark]
+        vec![ColorSchemeChoice::Tokyonight]
     );
 
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
@@ -3986,10 +4160,10 @@ fn options_menu_colorscheme_input_selects_draft_and_applies_on_enter() {
     assert!(app.options_menu_open);
     assert_eq!(
         app.options_menu_draft.color_scheme,
-        ColorSchemeChoice::TerminalDark
+        ColorSchemeChoice::Tokyonight
     );
-    assert_eq!(app.color_scheme, ColorSchemeChoice::TerminalDark);
-    assert_eq!(app.theme.background, DiffTheme::terminal_dark().background);
+    assert_eq!(app.color_scheme, ColorSchemeChoice::Tokyonight);
+    assert_eq!(app.theme.background, DiffTheme::tokyonight().background);
     assert!(app.pending_diff_load.is_none());
 }
 
@@ -3999,7 +4173,7 @@ fn colorscheme_picker_mouse_dismiss_keeps_options_menu_open() {
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
 
     app.open_options_menu();
-    app.move_options_menu_selection(6);
+    app.move_options_menu_selection(5);
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .expect("enter should open colorscheme picker");
     assert!(app.color_scheme_picker_open);
@@ -4039,11 +4213,10 @@ fn options_menu_omits_branch_options_for_branch_diff() {
         app.options_menu_items(),
         [
             OptionsMenuItem::Layout,
-            OptionsMenuItem::FileSidebar,
-            OptionsMenuItem::IncludeUntracked,
             OptionsMenuItem::LiveReload,
             OptionsMenuItem::ContextExpansion,
             OptionsMenuItem::SyntaxHighlighting,
+            OptionsMenuItem::LineWrapping,
             OptionsMenuItem::ColorScheme,
         ]
     );
@@ -4079,7 +4252,7 @@ fn options_menu_live_reload_toggles_without_reloading_diff() {
     assert!(app.live_updates_enabled);
 
     app.open_options_menu();
-    app.move_options_menu_selection(3);
+    app.move_options_menu_selection(1);
     assert_eq!(app.highlighted_option(), Some(OptionsMenuItem::LiveReload));
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .expect("enter should toggle live reload");
@@ -4095,7 +4268,7 @@ fn options_menu_reenabling_live_reload_reloads_diff() {
     app.live_updates_enabled = false;
 
     app.open_options_menu();
-    app.move_options_menu_selection(3);
+    app.move_options_menu_selection(1);
     assert_eq!(app.highlighted_option(), Some(OptionsMenuItem::LiveReload));
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .expect("enter should toggle live reload");
@@ -4116,7 +4289,7 @@ fn options_menu_does_not_enable_live_reload_when_watch_is_disabled() {
     app.live_updates_enabled = false;
 
     app.open_options_menu();
-    app.move_options_menu_selection(3);
+    app.move_options_menu_selection(1);
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .expect("enter should be handled");
 
@@ -4160,7 +4333,6 @@ fn options_menu_draws_centered_floating_menu() {
     assert!(title.1 > 30 && title.1 < 48, "title column was {}", title.1);
     assert!(rows.iter().any(|row| row.contains("> │")));
     assert!(rows.iter().any(|row| row.contains("Layout")));
-    assert!(rows.iter().any(|row| row.contains("Include untracked")));
     assert!(rows.iter().any(|row| row.contains("Live reload")));
     assert!(rows.iter().any(|row| row.contains("Syntax highlighting")));
     assert!(rows.iter().any(|row| row.contains("Colorscheme")));
@@ -4175,11 +4347,6 @@ fn options_menu_draws_centered_floating_menu() {
         value_column > label_column + 20,
         "setting value should be right aligned: {layout_row}"
     );
-
-    assert!(
-        rows.iter()
-            .any(|row| row.contains("Include untracked") && row.contains("[x]"))
-    );
 }
 
 #[test]
@@ -4187,7 +4354,7 @@ fn options_menu_scrolls_selected_setting_into_short_terminal() {
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
     app.open_options_menu();
-    app.set_options_menu_selection(6);
+    app.set_options_menu_selection(5);
     let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 5))
         .expect("test terminal should be created");
 
@@ -4252,10 +4419,10 @@ fn colorscheme_picker_draws_input_dropdown() {
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
     app.open_options_menu();
-    app.move_options_menu_selection(6);
+    app.move_options_menu_selection(5);
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .expect("enter should open colorscheme picker");
-    app.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE))
+    app.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE))
         .expect("typing should filter colorschemes");
     let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 20))
         .expect("test terminal should be created");
@@ -4274,8 +4441,72 @@ fn colorscheme_picker_draws_input_dropdown() {
         .collect();
 
     assert!(rows.iter().any(|row| row.contains("Colorscheme")));
-    assert!(rows.iter().any(|row| row.contains("> d│")));
-    assert!(rows.iter().any(|row| row.contains("terminal-dark")));
+    assert!(rows.iter().any(|row| row.contains("> g│")));
+    assert!(rows.iter().any(|row| row.contains("system")));
+    assert!(rows.iter().any(|row| row.contains("gruvbox-dark")));
+    assert!(!rows.iter().any(|row| row.contains("current")));
+
+    let (row, column) = rows
+        .iter()
+        .enumerate()
+        .find_map(|(row, text)| {
+            text.find("system")
+                .map(|column| (row as u16, column as u16))
+        })
+        .expect("current colorscheme should render");
+    assert_eq!(
+        buffer.cell((column, row)).expect("cell should exist").fg,
+        app.theme.muted
+    );
+}
+
+#[test]
+fn colorscheme_picker_previews_hovered_theme_and_reverts_on_close() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.open_options_menu();
+    app.move_options_menu_selection(5);
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("enter should open colorscheme picker");
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 20))
+        .expect("test terminal should be created");
+
+    terminal
+        .draw(|frame| crate::render::draw(frame, &mut app))
+        .expect("colorscheme picker draw should succeed");
+
+    let buffer = terminal.backend().buffer();
+    let (row, column) = (0..buffer.area.height)
+        .find_map(|y| {
+            let text: String = (0..buffer.area.width)
+                .map(|x| buffer.cell((x, y)).expect("cell should exist").symbol())
+                .collect();
+            text.find("gruvbox-dark").map(|column| (y, column as u16))
+        })
+        .expect("gruvbox row should render");
+
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Moved,
+        column,
+        row,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("hover should preview colorscheme");
+
+    assert_eq!(app.color_scheme, ColorSchemeChoice::GruvboxDark);
+    assert_eq!(app.theme.background, DiffTheme::gruvbox_dark().background);
+
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: 0,
+        row: 0,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("outside click should close colorscheme picker");
+
+    assert!(!app.color_scheme_picker_open);
+    assert_eq!(app.color_scheme, ColorSchemeChoice::System);
+    assert_eq!(app.theme, DiffTheme::system());
 }
 
 #[test]
@@ -5526,6 +5757,8 @@ fn color_overrides_layer_on_colorscheme() {
             cursor: Some("white".to_owned()),
             search_match_fg: Some("#112233".to_owned()),
             search_match_bg: Some("#223344".to_owned()),
+            statusline_accent_bg: Some("#334455".to_owned()),
+            statusline_info_fg: Some("#445566".to_owned()),
             keyword: Some("ansi-13".to_owned()),
             ..ColorOverrides::default()
         })
@@ -5540,6 +5773,8 @@ fn color_overrides_layer_on_colorscheme() {
     assert_eq!(theme.cursor, Color::White);
     assert_eq!(theme.search_match_fg, Color::Rgb(0x11, 0x22, 0x33));
     assert_eq!(theme.search_match_bg, Color::Rgb(0x22, 0x33, 0x44));
+    assert_eq!(theme.statusline_accent_bg, Color::Rgb(0x33, 0x44, 0x55));
+    assert_eq!(theme.statusline_info_fg, Color::Rgb(0x44, 0x55, 0x66));
     assert_eq!(
         theme.syntax.color(SyntaxClass::Keyword),
         Some(Color::Indexed(13))
@@ -5547,20 +5782,208 @@ fn color_overrides_layer_on_colorscheme() {
 }
 
 #[test]
-fn packaged_popular_themes_are_available() {
-    for name in ["catppuccin-mocha", "gruvbox-dark", "tokyonight", "dracula"] {
+fn packaged_builtin_themes_are_available() {
+    for name in [
+        "system",
+        "catppuccin-latte",
+        "catppuccin-frappe",
+        "catppuccin-macchiato",
+        "catppuccin-mocha",
+        "gruvbox-dark",
+        "gruvbox-light",
+        "github-dark",
+        "github-dark-high-contrast",
+        "github-light",
+        "github-light-high-contrast",
+        "tokyonight",
+    ] {
         let theme = builtin_diff_theme(Some(name)).expect("built-in theme should load");
 
-        assert_ne!(
-            theme.file,
-            Color::Reset,
-            "{name} should set file foreground"
-        );
+        assert_ne!(theme.statusline_accent_bg, Color::Reset);
         assert!(
             theme.syntax.color(SyntaxClass::Keyword).is_some(),
             "{name} should set syntax keyword foreground"
         );
     }
+}
+
+#[test]
+fn builtin_syntax_palettes_match_upstream_theme_scopes() {
+    // These expectations mirror the upstream TextMate scopes used by the
+    // Catppuccin, Gruvbox, and GitHub VS Code/Shiki themes for the closest
+    // matching Mark syntax classes.
+    for (theme, comment, operator, tag, attribute) in [
+        (
+            DiffTheme::catppuccin_latte(),
+            Color::Rgb(0x7c, 0x7f, 0x93),
+            Color::Rgb(0x17, 0x92, 0x99),
+            Color::Rgb(0x1e, 0x66, 0xf5),
+            Color::Rgb(0xdf, 0x8e, 0x1d),
+        ),
+        (
+            DiffTheme::catppuccin_frappe(),
+            Color::Rgb(0x94, 0x9c, 0xbb),
+            Color::Rgb(0x81, 0xc8, 0xbe),
+            Color::Rgb(0x8c, 0xaa, 0xee),
+            Color::Rgb(0xe5, 0xc8, 0x90),
+        ),
+        (
+            DiffTheme::catppuccin_macchiato(),
+            Color::Rgb(0x93, 0x9a, 0xb7),
+            Color::Rgb(0x8b, 0xd5, 0xca),
+            Color::Rgb(0x8a, 0xad, 0xf4),
+            Color::Rgb(0xee, 0xd4, 0x9f),
+        ),
+        (
+            DiffTheme::catppuccin_mocha(),
+            Color::Rgb(0x93, 0x99, 0xb2),
+            Color::Rgb(0x94, 0xe2, 0xd5),
+            Color::Rgb(0x89, 0xb4, 0xfa),
+            Color::Rgb(0xf9, 0xe2, 0xaf),
+        ),
+    ] {
+        assert_eq!(theme.syntax.color(SyntaxClass::Comment), Some(comment));
+        assert_eq!(theme.syntax.color(SyntaxClass::Operator), Some(operator));
+        assert_eq!(theme.syntax.color(SyntaxClass::Property), Some(operator));
+        assert_eq!(theme.syntax.color(SyntaxClass::Tag), Some(tag));
+        assert_eq!(theme.syntax.color(SyntaxClass::Attribute), Some(attribute));
+        assert_eq!(theme.syntax.color(SyntaxClass::Module), Some(attribute));
+        assert_eq!(theme.syntax.color(SyntaxClass::Variable), None);
+    }
+
+    for (theme, constant, function, operator, variable, punctuation, property) in [
+        (
+            DiffTheme::gruvbox_dark(),
+            Color::Rgb(0xd3, 0x86, 0x9b),
+            Color::Rgb(0xfa, 0xbd, 0x2f),
+            Color::Rgb(0x8e, 0xc0, 0x7c),
+            Color::Rgb(0x83, 0xa5, 0x98),
+            Color::Rgb(0xa8, 0x99, 0x84),
+            Color::Rgb(0x68, 0x9d, 0x6a),
+        ),
+        (
+            DiffTheme::gruvbox_light(),
+            Color::Rgb(0x8f, 0x3f, 0x71),
+            Color::Rgb(0xb5, 0x76, 0x14),
+            Color::Rgb(0x42, 0x7b, 0x58),
+            Color::Rgb(0x07, 0x66, 0x78),
+            Color::Rgb(0x7c, 0x6f, 0x64),
+            Color::Rgb(0x68, 0x9d, 0x6a),
+        ),
+    ] {
+        assert_eq!(
+            theme.syntax.color(SyntaxClass::Comment),
+            Some(Color::Rgb(0x92, 0x83, 0x74))
+        );
+        assert_eq!(theme.syntax.color(SyntaxClass::Constant), Some(constant));
+        assert_eq!(theme.syntax.color(SyntaxClass::Function), Some(function));
+        assert_eq!(theme.syntax.color(SyntaxClass::Type), Some(function));
+        assert_eq!(theme.syntax.color(SyntaxClass::Operator), Some(operator));
+        assert_eq!(theme.syntax.color(SyntaxClass::Tag), Some(operator));
+        assert_eq!(theme.syntax.color(SyntaxClass::Variable), Some(variable));
+        assert_eq!(
+            theme.syntax.color(SyntaxClass::Punctuation),
+            Some(punctuation)
+        );
+        assert_eq!(theme.syntax.color(SyntaxClass::Property), Some(property));
+    }
+
+    for (theme, comment, constant, function, tag, string, variable) in [
+        (
+            DiffTheme::github_light(),
+            Color::Rgb(0x6e, 0x77, 0x81),
+            Color::Rgb(0x05, 0x50, 0xae),
+            Color::Rgb(0x82, 0x50, 0xdf),
+            Color::Rgb(0x11, 0x63, 0x29),
+            Color::Rgb(0x0a, 0x30, 0x69),
+            Color::Rgb(0x95, 0x38, 0x00),
+        ),
+        (
+            DiffTheme::github_dark(),
+            Color::Rgb(0x8b, 0x94, 0x9e),
+            Color::Rgb(0x79, 0xc0, 0xff),
+            Color::Rgb(0xd2, 0xa8, 0xff),
+            Color::Rgb(0x7e, 0xe7, 0x87),
+            Color::Rgb(0xa5, 0xd6, 0xff),
+            Color::Rgb(0xff, 0xa6, 0x57),
+        ),
+        (
+            DiffTheme::github_light_high_contrast(),
+            Color::Rgb(0x66, 0x70, 0x7b),
+            Color::Rgb(0x02, 0x3b, 0x95),
+            Color::Rgb(0x62, 0x2c, 0xbc),
+            Color::Rgb(0x02, 0x4c, 0x1a),
+            Color::Rgb(0x03, 0x25, 0x63),
+            Color::Rgb(0x70, 0x2c, 0x00),
+        ),
+        (
+            DiffTheme::github_dark_high_contrast(),
+            Color::Rgb(0xbd, 0xc4, 0xcc),
+            Color::Rgb(0x91, 0xcb, 0xff),
+            Color::Rgb(0xdb, 0xb7, 0xff),
+            Color::Rgb(0x72, 0xf0, 0x88),
+            Color::Rgb(0xad, 0xdc, 0xff),
+            Color::Rgb(0xff, 0xb7, 0x57),
+        ),
+    ] {
+        assert_eq!(theme.syntax.color(SyntaxClass::Attribute), None);
+        assert_eq!(theme.syntax.color(SyntaxClass::Comment), Some(comment));
+        assert_eq!(theme.syntax.color(SyntaxClass::Constant), Some(constant));
+        assert_eq!(theme.syntax.color(SyntaxClass::Function), Some(function));
+        assert_eq!(theme.syntax.color(SyntaxClass::Tag), Some(tag));
+        assert_eq!(theme.syntax.color(SyntaxClass::String), Some(string));
+        assert_eq!(theme.syntax.color(SyntaxClass::Variable), Some(variable));
+        assert_eq!(theme.syntax.color(SyntaxClass::Type), Some(variable));
+        assert_eq!(theme.syntax.color(SyntaxClass::Property), Some(constant));
+        assert_eq!(theme.syntax.color(SyntaxClass::Punctuation), None);
+    }
+
+    let theme = DiffTheme::tokyonight();
+    assert_eq!(
+        theme.syntax.color(SyntaxClass::Comment),
+        Some(Color::Rgb(0x51, 0x59, 0x7d))
+    );
+    assert_eq!(
+        theme.syntax.color(SyntaxClass::Attribute),
+        Some(Color::Rgb(0xbb, 0x9a, 0xf7))
+    );
+    assert_eq!(
+        theme.syntax.color(SyntaxClass::Operator),
+        Some(Color::Rgb(0x89, 0xdd, 0xff))
+    );
+    assert_eq!(
+        theme.syntax.color(SyntaxClass::Property),
+        Some(Color::Rgb(0x7d, 0xcf, 0xff))
+    );
+    assert_eq!(
+        theme.syntax.color(SyntaxClass::Type),
+        Some(Color::Rgb(0x0d, 0xb9, 0xd7))
+    );
+    assert_eq!(
+        theme.syntax.color(SyntaxClass::Tag),
+        Some(Color::Rgb(0xf7, 0x76, 0x8e))
+    );
+}
+
+#[test]
+fn color_scheme_picker_lists_supported_builtin_themes_only() {
+    assert_eq!(
+        COLOR_SCHEME_CHOICES,
+        &[
+            ColorSchemeChoice::System,
+            ColorSchemeChoice::CatppuccinLatte,
+            ColorSchemeChoice::CatppuccinFrappe,
+            ColorSchemeChoice::CatppuccinMacchiato,
+            ColorSchemeChoice::CatppuccinMocha,
+            ColorSchemeChoice::GruvboxDark,
+            ColorSchemeChoice::GruvboxLight,
+            ColorSchemeChoice::GithubDark,
+            ColorSchemeChoice::GithubDarkHighContrast,
+            ColorSchemeChoice::GithubLight,
+            ColorSchemeChoice::GithubLightHighContrast,
+            ColorSchemeChoice::Tokyonight,
+        ]
+    );
 }
 
 #[test]

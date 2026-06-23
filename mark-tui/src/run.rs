@@ -69,7 +69,7 @@ async fn run_diff_with_live_updates_and_syntax_async(
     };
     let mut app = DiffApp::new_with_syntax(options, changeset, layout, syntax_mode);
     app.live_updates_allowed = live_updates;
-    app.live_updates_enabled = live_updates;
+    app.live_updates_enabled = live_updates && app.live_updates_enabled;
 
     let mut cleanup = TerminalCleanup::install()?;
     let backend = CrosstermBackend::new(io::stdout());

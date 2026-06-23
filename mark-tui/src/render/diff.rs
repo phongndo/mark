@@ -6,13 +6,18 @@ use ratatui::{
     prelude::{Color, Line, Modifier, Span, Style, Text},
     widgets::Paragraph,
 };
+use unicode_width::UnicodeWidthStr;
 
 use crate::{
     app::{DiffApp, split_cell_content_width, unified_content_width},
     controls::DiffLayoutMode,
     model::UiRow,
     render::{
-        grep::{grep_highlight_targets_for_row, highlighted_grep_text_line},
+        grep::{
+            diff_line_grep_highlight_text, grep_highlight_target_for_columns,
+            grep_highlight_targets_for_row, highlighted_grep_text_line, scrolled_text_byte_start,
+            split_diff_line_grep_highlight_target, unified_content_start_column,
+        },
         headers::{
             file_header_line, file_separator_line, hunk_header_line, hunk_header_line_with_focus,
         },
@@ -50,6 +55,11 @@ pub(crate) fn draw_diff(frame: &mut Frame<'_>, app: &mut DiffApp, area: Rect) {
     let visible_rows = area.height as usize;
     app.prepare_syntax_for_viewport(visible_rows);
 
+    if app.line_wrapping {
+        draw_wrapped_diff(frame, app, area, visible_rows);
+        return;
+    }
+
     let mut lines = Vec::with_capacity(visible_rows);
     let focused_hunk = app.focused_hunk_for_viewport(visible_rows);
     for offset in 0..visible_rows {
@@ -71,6 +81,29 @@ pub(crate) fn draw_diff(frame: &mut Frame<'_>, app: &mut DiffApp, area: Rect) {
     );
 }
 
+fn draw_wrapped_diff(frame: &mut Frame<'_>, app: &mut DiffApp, area: Rect, visible_rows: usize) {
+    let mut lines = Vec::with_capacity(visible_rows);
+    let focused_hunk = app.focused_hunk_for_viewport(visible_rows);
+    let mut row_index = app.scroll;
+    while lines.len() < visible_rows {
+        let Some(row) = app.model.row(row_index) else {
+            break;
+        };
+        let remaining = visible_rows.saturating_sub(lines.len());
+        lines.extend(
+            render_row_wrapped_with_focus(app, row_index, row, area.width as usize, focused_hunk)
+                .into_iter()
+                .take(remaining),
+        );
+        row_index = row_index.saturating_add(1);
+    }
+
+    frame.render_widget(
+        Paragraph::new(Text::from(lines)).style(Style::default().bg(base_bg(app.theme))),
+        area,
+    );
+}
+
 pub(crate) fn render_row(
     app: &mut DiffApp,
     row_index: usize,
@@ -78,6 +111,79 @@ pub(crate) fn render_row(
     width: usize,
 ) -> Line<'static> {
     render_row_with_focus(app, row_index, row, width, None)
+}
+
+pub(crate) fn render_row_wrapped_with_focus(
+    app: &mut DiffApp,
+    row_index: usize,
+    row: UiRow,
+    width: usize,
+    focused_hunk: Option<(usize, usize)>,
+) -> Vec<Line<'static>> {
+    let theme = app.theme;
+    let hunk_focused = row
+        .hunk_key()
+        .is_some_and(|hunk_key| Some(hunk_key) == focused_hunk);
+
+    match row {
+        UiRow::ContextLine {
+            file,
+            old_line,
+            new_line,
+        } => render_context_line_wrapped(app, file, old_line, new_line, row_index, width),
+        UiRow::UnifiedLine { file, hunk, line } => {
+            let kind = app.changeset.files[file].hunks[hunk].lines[line].kind;
+            let syntax =
+                unified_syntax_side(kind).and_then(|side| app.syntax_line(file, hunk, line, side));
+            let inline = app.inline_ranges(file, hunk, line);
+            let diff_line = &app.changeset.files[file].hunks[hunk].lines[line];
+            render_unified_line_wrapped_with_focus(
+                diff_line,
+                syntax.as_ref(),
+                &inline,
+                width,
+                theme,
+                hunk_focused,
+                &app.grep_filter,
+            )
+        }
+        UiRow::MetaLine { file, hunk, line } => {
+            let diff_line = &app.changeset.files[file].hunks[hunk].lines[line];
+            render_unified_line_wrapped_with_focus(
+                diff_line,
+                None,
+                &[],
+                width,
+                theme,
+                hunk_focused,
+                &app.grep_filter,
+            )
+        }
+        UiRow::SplitLine {
+            file,
+            hunk,
+            left,
+            right,
+        } => render_split_line_wrapped_with_focus(
+            app,
+            SplitLineRender {
+                file,
+                hunk,
+                left,
+                right,
+                row_index,
+                width,
+                focused: hunk_focused,
+            },
+        ),
+        _ => vec![render_row_with_focus(
+            app,
+            row_index,
+            row,
+            width,
+            focused_hunk,
+        )],
+    }
 }
 
 pub(crate) fn render_row_with_focus(
@@ -282,6 +388,46 @@ pub(crate) fn render_context_line(
     }
 }
 
+pub(crate) fn render_context_line_wrapped(
+    app: &mut DiffApp,
+    file: usize,
+    old_line: usize,
+    new_line: usize,
+    row_index: usize,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let theme = app.theme;
+    let side = app.context_source_side(file);
+    let syntax = side.and_then(|side| {
+        let line_number = match side {
+            DiffSide::Old => old_line,
+            DiffSide::New => new_line,
+        };
+        app.syntax_file_line(file, side, line_number)
+    });
+    let diff_line = DiffLine {
+        kind: DiffLineKind::Context,
+        old_line: Some(old_line),
+        new_line: Some(new_line),
+        text: app.context_line_text(file, old_line, new_line),
+    };
+
+    match app.layout {
+        DiffLayoutMode::Unified => render_unified_line_wrapped_with_focus(
+            &diff_line,
+            syntax.as_ref(),
+            &[],
+            width,
+            theme,
+            false,
+            &app.grep_filter,
+        ),
+        DiffLayoutMode::Split => {
+            render_split_context_line_wrapped(&diff_line, syntax.as_ref(), row_index, width, theme)
+        }
+    }
+}
+
 pub(crate) fn render_split_context_line(
     line: &DiffLine,
     syntax: Option<&HighlightedLine>,
@@ -323,6 +469,58 @@ pub(crate) fn render_split_context_line(
     Line::from(spans)
 }
 
+pub(crate) fn render_split_context_line_wrapped(
+    line: &DiffLine,
+    syntax: Option<&HighlightedLine>,
+    row_index: usize,
+    width: usize,
+    theme: DiffTheme,
+) -> Vec<Line<'static>> {
+    if width == 0 {
+        return vec![Line::default()];
+    }
+
+    let left_width = width / 2;
+    let right_width = width.saturating_sub(left_width);
+    let left_content_width = split_cell_content_width(left_width);
+    let right_content_width = split_cell_content_width(right_width);
+    let rows = wrapped_line_count(&line.text, left_content_width)
+        .max(wrapped_line_count(&line.text, right_content_width));
+    let mut lines = Vec::with_capacity(rows);
+    for wrap_index in 0..rows {
+        let mut spans = split_cell_spans_at_scroll_with_focus_and_continuation(
+            Some(line),
+            syntax,
+            &[],
+            SplitCellRender {
+                side: SplitSide::Old,
+                row_index,
+                width: left_width,
+                theme,
+            },
+            wrap_index.saturating_mul(left_content_width),
+            false,
+            wrap_index > 0,
+        );
+        spans.extend(split_cell_spans_at_scroll_with_focus_and_continuation(
+            Some(line),
+            syntax,
+            &[],
+            SplitCellRender {
+                side: SplitSide::New,
+                row_index,
+                width: right_width,
+                theme,
+            },
+            wrap_index.saturating_mul(right_content_width),
+            false,
+            wrap_index > 0,
+        ));
+        lines.push(Line::from(spans));
+    }
+    lines
+}
+
 pub(crate) fn render_unified_line_at_scroll(
     line: &DiffLine,
     syntax: Option<&HighlightedLine>,
@@ -352,20 +550,86 @@ pub(crate) fn render_unified_line_at_scroll_with_focus(
     horizontal_scroll: usize,
     focused: bool,
 ) -> Line<'static> {
+    render_unified_line_segment_with_focus(
+        line,
+        syntax,
+        inline,
+        width,
+        theme,
+        horizontal_scroll,
+        focused,
+        false,
+    )
+}
+
+pub(crate) fn render_unified_line_wrapped_with_focus(
+    line: &DiffLine,
+    syntax: Option<&HighlightedLine>,
+    inline: &[InlineRange],
+    width: usize,
+    theme: DiffTheme,
+    focused: bool,
+    grep_filter: &str,
+) -> Vec<Line<'static>> {
+    let content_width = unified_content_width(width);
+    let rows = wrapped_line_count(&line.text, content_width);
+    let mut lines = Vec::with_capacity(rows);
+    for wrap_index in 0..rows {
+        let horizontal_scroll = wrap_index.saturating_mul(content_width);
+        let rendered = render_unified_line_segment_with_focus(
+            line,
+            syntax,
+            inline,
+            width,
+            theme,
+            horizontal_scroll,
+            focused,
+            wrap_index > 0,
+        );
+        lines.push(highlight_wrapped_unified_grep_line(
+            rendered,
+            line,
+            grep_filter,
+            width,
+            horizontal_scroll,
+            theme,
+        ));
+    }
+    lines
+}
+
+fn render_unified_line_segment_with_focus(
+    line: &DiffLine,
+    syntax: Option<&HighlightedLine>,
+    inline: &[InlineRange],
+    width: usize,
+    theme: DiffTheme,
+    horizontal_scroll: usize,
+    focused: bool,
+    continuation: bool,
+) -> Line<'static> {
     if width == 0 {
         return Line::default();
     }
 
-    let sign = match line.kind {
-        DiffLineKind::Context => " ",
-        DiffLineKind::Addition => "+",
-        DiffLineKind::Deletion => "-",
-        DiffLineKind::Meta => " ",
+    let sign = if continuation {
+        " "
+    } else {
+        match line.kind {
+            DiffLineKind::Context => " ",
+            DiffLineKind::Addition => "+",
+            DiffLineKind::Deletion => "-",
+            DiffLineKind::Meta => " ",
+        }
     };
     let indicator_width = 1.min(width);
     let gutter_width = UNIFIED_GUTTER_WIDTH.min(width.saturating_sub(indicator_width));
     let content_width = unified_content_width(width);
-    let gutter = unified_gutter_text(line.old_line, line.new_line);
+    let gutter = if continuation {
+        spaces(UNIFIED_GUTTER_WIDTH.saturating_sub(1)).into_owned()
+    } else {
+        unified_gutter_text(line.old_line, line.new_line)
+    };
     let mut spans = Vec::new();
     if indicator_width > 0 {
         spans.push(diff_indicator_span_for_focus(line.kind, theme, focused));
@@ -383,6 +647,38 @@ pub(crate) fn render_unified_line_at_scroll_with_focus(
         horizontal_scroll,
     ));
     Line::from(spans)
+}
+
+fn highlight_wrapped_unified_grep_line(
+    rendered: Line<'static>,
+    line: &DiffLine,
+    query: &str,
+    width: usize,
+    horizontal_scroll: usize,
+    theme: DiffTheme,
+) -> Line<'static> {
+    if query.is_empty() {
+        return rendered;
+    }
+
+    let targets = grep_highlight_target_for_columns(
+        diff_line_grep_highlight_text(line),
+        &rendered.spans,
+        unified_content_start_column(width),
+        width,
+        1 + scrolled_text_byte_start(&line.text, horizontal_scroll),
+    )
+    .into_iter()
+    .collect();
+    highlighted_grep_text_line(rendered, query, targets, theme)
+}
+
+fn wrapped_line_count(text: &str, content_width: usize) -> usize {
+    if content_width == 0 {
+        return 1;
+    }
+
+    (text.width().saturating_add(content_width - 1) / content_width.max(1)).max(1)
 }
 
 pub(crate) fn diff_indicator_span_for_focus(
@@ -812,6 +1108,131 @@ pub(crate) fn render_split_line_with_focus(
     Line::from(spans)
 }
 
+pub(crate) fn render_split_line_wrapped_with_focus(
+    app: &mut DiffApp,
+    render: SplitLineRender,
+) -> Vec<Line<'static>> {
+    let SplitLineRender {
+        file,
+        hunk,
+        left,
+        right,
+        row_index,
+        width,
+        focused,
+    } = render;
+    if width == 0 {
+        return vec![Line::default()];
+    }
+    let theme = app.theme;
+
+    let left_syntax = left.and_then(|index| app.syntax_line(file, hunk, index, DiffSide::Old));
+    let right_syntax = right.and_then(|index| app.syntax_line(file, hunk, index, DiffSide::New));
+    let left_inline = left
+        .map(|index| app.inline_ranges(file, hunk, index))
+        .unwrap_or_default();
+    let right_inline = right
+        .map(|index| app.inline_ranges(file, hunk, index))
+        .unwrap_or_default();
+
+    let left_width = width / 2;
+    let right_width = width.saturating_sub(left_width);
+    let lines = &app.changeset.files[file].hunks[hunk].lines;
+    let left_line = left.and_then(|index| lines.get(index));
+    let right_line = right.and_then(|index| lines.get(index));
+    let left_content_width = split_cell_content_width(left_width);
+    let right_content_width = split_cell_content_width(right_width);
+    let left_rows = left_line
+        .map(|line| wrapped_line_count(&line.text, left_content_width))
+        .unwrap_or(1);
+    let right_rows = right_line
+        .map(|line| wrapped_line_count(&line.text, right_content_width))
+        .unwrap_or(1);
+    let rows = left_rows.max(right_rows).max(1);
+    let mut rendered_lines = Vec::with_capacity(rows);
+    for wrap_index in 0..rows {
+        let left_scroll = wrap_index.saturating_mul(left_content_width);
+        let right_scroll = wrap_index.saturating_mul(right_content_width);
+        let mut spans = split_cell_spans_at_scroll_with_focus_and_continuation(
+            left_line,
+            left_syntax.as_ref(),
+            &left_inline,
+            SplitCellRender {
+                side: SplitSide::Old,
+                row_index,
+                width: left_width,
+                theme,
+            },
+            left_scroll,
+            focused,
+            wrap_index > 0,
+        );
+        spans.extend(split_cell_spans_at_scroll_with_focus_and_continuation(
+            right_line,
+            right_syntax.as_ref(),
+            &right_inline,
+            SplitCellRender {
+                side: SplitSide::New,
+                row_index,
+                width: right_width,
+                theme,
+            },
+            right_scroll,
+            focused,
+            wrap_index > 0,
+        ));
+        let line = Line::from(spans);
+        rendered_lines.push(highlight_wrapped_split_grep_line(
+            line,
+            left_line,
+            right_line,
+            &app.grep_filter,
+            width,
+            left_scroll,
+            right_scroll,
+            theme,
+        ));
+    }
+    rendered_lines
+}
+
+fn highlight_wrapped_split_grep_line(
+    rendered: Line<'static>,
+    left_line: Option<&DiffLine>,
+    right_line: Option<&DiffLine>,
+    query: &str,
+    width: usize,
+    left_scroll: usize,
+    right_scroll: usize,
+    theme: DiffTheme,
+) -> Line<'static> {
+    if query.is_empty() {
+        return rendered;
+    }
+
+    let left_width = width / 2;
+    let right_width = width.saturating_sub(left_width);
+    let mut targets = Vec::with_capacity(2);
+    if let Some(target) = left_line.and_then(|line| {
+        split_diff_line_grep_highlight_target(line, &rendered.spans, 0, left_width, left_scroll)
+    }) {
+        targets.push(target);
+    }
+    if let Some(target) = right_line.and_then(|line| {
+        split_diff_line_grep_highlight_target(
+            line,
+            &rendered.spans,
+            left_width,
+            right_width,
+            right_scroll,
+        )
+    }) {
+        targets.push(target);
+    }
+
+    highlighted_grep_text_line(rendered, query, targets, theme)
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum SplitSide {
     Old,
@@ -843,6 +1264,26 @@ pub(crate) fn split_cell_spans_at_scroll_with_focus(
     render: SplitCellRender,
     horizontal_scroll: usize,
     focused: bool,
+) -> Vec<Span<'static>> {
+    split_cell_spans_at_scroll_with_focus_and_continuation(
+        line,
+        syntax,
+        inline,
+        render,
+        horizontal_scroll,
+        focused,
+        false,
+    )
+}
+
+fn split_cell_spans_at_scroll_with_focus_and_continuation(
+    line: Option<&DiffLine>,
+    syntax: Option<&HighlightedLine>,
+    inline: &[InlineRange],
+    render: SplitCellRender,
+    horizontal_scroll: usize,
+    focused: bool,
+    continuation: bool,
 ) -> Vec<Span<'static>> {
     let SplitCellRender {
         side,
@@ -886,14 +1327,22 @@ pub(crate) fn split_cell_spans_at_scroll_with_focus(
     let indicator_width = 1.min(width);
     let gutter_width = GUTTER_WIDTH.min(width.saturating_sub(indicator_width));
     let content_width = split_cell_content_width(width);
-    let line_number = match side {
-        SplitSide::Old => line.old_line,
-        SplitSide::New => line.new_line,
+    let line_number = if continuation {
+        None
+    } else {
+        match side {
+            SplitSide::Old => line.old_line,
+            SplitSide::New => line.new_line,
+        }
     };
-    let sign = match (side, line.kind) {
-        (SplitSide::Old, DiffLineKind::Deletion) => "-",
-        (SplitSide::New, DiffLineKind::Addition) => "+",
-        _ => " ",
+    let sign = if continuation {
+        " "
+    } else {
+        match (side, line.kind) {
+            (SplitSide::Old, DiffLineKind::Deletion) => "-",
+            (SplitSide::New, DiffLineKind::Addition) => "+",
+            _ => " ",
+        }
     };
 
     let mut spans = Vec::new();

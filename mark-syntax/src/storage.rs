@@ -86,6 +86,10 @@ pub(crate) fn settings_from_stored(stored: StoredSyntaxSettings) -> SyntaxSettin
         theme: colorscheme
             .map(theme_config_from_stored)
             .unwrap_or_default(),
+        layout: stored.layout,
+        live_reload: stored.live_reload.unwrap_or(true),
+        syntax_highlighting: stored.syntax_highlighting.unwrap_or(true),
+        line_wrapping: stored.line_wrapping,
         colors: stored.colors.overlay(stored.color_overrides),
         transparent_background: stored.transparent_background,
         diff: diff_from_stored(stored.diff),

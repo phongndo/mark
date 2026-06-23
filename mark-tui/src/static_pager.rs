@@ -71,7 +71,14 @@ pub fn render_static_changeset(
     } else {
         SyntaxStartupMode::Disabled
     };
-    let mut app = DiffApp::new_with_syntax(diff_options, changeset, layout, syntax_mode);
+    let mut app = match pager_options.layout {
+        StaticPagerLayout::Auto => {
+            DiffApp::new_with_syntax(diff_options, changeset, layout, syntax_mode)
+        }
+        StaticPagerLayout::Split | StaticPagerLayout::Unified => {
+            DiffApp::new_with_explicit_layout(diff_options, changeset, layout, syntax_mode)
+        }
+    };
     app.set_viewport_width(width);
     app.set_viewport_rows(app.model.len().max(1));
     settle_static_syntax(&mut app, pager_options.syntax_timeout);

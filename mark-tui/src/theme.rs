@@ -46,11 +46,6 @@ pub(crate) const FILE_SIDEBAR_MIN_DIFF_WIDTH: u16 = 30;
 pub(crate) const BRANCH_COMPARISON_SEPARATOR: &str = " → ";
 pub(crate) const CURRENT_BRANCH_MARKER: &str = "●";
 pub(crate) const BASE_BRANCH_MARKER: &str = "⌂";
-pub(crate) const STATUSLINE_BG: Color = Color::Rgb(0x24, 0x25, 0x2b);
-pub(crate) const STATUSLINE_ACCENT_BG: Color = Color::Rgb(0xe5, 0x9a, 0xca);
-pub(crate) const STATUSLINE_ACCENT_FG: Color = Color::Rgb(0x24, 0x24, 0x2b);
-pub(crate) const STATUSLINE_INFO_BG: Color = Color::Rgb(0x48, 0x49, 0x52);
-pub(crate) const STATUSLINE_INFO_FG: Color = Color::Rgb(0xd7, 0xd6, 0xe8);
 pub(crate) const STATUSLINE_SELECTOR_GAP: &str = " ";
 pub(crate) const HELP_MENU_WIDTH: u16 = 90;
 pub(crate) const HELP_KEY_COLUMN_WIDTH: usize = 17;
@@ -230,6 +225,12 @@ pub(crate) struct DiffTheme {
     pub(crate) empty_diff: Color,
     pub(crate) search_match_fg: Color,
     pub(crate) search_match_bg: Color,
+    pub(crate) statusline_fg: Color,
+    pub(crate) statusline_bg: Color,
+    pub(crate) statusline_accent_fg: Color,
+    pub(crate) statusline_accent_bg: Color,
+    pub(crate) statusline_info_fg: Color,
+    pub(crate) statusline_info_bg: Color,
     pub(crate) addition_fg: Color,
     pub(crate) addition_gutter_bg: Color,
     pub(crate) addition_bg: Color,
@@ -267,6 +268,12 @@ impl DiffTheme {
             empty_diff: Color::Rgb(0x3d, 0x42, 0x49),
             search_match_fg: Color::Indexed(0),
             search_match_bg: Color::Indexed(3),
+            statusline_fg: Color::Reset,
+            statusline_bg: Color::Reset,
+            statusline_accent_fg: Color::Indexed(0),
+            statusline_accent_bg: Color::Indexed(13),
+            statusline_info_fg: Color::Reset,
+            statusline_info_bg: Color::Indexed(0),
             addition_fg: green.color(),
             addition_gutter_bg: base.blend(green, 0.12).color(),
             addition_bg: Color::Rgb(0x1f, 0x30, 0x25),
@@ -278,96 +285,6 @@ impl DiffTheme {
             transparent_background: false,
             diff: DiffSettings::default(),
             syntax: SyntaxPalette::ansi(),
-        }
-    }
-
-    pub(crate) fn terminal_dark() -> Self {
-        let base = RgbColor::new(0x12, 0x12, 0x12);
-        let green = RgbColor::new(0x9b, 0xd6, 0xa6);
-        let red = RgbColor::new(0xe8, 0x8d, 0x8d);
-        Self {
-            foreground: Color::Reset,
-            background: base.color(),
-            header: Color::Rgb(220, 225, 232),
-            file: Color::Rgb(215, 218, 224),
-            hunk: Color::Rgb(205, 130, 170),
-            notice: Color::Green,
-            cursor: Color::White,
-            muted: Color::Rgb(125, 135, 148),
-            gutter_bg: Color::Rgb(12, 16, 20),
-            empty_diff: Color::Rgb(38, 45, 54),
-            search_match_fg: Color::Indexed(0),
-            search_match_bg: Color::Indexed(3),
-            addition_fg: Color::Indexed(2),
-            addition_gutter_bg: base.blend(green, 0.035).color(),
-            addition_bg: base.blend(green, 0.045).color(),
-            addition_inline_bg: base.blend(green, 0.14).color(),
-            deletion_fg: Color::Indexed(1),
-            deletion_gutter_bg: base.blend(red, 0.035).color(),
-            deletion_bg: base.blend(red, 0.045).color(),
-            deletion_inline_bg: base.blend(red, 0.14).color(),
-            transparent_background: false,
-            diff: DiffSettings::default(),
-            syntax: SyntaxPalette::terminal_dark(),
-        }
-    }
-
-    pub(crate) fn terminal_light() -> Self {
-        let base = RgbColor::new(0xff, 0xff, 0xff);
-        let green = RgbColor::new(0x22, 0x5f, 0x2d);
-        let red = RgbColor::new(0xb0, 0x38, 0x37);
-        Self {
-            foreground: Color::Reset,
-            background: base.color(),
-            header: Color::Rgb(36, 41, 47),
-            file: Color::Rgb(45, 51, 59),
-            hunk: Color::Rgb(138, 43, 92),
-            notice: Color::Green,
-            cursor: Color::Black,
-            muted: Color::Rgb(106, 115, 125),
-            gutter_bg: Color::Rgb(238, 242, 246),
-            empty_diff: Color::Rgb(225, 228, 232),
-            search_match_fg: Color::Rgb(36, 41, 47),
-            search_match_bg: Color::Rgb(0xff, 0xec, 0x99),
-            addition_fg: Color::Indexed(2),
-            addition_gutter_bg: base.blend(green, 0.035).color(),
-            addition_bg: base.blend(green, 0.045).color(),
-            addition_inline_bg: base.blend(green, 0.14).color(),
-            deletion_fg: Color::Indexed(1),
-            deletion_gutter_bg: base.blend(red, 0.035).color(),
-            deletion_bg: base.blend(red, 0.045).color(),
-            deletion_inline_bg: base.blend(red, 0.14).color(),
-            transparent_background: false,
-            diff: DiffSettings::default(),
-            syntax: SyntaxPalette::terminal_light(),
-        }
-    }
-
-    pub(crate) fn minimal() -> Self {
-        Self {
-            foreground: Color::Reset,
-            background: Color::Reset,
-            header: Color::White,
-            file: Color::White,
-            hunk: Color::Magenta,
-            notice: Color::Green,
-            cursor: Color::White,
-            muted: Color::DarkGray,
-            gutter_bg: Color::Black,
-            empty_diff: Color::DarkGray,
-            search_match_fg: Color::Black,
-            search_match_bg: Color::Yellow,
-            addition_fg: Color::Green,
-            addition_gutter_bg: Color::Black,
-            addition_bg: Color::Reset,
-            addition_inline_bg: Color::Green,
-            deletion_fg: Color::Red,
-            deletion_gutter_bg: Color::Black,
-            deletion_bg: Color::Reset,
-            deletion_inline_bg: Color::Red,
-            transparent_background: false,
-            diff: DiffSettings::default(),
-            syntax: SyntaxPalette::minimal(),
         }
     }
 
@@ -385,6 +302,12 @@ impl DiffTheme {
             empty_diff: Color::Indexed(8),
             search_match_fg: Color::Indexed(0),
             search_match_bg: Color::Indexed(3),
+            statusline_fg: Color::Indexed(15),
+            statusline_bg: Color::Indexed(0),
+            statusline_accent_fg: Color::Indexed(0),
+            statusline_accent_bg: Color::Indexed(13),
+            statusline_info_fg: Color::Indexed(15),
+            statusline_info_bg: Color::Indexed(8),
             addition_fg: Color::Indexed(2),
             addition_gutter_bg: Color::Indexed(0),
             addition_bg: Color::Reset,
@@ -400,64 +323,164 @@ impl DiffTheme {
     }
 
     pub(crate) fn catppuccin_mocha() -> Self {
-        let base = RgbColor::new(0x1e, 0x1e, 0x2e);
-        let green = RgbColor::new(0xa6, 0xe3, 0xa1);
-        let red = RgbColor::new(0xf3, 0x8b, 0xa8);
+        Self::catppuccin(CatppuccinPalette::MOCHA)
+    }
+
+    pub(crate) fn catppuccin_macchiato() -> Self {
+        Self::catppuccin(CatppuccinPalette::MACCHIATO)
+    }
+
+    pub(crate) fn catppuccin_frappe() -> Self {
+        Self::catppuccin(CatppuccinPalette::FRAPPE)
+    }
+
+    pub(crate) fn catppuccin_latte() -> Self {
+        Self::catppuccin(CatppuccinPalette::LATTE)
+    }
+
+    fn catppuccin(palette: CatppuccinPalette) -> Self {
         Self {
-            foreground: Color::Rgb(0xcd, 0xd6, 0xf4),
-            background: base.color(),
-            header: Color::Rgb(0xb4, 0xbe, 0xfe),
-            file: Color::Rgb(0xcd, 0xd6, 0xf4),
-            hunk: Color::Rgb(0xcb, 0xa6, 0xf7),
-            notice: green.color(),
-            cursor: Color::Rgb(0xf5, 0xe0, 0xdc),
-            muted: Color::Rgb(0x6c, 0x70, 0x86),
-            gutter_bg: base.blend(RgbColor::new(0, 0, 0), 0.22).color(),
-            empty_diff: Color::Rgb(0x31, 0x32, 0x44),
-            search_match_fg: base.color(),
-            search_match_bg: Color::Rgb(0xf9, 0xe2, 0xaf),
-            addition_fg: green.color(),
-            addition_gutter_bg: base.blend(green, 0.035).color(),
-            addition_bg: base.blend(green, 0.045).color(),
-            addition_inline_bg: base.blend(green, 0.14).color(),
-            deletion_fg: red.color(),
-            deletion_gutter_bg: base.blend(red, 0.035).color(),
-            deletion_bg: base.blend(red, 0.045).color(),
-            deletion_inline_bg: base.blend(red, 0.14).color(),
+            foreground: palette.text.color(),
+            background: palette.base.color(),
+            header: palette.lavender.color(),
+            file: palette.text.color(),
+            hunk: palette.mauve.color(),
+            notice: palette.green.color(),
+            cursor: palette.rosewater.color(),
+            muted: palette.overlay0.color(),
+            gutter_bg: palette.mantle.color(),
+            empty_diff: palette.surface0.color(),
+            search_match_fg: palette.base.color(),
+            search_match_bg: palette.yellow.color(),
+            statusline_fg: palette.text.color(),
+            statusline_bg: palette.mantle.color(),
+            statusline_accent_fg: palette.base.color(),
+            statusline_accent_bg: palette.mauve.color(),
+            statusline_info_fg: palette.text.color(),
+            statusline_info_bg: palette.surface0.color(),
+            addition_fg: palette.green.color(),
+            addition_gutter_bg: palette.base.blend(palette.green, 0.035).color(),
+            addition_bg: palette.base.blend(palette.green, 0.045).color(),
+            addition_inline_bg: palette.base.blend(palette.green, 0.14).color(),
+            deletion_fg: palette.red.color(),
+            deletion_gutter_bg: palette.base.blend(palette.red, 0.035).color(),
+            deletion_bg: palette.base.blend(palette.red, 0.045).color(),
+            deletion_inline_bg: palette.base.blend(palette.red, 0.14).color(),
             transparent_background: false,
             diff: DiffSettings::default(),
-            syntax: SyntaxPalette::catppuccin_mocha(),
+            syntax: SyntaxPalette::catppuccin(palette),
         }
     }
 
     pub(crate) fn gruvbox_dark() -> Self {
-        let base = RgbColor::new(0x28, 0x28, 0x28);
-        let green = RgbColor::new(0xb8, 0xbb, 0x26);
-        let red = RgbColor::new(0xfb, 0x49, 0x34);
+        Self::gruvbox(GruvboxPalette::DARK)
+    }
+
+    pub(crate) fn gruvbox_light() -> Self {
+        Self::gruvbox(GruvboxPalette::LIGHT)
+    }
+
+    fn gruvbox(palette: GruvboxPalette) -> Self {
+        let addition = palette.bright_green;
+        let deletion = palette.bright_red;
         Self {
-            foreground: Color::Rgb(0xeb, 0xdb, 0xb2),
-            background: base.color(),
-            header: Color::Rgb(0xfb, 0xf1, 0xc7),
-            file: Color::Rgb(0xeb, 0xdb, 0xb2),
-            hunk: Color::Rgb(0xd3, 0x86, 0x9b),
-            notice: green.color(),
-            cursor: Color::Rgb(0xfb, 0xf1, 0xc7),
-            muted: Color::Rgb(0x92, 0x83, 0x74),
-            gutter_bg: base.blend(RgbColor::new(0, 0, 0), 0.22).color(),
-            empty_diff: Color::Rgb(0x3c, 0x38, 0x36),
-            search_match_fg: base.color(),
-            search_match_bg: Color::Rgb(0xfa, 0xbd, 0x2f),
-            addition_fg: green.color(),
-            addition_gutter_bg: base.blend(green, 0.035).color(),
-            addition_bg: base.blend(green, 0.045).color(),
-            addition_inline_bg: base.blend(green, 0.14).color(),
-            deletion_fg: red.color(),
-            deletion_gutter_bg: base.blend(red, 0.035).color(),
-            deletion_bg: base.blend(red, 0.045).color(),
-            deletion_inline_bg: base.blend(red, 0.14).color(),
+            foreground: palette.fg1.color(),
+            background: palette.bg0.color(),
+            header: palette.fg0.color(),
+            file: palette.fg1.color(),
+            hunk: palette.bright_purple.color(),
+            notice: addition.color(),
+            cursor: palette.fg0.color(),
+            muted: palette.gray.color(),
+            gutter_bg: palette.bg0_h.color(),
+            empty_diff: palette.bg1.color(),
+            search_match_fg: palette.bg0.color(),
+            search_match_bg: palette.bright_yellow.color(),
+            statusline_fg: palette.fg1.color(),
+            statusline_bg: palette.bg0_h.color(),
+            statusline_accent_fg: palette.bg0.color(),
+            statusline_accent_bg: palette.bright_purple.color(),
+            statusline_info_fg: palette.fg1.color(),
+            statusline_info_bg: palette.bg1.color(),
+            addition_fg: addition.color(),
+            addition_gutter_bg: palette.bg0.blend(addition, 0.035).color(),
+            addition_bg: palette.bg0.blend(addition, 0.045).color(),
+            addition_inline_bg: palette.bg0.blend(addition, 0.14).color(),
+            deletion_fg: deletion.color(),
+            deletion_gutter_bg: palette.bg0.blend(deletion, 0.035).color(),
+            deletion_bg: palette.bg0.blend(deletion, 0.045).color(),
+            deletion_inline_bg: palette.bg0.blend(deletion, 0.14).color(),
             transparent_background: false,
             diff: DiffSettings::default(),
-            syntax: SyntaxPalette::gruvbox_dark(),
+            syntax: SyntaxPalette::gruvbox(palette),
+        }
+    }
+
+    pub(crate) fn github_dark() -> Self {
+        Self::github(GithubPalette::DARK)
+    }
+
+    pub(crate) fn github_dark_high_contrast() -> Self {
+        Self::github(GithubPalette::DARK_HIGH_CONTRAST)
+    }
+
+    pub(crate) fn github_light() -> Self {
+        Self::github(GithubPalette::LIGHT)
+    }
+
+    pub(crate) fn github_light_high_contrast() -> Self {
+        Self::github(GithubPalette::LIGHT_HIGH_CONTRAST)
+    }
+
+    fn github(palette: GithubPalette) -> Self {
+        Self {
+            foreground: palette.fg_default.color(),
+            background: palette.canvas_default.color(),
+            header: palette.fg_default.color(),
+            file: palette.fg_default.color(),
+            hunk: palette.done_fg.color(),
+            notice: palette.success_fg.color(),
+            cursor: palette.fg_default.color(),
+            muted: palette.fg_muted.color(),
+            gutter_bg: palette.canvas_subtle.color(),
+            empty_diff: palette.canvas_inset.color(),
+            search_match_fg: palette.canvas_default.color(),
+            search_match_bg: palette.attention_fg.color(),
+            statusline_fg: palette.fg_default.color(),
+            statusline_bg: palette.canvas_subtle.color(),
+            statusline_accent_fg: palette.canvas_default.color(),
+            statusline_accent_bg: palette.accent_fg.color(),
+            statusline_info_fg: palette.fg_default.color(),
+            statusline_info_bg: palette.canvas_inset.color(),
+            addition_fg: palette.success_fg.color(),
+            addition_gutter_bg: palette
+                .canvas_default
+                .blend(palette.success_fg, 0.05)
+                .color(),
+            addition_bg: palette
+                .canvas_default
+                .blend(palette.success_fg, 0.06)
+                .color(),
+            addition_inline_bg: palette
+                .canvas_default
+                .blend(palette.success_fg, 0.16)
+                .color(),
+            deletion_fg: palette.danger_fg.color(),
+            deletion_gutter_bg: palette
+                .canvas_default
+                .blend(palette.danger_fg, 0.05)
+                .color(),
+            deletion_bg: palette
+                .canvas_default
+                .blend(palette.danger_fg, 0.06)
+                .color(),
+            deletion_inline_bg: palette
+                .canvas_default
+                .blend(palette.danger_fg, 0.16)
+                .color(),
+            transparent_background: false,
+            diff: DiffSettings::default(),
+            syntax: SyntaxPalette::github(palette),
         }
     }
 
@@ -478,6 +501,12 @@ impl DiffTheme {
             empty_diff: Color::Rgb(0x24, 0x28, 0x3b),
             search_match_fg: base.color(),
             search_match_bg: Color::Rgb(0xe0, 0xaf, 0x68),
+            statusline_fg: Color::Rgb(0xc0, 0xca, 0xf5),
+            statusline_bg: base.blend(RgbColor::new(0, 0, 0), 0.18).color(),
+            statusline_accent_fg: base.color(),
+            statusline_accent_bg: Color::Rgb(0xbb, 0x9a, 0xf7),
+            statusline_info_fg: Color::Rgb(0xc0, 0xca, 0xf5),
+            statusline_info_bg: Color::Rgb(0x24, 0x28, 0x3b),
             addition_fg: green.color(),
             addition_gutter_bg: base.blend(green, 0.035).color(),
             addition_bg: base.blend(green, 0.045).color(),
@@ -489,37 +518,6 @@ impl DiffTheme {
             transparent_background: false,
             diff: DiffSettings::default(),
             syntax: SyntaxPalette::tokyonight(),
-        }
-    }
-
-    pub(crate) fn dracula() -> Self {
-        let base = RgbColor::new(0x28, 0x2a, 0x36);
-        let green = RgbColor::new(0x50, 0xfa, 0x7b);
-        let red = RgbColor::new(0xff, 0x55, 0x55);
-        Self {
-            foreground: Color::Rgb(0xf8, 0xf8, 0xf2),
-            background: base.color(),
-            header: Color::Rgb(0xf8, 0xf8, 0xf2),
-            file: Color::Rgb(0xf8, 0xf8, 0xf2),
-            hunk: Color::Rgb(0xff, 0x79, 0xc6),
-            notice: green.color(),
-            cursor: Color::Rgb(0xf8, 0xf8, 0xf2),
-            muted: Color::Rgb(0x62, 0x72, 0xa4),
-            gutter_bg: base.blend(RgbColor::new(0, 0, 0), 0.22).color(),
-            empty_diff: Color::Rgb(0x44, 0x47, 0x5a),
-            search_match_fg: base.color(),
-            search_match_bg: Color::Rgb(0xf1, 0xfa, 0x8c),
-            addition_fg: green.color(),
-            addition_gutter_bg: base.blend(green, 0.035).color(),
-            addition_bg: base.blend(green, 0.045).color(),
-            addition_inline_bg: base.blend(green, 0.14).color(),
-            deletion_fg: red.color(),
-            deletion_gutter_bg: base.blend(red, 0.035).color(),
-            deletion_bg: base.blend(red, 0.045).color(),
-            deletion_inline_bg: base.blend(red, 0.14).color(),
-            transparent_background: false,
-            diff: DiffSettings::default(),
-            syntax: SyntaxPalette::dracula(),
         }
     }
 
@@ -537,6 +535,12 @@ impl DiffTheme {
             empty_diff: scheme.base01.color(),
             search_match_fg: scheme.base00.color(),
             search_match_bg: scheme.base0a.color(),
+            statusline_fg: scheme.base05.color(),
+            statusline_bg: scheme.base00.blend(RgbColor::new(0, 0, 0), 0.18).color(),
+            statusline_accent_fg: scheme.base00.color(),
+            statusline_accent_bg: scheme.base0e.color(),
+            statusline_info_fg: scheme.base05.color(),
+            statusline_info_bg: scheme.base01.color(),
             addition_fg: scheme.base0b.color(),
             addition_gutter_bg: scheme.base00.blend(scheme.base0b, 0.035).color(),
             addition_bg: scheme.base00.blend(scheme.base0b, 0.045).color(),
@@ -597,6 +601,24 @@ impl DiffTheme {
         }
         if let Some(color) = config_color(&colors.search_match_bg, "search_match_bg")? {
             self.search_match_bg = color;
+        }
+        if let Some(color) = config_color(&colors.statusline_fg, "statusline_fg")? {
+            self.statusline_fg = color;
+        }
+        if let Some(color) = config_color(&colors.statusline_bg, "statusline_bg")? {
+            self.statusline_bg = color;
+        }
+        if let Some(color) = config_color(&colors.statusline_accent_fg, "statusline_accent_fg")? {
+            self.statusline_accent_fg = color;
+        }
+        if let Some(color) = config_color(&colors.statusline_accent_bg, "statusline_accent_bg")? {
+            self.statusline_accent_bg = color;
+        }
+        if let Some(color) = config_color(&colors.statusline_info_fg, "statusline_info_fg")? {
+            self.statusline_info_fg = color;
+        }
+        if let Some(color) = config_color(&colors.statusline_info_bg, "statusline_info_bg")? {
+            self.statusline_info_bg = color;
         }
         if let Some(color) = config_color(&colors.addition_fg, "addition_fg")? {
             self.addition_fg = color;
@@ -750,6 +772,371 @@ pub(crate) fn parse_named_color(value: &str) -> Option<Color> {
     }
 }
 
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CatppuccinPalette {
+    rosewater: RgbColor,
+    flamingo: RgbColor,
+    pink: RgbColor,
+    mauve: RgbColor,
+    red: RgbColor,
+    maroon: RgbColor,
+    peach: RgbColor,
+    yellow: RgbColor,
+    green: RgbColor,
+    teal: RgbColor,
+    sky: RgbColor,
+    sapphire: RgbColor,
+    blue: RgbColor,
+    lavender: RgbColor,
+    text: RgbColor,
+    subtext1: RgbColor,
+    subtext0: RgbColor,
+    overlay2: RgbColor,
+    overlay1: RgbColor,
+    overlay0: RgbColor,
+    surface2: RgbColor,
+    surface1: RgbColor,
+    surface0: RgbColor,
+    base: RgbColor,
+    mantle: RgbColor,
+    crust: RgbColor,
+}
+
+impl CatppuccinPalette {
+    const LATTE: Self = Self {
+        rosewater: RgbColor::new(0xdc, 0x8a, 0x78),
+        flamingo: RgbColor::new(0xdd, 0x78, 0x78),
+        pink: RgbColor::new(0xea, 0x76, 0xcb),
+        mauve: RgbColor::new(0x88, 0x39, 0xef),
+        red: RgbColor::new(0xd2, 0x0f, 0x39),
+        maroon: RgbColor::new(0xe6, 0x45, 0x53),
+        peach: RgbColor::new(0xfe, 0x64, 0x0b),
+        yellow: RgbColor::new(0xdf, 0x8e, 0x1d),
+        green: RgbColor::new(0x40, 0xa0, 0x2b),
+        teal: RgbColor::new(0x17, 0x92, 0x99),
+        sky: RgbColor::new(0x04, 0xa5, 0xe5),
+        sapphire: RgbColor::new(0x20, 0x9f, 0xb5),
+        blue: RgbColor::new(0x1e, 0x66, 0xf5),
+        lavender: RgbColor::new(0x72, 0x87, 0xfd),
+        text: RgbColor::new(0x4c, 0x4f, 0x69),
+        subtext1: RgbColor::new(0x5c, 0x5f, 0x77),
+        subtext0: RgbColor::new(0x6c, 0x6f, 0x85),
+        overlay2: RgbColor::new(0x7c, 0x7f, 0x93),
+        overlay1: RgbColor::new(0x8c, 0x8f, 0xa1),
+        overlay0: RgbColor::new(0x9c, 0xa0, 0xb0),
+        surface2: RgbColor::new(0xac, 0xb0, 0xbe),
+        surface1: RgbColor::new(0xbc, 0xc0, 0xcc),
+        surface0: RgbColor::new(0xcc, 0xd0, 0xda),
+        base: RgbColor::new(0xef, 0xf1, 0xf5),
+        mantle: RgbColor::new(0xe6, 0xe9, 0xef),
+        crust: RgbColor::new(0xdc, 0xe0, 0xe8),
+    };
+
+    const FRAPPE: Self = Self {
+        rosewater: RgbColor::new(0xf2, 0xd5, 0xcf),
+        flamingo: RgbColor::new(0xee, 0xbe, 0xbe),
+        pink: RgbColor::new(0xf4, 0xb8, 0xe4),
+        mauve: RgbColor::new(0xca, 0x9e, 0xe6),
+        red: RgbColor::new(0xe7, 0x82, 0x84),
+        maroon: RgbColor::new(0xea, 0x99, 0x9c),
+        peach: RgbColor::new(0xef, 0x9f, 0x76),
+        yellow: RgbColor::new(0xe5, 0xc8, 0x90),
+        green: RgbColor::new(0xa6, 0xd1, 0x89),
+        teal: RgbColor::new(0x81, 0xc8, 0xbe),
+        sky: RgbColor::new(0x99, 0xd1, 0xdb),
+        sapphire: RgbColor::new(0x85, 0xc1, 0xdc),
+        blue: RgbColor::new(0x8c, 0xaa, 0xee),
+        lavender: RgbColor::new(0xba, 0xbb, 0xf1),
+        text: RgbColor::new(0xc6, 0xd0, 0xf5),
+        subtext1: RgbColor::new(0xb5, 0xbf, 0xe2),
+        subtext0: RgbColor::new(0xa5, 0xad, 0xce),
+        overlay2: RgbColor::new(0x94, 0x9c, 0xbb),
+        overlay1: RgbColor::new(0x83, 0x8b, 0xa7),
+        overlay0: RgbColor::new(0x73, 0x79, 0x94),
+        surface2: RgbColor::new(0x62, 0x68, 0x80),
+        surface1: RgbColor::new(0x51, 0x57, 0x6d),
+        surface0: RgbColor::new(0x41, 0x45, 0x59),
+        base: RgbColor::new(0x30, 0x34, 0x46),
+        mantle: RgbColor::new(0x29, 0x2c, 0x3c),
+        crust: RgbColor::new(0x23, 0x26, 0x34),
+    };
+
+    const MACCHIATO: Self = Self {
+        rosewater: RgbColor::new(0xf4, 0xdb, 0xd6),
+        flamingo: RgbColor::new(0xf0, 0xc6, 0xc6),
+        pink: RgbColor::new(0xf5, 0xbd, 0xe6),
+        mauve: RgbColor::new(0xc6, 0xa0, 0xf6),
+        red: RgbColor::new(0xed, 0x87, 0x96),
+        maroon: RgbColor::new(0xee, 0x99, 0xa0),
+        peach: RgbColor::new(0xf5, 0xa9, 0x7f),
+        yellow: RgbColor::new(0xee, 0xd4, 0x9f),
+        green: RgbColor::new(0xa6, 0xda, 0x95),
+        teal: RgbColor::new(0x8b, 0xd5, 0xca),
+        sky: RgbColor::new(0x91, 0xd7, 0xe3),
+        sapphire: RgbColor::new(0x7d, 0xc4, 0xe4),
+        blue: RgbColor::new(0x8a, 0xad, 0xf4),
+        lavender: RgbColor::new(0xb7, 0xbd, 0xf8),
+        text: RgbColor::new(0xca, 0xd3, 0xf5),
+        subtext1: RgbColor::new(0xb8, 0xc0, 0xe0),
+        subtext0: RgbColor::new(0xa5, 0xad, 0xcb),
+        overlay2: RgbColor::new(0x93, 0x9a, 0xb7),
+        overlay1: RgbColor::new(0x80, 0x87, 0xa2),
+        overlay0: RgbColor::new(0x6e, 0x73, 0x8d),
+        surface2: RgbColor::new(0x5b, 0x60, 0x78),
+        surface1: RgbColor::new(0x49, 0x4d, 0x64),
+        surface0: RgbColor::new(0x36, 0x3a, 0x4f),
+        base: RgbColor::new(0x24, 0x27, 0x3a),
+        mantle: RgbColor::new(0x1e, 0x20, 0x30),
+        crust: RgbColor::new(0x18, 0x19, 0x26),
+    };
+
+    const MOCHA: Self = Self {
+        rosewater: RgbColor::new(0xf5, 0xe0, 0xdc),
+        flamingo: RgbColor::new(0xf2, 0xcd, 0xcd),
+        pink: RgbColor::new(0xf5, 0xc2, 0xe7),
+        mauve: RgbColor::new(0xcb, 0xa6, 0xf7),
+        red: RgbColor::new(0xf3, 0x8b, 0xa8),
+        maroon: RgbColor::new(0xeb, 0xa0, 0xac),
+        peach: RgbColor::new(0xfa, 0xb3, 0x87),
+        yellow: RgbColor::new(0xf9, 0xe2, 0xaf),
+        green: RgbColor::new(0xa6, 0xe3, 0xa1),
+        teal: RgbColor::new(0x94, 0xe2, 0xd5),
+        sky: RgbColor::new(0x89, 0xdc, 0xeb),
+        sapphire: RgbColor::new(0x74, 0xc7, 0xec),
+        blue: RgbColor::new(0x89, 0xb4, 0xfa),
+        lavender: RgbColor::new(0xb4, 0xbe, 0xfe),
+        text: RgbColor::new(0xcd, 0xd6, 0xf4),
+        subtext1: RgbColor::new(0xba, 0xc2, 0xde),
+        subtext0: RgbColor::new(0xa6, 0xad, 0xc8),
+        overlay2: RgbColor::new(0x93, 0x99, 0xb2),
+        overlay1: RgbColor::new(0x7f, 0x84, 0x9c),
+        overlay0: RgbColor::new(0x6c, 0x70, 0x86),
+        surface2: RgbColor::new(0x58, 0x5b, 0x70),
+        surface1: RgbColor::new(0x45, 0x47, 0x5a),
+        surface0: RgbColor::new(0x31, 0x32, 0x44),
+        base: RgbColor::new(0x1e, 0x1e, 0x2e),
+        mantle: RgbColor::new(0x18, 0x18, 0x25),
+        crust: RgbColor::new(0x11, 0x11, 0x1b),
+    };
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct GruvboxPalette {
+    bg0_h: RgbColor,
+    bg0: RgbColor,
+    bg0_s: RgbColor,
+    bg1: RgbColor,
+    bg2: RgbColor,
+    bg3: RgbColor,
+    bg4: RgbColor,
+    fg0: RgbColor,
+    fg1: RgbColor,
+    fg2: RgbColor,
+    fg3: RgbColor,
+    fg4: RgbColor,
+    red: RgbColor,
+    green: RgbColor,
+    yellow: RgbColor,
+    blue: RgbColor,
+    purple: RgbColor,
+    aqua: RgbColor,
+    gray: RgbColor,
+    orange: RgbColor,
+    bright_red: RgbColor,
+    bright_green: RgbColor,
+    bright_yellow: RgbColor,
+    bright_blue: RgbColor,
+    bright_purple: RgbColor,
+    bright_aqua: RgbColor,
+    bright_gray: RgbColor,
+    bright_orange: RgbColor,
+}
+
+impl GruvboxPalette {
+    const DARK: Self = Self {
+        bg0_h: RgbColor::new(0x1d, 0x20, 0x21),
+        bg0: RgbColor::new(0x28, 0x28, 0x28),
+        bg0_s: RgbColor::new(0x32, 0x30, 0x2f),
+        bg1: RgbColor::new(0x3c, 0x38, 0x36),
+        bg2: RgbColor::new(0x50, 0x49, 0x45),
+        bg3: RgbColor::new(0x66, 0x5c, 0x54),
+        bg4: RgbColor::new(0x7c, 0x6f, 0x64),
+        fg0: RgbColor::new(0xfb, 0xf1, 0xc7),
+        fg1: RgbColor::new(0xeb, 0xdb, 0xb2),
+        fg2: RgbColor::new(0xd5, 0xc4, 0xa1),
+        fg3: RgbColor::new(0xbd, 0xae, 0x93),
+        fg4: RgbColor::new(0xa8, 0x99, 0x84),
+        red: RgbColor::new(0xcc, 0x24, 0x1d),
+        green: RgbColor::new(0x98, 0x97, 0x1a),
+        yellow: RgbColor::new(0xd7, 0x99, 0x21),
+        blue: RgbColor::new(0x45, 0x85, 0x88),
+        purple: RgbColor::new(0xb1, 0x62, 0x86),
+        aqua: RgbColor::new(0x68, 0x9d, 0x6a),
+        gray: RgbColor::new(0x92, 0x83, 0x74),
+        orange: RgbColor::new(0xd6, 0x5d, 0x0e),
+        bright_red: RgbColor::new(0xfb, 0x49, 0x34),
+        bright_green: RgbColor::new(0xb8, 0xbb, 0x26),
+        bright_yellow: RgbColor::new(0xfa, 0xbd, 0x2f),
+        bright_blue: RgbColor::new(0x83, 0xa5, 0x98),
+        bright_purple: RgbColor::new(0xd3, 0x86, 0x9b),
+        bright_aqua: RgbColor::new(0x8e, 0xc0, 0x7c),
+        bright_gray: RgbColor::new(0xa8, 0x99, 0x84),
+        bright_orange: RgbColor::new(0xfe, 0x80, 0x19),
+    };
+
+    const LIGHT: Self = Self {
+        bg0_h: RgbColor::new(0xf9, 0xf5, 0xd7),
+        bg0: RgbColor::new(0xfb, 0xf1, 0xc7),
+        bg0_s: RgbColor::new(0xf2, 0xe5, 0xbc),
+        bg1: RgbColor::new(0xeb, 0xdb, 0xb2),
+        bg2: RgbColor::new(0xd5, 0xc4, 0xa1),
+        bg3: RgbColor::new(0xbd, 0xae, 0x93),
+        bg4: RgbColor::new(0xa8, 0x99, 0x84),
+        fg0: RgbColor::new(0x28, 0x28, 0x28),
+        fg1: RgbColor::new(0x3c, 0x38, 0x36),
+        fg2: RgbColor::new(0x50, 0x49, 0x45),
+        fg3: RgbColor::new(0x66, 0x5c, 0x54),
+        fg4: RgbColor::new(0x7c, 0x6f, 0x64),
+        red: RgbColor::new(0xcc, 0x24, 0x1d),
+        green: RgbColor::new(0x98, 0x97, 0x1a),
+        yellow: RgbColor::new(0xd7, 0x99, 0x21),
+        blue: RgbColor::new(0x45, 0x85, 0x88),
+        purple: RgbColor::new(0xb1, 0x62, 0x86),
+        aqua: RgbColor::new(0x68, 0x9d, 0x6a),
+        gray: RgbColor::new(0x92, 0x83, 0x74),
+        orange: RgbColor::new(0xd6, 0x5d, 0x0e),
+        bright_red: RgbColor::new(0x9d, 0x00, 0x06),
+        bright_green: RgbColor::new(0x79, 0x74, 0x0e),
+        bright_yellow: RgbColor::new(0xb5, 0x76, 0x14),
+        bright_blue: RgbColor::new(0x07, 0x66, 0x78),
+        bright_purple: RgbColor::new(0x8f, 0x3f, 0x71),
+        bright_aqua: RgbColor::new(0x42, 0x7b, 0x58),
+        bright_gray: RgbColor::new(0x92, 0x83, 0x74),
+        bright_orange: RgbColor::new(0xaf, 0x3a, 0x03),
+    };
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct GithubPalette {
+    fg_default: RgbColor,
+    fg_muted: RgbColor,
+    fg_subtle: RgbColor,
+    canvas_default: RgbColor,
+    canvas_subtle: RgbColor,
+    canvas_inset: RgbColor,
+    border_default: RgbColor,
+    accent_fg: RgbColor,
+    success_fg: RgbColor,
+    attention_fg: RgbColor,
+    severe_fg: RgbColor,
+    danger_fg: RgbColor,
+    done_fg: RgbColor,
+    syntax_comment: RgbColor,
+    syntax_constant: RgbColor,
+    syntax_entity: RgbColor,
+    syntax_storage: RgbColor,
+    syntax_string: RgbColor,
+    syntax_variable: RgbColor,
+    syntax_regexp: RgbColor,
+}
+
+impl GithubPalette {
+    const LIGHT: Self = Self {
+        fg_default: RgbColor::new(0x24, 0x29, 0x2f),
+        fg_muted: RgbColor::new(0x57, 0x60, 0x6a),
+        fg_subtle: RgbColor::new(0x6e, 0x77, 0x81),
+        canvas_default: RgbColor::new(0xff, 0xff, 0xff),
+        canvas_subtle: RgbColor::new(0xf6, 0xf8, 0xfa),
+        canvas_inset: RgbColor::new(0xea, 0xee, 0xf2),
+        border_default: RgbColor::new(0xd0, 0xd7, 0xde),
+        accent_fg: RgbColor::new(0x09, 0x69, 0xda),
+        success_fg: RgbColor::new(0x1a, 0x7f, 0x37),
+        attention_fg: RgbColor::new(0x9a, 0x67, 0x00),
+        severe_fg: RgbColor::new(0xbc, 0x4c, 0x00),
+        danger_fg: RgbColor::new(0xcf, 0x22, 0x2e),
+        done_fg: RgbColor::new(0x82, 0x50, 0xdf),
+        syntax_comment: RgbColor::new(0x6e, 0x77, 0x81),
+        syntax_constant: RgbColor::new(0x05, 0x50, 0xae),
+        syntax_entity: RgbColor::new(0x82, 0x50, 0xdf),
+        syntax_storage: RgbColor::new(0xcf, 0x22, 0x2e),
+        syntax_string: RgbColor::new(0x0a, 0x30, 0x69),
+        syntax_variable: RgbColor::new(0x95, 0x38, 0x00),
+        syntax_regexp: RgbColor::new(0x11, 0x63, 0x29),
+    };
+
+    const DARK: Self = Self {
+        fg_default: RgbColor::new(0xc9, 0xd1, 0xd9),
+        fg_muted: RgbColor::new(0x8b, 0x94, 0x9e),
+        fg_subtle: RgbColor::new(0x6e, 0x76, 0x81),
+        canvas_default: RgbColor::new(0x0d, 0x11, 0x17),
+        canvas_subtle: RgbColor::new(0x16, 0x1b, 0x22),
+        canvas_inset: RgbColor::new(0x01, 0x04, 0x09),
+        border_default: RgbColor::new(0x30, 0x36, 0x3d),
+        accent_fg: RgbColor::new(0x58, 0xa6, 0xff),
+        success_fg: RgbColor::new(0x3f, 0xb9, 0x50),
+        attention_fg: RgbColor::new(0xd2, 0x99, 0x22),
+        severe_fg: RgbColor::new(0xdb, 0x6d, 0x28),
+        danger_fg: RgbColor::new(0xf8, 0x51, 0x49),
+        done_fg: RgbColor::new(0xa3, 0x71, 0xf7),
+        syntax_comment: RgbColor::new(0x8b, 0x94, 0x9e),
+        syntax_constant: RgbColor::new(0x79, 0xc0, 0xff),
+        syntax_entity: RgbColor::new(0xd2, 0xa8, 0xff),
+        syntax_storage: RgbColor::new(0xff, 0x7b, 0x72),
+        syntax_string: RgbColor::new(0xa5, 0xd6, 0xff),
+        syntax_variable: RgbColor::new(0xff, 0xa6, 0x57),
+        syntax_regexp: RgbColor::new(0x7e, 0xe7, 0x87),
+    };
+
+    const LIGHT_HIGH_CONTRAST: Self = Self {
+        fg_default: RgbColor::new(0x0e, 0x11, 0x16),
+        fg_muted: RgbColor::new(0x4b, 0x53, 0x5d),
+        fg_subtle: RgbColor::new(0x59, 0x63, 0x6e),
+        canvas_default: RgbColor::new(0xff, 0xff, 0xff),
+        canvas_subtle: RgbColor::new(0xf6, 0xf8, 0xfa),
+        canvas_inset: RgbColor::new(0xea, 0xee, 0xf2),
+        border_default: RgbColor::new(0x85, 0x8f, 0x99),
+        accent_fg: RgbColor::new(0x03, 0x49, 0xb4),
+        success_fg: RgbColor::new(0x00, 0x6d, 0x32),
+        attention_fg: RgbColor::new(0x7d, 0x4e, 0x00),
+        severe_fg: RgbColor::new(0xa0, 0x41, 0x00),
+        danger_fg: RgbColor::new(0xa4, 0x0e, 0x26),
+        done_fg: RgbColor::new(0x62, 0x2c, 0xb8),
+        syntax_comment: RgbColor::new(0x66, 0x70, 0x7b),
+        syntax_constant: RgbColor::new(0x02, 0x3b, 0x95),
+        syntax_entity: RgbColor::new(0x62, 0x2c, 0xbc),
+        syntax_storage: RgbColor::new(0xa0, 0x11, 0x1f),
+        syntax_string: RgbColor::new(0x03, 0x25, 0x63),
+        syntax_variable: RgbColor::new(0x70, 0x2c, 0x00),
+        syntax_regexp: RgbColor::new(0x02, 0x4c, 0x1a),
+    };
+
+    const DARK_HIGH_CONTRAST: Self = Self {
+        fg_default: RgbColor::new(0xf0, 0xf3, 0xf6),
+        fg_muted: RgbColor::new(0xbd, 0xc4, 0xcc),
+        fg_subtle: RgbColor::new(0x9e, 0xa7, 0xb3),
+        canvas_default: RgbColor::new(0x0a, 0x0c, 0x10),
+        canvas_subtle: RgbColor::new(0x27, 0x2b, 0x33),
+        canvas_inset: RgbColor::new(0x01, 0x04, 0x09),
+        border_default: RgbColor::new(0x7a, 0x82, 0x8e),
+        accent_fg: RgbColor::new(0x71, 0xb7, 0xff),
+        success_fg: RgbColor::new(0x26, 0xcd, 0x4d),
+        attention_fg: RgbColor::new(0xf0, 0xb7, 0x2f),
+        severe_fg: RgbColor::new(0xe7, 0x81, 0x1d),
+        danger_fg: RgbColor::new(0xff, 0x94, 0x92),
+        done_fg: RgbColor::new(0xcb, 0x9e, 0xff),
+        syntax_comment: RgbColor::new(0xbd, 0xc4, 0xcc),
+        syntax_constant: RgbColor::new(0x91, 0xcb, 0xff),
+        syntax_entity: RgbColor::new(0xdb, 0xb7, 0xff),
+        syntax_storage: RgbColor::new(0xff, 0x94, 0x92),
+        syntax_string: RgbColor::new(0xad, 0xdc, 0xff),
+        syntax_variable: RgbColor::new(0xff, 0xb7, 0x57),
+        syntax_regexp: RgbColor::new(0x72, 0xf0, 0x88),
+    };
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SyntaxPalette {
     pub(crate) attribute: Option<Color>,
@@ -771,69 +1158,6 @@ pub(crate) struct SyntaxPalette {
 }
 
 impl SyntaxPalette {
-    pub(crate) fn terminal_dark() -> Self {
-        Self {
-            attribute: Some(Color::Rgb(150, 200, 240)),
-            comment: Some(Color::Rgb(125, 135, 148)),
-            constant: Some(Color::Rgb(229, 192, 123)),
-            constructor: Some(Color::Rgb(102, 217, 239)),
-            function: Some(Color::Rgb(130, 190, 255)),
-            keyword: Some(Color::Rgb(198, 153, 230)),
-            label: Some(Color::Rgb(150, 180, 255)),
-            module: Some(Color::Rgb(150, 180, 255)),
-            number: Some(Color::Rgb(229, 192, 123)),
-            operator: Some(Color::Rgb(220, 170, 255)),
-            property: Some(Color::Rgb(150, 200, 240)),
-            punctuation: Some(Color::Rgb(125, 135, 148)),
-            string: Some(Color::Rgb(173, 219, 177)),
-            tag: Some(Color::Rgb(240, 150, 150)),
-            r#type: Some(Color::Rgb(102, 217, 239)),
-            variable: None,
-        }
-    }
-
-    pub(crate) fn terminal_light() -> Self {
-        Self {
-            attribute: Some(Color::Rgb(0, 92, 197)),
-            comment: Some(Color::Rgb(106, 115, 125)),
-            constant: Some(Color::Rgb(177, 82, 0)),
-            constructor: Some(Color::Rgb(0, 95, 115)),
-            function: Some(Color::Rgb(0, 92, 197)),
-            keyword: Some(Color::Rgb(111, 66, 193)),
-            label: Some(Color::Rgb(0, 92, 197)),
-            module: Some(Color::Rgb(0, 92, 197)),
-            number: Some(Color::Rgb(177, 82, 0)),
-            operator: Some(Color::Rgb(111, 66, 193)),
-            property: Some(Color::Rgb(0, 92, 197)),
-            punctuation: Some(Color::Rgb(106, 115, 125)),
-            string: Some(Color::Rgb(34, 134, 58)),
-            tag: Some(Color::Rgb(176, 56, 55)),
-            r#type: Some(Color::Rgb(0, 95, 115)),
-            variable: None,
-        }
-    }
-
-    pub(crate) fn minimal() -> Self {
-        Self {
-            attribute: None,
-            comment: Some(Color::DarkGray),
-            constant: Some(Color::Yellow),
-            constructor: Some(Color::Cyan),
-            function: Some(Color::Blue),
-            keyword: Some(Color::Magenta),
-            label: Some(Color::Blue),
-            module: Some(Color::Blue),
-            number: Some(Color::Yellow),
-            operator: Some(Color::Magenta),
-            property: None,
-            punctuation: Some(Color::DarkGray),
-            string: Some(Color::Green),
-            tag: Some(Color::Red),
-            r#type: Some(Color::Cyan),
-            variable: None,
-        }
-    }
-
     pub(crate) fn ansi() -> Self {
         Self {
             attribute: Some(Color::Indexed(12)),
@@ -855,86 +1179,86 @@ impl SyntaxPalette {
         }
     }
 
-    pub(crate) fn catppuccin_mocha() -> Self {
+    fn catppuccin(palette: CatppuccinPalette) -> Self {
         Self {
-            attribute: Some(Color::Rgb(0x94, 0xe2, 0xd5)),
-            comment: Some(Color::Rgb(0x6c, 0x70, 0x86)),
-            constant: Some(Color::Rgb(0xfa, 0xb3, 0x87)),
-            constructor: Some(Color::Rgb(0xf9, 0xe2, 0xaf)),
-            function: Some(Color::Rgb(0x89, 0xb4, 0xfa)),
-            keyword: Some(Color::Rgb(0xcb, 0xa6, 0xf7)),
-            label: Some(Color::Rgb(0xb4, 0xbe, 0xfe)),
-            module: Some(Color::Rgb(0xb4, 0xbe, 0xfe)),
-            number: Some(Color::Rgb(0xfa, 0xb3, 0x87)),
-            operator: Some(Color::Rgb(0xcb, 0xa6, 0xf7)),
-            property: Some(Color::Rgb(0x89, 0xdc, 0xeb)),
-            punctuation: Some(Color::Rgb(0x6c, 0x70, 0x86)),
-            string: Some(Color::Rgb(0xa6, 0xe3, 0xa1)),
-            tag: Some(Color::Rgb(0xf3, 0x8b, 0xa8)),
-            r#type: Some(Color::Rgb(0xf9, 0xe2, 0xaf)),
+            attribute: Some(palette.yellow.color()),
+            comment: Some(palette.overlay2.color()),
+            constant: Some(palette.peach.color()),
+            constructor: Some(palette.yellow.color()),
+            function: Some(palette.blue.color()),
+            keyword: Some(palette.mauve.color()),
+            label: Some(palette.yellow.color()),
+            module: Some(palette.yellow.color()),
+            number: Some(palette.peach.color()),
+            operator: Some(palette.teal.color()),
+            property: Some(palette.teal.color()),
+            punctuation: Some(palette.overlay2.color()),
+            string: Some(palette.green.color()),
+            tag: Some(palette.blue.color()),
+            r#type: Some(palette.yellow.color()),
             variable: None,
         }
     }
 
-    pub(crate) fn gruvbox_dark() -> Self {
+    fn gruvbox(palette: GruvboxPalette) -> Self {
         Self {
-            attribute: Some(Color::Rgb(0x8e, 0xc0, 0x7c)),
-            comment: Some(Color::Rgb(0x92, 0x83, 0x74)),
-            constant: Some(Color::Rgb(0xfe, 0x80, 0x19)),
-            constructor: Some(Color::Rgb(0xfa, 0xbd, 0x2f)),
-            function: Some(Color::Rgb(0x83, 0xa5, 0x98)),
-            keyword: Some(Color::Rgb(0xfb, 0x49, 0x34)),
-            label: Some(Color::Rgb(0xd3, 0x86, 0x9b)),
-            module: Some(Color::Rgb(0x83, 0xa5, 0x98)),
-            number: Some(Color::Rgb(0xd3, 0x86, 0x9b)),
-            operator: Some(Color::Rgb(0xfe, 0x80, 0x19)),
-            property: Some(Color::Rgb(0x8e, 0xc0, 0x7c)),
-            punctuation: Some(Color::Rgb(0x92, 0x83, 0x74)),
-            string: Some(Color::Rgb(0xb8, 0xbb, 0x26)),
-            tag: Some(Color::Rgb(0xfb, 0x49, 0x34)),
-            r#type: Some(Color::Rgb(0xfa, 0xbd, 0x2f)),
-            variable: None,
+            attribute: Some(palette.bright_yellow.color()),
+            comment: Some(palette.gray.color()),
+            constant: Some(palette.bright_purple.color()),
+            constructor: Some(palette.bright_yellow.color()),
+            function: Some(palette.bright_yellow.color()),
+            keyword: Some(palette.bright_red.color()),
+            label: Some(palette.bright_yellow.color()),
+            module: Some(palette.bright_yellow.color()),
+            number: Some(palette.bright_purple.color()),
+            operator: Some(palette.bright_aqua.color()),
+            property: Some(palette.aqua.color()),
+            punctuation: Some(palette.fg4.color()),
+            string: Some(palette.bright_green.color()),
+            tag: Some(palette.bright_aqua.color()),
+            r#type: Some(palette.bright_yellow.color()),
+            variable: Some(palette.bright_blue.color()),
+        }
+    }
+
+    fn github(palette: GithubPalette) -> Self {
+        Self {
+            attribute: None,
+            comment: Some(palette.syntax_comment.color()),
+            constant: Some(palette.syntax_constant.color()),
+            constructor: Some(palette.syntax_variable.color()),
+            function: Some(palette.syntax_entity.color()),
+            keyword: Some(palette.syntax_storage.color()),
+            label: Some(palette.syntax_variable.color()),
+            module: Some(palette.syntax_constant.color()),
+            number: Some(palette.syntax_constant.color()),
+            operator: Some(palette.syntax_storage.color()),
+            property: Some(palette.syntax_constant.color()),
+            punctuation: None,
+            string: Some(palette.syntax_string.color()),
+            tag: Some(palette.syntax_regexp.color()),
+            r#type: Some(palette.syntax_variable.color()),
+            variable: Some(palette.syntax_variable.color()),
         }
     }
 
     pub(crate) fn tokyonight() -> Self {
         Self {
-            attribute: Some(Color::Rgb(0x73, 0xda, 0xca)),
-            comment: Some(Color::Rgb(0x56, 0x5f, 0x89)),
+            attribute: Some(Color::Rgb(0xbb, 0x9a, 0xf7)),
+            comment: Some(Color::Rgb(0x51, 0x59, 0x7d)),
             constant: Some(Color::Rgb(0xff, 0x9e, 0x64)),
-            constructor: Some(Color::Rgb(0xe0, 0xaf, 0x68)),
+            constructor: Some(Color::Rgb(0x0d, 0xb9, 0xd7)),
             function: Some(Color::Rgb(0x7a, 0xa2, 0xf7)),
             keyword: Some(Color::Rgb(0xbb, 0x9a, 0xf7)),
             label: Some(Color::Rgb(0x7a, 0xa2, 0xf7)),
-            module: Some(Color::Rgb(0x7a, 0xa2, 0xf7)),
+            module: Some(Color::Rgb(0x0d, 0xb9, 0xd7)),
             number: Some(Color::Rgb(0xff, 0x9e, 0x64)),
-            operator: Some(Color::Rgb(0xbb, 0x9a, 0xf7)),
-            property: Some(Color::Rgb(0x73, 0xda, 0xca)),
-            punctuation: Some(Color::Rgb(0x56, 0x5f, 0x89)),
+            operator: Some(Color::Rgb(0x89, 0xdd, 0xff)),
+            property: Some(Color::Rgb(0x7d, 0xcf, 0xff)),
+            punctuation: Some(Color::Rgb(0x89, 0xdd, 0xff)),
             string: Some(Color::Rgb(0x9e, 0xce, 0x6a)),
             tag: Some(Color::Rgb(0xf7, 0x76, 0x8e)),
-            r#type: Some(Color::Rgb(0x2a, 0xc3, 0xde)),
-            variable: None,
-        }
-    }
-
-    pub(crate) fn dracula() -> Self {
-        Self {
-            attribute: Some(Color::Rgb(0x8b, 0xe9, 0xfd)),
-            comment: Some(Color::Rgb(0x62, 0x72, 0xa4)),
-            constant: Some(Color::Rgb(0xbd, 0x93, 0xf9)),
-            constructor: Some(Color::Rgb(0x8b, 0xe9, 0xfd)),
-            function: Some(Color::Rgb(0x50, 0xfa, 0x7b)),
-            keyword: Some(Color::Rgb(0xff, 0x79, 0xc6)),
-            label: Some(Color::Rgb(0xbd, 0x93, 0xf9)),
-            module: Some(Color::Rgb(0xbd, 0x93, 0xf9)),
-            number: Some(Color::Rgb(0xbd, 0x93, 0xf9)),
-            operator: Some(Color::Rgb(0xff, 0x79, 0xc6)),
-            property: Some(Color::Rgb(0x8b, 0xe9, 0xfd)),
-            punctuation: Some(Color::Rgb(0x62, 0x72, 0xa4)),
-            string: Some(Color::Rgb(0xf1, 0xfa, 0x8c)),
-            tag: Some(Color::Rgb(0xff, 0x55, 0x55)),
-            r#type: Some(Color::Rgb(0x8b, 0xe9, 0xfd)),
+            r#type: Some(Color::Rgb(0x0d, 0xb9, 0xd7)),
             variable: None,
         }
     }
@@ -1085,13 +1409,19 @@ pub(crate) fn builtin_diff_theme(name: Option<&str>) -> MarkResult<DiffTheme> {
     let name = name.unwrap_or("system").trim().to_ascii_lowercase();
     match name.as_str() {
         "system" | "default" | "" => Ok(DiffTheme::system()),
-        "terminal-dark" | "mark-dark" | "dark" => Ok(DiffTheme::terminal_dark()),
-        "terminal-light" | "mark-light" | "light" => Ok(DiffTheme::terminal_light()),
-        "minimal" => Ok(DiffTheme::minimal()),
+        "catppuccin-latte" | "latte" => Ok(DiffTheme::catppuccin_latte()),
+        "catppuccin-frappe" | "frappe" => Ok(DiffTheme::catppuccin_frappe()),
+        "catppuccin-macchiato" | "macchiato" => Ok(DiffTheme::catppuccin_macchiato()),
         "catppuccin" | "catppuccin-mocha" | "mocha" => Ok(DiffTheme::catppuccin_mocha()),
         "gruvbox" | "gruvbox-dark" => Ok(DiffTheme::gruvbox_dark()),
+        "gruvbox-light" => Ok(DiffTheme::gruvbox_light()),
+        "github" | "github-dark" => Ok(DiffTheme::github_dark()),
+        "github-dark-high-contrast" | "github-high-contrast" => {
+            Ok(DiffTheme::github_dark_high_contrast())
+        }
+        "github-light" => Ok(DiffTheme::github_light()),
+        "github-light-high-contrast" => Ok(DiffTheme::github_light_high_contrast()),
         "tokyonight" | "tokyo-night" | "tokyonight-night" => Ok(DiffTheme::tokyonight()),
-        "dracula" => Ok(DiffTheme::dracula()),
         name => Err(MarkError::Usage(format!("unknown colorscheme '{name}'"))),
     }
 }

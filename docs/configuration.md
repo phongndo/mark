@@ -27,6 +27,10 @@ mark syntax path
 mode = "enabled"
 colorscheme = "system"
 transparent_background = false
+layout = "unified"
+live_reload = true
+syntax_highlighting = true
+line_wrapping = false
 
 [diff]
 line_background = "subtle"
@@ -91,8 +95,11 @@ Use a built-in colorscheme by name:
 colorscheme = "system"
 ```
 
-The aliases `ansi` and `terminal` use terminal colors. Base16 themes can be
-loaded from a file:
+Built-in colorschemes are `system`, `catppuccin-latte`,
+`catppuccin-frappe`, `catppuccin-macchiato`, `catppuccin-mocha`,
+`gruvbox-dark`, `gruvbox-light`, `github-dark`,
+`github-dark-high-contrast`, `github-light`, `github-light-high-contrast`,
+and `tokyonight`. Base16 themes can be loaded from a file:
 
 ```toml
 [colorscheme]
@@ -121,6 +128,8 @@ Common override keys include:
 ```text
 bg, fg, header, file, hunk, notice, cursor, muted, gutter_bg, empty_diff,
 search_match_fg, search_match_bg,
+statusline_fg, statusline_bg, statusline_accent_fg, statusline_accent_bg,
+statusline_info_fg, statusline_info_bg,
 addition_fg, addition_gutter_bg, addition_bg, addition_inline_bg,
 deletion_fg, deletion_gutter_bg, deletion_bg, deletion_inline_bg,
 attribute, comment, constant, constructor, function, keyword, label, module,
@@ -128,6 +137,16 @@ number, operator, property, punctuation, string, tag, type, variable
 ```
 
 ## Diff rendering
+
+Top-level UI settings mirror the interactive settings menu and are persisted
+when changed there:
+
+```toml
+layout = "unified"           # unified, split
+live_reload = true
+syntax_highlighting = true
+line_wrapping = false
+```
 
 `[diff]` controls visual emphasis:
 
