@@ -151,7 +151,7 @@ test("mark command rejects stdin patch sources before preflight", async () => {
   ]);
 });
 
-test("version flags run top-level mark instead of mark subcommands", async () => {
+test("top-level help and version flags run mark without git preflight", async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "pi-mark-test-"));
   const markPath = join(tempDir, "mark");
   const argsPath = join(tempDir, "args.json");
@@ -179,12 +179,14 @@ process.exit(0);
       },
     });
 
-    for (const [args, flag] of [
-      ["--version", "--version"],
-      ["-V", "-V"],
-      ["diff --version", "--version"],
-      ["show -V", "-V"],
-      ["patch --version", "--version"],
+    for (const [args, expected] of [
+      ["help", ["help"]],
+      ["help diff", ["help", "diff"]],
+      ["--version", ["--version"]],
+      ["-V", ["-V"]],
+      ["diff --version", ["--version"]],
+      ["show -V", ["-V"]],
+      ["patch --version", ["--version"]],
     ]) {
       const notifications = [];
       let customCalled = false;
@@ -223,7 +225,7 @@ process.exit(0);
 
       assert.equal(customCalled, true, `expected /mark ${args} to run mark`);
       assert.deepEqual(notifications, []);
-      assert.deepEqual(JSON.parse(await readFile(argsPath, "utf8")), [flag]);
+      assert.deepEqual(JSON.parse(await readFile(argsPath, "utf8")), expected);
     }
   } finally {
     if (oldPiMarkBin === undefined) {

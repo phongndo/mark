@@ -15,7 +15,7 @@ type MarkRunResult = {
   error?: string;
 };
 
-type MarkCommand = "diff" | "show" | "patch";
+type MarkCommand = "diff" | "show" | "patch" | "help";
 
 type MarkInvocation = {
   command: MarkCommand;
@@ -102,7 +102,7 @@ async function handleMarkCommand(args: string, ctx: ExtensionCommandContext): Pr
 
 function markInvocation(argv: string[]): MarkInvocation {
   const first = argv[0];
-  if (first === "diff" || first === "show" || first === "patch") {
+  if (first === "diff" || first === "show" || first === "patch" || first === "help") {
     return {
       command: first,
       argv: argv.slice(1),
@@ -389,6 +389,10 @@ export function markInvocationNeedsGit(command: MarkCommand, argv: string[]): bo
   }
 
   if (command === "patch") {
+    return false;
+  }
+
+  if (command === "help") {
     return false;
   }
 
