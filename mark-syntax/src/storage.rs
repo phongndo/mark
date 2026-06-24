@@ -10,15 +10,14 @@ use std::{
 };
 
 use crate::{
-    ARTIFACT_SOURCE, ASM_HIGHLIGHTS_QUERY, BASENAME_LANGUAGES,
-    CORE_LANGUAGES, CUSTOM_PARSER_SOURCE, CUSTOM_PARSER_VERSION, DiffContextExpansion,
-    DiffSettings, HIGHLIGHT_NAMES, LANGUAGE_ALIASES, LANGUAGE_PACK_VERSION,
-    StoredDiffContextExpansion, StoredDiffContextExpansionMode, StoredDiffSettings,
-    StoredLanguageMapping, StoredParserArtifact, StoredSyntaxConfig, StoredSyntaxLimits,
-    StoredSyntaxSettings, StoredSyntaxThemeConfig, StoredSyntaxThemeTable, SyntaxLimits,
-    SyntaxMode, SyntaxSettings, SyntaxThemeConfig, SyntaxThemeSource, TRUSTED_PARSER_MANIFEST,
-    TRUSTED_PARSER_MANIFEST_SHA256, cache_dir, config_path, load_settings, parsers_dir,
-    queries_dir,
+    ARTIFACT_SOURCE, ASM_HIGHLIGHTS_QUERY, BASENAME_LANGUAGES, CORE_LANGUAGES,
+    CUSTOM_PARSER_SOURCE, CUSTOM_PARSER_VERSION, DiffContextExpansion, DiffSettings,
+    HIGHLIGHT_NAMES, LANGUAGE_ALIASES, LANGUAGE_PACK_VERSION, StoredDiffContextExpansion,
+    StoredDiffContextExpansionMode, StoredDiffSettings, StoredLanguageMapping,
+    StoredParserArtifact, StoredSyntaxConfig, StoredSyntaxLimits, StoredSyntaxSettings,
+    StoredSyntaxThemeConfig, StoredSyntaxThemeTable, SyntaxLimits, SyntaxMode, SyntaxSettings,
+    SyntaxThemeConfig, SyntaxThemeSource, TRUSTED_PARSER_MANIFEST, TRUSTED_PARSER_MANIFEST_SHA256,
+    cache_dir, config_path, load_settings, parsers_dir, queries_dir,
 };
 use mark_core::{MarkError, MarkResult};
 use sha2::{Digest, Sha256};

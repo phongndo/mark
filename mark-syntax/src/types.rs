@@ -132,7 +132,6 @@ pub(crate) const ASM_HIGHLIGHTS_QUERY: &str = r#"
 (int) @number
 "#;
 
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SyntaxClass {
     Attribute,

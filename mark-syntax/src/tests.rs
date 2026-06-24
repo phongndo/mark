@@ -248,7 +248,6 @@ fn compiler_languages_have_queries_where_expected() {
     assert!(has_highlights("tablegen"));
 }
 
-
 #[test]
 fn typescript_query_fallback_highlights() {
     let mut highlighter = SyntaxHighlighter::new();
