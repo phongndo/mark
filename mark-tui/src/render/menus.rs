@@ -775,9 +775,20 @@ pub(crate) fn draw_commit_menu(frame: &mut Frame<'_>, app: &mut DiffApp, area: R
     );
 }
 
-pub(crate) fn draw_help_menu(frame: &mut Frame<'_>, app: &mut DiffApp, area: Rect) {
+pub(crate) fn help_menu_list_visible_rows(app: &DiffApp, area: Rect) -> Option<usize> {
+    let layout = help_menu_layout(app, area)?;
+    Some(layout.list_visible_rows)
+}
+
+struct HelpMenuLayout {
+    menu_area: Rect,
+    inner: Rect,
+    list_visible_rows: usize,
+}
+
+fn help_menu_layout(app: &DiffApp, area: Rect) -> Option<HelpMenuLayout> {
     if !app.help_menu_open || area.width < 4 || area.height < 3 {
-        return;
+        return None;
     }
 
     let rows = app.filtered_help_menu_rows();
@@ -786,7 +797,7 @@ pub(crate) fn draw_help_menu(frame: &mut Frame<'_>, app: &mut DiffApp, area: Rec
         .saturating_add(4)
         .min(area.height);
     if height == 0 {
-        return;
+        return None;
     }
 
     let menu_area = Rect {
@@ -798,10 +809,32 @@ pub(crate) fn draw_help_menu(frame: &mut Frame<'_>, app: &mut DiffApp, area: Rec
 
     let block = help_menu_block(app.theme);
     let inner = block.inner(menu_area);
-    let remaining_rows = inner.height.saturating_sub(2) as usize;
-    app.ensure_help_menu_selection_visible(remaining_rows);
+    const HEADER_LINES: u16 = 2;
+    let list_visible_rows = inner.height.saturating_sub(HEADER_LINES) as usize;
+    if list_visible_rows == 0 {
+        return None;
+    }
 
-    let selected = app.help_menu_selected.min(rows.len().saturating_sub(1));
+    Some(HelpMenuLayout {
+        menu_area,
+        inner,
+        list_visible_rows: list_visible_rows.max(1),
+    })
+}
+
+pub(crate) fn draw_help_menu(frame: &mut Frame<'_>, app: &mut DiffApp, area: Rect) {
+    let Some(layout) = help_menu_layout(app, area) else {
+        return;
+    };
+
+    let rows = app.filtered_help_menu_rows();
+    let inner = layout.inner;
+    let remaining_rows = layout.list_visible_rows;
+    app.help_menu_visible_rows = remaining_rows;
+    app.clamp_help_menu_scroll(remaining_rows);
+    let menu_area = layout.menu_area;
+
+    let block = help_menu_block(app.theme);
     let mut lines = vec![selector_input_line(
         &app.help_menu_input,
         inner.width as usize,
@@ -810,7 +843,6 @@ pub(crate) fn draw_help_menu(frame: &mut Frame<'_>, app: &mut DiffApp, area: Rec
         HELP_MENU_ROWS.len(),
     )];
     lines.push(selector_separator_line(inner.width as usize, app.theme));
-    let remaining_rows = inner.height.saturating_sub(lines.len() as u16) as usize;
     if rows.is_empty() {
         if remaining_rows > 0 {
             lines.push(selector_empty_line(
@@ -821,17 +853,11 @@ pub(crate) fn draw_help_menu(frame: &mut Frame<'_>, app: &mut DiffApp, area: Rec
         }
     } else {
         let scroll = app.help_menu_scroll;
-        lines.extend(scrolled_selector_items(&rows, scroll, remaining_rows).map(
-            |(global_index, row)| {
-                help_menu_row_line(
-                    *row,
-                    inner.width as usize,
-                    app.theme,
-                    &app.keymap,
-                    global_index == selected,
-                )
-            },
-        ));
+        lines.extend(
+            scrolled_selector_items(&rows, scroll, remaining_rows).map(|(_, row)| {
+                help_menu_row_line(*row, inner.width as usize, app.theme, &app.keymap)
+            }),
+        );
     }
 
     frame.render_widget(Clear, menu_area);
@@ -912,7 +938,7 @@ pub(crate) fn help_menu_lines(
     HELP_MENU_ROWS
         .iter()
         .take(height)
-        .map(|row| help_menu_row_line(*row, width, theme, keymap, false))
+        .map(|row| help_menu_row_line(*row, width, theme, keymap))
         .collect()
 }
 
@@ -966,46 +992,32 @@ pub(crate) fn help_menu_row_line(
     width: usize,
     theme: DiffTheme,
     keymap: &Keymap,
-    highlighted: bool,
 ) -> Line<'static> {
     match row {
-        HelpMenuRow::Section(section) => {
-            let mut style = Style::default()
+        HelpMenuRow::Section(section) => Line::from(Span::styled(
+            fit_padded(&format!(" {section}"), width),
+            Style::default()
                 .fg(help_menu_section_color(theme))
                 .bg(help_menu_bg(theme))
-                .add_modifier(Modifier::BOLD);
-            if highlighted {
-                style = selector_row_style(theme, true);
-            }
-            Line::from(Span::styled(
-                fit_padded(&format!(" {section}"), width),
-                style,
-            ))
-        }
+                .add_modifier(Modifier::BOLD),
+        )),
         HelpMenuRow::Binding(keys, description) => {
             let key_label = help_menu_key_label(keys, keymap);
             let key_width = HELP_KEY_COLUMN_WIDTH.min(width);
             let description_width = width.saturating_sub(key_width);
-            let key_style = if highlighted {
-                selector_row_style(theme, true)
-            } else {
-                Style::default()
-                    .fg(help_menu_key_color(theme))
-                    .bg(help_menu_bg(theme))
-                    .add_modifier(Modifier::BOLD)
-            };
-            let description_style = if highlighted {
-                selector_row_style(theme, true)
-            } else {
-                Style::default()
-                    .fg(help_menu_description_color(theme))
-                    .bg(help_menu_bg(theme))
-            };
             Line::from(vec![
-                Span::styled(fit_padded(&format!(" {key_label}"), key_width), key_style),
+                Span::styled(
+                    fit_padded(&format!(" {key_label}"), key_width),
+                    Style::default()
+                        .fg(help_menu_key_color(theme))
+                        .bg(help_menu_bg(theme))
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(
                     fit_padded(description, description_width),
-                    description_style,
+                    Style::default()
+                        .fg(help_menu_description_color(theme))
+                        .bg(help_menu_bg(theme)),
                 ),
             ])
         }

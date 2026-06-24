@@ -38,6 +38,7 @@ use mark_syntax::{
     SyntaxClass, SyntaxLanguageSet, SyntaxLimits, SyntaxSettings, SyntaxThemeConfig,
     SyntaxThemeSource,
 };
+use ratatui::layout::Rect;
 use ratatui::prelude::{Color, Line, Modifier, Span, Style};
 use std::{
     collections::{HashMap, HashSet},
@@ -3111,6 +3112,48 @@ fn help_menu_lines_use_configured_keymap_labels() {
             .any(|line| line.contains(", l") && line.contains("split / unified"))
     );
     assert!(!text.iter().any(|line| line.contains("Space q")));
+}
+
+#[test]
+fn help_menu_ctrl_n_scrolls_without_tab() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_terminal_area(Rect {
+        x: 0,
+        y: 0,
+        width: 80,
+        height: 40,
+    });
+    app.toggle_help_menu();
+    assert!(app.help_menu_visible_rows > 1);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL))
+        .expect("ctrl-n should scroll help");
+    assert_eq!(app.help_menu_scroll, 1);
+
+    app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+        .expect("tab should not scroll help");
+    assert_eq!(app.help_menu_scroll, 1);
+}
+
+#[test]
+fn help_menu_page_down_uses_layout_before_paint() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_terminal_area(Rect {
+        x: 0,
+        y: 0,
+        width: 80,
+        height: 40,
+    });
+    app.toggle_help_menu();
+    let page = app.help_menu_visible_rows;
+    assert!(page > 1);
+
+    app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE))
+        .expect("page down should scroll help");
+    let max_scroll = app.filtered_help_menu_rows().len().saturating_sub(page);
+    assert_eq!(app.help_menu_scroll, page.min(max_scroll));
 }
 
 #[test]

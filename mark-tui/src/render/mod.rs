@@ -24,6 +24,7 @@ use self::{
 
 pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut DiffApp) {
     let area = frame.area();
+    app.set_terminal_area(area);
     if area.height == 0 {
         return;
     }

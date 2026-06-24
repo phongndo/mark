@@ -45,7 +45,7 @@ use crate::{
         draw,
         menus::{
             branch_menu_block, branch_menu_width, color_scheme_picker_block, commit_menu_block,
-            diff_menu_block, diff_selector_width,
+            diff_menu_block, diff_selector_width, help_menu_list_visible_rows,
         },
         sidebar::max_file_sidebar_width,
     },
@@ -390,7 +390,13 @@ pub(crate) fn handle_event(
             app.handle_mouse(mouse)?;
             Ok(false)
         }
-        Event::Resize(width, _) => {
+        Event::Resize(width, height) => {
+            app.set_terminal_area(Rect {
+                x: 0,
+                y: 0,
+                width,
+                height,
+            });
             app.apply_responsive_layout(width);
             Ok(false)
         }
@@ -972,8 +978,9 @@ pub(crate) struct DiffApp {
     pub(crate) leader_pending: bool,
     pub(crate) help_menu_open: bool,
     pub(crate) help_menu_input: String,
-    pub(crate) help_menu_selected: usize,
     pub(crate) help_menu_scroll: usize,
+    pub(crate) help_menu_visible_rows: usize,
+    terminal_area: Rect,
     pub(crate) diff_menu_open: bool,
     pub(crate) diff_menu_input: String,
     pub(crate) diff_menu_selected: usize,
@@ -1259,8 +1266,9 @@ impl DiffApp {
             leader_pending: false,
             help_menu_open: false,
             help_menu_input: String::new(),
-            help_menu_selected: 0,
             help_menu_scroll: 0,
+            help_menu_visible_rows: 1,
+            terminal_area: Rect::default(),
             diff_menu_open: false,
             diff_menu_input: String::new(),
             diff_menu_selected: 0,
@@ -1666,20 +1674,40 @@ impl DiffApp {
         Ok(false)
     }
 
+    fn help_menu_line_scroll_delta(&self, key: KeyEvent) -> Option<isize> {
+        if self.keymap.matches_help_menu_scroll(MenuAction::Down, key) {
+            Some(1)
+        } else if self.keymap.matches_help_menu_scroll(MenuAction::Up, key) {
+            Some(-1)
+        } else {
+            None
+        }
+    }
+
     pub(crate) fn handle_help_menu_key(&mut self, key: KeyEvent) -> MarkResult<bool> {
         if self.keymap.matches_menu(MenuAction::Close, key) {
             self.close_help_menu();
             return Ok(false);
         }
 
-        if self.keymap.matches_menu(MenuAction::Down, key) {
-            self.move_help_menu_selection(1);
-        } else if self.keymap.matches_menu(MenuAction::Up, key) {
-            self.move_help_menu_selection(-1);
+        if let Some(delta) = self.help_menu_line_scroll_delta(key) {
+            self.scroll_help_menu(delta);
         } else {
             match key.code {
-                KeyCode::Home => self.set_help_menu_selection(0),
-                KeyCode::End => self.set_help_menu_selection(usize::MAX),
+                KeyCode::PageDown => {
+                    let page = self.help_menu_page_scroll_rows();
+                    if page > 0 {
+                        self.scroll_help_menu(page as isize);
+                    }
+                }
+                KeyCode::PageUp => {
+                    let page = self.help_menu_page_scroll_rows();
+                    if page > 0 {
+                        self.scroll_help_menu(-(page as isize));
+                    }
+                }
+                KeyCode::Home => self.set_help_menu_scroll(0),
+                KeyCode::End => self.set_help_menu_scroll(usize::MAX),
                 KeyCode::Backspace => self.pop_help_menu_input(),
                 KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                     self.clear_help_menu_input();
@@ -1809,24 +1837,47 @@ impl DiffApp {
         is_quit_key(key) || self.keymap.matches_single(GlobalAction::Quit, key)
     }
 
+    pub(crate) fn set_terminal_area(&mut self, area: Rect) {
+        if self.terminal_area != area {
+            self.terminal_area = area;
+            self.sync_help_menu_visible_rows();
+        }
+    }
+
+    fn sync_help_menu_visible_rows(&mut self) {
+        if !self.help_menu_open {
+            return;
+        }
+        let Some(visible) = help_menu_list_visible_rows(self, self.terminal_area) else {
+            return;
+        };
+        if self.help_menu_visible_rows != visible {
+            self.help_menu_visible_rows = visible;
+            self.clamp_help_menu_scroll(visible);
+        }
+    }
+
+    fn help_menu_page_scroll_rows(&self) -> usize {
+        help_menu_list_visible_rows(self, self.terminal_area)
+            .unwrap_or(self.help_menu_visible_rows)
+            .max(1)
+    }
+
     pub(crate) fn toggle_help_menu(&mut self) {
         self.help_menu_open = !self.help_menu_open;
         self.help_menu_input.clear();
-        self.help_menu_selected = 0;
         self.help_menu_scroll = 0;
         self.leader_pending = false;
+        if self.help_menu_open {
+            self.sync_help_menu_visible_rows();
+        }
         self.dirty = true;
     }
 
     pub(crate) fn close_help_menu(&mut self) {
-        if self.help_menu_open
-            || !self.help_menu_input.is_empty()
-            || self.help_menu_selected != 0
-            || self.help_menu_scroll != 0
-        {
+        if self.help_menu_open || !self.help_menu_input.is_empty() || self.help_menu_scroll != 0 {
             self.help_menu_open = false;
             self.help_menu_input.clear();
-            self.help_menu_selected = 0;
             self.help_menu_scroll = 0;
             self.leader_pending = false;
             self.dirty = true;
@@ -1898,58 +1949,64 @@ impl DiffApp {
         }
     }
 
-    pub(crate) fn move_help_menu_selection(&mut self, delta: isize) {
+    pub(crate) fn scroll_help_menu(&mut self, delta: isize) {
         let len = self.filtered_help_menu_rows().len();
-        if len == 0 {
+        if len == 0 || delta == 0 {
             return;
         }
-
-        self.help_menu_selected =
-            (self.help_menu_selected as isize + delta).rem_euclid(len as isize) as usize;
-        self.dirty = true;
-    }
-
-    pub(crate) fn set_help_menu_selection(&mut self, selected: usize) {
-        let selected = selected.min(self.filtered_help_menu_rows().len().saturating_sub(1));
-        if self.help_menu_selected != selected {
-            self.help_menu_selected = selected;
+        let visible = self.help_menu_visible_rows.max(1);
+        let max_scroll = self.help_menu_max_scroll(visible);
+        let next = (self.help_menu_scroll as isize + delta).clamp(0, max_scroll as isize) as usize;
+        if self.help_menu_scroll != next {
+            self.help_menu_scroll = next;
             self.dirty = true;
         }
     }
 
-    pub(crate) fn ensure_help_menu_selection_visible(&mut self, visible_rows: usize) {
-        let len = self.filtered_help_menu_rows().len();
-        ensure_selector_scroll(
-            &mut self.help_menu_scroll,
-            self.help_menu_selected,
-            len,
-            visible_rows,
-        );
+    pub(crate) fn set_help_menu_scroll(&mut self, scroll: usize) {
+        let next = scroll.min(self.help_menu_max_scroll(self.help_menu_visible_rows.max(1)));
+        if self.help_menu_scroll != next {
+            self.help_menu_scroll = next;
+            self.dirty = true;
+        }
+    }
+
+    fn help_menu_max_scroll(&self, visible_rows: usize) -> usize {
+        self.filtered_help_menu_rows()
+            .len()
+            .saturating_sub(visible_rows.max(1))
+    }
+
+    pub(crate) fn clamp_help_menu_scroll(&mut self, visible_rows: usize) {
+        let next = self
+            .help_menu_scroll
+            .min(self.help_menu_max_scroll(visible_rows));
+        if self.help_menu_scroll != next {
+            self.help_menu_scroll = next;
+            self.dirty = true;
+        }
     }
 
     pub(crate) fn push_help_menu_input(&mut self, character: char) {
         self.help_menu_input.push(character);
-        self.help_menu_selected = 0;
         self.help_menu_scroll = 0;
+        self.sync_help_menu_visible_rows();
         self.dirty = true;
     }
 
     pub(crate) fn pop_help_menu_input(&mut self) {
         if self.help_menu_input.pop().is_some() {
-            self.help_menu_selected = 0;
             self.help_menu_scroll = 0;
+            self.sync_help_menu_visible_rows();
             self.dirty = true;
         }
     }
 
     pub(crate) fn clear_help_menu_input(&mut self) {
-        if !self.help_menu_input.is_empty()
-            || self.help_menu_selected != 0
-            || self.help_menu_scroll != 0
-        {
+        if !self.help_menu_input.is_empty() || self.help_menu_scroll != 0 {
             self.help_menu_input.clear();
-            self.help_menu_selected = 0;
             self.help_menu_scroll = 0;
+            self.sync_help_menu_visible_rows();
             self.dirty = true;
         }
     }
@@ -2387,8 +2444,8 @@ impl DiffApp {
     pub(crate) fn handle_mouse(&mut self, mouse: MouseEvent) -> MarkResult<()> {
         if self.help_menu_open {
             match mouse.kind {
-                MouseEventKind::ScrollDown => self.move_help_menu_selection(1),
-                MouseEventKind::ScrollUp => self.move_help_menu_selection(-1),
+                MouseEventKind::ScrollDown => self.scroll_help_menu(1),
+                MouseEventKind::ScrollUp => self.scroll_help_menu(-1),
                 MouseEventKind::Down(MouseButton::Left) => self.close_help_menu(),
                 _ => {}
             }

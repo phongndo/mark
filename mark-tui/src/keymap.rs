@@ -283,6 +283,14 @@ impl Keymap {
             .any(|sequence| sequence.0.as_slice() == [key])
     }
 
+    /// Menu up/down for scrollable overlays that intentionally ignore Tab / Shift-Tab.
+    pub(crate) fn matches_help_menu_scroll(&self, action: MenuAction, key: KeyEvent) -> bool {
+        if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
+            return false;
+        }
+        self.matches_menu(action, key)
+    }
+
     fn global_sequences(&self, action: GlobalAction) -> &[KeySequence] {
         match action {
             GlobalAction::Help => &self.help,
@@ -693,6 +701,18 @@ mod tests {
         assert!(keymap.matches_menu(
             MenuAction::Down,
             KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE)
+        ));
+        assert!(keymap.matches_help_menu_scroll(
+            MenuAction::Down,
+            KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE)
+        ));
+        assert!(!keymap.matches_help_menu_scroll(
+            MenuAction::Down,
+            KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)
+        ));
+        assert!(!keymap.matches_help_menu_scroll(
+            MenuAction::Up,
+            KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)
         ));
         assert!(keymap.matches_single(
             GlobalAction::PreviousDiffType,
