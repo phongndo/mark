@@ -1666,41 +1666,46 @@ impl DiffApp {
         Ok(false)
     }
 
+    fn help_menu_line_scroll_delta(key: KeyEvent) -> Option<isize> {
+        match key.code {
+            KeyCode::Up => Some(-1),
+            KeyCode::Down => Some(1),
+            KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => Some(1),
+            KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => Some(-1),
+            _ => None,
+        }
+    }
+
     pub(crate) fn handle_help_menu_key(&mut self, key: KeyEvent) -> MarkResult<bool> {
         if self.keymap.matches_menu(MenuAction::Close, key) {
             self.close_help_menu();
             return Ok(false);
         }
 
-        match key.code {
-            KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.scroll_help_menu(1);
+        if let Some(delta) = Self::help_menu_line_scroll_delta(key) {
+            self.scroll_help_menu(delta);
+        } else {
+            match key.code {
+                KeyCode::PageDown => {
+                    self.scroll_help_menu(self.help_menu_visible_rows as isize);
+                }
+                KeyCode::PageUp => {
+                    self.scroll_help_menu(-(self.help_menu_visible_rows as isize));
+                }
+                KeyCode::Home => self.set_help_menu_scroll(0),
+                KeyCode::End => self.set_help_menu_scroll(usize::MAX),
+                KeyCode::Backspace => self.pop_help_menu_input(),
+                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.clear_help_menu_input();
+                }
+                KeyCode::Char(character)
+                    if !key.modifiers.contains(KeyModifiers::CONTROL)
+                        && !key.modifiers.contains(KeyModifiers::ALT) =>
+                {
+                    self.push_help_menu_input(character);
+                }
+                _ => {}
             }
-            KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.scroll_help_menu(-1);
-            }
-            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.scroll_help_menu(self.help_menu_visible_rows as isize);
-            }
-            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.scroll_help_menu(-(self.help_menu_visible_rows as isize));
-            }
-            KeyCode::PageDown => {
-                self.scroll_help_menu(self.help_menu_visible_rows as isize);
-            }
-            KeyCode::PageUp => {
-                self.scroll_help_menu(-(self.help_menu_visible_rows as isize));
-            }
-            KeyCode::Home => self.set_help_menu_scroll(0),
-            KeyCode::End => self.set_help_menu_scroll(usize::MAX),
-            KeyCode::Backspace => self.pop_help_menu_input(),
-            KeyCode::Char(character)
-                if !key.modifiers.contains(KeyModifiers::CONTROL)
-                    && !key.modifiers.contains(KeyModifiers::ALT) =>
-            {
-                self.push_help_menu_input(character);
-            }
-            _ => {}
         }
 
         Ok(false)
@@ -1947,6 +1952,14 @@ impl DiffApp {
 
     pub(crate) fn pop_help_menu_input(&mut self) {
         if self.help_menu_input.pop().is_some() {
+            self.help_menu_scroll = 0;
+            self.dirty = true;
+        }
+    }
+
+    pub(crate) fn clear_help_menu_input(&mut self) {
+        if !self.help_menu_input.is_empty() || self.help_menu_scroll != 0 {
+            self.help_menu_input.clear();
             self.help_menu_scroll = 0;
             self.dirty = true;
         }
