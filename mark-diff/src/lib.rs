@@ -1962,6 +1962,10 @@ fn patch_header_line(line: &str) -> &str {
     line.strip_suffix('\r').unwrap_or(line)
 }
 
+fn is_diff_no_newline_marker(raw: &str) -> bool {
+    raw.starts_with("\\ No newline at end of file")
+}
+
 fn finish_hunk(file: &mut Option<DiffFileBuilder>, hunk: &mut Option<DiffHunkBuilder>) {
     if let (Some(file), Some(hunk)) = (file.as_mut(), hunk.take()) {
         file.additions += hunk.additions;
@@ -2272,12 +2276,16 @@ impl DiffHunkBuilder {
                 });
             }
             b' ' => self.push_context_owned(raw.get(1..).unwrap_or_default().to_owned()),
-            b'\\' => self.lines.push(DiffLine {
-                kind: DiffLineKind::Meta,
-                old_line: None,
-                new_line: None,
-                text: raw.to_owned(),
-            }),
+            b'\\' => {
+                if !is_diff_no_newline_marker(raw) {
+                    self.lines.push(DiffLine {
+                        kind: DiffLineKind::Meta,
+                        old_line: None,
+                        new_line: None,
+                        text: raw.to_owned(),
+                    });
+                }
+            }
             _ => self.push_context(raw),
         }
     }
@@ -2337,6 +2345,22 @@ fn parse_hunk_range(range: &str) -> (usize, usize) {
 mod tests {
     use super::*;
     use std::{env, io::Write, process::Stdio};
+
+    #[test]
+    fn parse_patch_omits_no_newline_at_end_of_file_marker() {
+        let patch = "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1,2 +1,2 @@\n line\n-old\n\\ No newline at end of file\n+new\n\\ No newline at end of file\n";
+
+        let files = parse_patch(patch);
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].hunks[0].lines.len(), 3);
+        assert!(
+            files[0].hunks[0]
+                .lines
+                .iter()
+                .all(|line| line.kind != DiffLineKind::Meta)
+        );
+    }
 
     #[test]
     fn parse_patch_reads_file_hunks_and_line_numbers() {
