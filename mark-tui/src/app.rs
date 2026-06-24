@@ -27,10 +27,11 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::{
     controls::{
-        BranchMenu, CrosstermTerminal, DiffChoice, DiffFilterKind, DiffLayoutMode,
-        branch_base_from_options, branch_head_from_options, branch_match_score,
-        comparison_branches, current_head_label, default_branch_base, default_layout_for_width,
-        diff_stats_for_files,
+        BranchMenu, CrosstermTerminal, DiffChoice, DiffFilterKind, DiffLayoutMode, GitCommit,
+        branch_base_from_options, branch_head_from_options, branch_match_score, commit_match_score,
+        commit_menu_width, commit_short_sha, comparison_branches, comparison_commits,
+        current_head_label, default_branch_base, default_layout_for_width, diff_stats_for_files,
+        rev_display_label,
     },
     editor::{EditorTarget, configured_editor, open_editor, repo_file_path},
     event_reader::TerminalEventReader,
@@ -43,8 +44,8 @@ use crate::{
     render::{
         draw,
         menus::{
-            branch_menu_block, branch_menu_width, color_scheme_picker_block, diff_menu_block,
-            diff_selector_width,
+            branch_menu_block, branch_menu_width, color_scheme_picker_block, commit_menu_block,
+            diff_menu_block, diff_selector_width,
         },
         sidebar::max_file_sidebar_width,
     },
@@ -416,6 +417,34 @@ fn rect_contains(area: Rect, column: u16, row: u16) -> bool {
         && row < area.y.saturating_add(area.height)
 }
 
+/// Keeps `selected` visible in a scrollable list of `item_count` rows.
+pub(crate) fn ensure_selector_scroll(
+    scroll: &mut usize,
+    selected: usize,
+    item_count: usize,
+    visible_rows: usize,
+) {
+    if visible_rows == 0 {
+        *scroll = 0;
+        return;
+    }
+
+    let max_scroll = item_count.saturating_sub(visible_rows.max(1));
+    if selected < *scroll {
+        *scroll = selected;
+    } else if selected >= scroll.saturating_add(visible_rows) {
+        *scroll = selected.saturating_add(1).saturating_sub(visible_rows);
+    }
+    *scroll = (*scroll).min(max_scroll);
+}
+
+pub(crate) fn show_rev_from_options(options: &DiffOptions) -> Option<String> {
+    match &options.source {
+        DiffSource::Show(rev) if !rev.is_empty() => Some(rev.clone()),
+        _ => None,
+    }
+}
+
 pub(crate) fn diff_choice_for_options(options: &DiffOptions) -> Option<DiffChoice> {
     match (&options.source, options.scope) {
         (DiffSource::Worktree, DiffScope::All) => Some(DiffChoice::All),
@@ -424,6 +453,7 @@ pub(crate) fn diff_choice_for_options(options: &DiffOptions) -> Option<DiffChoic
         (DiffSource::Base(_) | DiffSource::Branch { .. }, DiffScope::All) => {
             Some(DiffChoice::Branch)
         }
+        (DiffSource::Show(_), DiffScope::All) => Some(DiffChoice::Show),
         _ => None,
     }
 }
@@ -937,6 +967,7 @@ pub(crate) struct DiffApp {
     pub(crate) file_sidebar_resizing: bool,
     pub(crate) rendered_diff_menu_area: Option<Rect>,
     pub(crate) rendered_branch_menu_area: Option<Rect>,
+    pub(crate) rendered_commit_menu_area: Option<Rect>,
     pub(crate) rendered_color_scheme_picker_area: Option<Rect>,
     pub(crate) leader_pending: bool,
     pub(crate) help_menu_open: bool,
@@ -972,6 +1003,12 @@ pub(crate) struct DiffApp {
     pub(crate) branch_head: Option<String>,
     pub(crate) current_head: Option<String>,
     pub(crate) comparison_branches: Vec<String>,
+    pub(crate) commit_menu_open: bool,
+    pub(crate) commit_menu_input: String,
+    pub(crate) commit_menu_scroll: usize,
+    pub(crate) commit_menu_selected: usize,
+    pub(crate) show_rev: Option<String>,
+    pub(crate) comparison_commits: Vec<GitCommit>,
     pub(crate) live_diff_failed_options: Option<DiffOptions>,
     pub(crate) editor_reload: Option<EditorReloadWorker>,
     pub(crate) pending_editor_reload: Option<EditorReloadRequest>,
@@ -1150,6 +1187,8 @@ impl DiffApp {
                 branch_base.as_deref(),
             ],
         );
+        let show_rev = show_rev_from_options(&options);
+        let comparison_commits = comparison_commits(&changeset.repo, show_rev.as_deref());
         let (keymap, keymap_notice) = load_keymap_for_diff(load_user_settings);
         if let Some(message) = keymap_notice {
             push_startup_error_log(&mut startup_error_log, message);
@@ -1215,6 +1254,7 @@ impl DiffApp {
             file_sidebar_resizing: false,
             rendered_diff_menu_area: None,
             rendered_branch_menu_area: None,
+            rendered_commit_menu_area: None,
             rendered_color_scheme_picker_area: None,
             leader_pending: false,
             help_menu_open: false,
@@ -1257,6 +1297,12 @@ impl DiffApp {
             branch_head,
             current_head,
             comparison_branches,
+            commit_menu_open: false,
+            commit_menu_input: String::new(),
+            commit_menu_scroll: 0,
+            commit_menu_selected: 0,
+            show_rev,
+            comparison_commits,
             live_diff_failed_options: None,
             editor_reload: None,
             pending_editor_reload: None,
@@ -1317,6 +1363,10 @@ impl DiffApp {
 
         if self.branch_menu_open.is_some() {
             return self.handle_branch_menu_key(key);
+        }
+
+        if self.commit_menu_open {
+            return self.handle_commit_menu_key(key);
         }
 
         if self.diff_menu_open {
@@ -1579,6 +1629,43 @@ impl DiffApp {
         Ok(false)
     }
 
+    pub(crate) fn handle_commit_menu_key(&mut self, key: KeyEvent) -> MarkResult<bool> {
+        if self.keymap.matches_menu(MenuAction::Close, key) {
+            self.close_commit_menu();
+            return Ok(false);
+        }
+
+        if self.keymap.matches_menu(MenuAction::Down, key) {
+            self.cycle_commit_completion(1);
+        } else if self.keymap.matches_menu(MenuAction::Up, key) {
+            self.cycle_commit_completion(-1);
+        } else if self.keymap.matches_menu(MenuAction::Select, key)
+            || self.keymap.matches_menu(MenuAction::Confirm, key)
+        {
+            self.select_highlighted_commit_match();
+        } else {
+            match key.code {
+                KeyCode::PageDown => self.move_commit_selection(MAX_BRANCH_MENU_ROWS as isize),
+                KeyCode::PageUp => self.move_commit_selection(-(MAX_BRANCH_MENU_ROWS as isize)),
+                KeyCode::Home => self.set_commit_selection(0),
+                KeyCode::End => self.set_commit_selection(usize::MAX),
+                KeyCode::Backspace => self.pop_commit_input(),
+                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.clear_commit_input();
+                }
+                KeyCode::Char(character)
+                    if !key.modifiers.contains(KeyModifiers::CONTROL)
+                        && !key.modifiers.contains(KeyModifiers::ALT) =>
+                {
+                    self.push_commit_input(character);
+                }
+                _ => {}
+            }
+        }
+
+        Ok(false)
+    }
+
     pub(crate) fn handle_help_menu_key(&mut self, key: KeyEvent) -> MarkResult<bool> {
         if self.keymap.matches_menu(MenuAction::Close, key) {
             self.close_help_menu();
@@ -1831,24 +1918,13 @@ impl DiffApp {
     }
 
     pub(crate) fn ensure_help_menu_selection_visible(&mut self, visible_rows: usize) {
-        if visible_rows == 0 {
-            self.help_menu_scroll = 0;
-            return;
-        }
-
-        let max_scroll = self
-            .filtered_help_menu_rows()
-            .len()
-            .saturating_sub(visible_rows);
-        if self.help_menu_selected < self.help_menu_scroll {
-            self.help_menu_scroll = self.help_menu_selected;
-        } else if self.help_menu_selected >= self.help_menu_scroll.saturating_add(visible_rows) {
-            self.help_menu_scroll = self
-                .help_menu_selected
-                .saturating_add(1)
-                .saturating_sub(visible_rows);
-        }
-        self.help_menu_scroll = self.help_menu_scroll.min(max_scroll);
+        let len = self.filtered_help_menu_rows().len();
+        ensure_selector_scroll(
+            &mut self.help_menu_scroll,
+            self.help_menu_selected,
+            len,
+            visible_rows,
+        );
     }
 
     pub(crate) fn push_help_menu_input(&mut self, character: char) {
@@ -1978,6 +2054,10 @@ impl DiffApp {
 
     pub(crate) fn set_rendered_branch_menu_area(&mut self, area: Option<Rect>) {
         self.rendered_branch_menu_area = area.filter(|_| self.branch_menu_open.is_some());
+    }
+
+    pub(crate) fn set_rendered_commit_menu_area(&mut self, area: Option<Rect>) {
+        self.rendered_commit_menu_area = area.filter(|_| self.commit_menu_open);
     }
 
     pub(crate) fn start_error_log_resize(&mut self, row: u16) -> bool {
@@ -2489,6 +2569,30 @@ impl DiffApp {
         let clicked_branch_selector = (row == 0)
             .then(|| self.branch_selector_at(column))
             .flatten();
+        let clicked_commit_selector = row == 0 && self.commit_selector_at(column);
+
+        if self.commit_menu_open {
+            if let Some(rev) = self.commit_choice_at(column, row) {
+                self.close_commit_menu();
+                self.select_show_commit(rev);
+                return;
+            }
+
+            if self.is_rendered_commit_menu_position(column, row) {
+                return;
+            }
+
+            if clicked_commit_selector {
+                self.toggle_commit_menu();
+                return;
+            }
+
+            self.close_commit_menu();
+            if clicked_selector {
+                self.toggle_diff_menu();
+            }
+            return;
+        }
 
         if let Some(menu) = self.branch_menu_open {
             if let Some(branch) = self.branch_choice_at(menu, column, row) {
@@ -2551,6 +2655,8 @@ impl DiffApp {
 
         if clicked_selector {
             self.toggle_diff_menu();
+        } else if clicked_commit_selector {
+            self.toggle_commit_menu();
         } else if let Some(menu) = clicked_branch_selector {
             self.toggle_branch_menu(menu);
         } else if !self.handle_file_sidebar_click(column, row) {
@@ -2810,6 +2916,7 @@ impl DiffApp {
         self.close_color_scheme_picker();
         self.branch_menu_open = None;
         self.rendered_branch_menu_area = None;
+        self.close_commit_menu();
         self.dirty = true;
     }
 
@@ -2846,6 +2953,7 @@ impl DiffApp {
         self.rendered_diff_menu_area = None;
         self.branch_menu_open = None;
         self.rendered_branch_menu_area = None;
+        self.close_commit_menu();
         self.dirty = true;
     }
 
@@ -2889,26 +2997,13 @@ impl DiffApp {
     }
 
     pub(crate) fn ensure_options_menu_selection_visible(&mut self, visible_rows: usize) {
-        if visible_rows == 0 {
-            self.options_menu_scroll = 0;
-            return;
-        }
-
-        let max_scroll = self
-            .filtered_options_menu_items()
-            .len()
-            .saturating_sub(visible_rows);
-        if self.options_menu_selected < self.options_menu_scroll {
-            self.options_menu_scroll = self.options_menu_selected;
-        } else if self.options_menu_selected
-            >= self.options_menu_scroll.saturating_add(visible_rows)
-        {
-            self.options_menu_scroll = self
-                .options_menu_selected
-                .saturating_add(1)
-                .saturating_sub(visible_rows);
-        }
-        self.options_menu_scroll = self.options_menu_scroll.min(max_scroll);
+        let len = self.filtered_options_menu_items().len();
+        ensure_selector_scroll(
+            &mut self.options_menu_scroll,
+            self.options_menu_selected,
+            len,
+            visible_rows,
+        );
     }
 
     fn clamp_options_menu_selection_to_filtered_items(&mut self) {
@@ -3119,27 +3214,14 @@ impl DiffApp {
         self.filtered_color_schemes().len().saturating_sub(1)
     }
 
-    pub(crate) fn max_color_scheme_scroll(&self) -> usize {
-        self.filtered_color_schemes()
-            .len()
-            .saturating_sub(MAX_COLOR_SCHEME_MENU_ROWS)
-    }
-
     pub(crate) fn ensure_color_scheme_selection_visible(&mut self) {
-        let max_scroll = self.max_color_scheme_scroll();
-        if self.color_scheme_selected < self.color_scheme_scroll {
-            self.color_scheme_scroll = self.color_scheme_selected;
-        } else if self.color_scheme_selected
-            >= self
-                .color_scheme_scroll
-                .saturating_add(MAX_COLOR_SCHEME_MENU_ROWS)
-        {
-            self.color_scheme_scroll = self
-                .color_scheme_selected
-                .saturating_add(1)
-                .saturating_sub(MAX_COLOR_SCHEME_MENU_ROWS);
-        }
-        self.color_scheme_scroll = self.color_scheme_scroll.min(max_scroll);
+        let len = self.filtered_color_schemes().len();
+        ensure_selector_scroll(
+            &mut self.color_scheme_scroll,
+            self.color_scheme_selected,
+            len,
+            MAX_COLOR_SCHEME_MENU_ROWS,
+        );
     }
 
     pub(crate) fn set_color_scheme_selection(&mut self, selected: usize) {
@@ -3410,6 +3492,54 @@ impl DiffApp {
         }
     }
 
+    pub(crate) fn close_commit_menu(&mut self) {
+        if self.commit_menu_open
+            || !self.commit_menu_input.is_empty()
+            || self.commit_menu_scroll != 0
+            || self.rendered_commit_menu_area.is_some()
+        {
+            self.commit_menu_open = false;
+            self.commit_menu_input.clear();
+            self.commit_menu_scroll = 0;
+            self.commit_menu_selected = 0;
+            self.rendered_commit_menu_area = None;
+            self.dirty = true;
+        }
+    }
+
+    pub(crate) fn toggle_commit_menu(&mut self) {
+        if self.comparison_commits.is_empty() {
+            self.set_notice("commit list unavailable");
+            return;
+        }
+        if self.commit_menu_open {
+            self.close_commit_menu();
+            return;
+        }
+
+        self.commit_menu_open = true;
+        self.diff_menu_open = false;
+        self.diff_menu_input.clear();
+        self.rendered_diff_menu_area = None;
+        self.branch_menu_open = None;
+        self.branch_menu_input.clear();
+        self.rendered_branch_menu_area = None;
+        self.options_menu_open = false;
+        self.close_color_scheme_picker();
+        self.commit_menu_input.clear();
+        self.commit_menu_selected = self
+            .selected_commit_menu_choice()
+            .and_then(|commit| {
+                self.filtered_commits()
+                    .iter()
+                    .position(|candidate| candidate.sha == commit.sha)
+            })
+            .unwrap_or_default()
+            .min(self.max_commit_menu_selection());
+        self.ensure_commit_selection_visible();
+        self.dirty = true;
+    }
+
     pub(crate) fn toggle_branch_menu(&mut self, menu: BranchMenu) {
         if self.comparison_branches.is_empty() {
             return;
@@ -3425,6 +3555,7 @@ impl DiffApp {
         self.rendered_diff_menu_area = None;
         self.options_menu_open = false;
         self.close_color_scheme_picker();
+        self.close_commit_menu();
         self.branch_menu_input.clear();
         self.branch_menu_selected = self
             .branch_ref(menu)
@@ -3541,22 +3672,13 @@ impl DiffApp {
     }
 
     pub(crate) fn ensure_branch_selection_visible_for_rows(&mut self, visible_rows: usize) {
-        if visible_rows == 0 {
-            self.branch_menu_scroll = 0;
-            return;
-        }
-
-        let max_scroll = self.max_branch_menu_scroll_for_rows(visible_rows);
-        if self.branch_menu_selected < self.branch_menu_scroll {
-            self.branch_menu_scroll = self.branch_menu_selected;
-        } else if self.branch_menu_selected >= self.branch_menu_scroll.saturating_add(visible_rows)
-        {
-            self.branch_menu_scroll = self
-                .branch_menu_selected
-                .saturating_add(1)
-                .saturating_sub(visible_rows);
-        }
-        self.branch_menu_scroll = self.branch_menu_scroll.min(max_scroll);
+        let len = self.filtered_branches().len();
+        ensure_selector_scroll(
+            &mut self.branch_menu_scroll,
+            self.branch_menu_selected,
+            len,
+            visible_rows,
+        );
     }
 
     pub(crate) fn max_branch_menu_selection(&self) -> usize {
@@ -3584,6 +3706,288 @@ impl DiffApp {
             .max(usize::from(self.filtered_branches().is_empty()))
             .saturating_add(4)
             .saturating_add(pinned_rows)
+    }
+
+    pub(crate) fn is_show_diff(&self) -> bool {
+        matches!(&self.options.source, DiffSource::Show(_))
+    }
+
+    pub(crate) fn show_rev_menu_detail(&self) -> String {
+        let rev = self.show_rev.as_deref().or(match &self.options.source {
+            DiffSource::Show(rev) => Some(rev.as_str()),
+            _ => None,
+        });
+        let label = match rev {
+            None | Some("HEAD") => self
+                .current_head
+                .clone()
+                .or_else(|| current_head_label(&self.changeset.repo))
+                .unwrap_or_else(|| "HEAD".to_owned()),
+            Some(symbolic) => rev_display_label(symbolic).to_owned(),
+        };
+        format!("Show {label}")
+    }
+
+    pub(crate) fn commit_menu_height(&self) -> usize {
+        let pinned_rows = usize::from(self.selected_commit_menu_choice().is_some());
+        self.visible_commit_menu_rows()
+            .max(usize::from(self.filtered_commits().is_empty()))
+            .saturating_add(4)
+            .saturating_add(pinned_rows)
+    }
+
+    pub(crate) fn commit_menu_width(&self) -> u16 {
+        let commit_width = commit_menu_width(&self.comparison_commits) as usize;
+        let input_width = self.commit_menu_input.width().saturating_add(4);
+        commit_width.max(input_width).max(36).saturating_add(4) as u16
+    }
+
+    pub(crate) fn visible_commit_menu_rows(&self) -> usize {
+        self.filtered_commits().len().min(MAX_BRANCH_MENU_ROWS)
+    }
+
+    pub(crate) fn max_commit_menu_selection(&self) -> usize {
+        self.filtered_commits().len().saturating_sub(1)
+    }
+
+    pub(crate) fn max_commit_menu_scroll_for_rows(&self, visible_rows: usize) -> usize {
+        self.filtered_commits()
+            .len()
+            .saturating_sub(visible_rows.max(1))
+    }
+
+    pub(crate) fn ensure_commit_selection_visible(&mut self) {
+        self.ensure_commit_selection_visible_for_rows(MAX_BRANCH_MENU_ROWS);
+    }
+
+    pub(crate) fn ensure_commit_selection_visible_for_rows(&mut self, visible_rows: usize) {
+        let len = self.filtered_commits().len();
+        ensure_selector_scroll(
+            &mut self.commit_menu_scroll,
+            self.commit_menu_selected,
+            len,
+            visible_rows,
+        );
+    }
+
+    pub(crate) fn move_commit_selection(&mut self, delta: isize) {
+        let next = if delta < 0 {
+            self.commit_menu_selected
+                .saturating_sub(delta.unsigned_abs())
+        } else {
+            self.commit_menu_selected.saturating_add(delta as usize)
+        };
+        self.set_commit_selection(next);
+    }
+
+    pub(crate) fn set_commit_selection(&mut self, selected: usize) {
+        let selected = selected.min(self.max_commit_menu_selection());
+        if self.commit_menu_selected != selected {
+            self.commit_menu_selected = selected;
+            self.ensure_commit_selection_visible();
+            self.dirty = true;
+        }
+    }
+
+    pub(crate) fn cycle_commit_completion(&mut self, delta: isize) {
+        let len = self.filtered_commits().len();
+        if len == 0 {
+            return;
+        }
+
+        let next = if delta < 0 {
+            self.commit_menu_selected
+                .checked_sub(1)
+                .unwrap_or(len.saturating_sub(1))
+        } else {
+            (self.commit_menu_selected + 1) % len
+        };
+        self.set_commit_selection(next);
+    }
+
+    pub(crate) fn push_commit_input(&mut self, character: char) {
+        self.commit_menu_input.push(character);
+        self.commit_menu_scroll = 0;
+        self.commit_menu_selected = 0;
+        self.dirty = true;
+    }
+
+    pub(crate) fn pop_commit_input(&mut self) {
+        if self.commit_menu_input.pop().is_some() {
+            self.commit_menu_scroll = 0;
+            self.commit_menu_selected = 0;
+            self.dirty = true;
+        }
+    }
+
+    pub(crate) fn clear_commit_input(&mut self) {
+        if !self.commit_menu_input.is_empty()
+            || self.commit_menu_scroll != 0
+            || self.commit_menu_selected != 0
+        {
+            self.commit_menu_input.clear();
+            self.commit_menu_scroll = 0;
+            self.commit_menu_selected = 0;
+            self.dirty = true;
+        }
+    }
+
+    pub(crate) fn selected_commit_menu_choice(&self) -> Option<&GitCommit> {
+        let rev = self.show_rev.as_deref()?;
+        self.comparison_commits.iter().find(|commit| {
+            commit.sha == rev
+                || commit.sha.starts_with(rev)
+                || rev.starts_with(&commit.sha[..commit.sha.len().min(7)])
+        })
+    }
+
+    pub(crate) fn selectable_commit_count(&self) -> usize {
+        let selected = self.selected_commit_menu_choice();
+        self.comparison_commits
+            .iter()
+            .filter(|commit| selected != Some(commit))
+            .count()
+    }
+
+    pub(crate) fn filtered_commits(&self) -> Vec<&GitCommit> {
+        let query = self.commit_menu_input.trim().to_ascii_lowercase();
+        let selected = self.selected_commit_menu_choice();
+        if query.is_empty() {
+            return self
+                .comparison_commits
+                .iter()
+                .filter(|commit| selected != Some(commit))
+                .collect();
+        }
+
+        let mut matches: Vec<_> = self
+            .comparison_commits
+            .iter()
+            .enumerate()
+            .filter(|(_, commit)| selected != Some(commit))
+            .filter_map(|(index, commit)| {
+                commit_match_score(&query, commit).map(|score| (score, index, commit))
+            })
+            .collect();
+        matches.sort_by(|left, right| {
+            left.0
+                .cmp(&right.0)
+                .then_with(|| left.1.cmp(&right.1))
+                .then_with(|| left.2.sha.cmp(&right.2.sha))
+        });
+        matches.into_iter().map(|(_, _, commit)| commit).collect()
+    }
+
+    pub(crate) fn filtered_commit(&self, row_index: usize) -> Option<&GitCommit> {
+        self.filtered_commits()
+            .get(self.commit_menu_scroll.saturating_add(row_index))
+            .copied()
+    }
+
+    pub(crate) fn select_highlighted_commit_match(&mut self) {
+        let Some(commit) = self
+            .filtered_commits()
+            .get(self.commit_menu_selected)
+            .map(|commit| (*commit).clone())
+        else {
+            self.set_notice("no matching commit");
+            return;
+        };
+        self.close_commit_menu();
+        self.select_show_commit(commit.sha);
+    }
+
+    pub(crate) fn select_show_commit(&mut self, rev: String) {
+        let mut options = self.options.clone();
+        options.source = DiffSource::Show(rev.clone());
+        options.scope = DiffScope::All;
+
+        if options == self.options {
+            self.show_rev = Some(rev);
+            self.dirty = true;
+            return;
+        }
+
+        self.show_rev = Some(rev);
+        self.start_diff_load(options, "show unavailable");
+    }
+
+    pub(crate) fn commit_selector_text(&self) -> Option<String> {
+        let rev = self.show_rev.as_deref()?;
+        let label = self
+            .comparison_commits
+            .iter()
+            .find(|commit| commit.sha == rev || commit.sha.starts_with(rev))
+            .map(|commit| {
+                let short = commit_short_sha(commit);
+                if commit.subject.is_empty() {
+                    short.to_owned()
+                } else {
+                    format!("{short} · {}", commit.subject)
+                }
+            })
+            .unwrap_or_else(|| rev.to_owned());
+        Some(format!("{label} ▾"))
+    }
+
+    pub(crate) fn commit_selector_width(&self) -> Option<u16> {
+        self.commit_selector_text().map(|text| text.width() as u16)
+    }
+
+    pub(crate) fn commit_selector_start(&self) -> Option<u16> {
+        if !self.is_show_diff() {
+            return None;
+        }
+        let selector_gap = STATUSLINE_SELECTOR_GAP.width() as u16;
+        Some(diff_selector_width(&self.options).saturating_add(selector_gap))
+    }
+
+    pub(crate) fn commit_selector_at(&self, column: u16) -> bool {
+        let Some(start) = self.commit_selector_start() else {
+            return false;
+        };
+        let Some(width) = self.commit_selector_width() else {
+            return false;
+        };
+        column >= start && column < start.saturating_add(width)
+    }
+
+    pub(crate) fn is_rendered_commit_menu_position(&self, column: u16, row: u16) -> bool {
+        self.rendered_commit_menu_area
+            .is_some_and(|area| rect_contains(area, column, row))
+    }
+
+    pub(crate) fn commit_choice_at(&self, column: u16, row: u16) -> Option<String> {
+        if !self.commit_menu_open {
+            return None;
+        }
+
+        let menu_area = self.rendered_commit_menu_area?;
+        let inner = commit_menu_block(self.theme).inner(menu_area);
+        if column < inner.x
+            || column >= inner.x.saturating_add(inner.width)
+            || row < inner.y.saturating_add(2)
+            || row >= inner.y.saturating_add(inner.height)
+        {
+            return None;
+        }
+
+        let row_index = usize::from(row.saturating_sub(inner.y).saturating_sub(2));
+        let pinned_rows = usize::from(self.selected_commit_menu_choice().is_some());
+        if row_index < pinned_rows {
+            return None;
+        }
+
+        let commit_index = row_index.saturating_sub(pinned_rows);
+        let rendered_choices = self
+            .visible_commit_menu_rows()
+            .min(inner.height.saturating_sub(2 + pinned_rows as u16) as usize);
+        if commit_index >= rendered_choices {
+            return None;
+        }
+
+        self.filtered_commit(commit_index)
+            .map(|commit| commit.sha.clone())
     }
 
     pub(crate) fn filtered_branches(&self) -> Vec<&str> {
@@ -3852,9 +4256,9 @@ impl DiffApp {
     }
 
     pub(crate) fn diff_menu_choices(&self) -> Vec<DiffChoice> {
-        if !matches!(
+        if matches!(
             &self.options.source,
-            DiffSource::Worktree | DiffSource::Base(_) | DiffSource::Branch { .. }
+            DiffSource::Patch(_) | DiffSource::Range { .. } | DiffSource::Difftool { .. }
         ) {
             return Vec::new();
         }
@@ -3863,6 +4267,7 @@ impl DiffApp {
         if self.branch_base.is_some() {
             choices.push(DiffChoice::Branch);
         }
+        choices.push(DiffChoice::Show);
         choices.extend([DiffChoice::Unstaged, DiffChoice::Staged]);
         choices
     }
@@ -3930,6 +4335,7 @@ impl DiffApp {
                 }
                 None => "base unavailable".to_owned(),
             },
+            DiffChoice::Show => self.show_rev_menu_detail(),
         }
     }
 
@@ -4096,6 +4502,11 @@ impl DiffApp {
             DiffChoice::Staged => {
                 options.source = DiffSource::Worktree;
                 options.scope = DiffScope::Staged;
+            }
+            DiffChoice::Show => {
+                let rev = self.show_rev.clone().unwrap_or_else(|| "HEAD".to_owned());
+                options.source = DiffSource::Show(rev);
+                options.scope = DiffScope::All;
             }
         }
 
@@ -5919,6 +6330,12 @@ impl DiffApp {
             );
         }
         self.branch_menu_scroll = self.branch_menu_scroll.min(self.max_branch_menu_scroll());
+        self.show_rev = show_rev_from_options(&self.options);
+        self.comparison_commits =
+            comparison_commits(&self.changeset.repo, self.show_rev.as_deref());
+        self.commit_menu_scroll = self
+            .commit_menu_scroll
+            .min(self.max_commit_menu_scroll_for_rows(MAX_BRANCH_MENU_ROWS));
         self.total_stats = total_stats;
         self.base_changeset = changeset.clone();
         self.changeset = changeset;
@@ -6020,6 +6437,11 @@ impl DiffApp {
             ],
         );
         self.branch_menu_scroll = self.branch_menu_scroll.min(self.max_branch_menu_scroll());
+        self.show_rev = show_rev_from_options(&self.options);
+        self.comparison_commits = comparison_commits(&changeset.repo, self.show_rev.as_deref());
+        self.commit_menu_scroll = self
+            .commit_menu_scroll
+            .min(self.max_commit_menu_scroll_for_rows(MAX_BRANCH_MENU_ROWS));
         self.total_stats = changeset.stats();
         self.base_changeset = changeset.clone();
         self.changeset = changeset;

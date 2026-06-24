@@ -2429,7 +2429,7 @@ fn leader_m_opens_diff_source_menu() {
         .expect("leader m should be handled");
 
     assert!(app.diff_menu_open);
-    assert_eq!(app.highlighted_diff_choice(), Some(DiffChoice::Unstaged));
+    assert_eq!(app.highlighted_diff_choice(), Some(DiffChoice::Show));
 }
 
 #[test]
@@ -2522,12 +2522,15 @@ fn configured_leader_diff_type_bindings_cycle_choices() {
         .pending_diff_load
         .as_ref()
         .expect("leader n should queue diff load");
-    assert_eq!(load.options.source, DiffSource::Worktree);
-    assert_eq!(load.options.scope, DiffScope::Unstaged);
+    assert_eq!(load.options.source, DiffSource::Show("HEAD".to_owned()));
+    assert_eq!(load.options.scope, DiffScope::All);
     assert!(!app.leader_pending);
 
     app.pending_diff_load = None;
-    app.options.scope = DiffScope::Staged;
+    app.options = DiffOptions {
+        source: DiffSource::Show("HEAD".to_owned()),
+        ..DiffOptions::default()
+    };
     app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
         .expect("leader should be handled");
     app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE))
@@ -2537,7 +2540,7 @@ fn configured_leader_diff_type_bindings_cycle_choices() {
         .as_ref()
         .expect("leader p should queue diff load");
     assert_eq!(load.options.source, DiffSource::Worktree);
-    assert_eq!(load.options.scope, DiffScope::Unstaged);
+    assert_eq!(load.options.scope, DiffScope::All);
     assert!(!app.leader_pending);
 }
 
@@ -3501,6 +3504,55 @@ fn statusline_header_shows_pending_live_reload() {
 }
 
 #[test]
+fn commit_match_score_matches_sha_and_subject() {
+    let commit = GitCommit {
+        sha: "abcdef0123456789".to_owned(),
+        subject: "fix tui menus".to_owned(),
+    };
+    assert!(commit_match_score("abcdef0", &commit).is_some());
+    assert!(commit_match_score("tui", &commit).is_some());
+    assert!(commit_match_score("menus", &commit).is_some());
+    assert!(commit_match_score("zzzz", &commit).is_none());
+}
+
+#[test]
+fn diff_menu_show_detail_uses_resolved_head_sha() {
+    let mut app = DiffApp::new(
+        DiffOptions::default(),
+        changeset_with_context_lines(1),
+        DiffLayoutMode::Unified,
+    );
+    app.current_head = Some("feature".to_owned());
+    assert_eq!(app.show_rev_menu_detail(), "Show feature");
+    app.current_head = Some("a1b2c3d".to_owned());
+    assert_eq!(app.show_rev_menu_detail(), "Show a1b2c3d");
+    app.show_rev = Some("HEAD~1".to_owned());
+    assert_eq!(app.show_rev_menu_detail(), "Show HEAD~1");
+}
+
+#[test]
+fn diff_menu_show_loads_current_commit_like_branch() {
+    let mut app = DiffApp::new(
+        DiffOptions::default(),
+        changeset_with_context_lines(1),
+        DiffLayoutMode::Unified,
+    );
+    app.open_diff_menu();
+    while app.highlighted_diff_choice() != Some(DiffChoice::Show) {
+        app.move_diff_menu_selection(1);
+    }
+    app.select_highlighted_diff_choice();
+    assert!(!app.diff_menu_open);
+    assert!(!app.commit_menu_open);
+    let load = app
+        .pending_diff_load
+        .as_ref()
+        .expect("show choice should queue diff load");
+    assert_eq!(load.options.source, DiffSource::Show("HEAD".to_owned()));
+    assert_eq!(load.options.scope, DiffScope::All);
+}
+
+#[test]
 fn diff_menu_lists_all_changes_first() {
     let mut app = DiffApp::new(
         DiffOptions::default(),
@@ -3514,6 +3566,7 @@ fn diff_menu_lists_all_changes_first() {
         vec![
             DiffChoice::All,
             DiffChoice::Branch,
+            DiffChoice::Show,
             DiffChoice::Unstaged,
             DiffChoice::Staged,
         ]
@@ -3577,6 +3630,10 @@ fn diff_menu_keyboard_selects_diff_choice() {
     );
 
     app.open_diff_menu();
+    assert_eq!(app.highlighted_diff_choice(), Some(DiffChoice::Show));
+
+    app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+        .expect("down should move to unstaged");
     assert_eq!(app.highlighted_diff_choice(), Some(DiffChoice::Unstaged));
 
     let should_quit = app
@@ -3620,7 +3677,7 @@ fn diff_menu_uses_configured_menu_keymap() {
     app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE))
         .expect("configured down key should move menu selection");
     assert_eq!(app.diff_menu_input, "");
-    assert_eq!(app.highlighted_diff_choice(), Some(DiffChoice::Unstaged));
+    assert_eq!(app.highlighted_diff_choice(), Some(DiffChoice::Show));
 
     app.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE))
         .expect("configured up key should move menu selection");
@@ -3724,7 +3781,7 @@ fn diff_menu_ctrl_n_and_ctrl_p_move_selection() {
 
     app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL))
         .expect("ctrl-n should move menu selection");
-    assert_eq!(app.highlighted_diff_choice(), Some(DiffChoice::Unstaged));
+    assert_eq!(app.highlighted_diff_choice(), Some(DiffChoice::Show));
 
     app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL))
         .expect("ctrl-p should move menu selection");
@@ -4910,11 +4967,14 @@ fn tab_keys_cycle_diff_choice() {
         .pending_diff_load
         .as_ref()
         .expect("tab should queue diff load");
-    assert_eq!(load.options.source, DiffSource::Worktree);
-    assert_eq!(load.options.scope, DiffScope::Unstaged);
+    assert_eq!(load.options.source, DiffSource::Show("HEAD".to_owned()));
+    assert_eq!(load.options.scope, DiffScope::All);
 
     app.pending_diff_load = None;
-    app.options.scope = DiffScope::Staged;
+    app.options = DiffOptions {
+        source: DiffSource::Show("HEAD".to_owned()),
+        ..DiffOptions::default()
+    };
     app.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT))
         .expect("shift-tab should cycle diff type backwards");
 
@@ -4923,7 +4983,7 @@ fn tab_keys_cycle_diff_choice() {
         .as_ref()
         .expect("shift-tab should queue diff load");
     assert_eq!(load.options.source, DiffSource::Worktree);
-    assert_eq!(load.options.scope, DiffScope::Unstaged);
+    assert_eq!(load.options.scope, DiffScope::All);
 }
 
 #[test]
@@ -4940,11 +5000,8 @@ fn cached_tab_key_switches_diff_choice_without_loading() {
     let cached_changeset = changeset_with_files(&["unstaged.rs"]);
     app.cache_loaded_diff(unstaged.clone(), cached_changeset.clone());
 
-    let should_quit = app
-        .handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
-        .expect("tab should cycle diff type");
+    app.select_diff_choice(DiffChoice::Unstaged);
 
-    assert!(!should_quit);
     assert!(app.pending_diff_load.is_none());
     assert_eq!(app.options, unstaged);
     assert_eq!(app.base_changeset, cached_changeset);
@@ -4972,13 +5029,11 @@ fn cached_current_diff_rebuilds_model_while_filter_apply_is_pending() {
     app.file_filter_input.clear();
     app.filter_searching = true;
 
-    app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
-        .expect("tab should switch to cached diff type");
+    app.select_diff_choice(DiffChoice::Unstaged);
     assert_eq!(app.options, unstaged);
     assert_eq!(visible_paths(&app), vec!["unstaged.rs"]);
 
-    app.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT))
-        .expect("shift-tab should switch back to cached current diff type");
+    app.select_diff_choice(DiffChoice::All);
     assert_eq!(app.options, DiffOptions::default());
     assert_eq!(visible_paths(&app), vec!["all.rs", "filtered.rs"]);
 }
@@ -4998,6 +5053,14 @@ fn cached_diff_choice_is_not_reused_without_live_invalidator() {
     app.live_updates_allowed = false;
     app.live_updates_enabled = false;
 
+    app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+        .expect("tab should cycle to show");
+    app.pending_diff_load = None;
+    app.options = DiffOptions {
+        source: DiffSource::Show("HEAD".to_owned()),
+        ..DiffOptions::default()
+    };
+
     let should_quit = app
         .handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
         .expect("tab should cycle diff type");
@@ -5008,7 +5071,7 @@ fn cached_diff_choice_is_not_reused_without_live_invalidator() {
         .as_ref()
         .expect("tab should queue a fresh diff load");
     assert_eq!(load.options, unstaged);
-    assert_eq!(app.options, DiffOptions::default());
+    assert_eq!(app.options.source, DiffSource::Show("HEAD".to_owned()));
     assert_eq!(visible_paths(&app), vec!["all.rs"]);
     assert!(app.diff_cache.is_empty());
 }
@@ -5027,6 +5090,14 @@ fn cached_diff_choice_is_not_reused_during_pending_live_reload() {
     app.cache_loaded_diff(unstaged.clone(), changeset_with_files(&["stale.rs"]));
     app.mark_live_reload_pending();
 
+    app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+        .expect("tab should cycle to show");
+    app.pending_diff_load = None;
+    app.options = DiffOptions {
+        source: DiffSource::Show("HEAD".to_owned()),
+        ..DiffOptions::default()
+    };
+
     let should_quit = app
         .handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
         .expect("tab should cycle diff type");
@@ -5037,7 +5108,7 @@ fn cached_diff_choice_is_not_reused_during_pending_live_reload() {
         .as_ref()
         .expect("tab should queue a fresh diff load");
     assert_eq!(load.options, unstaged);
-    assert_eq!(app.options, DiffOptions::default());
+    assert_eq!(app.options.source, DiffSource::Show("HEAD".to_owned()));
     assert_eq!(visible_paths(&app), vec!["all.rs"]);
     assert!(app.diff_cache.is_empty());
     assert!(app.live_reload_pending);
@@ -5091,14 +5162,26 @@ fn repeated_tab_uses_pending_diff_choice_for_next_target() {
     );
 
     app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
-        .expect("tab should queue next diff type");
+        .expect("tab should queue show");
+    app.pending_diff_load = None;
+    app.options = DiffOptions {
+        source: DiffSource::Show("HEAD".to_owned()),
+        ..DiffOptions::default()
+    };
     app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
-        .expect("tab should advance from pending diff type");
+        .expect("tab should queue unstaged");
+    app.pending_diff_load = None;
+    app.options = DiffOptions {
+        scope: DiffScope::Unstaged,
+        ..DiffOptions::default()
+    };
+    app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+        .expect("tab should advance to staged");
 
     let load = app
         .pending_diff_load
         .as_ref()
-        .expect("second tab should queue diff load");
+        .expect("third tab should queue diff load");
     assert_eq!(load.options.source, DiffSource::Worktree);
     assert_eq!(load.options.scope, DiffScope::Staged);
 }
@@ -5458,6 +5541,48 @@ fn branch_menu_scrolls_to_rendered_rows_in_short_terminal() {
         !rows
             .iter()
             .any(|row| row.contains("branch-02") && row.contains("│"))
+    );
+}
+
+#[test]
+fn commit_menu_scrolls_to_rendered_rows_and_highlights_selection() {
+    let options = DiffOptions {
+        source: DiffSource::Show("HEAD".to_owned()),
+        ..DiffOptions::default()
+    };
+    let mut app = DiffApp::new(
+        options,
+        changeset_with_context_lines(1),
+        DiffLayoutMode::Unified,
+    );
+    app.show_rev = Some("ccccccc".to_owned());
+    app.comparison_commits = (0..12)
+        .map(|index| GitCommit {
+            sha: format!("{index:07x}"),
+            subject: format!("commit-{index:02}"),
+        })
+        .collect();
+    app.toggle_commit_menu();
+    app.set_commit_selection(5);
+    assert_eq!(app.commit_menu_scroll, 0);
+
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 8))
+        .expect("test terminal should be created");
+    terminal
+        .draw(|frame| crate::render::draw(frame, &mut app))
+        .expect("commit menu draw should succeed");
+
+    assert_eq!(app.commit_menu_selected, 5);
+    assert!(app.commit_menu_scroll > 0);
+    let rows = buffer_rows(terminal.backend().buffer());
+    assert!(
+        rows.iter()
+            .any(|row| row.contains("0000005") && row.contains("commit-05"))
+    );
+    assert!(
+        !rows
+            .iter()
+            .any(|row| row.contains("0000001") && row.contains("commit-01") && row.contains("│"))
     );
 }
 

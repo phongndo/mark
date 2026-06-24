@@ -9,11 +9,11 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::{
     app::{DiffApp, OptionsMenuItem, color_scheme_label, option_label},
-    controls::{BranchMenu, DiffChoice, INPUT_CURSOR},
+    controls::{BranchMenu, DiffChoice, GitCommit, INPUT_CURSOR, commit_short_sha},
     keymap::Keymap,
     render::{
         style::{base_bg, header_bg},
-        text::fit_padded,
+        text::{fit_padded, fit_with_ellipsis},
     },
     theme::{
         DiffTheme, HELP_KEY_COLUMN_WIDTH, HELP_MENU_ROWS, HELP_MENU_WIDTH, HelpMenuKey, HelpMenuRow,
@@ -262,6 +262,20 @@ fn selector_entry_line(
     ))
 }
 
+/// Visible slice of a scrollable selector list. `global_index = scroll + visible_row`.
+fn scrolled_selector_items<'a, T>(
+    items: &'a [T],
+    scroll: usize,
+    visible_rows: usize,
+) -> impl Iterator<Item = (usize, &'a T)> + 'a {
+    items
+        .iter()
+        .skip(scroll)
+        .take(visible_rows)
+        .enumerate()
+        .map(move |(visible_row, item)| (scroll.saturating_add(visible_row), item))
+}
+
 pub(crate) fn draw_options_menu(frame: &mut Frame<'_>, app: &mut DiffApp, area: Rect) {
     if !app.options_menu_open || area.width < 24 || area.height < 5 {
         return;
@@ -306,22 +320,18 @@ pub(crate) fn draw_options_menu(frame: &mut Frame<'_>, app: &mut DiffApp, area: 
             ));
         }
     } else {
-        lines.extend(
-            items
-                .iter()
-                .enumerate()
-                .skip(app.options_menu_scroll)
-                .take(remaining_rows)
-                .map(|(index, item)| {
-                    selector_setting_line(
-                        option_label(*item),
-                        &app.option_value(*item),
-                        inner.width as usize,
-                        app.theme,
-                        index == selected,
-                    )
-                }),
-        );
+        let scroll = app.options_menu_scroll;
+        lines.extend(scrolled_selector_items(&items, scroll, remaining_rows).map(
+            |(global_index, item)| {
+                selector_setting_line(
+                    option_label(*item),
+                    &app.option_value(*item),
+                    inner.width as usize,
+                    app.theme,
+                    global_index == selected,
+                )
+            },
+        ));
     }
 
     frame.render_widget(Clear, menu_area);
@@ -422,6 +432,12 @@ pub(crate) fn draw_color_scheme_picker(frame: &mut Frame<'_>, app: &mut DiffApp,
     ));
 
     let remaining_rows = inner.height.saturating_sub(lines.len() as u16) as usize;
+    crate::app::ensure_selector_scroll(
+        &mut app.color_scheme_scroll,
+        app.color_scheme_selected,
+        choices.len(),
+        remaining_rows,
+    );
     if choices.is_empty() {
         if remaining_rows > 0 {
             lines.push(selector_empty_line(
@@ -431,17 +447,16 @@ pub(crate) fn draw_color_scheme_picker(frame: &mut Frame<'_>, app: &mut DiffApp,
             ));
         }
     } else {
+        let scroll = app.color_scheme_scroll;
+        let selected = app.color_scheme_selected;
         lines.extend(
-            choices
-                .iter()
-                .enumerate()
-                .skip(app.color_scheme_scroll)
-                .take(remaining_rows)
-                .map(|(index, choice)| {
-                    let highlighted = index == app.color_scheme_selected;
+            scrolled_selector_items(&choices, scroll, remaining_rows).map(
+                |(global_index, choice)| {
+                    let highlighted = global_index == selected;
                     let label = color_scheme_label(*choice);
                     selector_entry_line(label, "", inner.width as usize, app.theme, highlighted)
-                }),
+                },
+            ),
         );
     }
 
@@ -546,16 +561,15 @@ pub(crate) fn draw_branch_menu(frame: &mut Frame<'_>, app: &mut DiffApp, area: R
             ));
         }
     } else {
+        let scroll = app.branch_menu_scroll;
+        let selected = app.branch_menu_selected;
         lines.extend(
-            matches
-                .iter()
-                .enumerate()
-                .skip(app.branch_menu_scroll)
-                .take(remaining_rows)
-                .map(|(index, branch)| {
-                    let highlighted = index == app.branch_menu_selected;
+            scrolled_selector_items(&matches, scroll, remaining_rows).map(
+                |(global_index, branch)| {
+                    let highlighted = global_index == selected;
                     selector_entry_line(branch, "", inner.width as usize, app.theme, highlighted)
-                }),
+                },
+            ),
         );
     }
 
@@ -586,6 +600,179 @@ pub(crate) fn branch_menu_block(theme: DiffTheme, menu: BranchMenu) -> Block<'st
                 .add_modifier(Modifier::BOLD),
         )))
         .title_alignment(Alignment::Center)
+}
+
+pub(crate) fn commit_menu_block(theme: DiffTheme) -> Block<'static> {
+    let bg = base_bg(theme);
+    Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(selector_border_color(theme)).bg(bg))
+        .style(Style::default().bg(bg))
+        .padding(Padding::horizontal(1))
+        .title(Line::from(Span::styled(
+            " commit ",
+            Style::default()
+                .fg(selector_title_color(theme))
+                .bg(bg)
+                .add_modifier(Modifier::BOLD),
+        )))
+        .title_alignment(Alignment::Center)
+}
+
+const COMMIT_MENU_SHA_COL_WIDTH: usize = 8;
+
+fn commit_menu_sha_fg(theme: DiffTheme, highlighted: bool, disabled: bool) -> Color {
+    if disabled {
+        return theme.syntax.comment.unwrap_or(theme.muted);
+    }
+    if highlighted {
+        return selector_highlight_color(theme);
+    }
+    theme.syntax.string.unwrap_or(theme.header)
+}
+
+fn commit_menu_subject_fg(theme: DiffTheme, highlighted: bool, disabled: bool) -> Color {
+    if disabled {
+        return theme.muted;
+    }
+    if highlighted {
+        return selector_highlight_color(theme);
+    }
+    theme.foreground
+}
+
+fn commit_menu_row_bg(theme: DiffTheme, highlighted: bool) -> Color {
+    if highlighted {
+        header_bg(theme)
+    } else {
+        base_bg(theme)
+    }
+}
+
+fn commit_menu_row_line(
+    commit: &GitCommit,
+    width: usize,
+    theme: DiffTheme,
+    highlighted: bool,
+    disabled: bool,
+) -> Line<'static> {
+    let row_width = width.saturating_sub(2);
+    let sha_w = COMMIT_MENU_SHA_COL_WIDTH.min(row_width);
+    let gap_w = usize::from(row_width > sha_w);
+    let subject_w = row_width.saturating_sub(sha_w).saturating_sub(gap_w);
+    let short = commit_short_sha(commit);
+    let subject = if subject_w == 0 {
+        String::new()
+    } else {
+        fit_with_ellipsis(&commit.subject, subject_w)
+    };
+    let bg = commit_menu_row_bg(theme, highlighted && !disabled);
+    let bold = highlighted && !disabled;
+    let mut sha_style = Style::default()
+        .fg(commit_menu_sha_fg(theme, highlighted, disabled))
+        .bg(bg);
+    let mut subject_style = Style::default()
+        .fg(commit_menu_subject_fg(theme, highlighted, disabled))
+        .bg(bg);
+    if bold {
+        sha_style = sha_style.add_modifier(Modifier::BOLD);
+        subject_style = subject_style.add_modifier(Modifier::BOLD);
+    }
+    let gap_style = Style::default().bg(bg);
+    let mut spans = vec![Span::styled(" ", gap_style)];
+    if sha_w > 0 {
+        spans.push(Span::styled(fit_padded(short, sha_w), sha_style));
+    }
+    if gap_w > 0 {
+        spans.push(Span::styled(" ", gap_style));
+    }
+    if subject_w > 0 {
+        spans.push(Span::styled(fit_padded(&subject, subject_w), subject_style));
+    }
+    Line::from(spans)
+}
+
+pub(crate) fn draw_commit_menu(frame: &mut Frame<'_>, app: &mut DiffApp, area: Rect) {
+    if !app.commit_menu_open {
+        app.set_rendered_commit_menu_area(None);
+        return;
+    }
+    if area.width < 24 || area.height < 5 || app.comparison_commits.is_empty() {
+        app.set_rendered_commit_menu_area(None);
+        return;
+    }
+
+    let width = app.commit_menu_width().min(area.width).min(88);
+    let height = (app.commit_menu_height() as u16).min(area.height);
+    if width == 0 || height == 0 {
+        app.set_rendered_commit_menu_area(None);
+        return;
+    }
+
+    let menu_area = Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    };
+    app.set_rendered_commit_menu_area(Some(menu_area));
+
+    let block = commit_menu_block(app.theme);
+    let inner = block.inner(menu_area);
+    let match_count = app.filtered_commits().len();
+    let mut lines = vec![selector_input_line(
+        &app.commit_menu_input,
+        inner.width as usize,
+        app.theme,
+        match_count,
+        app.selectable_commit_count(),
+    )];
+    lines.push(selector_separator_line(inner.width as usize, app.theme));
+    if let Some(commit) = app.selected_commit_menu_choice() {
+        lines.push(commit_menu_row_line(
+            commit,
+            inner.width as usize,
+            app.theme,
+            false,
+            true,
+        ));
+    }
+    let remaining_rows = inner.height.saturating_sub(lines.len() as u16) as usize;
+    app.ensure_commit_selection_visible_for_rows(remaining_rows);
+    let matches = app.filtered_commits();
+    if matches.is_empty() {
+        if remaining_rows > 0 {
+            lines.push(selector_empty_line(
+                " no matching commits",
+                inner.width as usize,
+                app.theme,
+            ));
+        }
+    } else {
+        let scroll = app.commit_menu_scroll;
+        let selected = app.commit_menu_selected;
+        lines.extend(
+            scrolled_selector_items(&matches, scroll, remaining_rows).map(
+                |(global_index, commit)| {
+                    let highlighted = global_index == selected;
+                    commit_menu_row_line(
+                        commit,
+                        inner.width as usize,
+                        app.theme,
+                        highlighted,
+                        false,
+                    )
+                },
+            ),
+        );
+    }
+
+    frame.render_widget(Clear, menu_area);
+    frame.render_widget(block, menu_area);
+    frame.render_widget(
+        Paragraph::new(Text::from(lines)).style(Style::default().bg(base_bg(app.theme))),
+        inner,
+    );
 }
 
 pub(crate) fn draw_help_menu(frame: &mut Frame<'_>, app: &mut DiffApp, area: Rect) {
@@ -633,21 +820,18 @@ pub(crate) fn draw_help_menu(frame: &mut Frame<'_>, app: &mut DiffApp, area: Rec
             ));
         }
     } else {
-        lines.extend(
-            rows.iter()
-                .enumerate()
-                .skip(app.help_menu_scroll)
-                .take(remaining_rows)
-                .map(|(index, row)| {
-                    help_menu_row_line(
-                        *row,
-                        inner.width as usize,
-                        app.theme,
-                        &app.keymap,
-                        index == selected,
-                    )
-                }),
-        );
+        let scroll = app.help_menu_scroll;
+        lines.extend(scrolled_selector_items(&rows, scroll, remaining_rows).map(
+            |(global_index, row)| {
+                help_menu_row_line(
+                    *row,
+                    inner.width as usize,
+                    app.theme,
+                    &app.keymap,
+                    global_index == selected,
+                )
+            },
+        ));
     }
 
     frame.render_widget(Clear, menu_area);
@@ -871,6 +1055,7 @@ pub(crate) fn diff_choice_from_options(options: &DiffOptions) -> Option<DiffChoi
         (DiffSource::Worktree, DiffScope::All) => Some(DiffChoice::All),
         (DiffSource::Worktree, DiffScope::Unstaged) => Some(DiffChoice::Unstaged),
         (DiffSource::Worktree, DiffScope::Staged) => Some(DiffChoice::Staged),
+        (DiffSource::Show(_), DiffScope::All) => Some(DiffChoice::Show),
         _ => None,
     }
 }
