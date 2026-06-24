@@ -1697,6 +1697,26 @@ fn responsive_layout_preserves_manual_split_choice_on_narrow_resize() {
 }
 
 #[test]
+fn explicit_layout_preserves_split_choice_on_narrow_resize() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new_with_explicit_layout(
+        DiffOptions::default(),
+        changeset,
+        DiffLayoutMode::Split,
+        SyntaxStartupMode::Disabled,
+    );
+
+    assert_eq!(app.layout, DiffLayoutMode::Split);
+    assert_eq!(app.layout_override, Some(DiffLayoutMode::Split));
+    assert_eq!(app.options_menu_draft.layout, LayoutSetting::Split);
+
+    app.apply_responsive_layout(MIN_SPLIT_WIDTH - 1);
+
+    assert_eq!(app.layout, DiffLayoutMode::Split);
+    assert_eq!(app.layout_override, Some(DiffLayoutMode::Split));
+}
+
+#[test]
 fn b_key_does_not_toggle_file_sidebar() {
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
@@ -4268,6 +4288,36 @@ fn line_wrapping_recomputes_scroll_bounds_after_width_change() {
 }
 
 #[test]
+fn responsive_resize_clamps_wrapped_scroll_after_width_change() {
+    let changeset = changeset_with_line_text("abcdefghijklmnopqrstuvwx");
+    let mut app = DiffApp::new_with_explicit_layout(
+        DiffOptions::default(),
+        changeset,
+        DiffLayoutMode::Unified,
+        SyntaxStartupMode::Disabled,
+    );
+    app.line_wrapping = true;
+    app.set_viewport_width(18);
+    app.set_viewport_rows(4);
+    app.set_scroll(app.max_scroll());
+
+    let previous_scroll = app.scroll;
+    assert!(previous_scroll > 0);
+
+    app.apply_responsive_layout(80);
+
+    assert!(previous_scroll > app.max_scroll());
+    assert_eq!(app.scroll, app.max_scroll());
+    let lines = wrapped_diff_lines_for_viewport(&mut app, 80, 4);
+    assert!(!lines.is_empty());
+    assert!(
+        lines
+            .iter()
+            .any(|line| line_text(line).contains("abcdefghijklmnopqrstuvwx"))
+    );
+}
+
+#[test]
 fn select_file_scrolls_to_visual_file_start_for_wrapped_no_hunk_file() {
     let mut changeset = changeset_with_wrapped_leading_file();
     changeset.files[1].hunks.clear();
@@ -4778,6 +4828,50 @@ fn colorscheme_picker_previews_hovered_theme_and_reverts_on_close() {
     assert!(!app.color_scheme_picker_open);
     assert_eq!(app.color_scheme, ColorSchemeChoice::System);
     assert_eq!(app.theme, DiffTheme::system());
+}
+
+#[test]
+fn colorscheme_picker_previews_first_hovered_theme() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.color_scheme = ColorSchemeChoice::System;
+    app.theme = DiffTheme::system();
+    app.open_options_menu();
+    app.move_options_menu_selection(5);
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("enter should open colorscheme picker");
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 20))
+        .expect("test terminal should be created");
+
+    terminal
+        .draw(|frame| crate::render::draw(frame, &mut app))
+        .expect("colorscheme picker draw should succeed");
+
+    let rows = buffer_rows(terminal.backend().buffer());
+    let (row, column) = rows
+        .iter()
+        .enumerate()
+        .find_map(|(row, text)| {
+            text.find("catppuccin-latte")
+                .map(|column| (row as u16, column as u16))
+        })
+        .expect("first colorscheme row should render");
+    assert_eq!(app.color_scheme_selected, 0);
+
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Moved,
+        column,
+        row,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("hover should preview first colorscheme");
+
+    assert_eq!(app.color_scheme_selected, 0);
+    assert_eq!(app.color_scheme, ColorSchemeChoice::CatppuccinLatte);
+    assert_eq!(
+        app.theme.background,
+        DiffTheme::catppuccin_latte().background
+    );
 }
 
 #[test]

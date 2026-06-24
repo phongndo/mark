@@ -1101,7 +1101,16 @@ impl DiffApp {
         layout: DiffLayoutMode,
         syntax_mode: SyntaxStartupMode,
     ) -> Self {
-        Self::new_with_syntax_and_layout_settings(options, changeset, layout, syntax_mode, false)
+        let mut app = Self::new_with_syntax_and_layout_settings(
+            options,
+            changeset,
+            layout,
+            syntax_mode,
+            false,
+        );
+        app.layout_override = Some(layout);
+        app.options_menu_draft.layout = layout_setting_from_override(app.layout_override);
+        app
     }
 
     fn new_with_syntax_and_layout_settings(
@@ -3135,12 +3144,10 @@ impl DiffApp {
 
     pub(crate) fn set_color_scheme_selection(&mut self, selected: usize) {
         let selected = selected.min(self.max_color_scheme_selection());
-        if self.color_scheme_selected != selected {
-            self.color_scheme_selected = selected;
-            self.ensure_color_scheme_selection_visible();
-            self.preview_highlighted_color_scheme();
-            self.dirty = true;
-        }
+        self.color_scheme_selected = selected;
+        self.ensure_color_scheme_selection_visible();
+        self.preview_highlighted_color_scheme();
+        self.dirty = true;
     }
 
     pub(crate) fn move_color_scheme_selection(&mut self, delta: isize) {
@@ -5754,12 +5761,12 @@ impl DiffApp {
     }
 
     pub(crate) fn apply_responsive_layout(&mut self, width: u16) {
-        self.viewport_width = (width as usize).max(1);
-        self.invalidate_wrapped_visual_layout();
+        let horizontal_scroll = self.horizontal_scroll;
+        self.set_viewport_width(width as usize);
         let responsive_layout = default_layout_for_width(width);
         let layout = self.layout_override.unwrap_or(responsive_layout);
         self.set_layout(layout);
-        self.set_horizontal_scroll(self.horizontal_scroll);
+        self.set_horizontal_scroll(horizontal_scroll);
         self.dirty = true;
     }
 
