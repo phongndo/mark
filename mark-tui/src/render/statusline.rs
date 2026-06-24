@@ -383,7 +383,19 @@ pub(crate) fn push_statusline_left_spans(
         Style::default().bg(statusline_bg(app.theme)),
         remaining,
     );
-    if app.is_branch_diff()
+    if app.is_show_diff()
+        && let Some(commit) = app.commit_selector_text()
+    {
+        push_fitted_statusline_span(
+            spans,
+            commit,
+            Style::default()
+                .fg(app.theme.header)
+                .bg(statusline_bg(app.theme))
+                .add_modifier(Modifier::BOLD),
+            remaining,
+        );
+    } else if app.is_branch_diff()
         && let (Some(head), Some(base)) = (
             app.branch_selector_text(BranchMenu::Head),
             app.branch_selector_text(BranchMenu::Base),

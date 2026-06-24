@@ -2,6 +2,7 @@ use std::{collections::HashSet, env, io, path::Path, process::Command};
 
 use mark_diff::{Changeset, DiffLine, DiffLineKind, DiffOptions, DiffSource, DiffStats};
 use ratatui::{Terminal, backend::CrosstermBackend};
+use unicode_width::UnicodeWidthStr;
 
 use crate::theme::MIN_SPLIT_WIDTH;
 
@@ -35,9 +36,16 @@ impl DiffLayoutMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DiffChoice {
     Branch,
+    Show,
     All,
     Unstaged,
     Staged,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct GitCommit {
+    pub(crate) sha: String,
+    pub(crate) subject: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,6 +64,7 @@ impl DiffChoice {
     pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Branch => "Branch",
+            Self::Show => "Show",
             Self::All => "All changes",
             Self::Unstaged => "Unstaged",
             Self::Staged => "Staged",
@@ -116,6 +125,105 @@ pub(crate) fn fuzzy_subsequence_score(query: &str, branch: &str) -> Option<usize
     }
 
     Some(score)
+}
+
+pub(crate) fn commit_match_score(query: &str, commit: &GitCommit) -> Option<(usize, usize)> {
+    let sha_lower = commit.sha.to_ascii_lowercase();
+    let short = commit.sha.get(..7).unwrap_or(commit.sha.as_str());
+    let short_lower = short.to_ascii_lowercase();
+    let subject_lower = commit.subject.to_ascii_lowercase();
+    let combined = format!("{short_lower} {subject_lower}");
+
+    branch_match_score(query, &sha_lower)
+        .or_else(|| branch_match_score(query, &short_lower))
+        .or_else(|| branch_match_score(query, &subject_lower))
+        .or_else(|| branch_match_score(query, &combined))
+}
+
+pub(crate) fn comparison_commits(repo: &Path, selected_rev: Option<&str>) -> Vec<GitCommit> {
+    let mut commits = git_log_commits(repo);
+    if let Some(rev) = selected_rev.filter(|rev| !rev.is_empty()) {
+        if !commits
+            .iter()
+            .any(|commit| commit.sha == rev || commit.sha.starts_with(rev))
+        {
+            let subject = git_commit_subject(repo, rev).unwrap_or_default();
+            commits.insert(
+                0,
+                GitCommit {
+                    sha: rev.to_owned(),
+                    subject,
+                },
+            );
+        }
+    }
+    commits
+}
+
+pub(crate) fn git_log_commits(repo: &Path) -> Vec<GitCommit> {
+    if repo.as_os_str().is_empty() || !repo.exists() {
+        return Vec::new();
+    }
+
+    let output = match Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["log", "--format=%H%x09%s", "-n", "500"])
+        .output()
+    {
+        Ok(output) if output.status.success() => output,
+        _ => return Vec::new(),
+    };
+
+    let mut commits = Vec::new();
+    let mut seen = HashSet::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let Some((sha, subject)) = line.split_once('\t') else {
+            continue;
+        };
+        let sha = sha.trim();
+        if sha.is_empty() || !seen.insert(sha.to_owned()) {
+            continue;
+        }
+        commits.push(GitCommit {
+            sha: sha.to_owned(),
+            subject: subject.trim().to_owned(),
+        });
+    }
+    commits
+}
+
+pub(crate) fn git_commit_subject(repo: &Path, rev: &str) -> Option<String> {
+    git_output(repo, ["log", "-1", "--format=%s", rev])
+}
+
+pub(crate) fn commit_short_sha(commit: &GitCommit) -> &str {
+    commit.sha.get(..7).unwrap_or(commit.sha.as_str())
+}
+
+pub(crate) fn rev_display_label(rev: &str) -> &str {
+    if rev.len() > 7 && rev.chars().all(|c| c.is_ascii_hexdigit()) {
+        rev.get(..7).unwrap_or(rev)
+    } else {
+        rev
+    }
+}
+
+pub(crate) fn commit_menu_label(commit: &GitCommit) -> String {
+    let short = commit_short_sha(commit);
+    if commit.subject.is_empty() {
+        short.to_owned()
+    } else {
+        format!("{short} {subject}", subject = commit.subject)
+    }
+}
+
+pub(crate) fn commit_menu_width(commits: &[GitCommit]) -> u16 {
+    commits
+        .iter()
+        .map(|commit| commit_menu_label(commit).width() + 8)
+        .max()
+        .unwrap_or_default() as u16
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
