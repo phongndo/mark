@@ -600,13 +600,17 @@ fn patch_source_stats(source: &PatchSource) -> MarkResult<PatchStats> {
     }
 }
 
-fn parse_patch_stats(reader: impl BufRead) -> io::Result<PatchStats> {
+fn parse_patch_stats(mut reader: impl BufRead) -> io::Result<PatchStats> {
     let mut parser = PatchStatsParser::default();
+    let mut line = Vec::new();
 
-    for line in reader.lines() {
-        let line = line?;
-        let line = line.trim_end_matches('\r');
-        parser.push_line(line);
+    loop {
+        line.clear();
+        if reader.read_until(b'\n', &mut line)? == 0 {
+            break;
+        }
+        let (line, _) = patch_line_parts(&line);
+        parser.push_line_bytes(line);
     }
 
     Ok(parser.finish())
@@ -617,8 +621,7 @@ fn parse_patch_stats_lossy(patch: &[u8]) -> PatchStats {
 
     for line in patch.split_inclusive(|byte| *byte == b'\n') {
         let (line, _) = patch_line_parts(line);
-        let line = String::from_utf8_lossy(line);
-        parser.push_line(&line);
+        parser.push_line_bytes(line);
     }
 
     parser.finish()
@@ -632,7 +635,7 @@ struct PatchStatsParser {
 }
 
 impl PatchStatsParser {
-    fn push_line(&mut self, line: &str) {
+    fn push_line_bytes(&mut self, line: &[u8]) {
         if let Some(hunk) = self.current_hunk.as_mut() {
             hunk.push_line(line, self.current.as_mut());
             if hunk.is_complete() {
@@ -641,6 +644,11 @@ impl PatchStatsParser {
             return;
         }
 
+        let line = String::from_utf8_lossy(line);
+        self.push_header_line(&line);
+    }
+
+    fn push_header_line(&mut self, line: &str) {
         if line.starts_with("diff --git ") {
             finish_patch_stat_file(&mut self.stats, &mut self.current);
             self.current = Some(PatchFileStatBuilder::from_diff_git(line));
@@ -771,8 +779,8 @@ impl PatchHunkStat {
         }
     }
 
-    fn push_line(&mut self, raw: &str, file: Option<&mut PatchFileStatBuilder>) {
-        match raw.as_bytes().first().copied() {
+    fn push_line(&mut self, raw: &[u8], file: Option<&mut PatchFileStatBuilder>) {
+        match raw.first().copied() {
             Some(b'+') => {
                 self.new_remaining = self.new_remaining.saturating_sub(1);
                 if let Some(file) = file {
@@ -2396,6 +2404,21 @@ mod tests {
         assert_eq!(stats.totals.additions, 2);
         assert_eq!(stats.totals.deletions, 1);
         assert_eq!(stats.totals.binary_files, 1);
+    }
+
+    #[test]
+    fn parse_patch_stats_counts_non_utf8_hunk_lines() {
+        let patch = b"diff --git a/bytes.txt b/bytes.txt\n--- a/bytes.txt\n+++ b/bytes.txt\n@@ -1 +1 @@\n-\xff\n+\xfe\n";
+
+        let stats = parse_patch_stats(BufReader::new(patch.as_slice())).unwrap();
+
+        assert_eq!(stats.files.len(), 1);
+        assert_eq!(stats.files[0].display_path(), "bytes.txt");
+        assert_eq!(stats.files[0].additions, 1);
+        assert_eq!(stats.files[0].deletions, 1);
+        assert_eq!(stats.totals.files, 1);
+        assert_eq!(stats.totals.additions, 1);
+        assert_eq!(stats.totals.deletions, 1);
     }
 
     #[test]
