@@ -475,7 +475,7 @@ fn color_scheme_picker_width(app: &DiffApp) -> u16 {
     let rows = app
         .filtered_color_schemes()
         .iter()
-        .map(|choice| format!(" › {} ", color_scheme_label(*choice)).width())
+        .map(|choice| format!(" {} ", color_scheme_label(*choice)).width())
         .max()
         .unwrap_or_else(|| " no matching colorscheme ".width());
     let current = format!(
