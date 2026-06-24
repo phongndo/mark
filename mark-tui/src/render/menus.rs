@@ -775,9 +775,20 @@ pub(crate) fn draw_commit_menu(frame: &mut Frame<'_>, app: &mut DiffApp, area: R
     );
 }
 
-pub(crate) fn draw_help_menu(frame: &mut Frame<'_>, app: &mut DiffApp, area: Rect) {
+pub(crate) fn help_menu_list_visible_rows(app: &DiffApp, area: Rect) -> Option<usize> {
+    let layout = help_menu_layout(app, area)?;
+    Some(layout.list_visible_rows)
+}
+
+struct HelpMenuLayout {
+    menu_area: Rect,
+    inner: Rect,
+    list_visible_rows: usize,
+}
+
+fn help_menu_layout(app: &DiffApp, area: Rect) -> Option<HelpMenuLayout> {
     if !app.help_menu_open || area.width < 4 || area.height < 3 {
-        return;
+        return None;
     }
 
     let rows = app.filtered_help_menu_rows();
@@ -786,7 +797,7 @@ pub(crate) fn draw_help_menu(frame: &mut Frame<'_>, app: &mut DiffApp, area: Rec
         .saturating_add(4)
         .min(area.height);
     if height == 0 {
-        return;
+        return None;
     }
 
     let menu_area = Rect {
@@ -798,6 +809,32 @@ pub(crate) fn draw_help_menu(frame: &mut Frame<'_>, app: &mut DiffApp, area: Rec
 
     let block = help_menu_block(app.theme);
     let inner = block.inner(menu_area);
+    const HEADER_LINES: u16 = 2;
+    let list_visible_rows = inner.height.saturating_sub(HEADER_LINES) as usize;
+    if list_visible_rows == 0 {
+        return None;
+    }
+
+    Some(HelpMenuLayout {
+        menu_area,
+        inner,
+        list_visible_rows: list_visible_rows.max(1),
+    })
+}
+
+pub(crate) fn draw_help_menu(frame: &mut Frame<'_>, app: &mut DiffApp, area: Rect) {
+    let Some(layout) = help_menu_layout(app, area) else {
+        return;
+    };
+
+    let rows = app.filtered_help_menu_rows();
+    let inner = layout.inner;
+    let remaining_rows = layout.list_visible_rows;
+    app.help_menu_visible_rows = remaining_rows;
+    app.clamp_help_menu_scroll(remaining_rows);
+    let menu_area = layout.menu_area;
+
+    let block = help_menu_block(app.theme);
     let mut lines = vec![selector_input_line(
         &app.help_menu_input,
         inner.width as usize,
@@ -806,9 +843,6 @@ pub(crate) fn draw_help_menu(frame: &mut Frame<'_>, app: &mut DiffApp, area: Rec
         HELP_MENU_ROWS.len(),
     )];
     lines.push(selector_separator_line(inner.width as usize, app.theme));
-    let remaining_rows = inner.height.saturating_sub(lines.len() as u16) as usize;
-    app.help_menu_visible_rows = remaining_rows.max(1);
-    app.clamp_help_menu_scroll(remaining_rows);
     if rows.is_empty() {
         if remaining_rows > 0 {
             lines.push(selector_empty_line(
