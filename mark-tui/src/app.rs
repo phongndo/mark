@@ -6109,13 +6109,10 @@ impl DiffApp {
 
     fn max_scroll_with_annotations(&self, row_count: usize) -> usize {
         let mut blocks = Vec::new();
-        let draft_model_row = self
-            .annotation_draft
-            .as_ref()
-            .map(|draft| draft.model_row_index);
+        let draft_key = self.annotation_draft.as_ref().map(|draft| &draft.key);
         for (key, text) in &self.annotations {
             if let Some(model_row) = self.annotation_model_row(key) {
-                if draft_model_row == Some(model_row) {
+                if draft_key == Some(key) {
                     continue;
                 }
                 let anchor = self.annotation_anchor_visual_scroll(model_row);

@@ -69,20 +69,18 @@ fn plan_unwrapped_viewport_rows(
             },
         });
 
-        if let Some(draft) = draft.filter(|d| d.model_row_index == visual_row) {
-            push_compose_plan_slots(
-                &mut plans,
-                visual_row,
-                draft,
-                app.viewport_width,
-                visible_rows,
-            );
-            continue;
-        }
-
         for key in AnnotationKey::candidates_from_ui_row(&app.changeset, row) {
-            if annotations.contains_key(&key) && draft.is_none_or(|d| d.key != key) {
-                let text = annotations.get(&key).expect("key");
+            if let Some(draft) = draft.filter(|d| d.model_row_index == visual_row && d.key == key) {
+                push_compose_plan_slots(
+                    &mut plans,
+                    visual_row,
+                    draft,
+                    app.viewport_width,
+                    visible_rows,
+                );
+            } else if let Some(text) = annotations.get(&key)
+                && draft.is_none_or(|d| d.key != key)
+            {
                 push_saved_plan_slots(
                     &mut plans,
                     visual_row,
@@ -140,28 +138,28 @@ fn plan_wrapped_viewport_rows(
             break;
         }
         if wraps_left == 0 {
-            if let Some(draft) = draft.filter(|d| d.model_row_index == row_index) {
-                push_compose_plan_slots(
-                    &mut plans,
-                    row_index,
-                    draft,
-                    app.viewport_width,
-                    visible_rows,
-                );
-            } else {
-                for key in AnnotationKey::candidates_from_ui_row(&app.changeset, row) {
-                    if let Some(text) = annotations.get(&key)
-                        && draft.is_none_or(|d| d.key != key)
-                    {
-                        push_saved_plan_slots(
-                            &mut plans,
-                            row_index,
-                            key,
-                            text,
-                            app.viewport_width,
-                            visible_rows,
-                        );
-                    }
+            for key in AnnotationKey::candidates_from_ui_row(&app.changeset, row) {
+                if let Some(draft) =
+                    draft.filter(|d| d.model_row_index == row_index && d.key == key)
+                {
+                    push_compose_plan_slots(
+                        &mut plans,
+                        row_index,
+                        draft,
+                        app.viewport_width,
+                        visible_rows,
+                    );
+                } else if let Some(text) = annotations.get(&key)
+                    && draft.is_none_or(|d| d.key != key)
+                {
+                    push_saved_plan_slots(
+                        &mut plans,
+                        row_index,
+                        key,
+                        text,
+                        app.viewport_width,
+                        visible_rows,
+                    );
                 }
             }
         }

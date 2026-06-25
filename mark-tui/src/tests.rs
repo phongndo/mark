@@ -6866,6 +6866,179 @@ fn split_annotation_add_button_opens_draft_for_clicked_side() {
 }
 
 #[test]
+fn split_row_draft_keeps_sibling_annotation_visible() {
+    use crate::annotation::{AnnotationDraft, AnnotationKey, AnnotationSide};
+    use crate::render::viewport_plan::{ViewportSlotKind, plan_diff_viewport_rows};
+
+    for line_wrapping in [false, true] {
+        for draft_side in [AnnotationSide::Old, AnnotationSide::New] {
+            let changeset = changeset_with_replacement_pair();
+            let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Split);
+            app.set_viewport_width(60);
+            app.set_viewport_rows(12);
+            app.line_wrapping = line_wrapping;
+
+            let split_row = app
+                .model
+                .rows
+                .iter()
+                .position(|row| matches!(row, UiRow::SplitLine { .. }))
+                .expect("split line");
+            app.scroll = app.annotation_anchor_visual_scroll(split_row);
+
+            let row = app.model.row(split_row).expect("row");
+            let keys = AnnotationKey::candidates_from_ui_row(&app.changeset, row);
+            let old_key = keys
+                .iter()
+                .find(|key| key.side == AnnotationSide::Old)
+                .cloned()
+                .expect("old-side key");
+            let new_key = keys
+                .iter()
+                .find(|key| key.side == AnnotationSide::New)
+                .cloned()
+                .expect("new-side key");
+
+            app.annotations
+                .insert(old_key.clone(), "old saved".to_owned());
+            app.annotations
+                .insert(new_key.clone(), "new saved".to_owned());
+
+            let (draft_key, draft_input, draft_saved, sibling_key, sibling_saved) = match draft_side
+            {
+                AnnotationSide::Old => (
+                    old_key.clone(),
+                    "old draft",
+                    "old saved",
+                    new_key.clone(),
+                    "new saved",
+                ),
+                AnnotationSide::New => (
+                    new_key.clone(),
+                    "new draft",
+                    "new saved",
+                    old_key.clone(),
+                    "old saved",
+                ),
+            };
+
+            app.annotation_draft = Some(AnnotationDraft {
+                key: draft_key.clone(),
+                model_row_index: split_row,
+                input: draft_input.to_owned(),
+                cursor: draft_input.len(),
+            });
+
+            let rendered: Vec<String> = build_diff_viewport_lines(&mut app, 60, 12)
+                .iter()
+                .map(line_text)
+                .collect();
+            assert!(rendered.iter().any(|line| line.contains(draft_input)));
+            assert!(
+                rendered.iter().any(|line| line.contains(sibling_saved)),
+                "sibling annotation should stay visible with line_wrapping={line_wrapping}, draft_side={draft_side:?}: {rendered:?}"
+            );
+            assert!(!rendered.iter().any(|line| line.contains(draft_saved)));
+
+            let saved_keys: Vec<AnnotationKey> = plan_diff_viewport_rows(&app, app.viewport_rows)
+                .into_iter()
+                .filter_map(|slot| match slot.kind {
+                    ViewportSlotKind::AnnotationSaved {
+                        key, block_row: 0, ..
+                    } => Some(key),
+                    _ => None,
+                })
+                .collect();
+            assert!(
+                saved_keys.contains(&sibling_key),
+                "sibling annotation hit target should stay planned with line_wrapping={line_wrapping}, draft_side={draft_side:?}"
+            );
+            assert!(!saved_keys.contains(&draft_key));
+        }
+    }
+}
+
+#[test]
+fn max_scroll_counts_sibling_annotation_while_drafting_same_split_row() {
+    use crate::annotation::{AnnotationDraft, AnnotationKey, AnnotationSide};
+
+    let mut changeset = changeset_with_line_texts(&[
+        "context 1",
+        "context 2",
+        "context 3",
+        "context 4",
+        "context 5",
+        "context 6",
+        "context 7",
+        "context 8",
+        "old",
+        "new",
+        "tail",
+    ]);
+    let hunk = &mut changeset.files[0].hunks[0];
+    hunk.old_count = 10;
+    hunk.new_count = 10;
+    hunk.lines[8].kind = DiffLineKind::Deletion;
+    hunk.lines[8].new_line = None;
+    hunk.lines[9].kind = DiffLineKind::Addition;
+    hunk.lines[9].old_line = None;
+    hunk.lines[9].new_line = Some(9);
+    hunk.lines[10].old_line = Some(10);
+    hunk.lines[10].new_line = Some(10);
+
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Split);
+    app.set_viewport_width(60);
+    app.set_viewport_rows(8);
+
+    let split_row = app
+        .model
+        .rows
+        .iter()
+        .position(|row| {
+            let UiRow::SplitLine {
+                hunk,
+                left: Some(left),
+                right: Some(right),
+                ..
+            } = *row
+            else {
+                return false;
+            };
+            let lines = &app.changeset.files[0].hunks[hunk].lines;
+            lines[left].kind == DiffLineKind::Deletion
+                && lines[right].kind == DiffLineKind::Addition
+        })
+        .expect("replacement split line");
+    let row = app.model.row(split_row).expect("row");
+    let keys = AnnotationKey::candidates_from_ui_row(&app.changeset, row);
+    let old_key = keys
+        .iter()
+        .find(|key| key.side == AnnotationSide::Old)
+        .cloned()
+        .expect("old-side key");
+    let new_key = keys
+        .iter()
+        .find(|key| key.side == AnnotationSide::New)
+        .cloned()
+        .expect("new-side key");
+
+    app.annotations
+        .insert(old_key.clone(), "old saved".to_owned());
+    app.annotations
+        .insert(new_key.clone(), "new saved".to_owned());
+    app.annotation_draft = Some(AnnotationDraft {
+        key: old_key,
+        model_row_index: split_row,
+        input: "old draft".to_owned(),
+        cursor: "old draft".len(),
+    });
+
+    let max_scroll_with_sibling = app.max_scroll();
+    app.annotations.remove(&new_key);
+    assert!(max_scroll_with_sibling > app.max_scroll());
+}
+
+#[test]
 fn annotation_save_preserves_body_whitespace_but_deletes_blank_drafts() {
     use crate::annotation::{AnnotationDraft, AnnotationKey};
 
