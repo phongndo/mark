@@ -5773,12 +5773,16 @@ fn live_diff_filter_ignores_non_state_git_paths() {
     assert!(filter.is_relevant_path(&repo.join(".git/index.lock")));
     assert!(filter.is_relevant_path(&repo.join(".git/refs/heads/main")));
     assert!(!filter.is_relevant_path(&repo.join(".git/logs/HEAD")));
+    assert!(filter.is_relevant_path(&repo.join("vendor/plugin/.git")));
     assert!(!filter.is_relevant_path(&repo.join("vendor/plugin/.git/index.lock")));
     assert!(!filter.is_relevant_path(&repo.join("vendor/plugin/.git/objects/tmp")));
     assert!(!filter.is_relevant_path(&repo.join("vendor/plugin/.git/logs/HEAD")));
     assert!(filter.is_relevant_path(&repo.join("vendor/plugin/.git/HEAD")));
     assert!(filter.is_relevant_path(&repo.join("vendor/plugin/.git/index")));
     assert!(filter.is_relevant_path(&repo.join("vendor/plugin/.git/refs/heads/main")));
+    assert!(filter.is_relevant_path(&repo.join("vendor/plugin/.git/info")));
+    assert!(filter.is_relevant_path(&repo.join("vendor/plugin/.git/info/exclude")));
+    assert!(!filter.is_relevant_path(&repo.join("vendor/plugin/.git/info/attributes")));
     assert!(filter.is_relevant_path(&repo.join("vendor/plugin/src/lib.rs")));
     assert!(!filter.is_relevant_path(&other.join("file.rs")));
 }

@@ -291,7 +291,8 @@ impl LiveDiffFilter {
 
 fn is_relevant_git_metadata_components(mut components: std::path::Components<'_>) -> bool {
     let Some(first) = components.next() else {
-        return false;
+        // Some watcher backends coalesce state-file changes to the .git directory.
+        return true;
     };
 
     match first.as_os_str() {
@@ -303,10 +304,13 @@ fn is_relevant_git_metadata_components(mut components: std::path::Components<'_>
             components.next().is_none()
         }
         path if path == OsStr::new("refs") => true,
-        path if path == OsStr::new("info") => {
-            matches!(components.next(), Some(component) if component.as_os_str() == OsStr::new("exclude"))
-                && components.next().is_none()
-        }
+        path if path == OsStr::new("info") => match components.next() {
+            None => true,
+            Some(component) if component.as_os_str() == OsStr::new("exclude") => {
+                components.next().is_none()
+            }
+            Some(_) => false,
+        },
         _ => false,
     }
 }
