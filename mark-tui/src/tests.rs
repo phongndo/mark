@@ -2368,6 +2368,54 @@ fn n_and_p_navigate_grep_by_line_not_match_count() {
 }
 
 #[test]
+fn grep_jump_scrolls_past_annotation_blocks_to_show_match() {
+    use crate::annotation::AnnotationKey;
+    use crate::render::viewport_plan::{ViewportSlotKind, plan_diff_viewport_rows};
+
+    let changeset = changeset_with_line_texts(&["annotated", "other", "needle", "tail"]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_width(40);
+    app.set_viewport_rows(5);
+
+    let annotated_row = app
+        .model
+        .rows
+        .iter()
+        .position(|row| {
+            matches!(
+                row,
+                UiRow::UnifiedLine {
+                    file: 0,
+                    hunk: 0,
+                    line: 0
+                }
+            )
+        })
+        .expect("annotated row should exist");
+    let key = AnnotationKey::from_ui_row(
+        &app.changeset,
+        app.model.row(annotated_row).expect("annotated row"),
+    )
+    .expect("annotation key");
+    app.annotations.insert(key, "note".to_owned());
+
+    app.grep_filter = "needle".to_owned();
+    app.apply_filters(true);
+
+    let match_row = app
+        .current_grep_match_row()
+        .expect("grep match should be selected");
+    let rendered_rows: Vec<_> = plan_diff_viewport_rows(&app, app.viewport_rows)
+        .into_iter()
+        .filter_map(|slot| match slot.kind {
+            ViewportSlotKind::DiffVisual { model_row, .. } => Some(model_row),
+            _ => None,
+        })
+        .collect();
+    assert!(rendered_rows.contains(&match_row));
+}
+
+#[test]
 fn wrapped_grep_selection_stays_on_visible_continuation_row() {
     let changeset = changeset_with_line_texts(&["needle abcdefghijkl", "other", "needle second"]);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);

@@ -5937,11 +5937,9 @@ impl DiffApp {
 
     pub(crate) fn set_scroll_centered_on(&mut self, row: usize) {
         let center_offset = viewport_center_offset(self.viewport_rows);
-        self.set_scroll_with_grep_sync(
-            self.scroll_for_model_row(row).saturating_sub(center_offset),
-            false,
-            HunkFocusScrollBehavior::ClearOnScroll,
-        );
+        let scroll = self.scroll_for_model_row(row).saturating_sub(center_offset);
+        let scroll = self.scroll_with_model_row_rendered(scroll, row);
+        self.set_scroll_with_grep_sync(scroll, false, HunkFocusScrollBehavior::ClearOnScroll);
     }
 
     pub(crate) fn set_scroll_focused_on_hunk(&mut self, file: usize, hunk: usize) {
