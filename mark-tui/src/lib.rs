@@ -1,4 +1,3 @@
-mod annotation;
 mod app;
 mod controls;
 mod editor;
