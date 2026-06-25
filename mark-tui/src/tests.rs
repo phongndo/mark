@@ -1786,6 +1786,7 @@ fn live_reload_started_state_marks_pending_until_loaded() {
         .expect("started reload should send");
     drain_live_reloads(&mut app, Some(&mut reload_rx));
 
+    assert!(app.live_reload_invalidated);
     assert!(app.live_reload_pending);
     app.dirty = false;
 
@@ -1794,8 +1795,31 @@ fn live_reload_started_state_marks_pending_until_loaded() {
         .expect("loaded reload should send");
     drain_live_reloads(&mut app, Some(&mut reload_rx));
 
+    assert!(!app.live_reload_invalidated);
     assert!(!app.live_reload_pending);
     assert!(app.dirty);
+}
+
+#[test]
+fn live_reload_invalidation_clears_cache_without_visible_pending_state() {
+    let changeset = changeset_with_files(&["src/lib.rs"]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    let options = DiffOptions {
+        scope: DiffScope::Unstaged,
+        ..DiffOptions::default()
+    };
+
+    app.cache_loaded_diff(options, changeset_with_files(&["cached.rs"]));
+    assert!(!app.diff_cache.is_empty());
+
+    app.mark_live_reload_invalidated();
+
+    assert!(app.live_reload_invalidated);
+    assert!(!app.live_reload_pending);
+    assert!(app.diff_cache.is_empty());
+
+    let line = statusline_header_line(&app, 80);
+    assert!(!line_text(&line).contains("refreshing diff"));
 }
 
 #[test]
@@ -5749,6 +5773,13 @@ fn live_diff_filter_ignores_non_state_git_paths() {
     assert!(filter.is_relevant_path(&repo.join(".git/index.lock")));
     assert!(filter.is_relevant_path(&repo.join(".git/refs/heads/main")));
     assert!(!filter.is_relevant_path(&repo.join(".git/logs/HEAD")));
+    assert!(!filter.is_relevant_path(&repo.join("vendor/plugin/.git/index.lock")));
+    assert!(!filter.is_relevant_path(&repo.join("vendor/plugin/.git/objects/tmp")));
+    assert!(!filter.is_relevant_path(&repo.join("vendor/plugin/.git/logs/HEAD")));
+    assert!(filter.is_relevant_path(&repo.join("vendor/plugin/.git/HEAD")));
+    assert!(filter.is_relevant_path(&repo.join("vendor/plugin/.git/index")));
+    assert!(filter.is_relevant_path(&repo.join("vendor/plugin/.git/refs/heads/main")));
+    assert!(filter.is_relevant_path(&repo.join("vendor/plugin/src/lib.rs")));
     assert!(!filter.is_relevant_path(&other.join("file.rs")));
 }
 

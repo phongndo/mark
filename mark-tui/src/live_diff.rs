@@ -248,7 +248,7 @@ impl LiveDiffFilter {
             return true;
         }
 
-        if self.is_inside_repo_dot_git(path) {
+        if self.is_ignored_git_metadata_path(path) {
             return false;
         }
 
@@ -273,15 +273,41 @@ impl LiveDiffFilter {
         })
     }
 
-    pub(crate) fn is_inside_repo_dot_git(&self, path: &Path) -> bool {
+    pub(crate) fn is_ignored_git_metadata_path(&self, path: &Path) -> bool {
         let Ok(relative) = path.strip_prefix(&self.repo) else {
             return false;
         };
 
-        relative
-            .components()
-            .next()
-            .is_some_and(|component| component.as_os_str() == OsStr::new(".git"))
+        let mut components = relative.components();
+        while let Some(component) = components.next() {
+            if component.as_os_str() == OsStr::new(".git") {
+                return !is_relevant_git_metadata_components(components);
+            }
+        }
+
+        false
+    }
+}
+
+fn is_relevant_git_metadata_components(mut components: std::path::Components<'_>) -> bool {
+    let Some(first) = components.next() else {
+        return false;
+    };
+
+    match first.as_os_str() {
+        path if path == OsStr::new("HEAD")
+            || path == OsStr::new("index")
+            || path == OsStr::new("packed-refs")
+            || path == OsStr::new("config") =>
+        {
+            components.next().is_none()
+        }
+        path if path == OsStr::new("refs") => true,
+        path if path == OsStr::new("info") => {
+            matches!(components.next(), Some(component) if component.as_os_str() == OsStr::new("exclude"))
+                && components.next().is_none()
+        }
+        _ => false,
     }
 }
 
