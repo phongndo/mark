@@ -199,6 +199,42 @@ fn hunk_focus_uses_rendered_rows_when_annotations_hide_model_rows() {
 }
 
 #[test]
+fn max_scroll_reaches_rows_hidden_by_saved_annotation() {
+    use crate::annotation::AnnotationKey;
+    use crate::render::viewport_plan::{ViewportSlotKind, plan_diff_viewport_rows};
+
+    let lines: Vec<&str> = (0..5).map(|_| "line").collect();
+    let changeset = changeset_with_line_texts(&lines);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_width(40);
+    app.set_viewport_rows(app.model.len());
+
+    let annotated_row = app
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
+        .expect("unified line");
+    let key = AnnotationKey::from_ui_row(
+        &app.changeset,
+        app.model.row(annotated_row).expect("annotated row"),
+    )
+    .expect("annotation key");
+    app.annotations.insert(key, "note".to_owned());
+
+    assert!(app.max_scroll() > annotated_row);
+    app.set_scroll(app.max_scroll());
+    let rendered_rows: Vec<_> = plan_diff_viewport_rows(&app, app.viewport_rows)
+        .into_iter()
+        .filter_map(|slot| match slot.kind {
+            ViewportSlotKind::DiffVisual { model_row, .. } => Some(model_row),
+            _ => None,
+        })
+        .collect();
+    assert!(rendered_rows.contains(&(app.model.len() - 1)));
+}
+
+#[test]
 fn hunk_focus_moves_between_hunks_when_diff_fits_viewport() {
     let changeset = changeset_with_hunks_at(PathBuf::from("/repo"), &[1, 2, 3]);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
@@ -7061,6 +7097,87 @@ fn annotation_save_and_cancel_use_configured_keybindings() {
     app.handle_annotation_input_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL));
     assert!(app.annotation_draft.is_none());
     assert_eq!(app.annotations.get(&key).map(String::as_str), Some("n"));
+}
+
+#[test]
+fn annotation_cancel_binding_preempts_overlapping_edit_hunk_shortcut() {
+    let changeset = changeset_with_line_text("hello");
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.keymap = Keymap::parse(
+        r#"
+        [keymap.global]
+        edit_hunk = "ctrl-x"
+        cancel_mark = "ctrl-x"
+        "#,
+    )
+    .expect("keymap should parse");
+    app.set_rendered_diff_area(Rect {
+        x: 0,
+        y: 1,
+        width: 40,
+        height: 8,
+    });
+    app.set_viewport_width(40);
+    app.set_viewport_rows(8);
+    let code_row = app
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
+        .expect("unified line");
+    app.scroll = code_row;
+    app.update_diff_mouse_hover(38, 1);
+    assert!(app.handle_diff_click(38, 1));
+    assert!(app.annotation_draft.is_some());
+
+    assert!(!handle_test_key_event(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL)
+    ));
+
+    assert!(app.annotation_draft.is_none());
+    assert!(app.annotations.is_empty());
+}
+
+#[test]
+fn annotation_save_binding_preempts_overlapping_edit_hunk_shortcut() {
+    use crate::annotation::{AnnotationDraft, AnnotationKey};
+
+    let changeset = changeset_with_line_text("hello");
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.keymap = Keymap::parse(
+        r#"
+        [keymap.global]
+        edit_hunk = "ctrl-g"
+        save_mark = "ctrl-g"
+        "#,
+    )
+    .expect("keymap should parse");
+    let code_row = app
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
+        .expect("unified line");
+    let key = AnnotationKey::from_ui_row(
+        &app.changeset,
+        app.model.row(code_row).expect("annotated row"),
+    )
+    .expect("annotation key");
+    app.annotation_draft = Some(AnnotationDraft {
+        key: key.clone(),
+        model_row_index: code_row,
+        input: "note".to_owned(),
+        cursor: "note".len(),
+    });
+
+    assert!(!handle_test_key_event(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL)
+    ));
+
+    assert!(app.annotation_draft.is_none());
+    assert_eq!(app.annotations.get(&key).map(String::as_str), Some("note"));
 }
 
 #[test]

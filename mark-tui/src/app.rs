@@ -429,6 +429,7 @@ pub(crate) fn handle_event(
     match event {
         Event::Key(key) if app.ignore_post_editor_quit_key(key, Instant::now()) => Ok(false),
         Event::Key(key) if is_quit_key(key) => Ok(true),
+        Event::Key(key) if app.handle_annotation_save_or_cancel_key(key) => Ok(false),
         Event::Key(key)
             if app.keymap.matches_single(GlobalAction::EditHunk, key)
                 && app.editor_shortcut_available() =>
@@ -3455,6 +3456,17 @@ impl DiffApp {
         true
     }
 
+    fn handle_annotation_save_or_cancel_key(&mut self, key: KeyEvent) -> bool {
+        if self.annotation_draft.is_none()
+            || !(self.keymap.matches_single(GlobalAction::CancelMark, key)
+                || self.keymap.matches_single(GlobalAction::SaveMark, key))
+        {
+            return false;
+        }
+
+        self.handle_annotation_input_key(key)
+    }
+
     fn commit_annotation_draft(&mut self, draft: AnnotationDraft) {
         let text = draft.input.trim().to_owned();
         if text.is_empty() {
@@ -5983,28 +5995,27 @@ impl DiffApp {
     }
 
     fn max_scroll_with_annotations(&self, row_count: usize) -> usize {
-        let mut max_scroll = max_scroll_for_viewport(row_count, self.viewport_rows);
+        let mut blocks = Vec::new();
+        let draft_model_row = self
+            .annotation_draft
+            .as_ref()
+            .map(|draft| draft.model_row_index);
         for (key, text) in &self.annotations {
             if let Some(model_row) = self.annotation_model_row(key) {
+                if draft_model_row == Some(model_row) {
+                    continue;
+                }
                 let anchor = self.annotation_anchor_visual_scroll(model_row);
                 let height = annotation_saved_block_height(text, self.viewport_width);
-                max_scroll = max_scroll.max(anchor).max(annotation_scroll_for_block(
-                    anchor,
-                    height,
-                    self.viewport_rows,
-                ));
+                blocks.push((anchor, height));
             }
         }
         if let Some(draft) = self.annotation_draft.as_ref() {
             let anchor = self.annotation_anchor_visual_scroll(draft.model_row_index);
             let height = annotation_compose_block_height(draft, self.viewport_width);
-            max_scroll = max_scroll.max(anchor).max(annotation_scroll_for_block(
-                anchor,
-                height,
-                self.viewport_rows,
-            ));
+            blocks.push((anchor, height));
         }
-        max_scroll
+        max_scroll_for_annotated_viewport(row_count, self.viewport_rows, blocks)
     }
 
     pub(crate) fn max_horizontal_scroll(&self) -> usize {
@@ -7593,6 +7604,74 @@ impl DiffApp {
 
 pub(crate) fn max_scroll_for_viewport(row_count: usize, viewport_rows: usize) -> usize {
     row_count.saturating_sub(viewport_rows.max(1))
+}
+
+fn max_scroll_for_annotated_viewport(
+    row_count: usize,
+    viewport_rows: usize,
+    mut annotation_blocks: Vec<(usize, usize)>,
+) -> usize {
+    if row_count == 0 {
+        return 0;
+    }
+
+    annotation_blocks.retain(|(anchor, height)| *anchor < row_count && *height > 0);
+    if annotation_blocks.is_empty() {
+        return max_scroll_for_viewport(row_count, viewport_rows);
+    }
+
+    annotation_blocks.sort_unstable_by_key(|(anchor, _)| *anchor);
+    let mut merged_blocks: Vec<(usize, usize)> = Vec::with_capacity(annotation_blocks.len());
+    for (anchor, height) in annotation_blocks {
+        if let Some((last_anchor, last_height)) = merged_blocks.last_mut()
+            && *last_anchor == anchor
+        {
+            *last_height = last_height.saturating_add(height);
+            continue;
+        }
+        merged_blocks.push((anchor, height));
+    }
+
+    let annotation_rows = merged_blocks
+        .iter()
+        .fold(0usize, |total, (_, height)| total.saturating_add(*height));
+    let max_anchor = merged_blocks
+        .iter()
+        .map(|(anchor, _)| *anchor)
+        .max()
+        .unwrap_or(0);
+    let target_rendered_scroll = row_count
+        .saturating_add(annotation_rows)
+        .saturating_sub(viewport_rows.max(1));
+
+    // `scroll` is expressed in diff visual rows, while annotations add rendered
+    // rows after their anchors. Project the last rendered viewport start back to
+    // the first diff visual row at or after that rendered position; if that
+    // position lands inside an annotation, scrolling to the next diff row reveals
+    // rows hidden by the annotation block. Keep annotation anchors reachable too,
+    // so saving or resizing a mark does not clamp the view away from its line.
+    let mut annotation_rows_before = 0usize;
+    let mut first_row_in_range = 0usize;
+    for (anchor, height) in merged_blocks {
+        let candidate = target_rendered_scroll.saturating_sub(annotation_rows_before);
+        if candidate <= anchor {
+            let projected_scroll = candidate.max(first_row_in_range).min(row_count - 1);
+            return projected_scroll.max(max_anchor);
+        }
+
+        annotation_rows_before = annotation_rows_before.saturating_add(height);
+        first_row_in_range = anchor.saturating_add(1).min(row_count);
+    }
+
+    if first_row_in_range < row_count {
+        let projected_scroll = target_rendered_scroll
+            .saturating_sub(annotation_rows_before)
+            .max(first_row_in_range)
+            .min(row_count - 1);
+        return projected_scroll.max(max_anchor);
+    }
+
+    row_count - 1
 }
 
 fn annotation_scroll_for_block(
