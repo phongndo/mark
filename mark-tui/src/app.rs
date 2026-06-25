@@ -2463,11 +2463,17 @@ impl DiffApp {
     }
 
     fn export_marks(&self) -> Vec<MarkExport> {
-        let exportable_keys = self.exportable_annotation_keys();
+        // Copy marks for the current diff, not stale annotations whose path still
+        // exists after a reload. Build an unfiltered model so active file/grep
+        // filters do not hide otherwise-current marks from export.
+        let export_model = UiModel::new(&self.changeset, self.layout, &self.context_expansions);
+        let exportable_keys = self.exportable_annotation_keys(&export_model);
         self.annotations
             .iter()
             .filter_map(|(key, body)| {
-                if !exportable_keys.contains(key) {
+                if !exportable_keys.contains(key)
+                    && !self.collapsed_context_contains_annotation_key(&export_model, key)
+                {
                     return None;
                 }
                 self.export_mark(key, body)
@@ -2475,15 +2481,49 @@ impl DiffApp {
             .collect()
     }
 
-    fn exportable_annotation_keys(&self) -> HashSet<AnnotationKey> {
-        // Copy marks for the current diff, not stale annotations whose path still
-        // exists after a reload. Build an unfiltered model so active file/grep
-        // filters do not hide otherwise-current marks from export.
-        UiModel::new(&self.changeset, self.layout, &self.context_expansions)
+    fn exportable_annotation_keys(&self, model: &UiModel) -> HashSet<AnnotationKey> {
+        model
             .rows
-            .into_iter()
+            .iter()
+            .copied()
             .flat_map(|row| AnnotationKey::candidates_from_ui_row(&self.changeset, row))
             .collect()
+    }
+
+    fn collapsed_context_contains_annotation_key(
+        &self,
+        model: &UiModel,
+        key: &AnnotationKey,
+    ) -> bool {
+        if key.side != AnnotationSide::New {
+            return false;
+        }
+
+        model.rows.iter().any(|row| {
+            let UiRow::Collapsed {
+                file,
+                hunk,
+                new_start,
+                lines,
+                expanded,
+                ..
+            } = *row
+            else {
+                return false;
+            };
+            let Some(file) = self.changeset.files.get(file) else {
+                return false;
+            };
+            if AnnotationKey::path_for_side(file, AnnotationSide::New) != Some(key.path.as_str()) {
+                return false;
+            }
+
+            let hidden_start = match context_expansion_direction(hunk) {
+                ContextExpansionDirection::Up => new_start,
+                ContextExpansionDirection::Down => new_start.saturating_add(expanded),
+            };
+            key.line >= hidden_start && key.line.saturating_sub(hidden_start) < lines
+        })
     }
 
     fn export_mark(&self, key: &AnnotationKey, body: &str) -> Option<MarkExport> {

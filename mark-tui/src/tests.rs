@@ -3313,6 +3313,63 @@ fn copy_marks_omits_annotations_without_current_diff_line() {
 }
 
 #[test]
+fn copy_marks_includes_marks_on_collapsed_context_lines() {
+    use crate::annotation::AnnotationKey;
+
+    let repo = temp_test_dir("copy-collapsed-context-mark");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    let text = (1..=80)
+        .map(|line| format!("line {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(repo.join("file.rs"), text).expect("context file should be written");
+    let changeset = changeset_with_hunk_at(repo, 50);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+
+    assert!(app.expand_context_at_row(1));
+    let context_row = app
+        .model
+        .rows
+        .iter()
+        .copied()
+        .find(|row| matches!(row, UiRow::ContextLine { .. }))
+        .expect("expanded context line");
+    let key = AnnotationKey::from_ui_row(&app.changeset, context_row).expect("context key");
+    app.annotations
+        .insert(key.clone(), "context note".to_owned());
+
+    assert!(app.hide_context(0, 0));
+    assert!(
+        !app.model.rows.iter().any(|row| matches!(
+            row,
+            UiRow::ContextLine { new_line, .. } if *new_line == key.line
+        )),
+        "marked context line should be collapsed"
+    );
+
+    let expected = format!(
+        concat!(
+            "{{\n",
+            "  \"version\": 1,\n",
+            "  \"marks\": [\n",
+            "    {{\n",
+            "      \"path\": \"file.rs\",\n",
+            "      \"new_line\": {},\n",
+            "      \"body\": \"context note\"\n",
+            "    }}\n",
+            "  ]\n",
+            "}}"
+        ),
+        key.line
+    );
+
+    assert_eq!(
+        app.marks_clipboard_json().as_deref(),
+        Some(expected.as_str())
+    );
+}
+
+#[test]
 fn copy_marks_without_marks_shows_notice_without_writing() {
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
