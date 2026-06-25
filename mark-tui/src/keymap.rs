@@ -112,6 +112,8 @@ impl Keymap {
 
     fn from_stored(stored: StoredKeymap) -> Result<Self, String> {
         let mut keymap = Self::default();
+        let save_mark_configured = stored.global.save_mark.is_some();
+        let cancel_mark_configured = stored.global.cancel_mark.is_some();
         let copy_marks_configured = stored.global.copy_marks.is_some();
 
         if let Some(leader) = stored.global.leader {
@@ -139,6 +141,10 @@ impl Keymap {
             &mut keymap.previous_diff_type,
             stored.global.previous_diff_type,
         )?;
+        keymap.clear_unconfigured_mark_draft_leader_conflicts(
+            save_mark_configured,
+            cancel_mark_configured,
+        );
         if !copy_marks_configured {
             keymap.clear_default_copy_marks_on_conflict();
         }
@@ -312,6 +318,22 @@ impl Keymap {
         });
         if conflicts {
             self.copy_marks.clear();
+        }
+    }
+
+    fn clear_unconfigured_mark_draft_leader_conflicts(
+        &mut self,
+        save_mark_configured: bool,
+        cancel_mark_configured: bool,
+    ) {
+        let leader = self.leader;
+        if !save_mark_configured {
+            self.save_mark
+                .retain(|sequence| sequence.0.as_slice() != [leader]);
+        }
+        if !cancel_mark_configured {
+            self.cancel_mark
+                .retain(|sequence| sequence.0.as_slice() != [leader]);
         }
     }
 
@@ -894,6 +916,51 @@ mod tests {
             GlobalAction::CancelMark,
             KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)
         ));
+    }
+
+    #[test]
+    fn keymap_keeps_custom_leaders_that_overlap_default_mark_draft_bindings() {
+        let ctrl_s_leader = Keymap::parse(
+            r#"
+            [keymap.global]
+            leader = "ctrl-s"
+            "#,
+        )
+        .expect("ctrl-s leader should parse");
+
+        assert!(ctrl_s_leader.is_leader(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL)));
+        assert_eq!(
+            ctrl_s_leader.global_action_label(GlobalAction::SaveMark),
+            "unbound"
+        );
+
+        let esc_leader = Keymap::parse(
+            r#"
+            [keymap.global]
+            leader = "esc"
+            "#,
+        )
+        .expect("esc leader should parse");
+
+        assert!(esc_leader.is_leader(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+        assert_eq!(
+            esc_leader.global_action_label(GlobalAction::CancelMark),
+            "unbound"
+        );
+    }
+
+    #[test]
+    fn keymap_rejects_configured_mark_draft_binding_that_uses_leader() {
+        let error = Keymap::parse(
+            r#"
+            [keymap.global]
+            leader = "ctrl-s"
+            save_mark = "ctrl-s"
+            "#,
+        )
+        .expect_err("configured draft binding should not use leader");
+
+        assert!(error.contains("save_mark single-key binding cannot use leader"));
     }
 
     #[test]

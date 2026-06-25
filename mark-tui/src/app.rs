@@ -48,7 +48,7 @@ use crate::{
         annotations::{
             annotation_close_hit_at_column, annotation_compose_block_height,
             annotation_edit_hit_at_column, annotation_hit_at_column, annotation_saved_block_height,
-            annotation_submit_hit_at_column,
+            annotation_submit_hit_at_column, split_annotation_hit_side_at_column,
         },
         draw,
         menus::{
@@ -3199,10 +3199,9 @@ impl DiffApp {
         {
             return true;
         }
-        if annotation_hit_at_column(diff_column, width)
-            && self
-                .mouse_hover
-                .is_some_and(|(_, hover_row)| hover_row == viewport_row)
+        if self
+            .mouse_hover
+            .is_some_and(|(_, hover_row)| hover_row == viewport_row)
             && self.try_open_annotation_draft_at_viewport_row(viewport_row, diff_column)
         {
             return true;
@@ -3307,9 +3306,6 @@ impl DiffApp {
         if self.annotation_draft.is_some() {
             return false;
         }
-        if !annotation_hit_at_column(column, self.viewport_width) {
-            return false;
-        }
         let Some(visual_row) = visual_scroll_for_viewport_row(self, viewport_row) else {
             return false;
         };
@@ -3330,10 +3326,24 @@ impl DiffApp {
         if self.annotation_anchor_visual_scroll(row_index) != visual_row {
             return false;
         }
-        let Some(key) = AnnotationKey::from_ui_row(&self.changeset, row) else {
+        let Some(key) = self.annotation_key_for_add_click(row, column) else {
             return false;
         };
         self.open_annotation_draft_for_key(key, row_index)
+    }
+
+    fn annotation_key_for_add_click(&self, row: UiRow, column: u16) -> Option<AnnotationKey> {
+        if self.layout == DiffLayoutMode::Split && matches!(row, UiRow::SplitLine { .. }) {
+            let side = split_annotation_hit_side_at_column(column, self.viewport_width)?;
+            return AnnotationKey::candidates_from_ui_row(&self.changeset, row)
+                .into_iter()
+                .find(|key| key.side == side);
+        }
+
+        if !annotation_hit_at_column(column, self.viewport_width) {
+            return None;
+        }
+        AnnotationKey::from_ui_row(&self.changeset, row)
     }
 
     fn open_annotation_draft_for_key(

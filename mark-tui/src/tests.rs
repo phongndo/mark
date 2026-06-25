@@ -6709,6 +6709,71 @@ fn annotation_add_button_opens_input_under_hovered_line() {
 }
 
 #[test]
+fn split_annotation_add_button_opens_draft_for_clicked_side() {
+    use crate::annotation::{AnnotationKey, AnnotationSide};
+
+    let changeset = changeset_with_replacement_pair();
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Split);
+    app.set_rendered_diff_area(Rect {
+        x: 0,
+        y: 1,
+        width: 60,
+        height: 8,
+    });
+    app.set_viewport_width(60);
+    app.set_viewport_rows(8);
+    let split_row = app
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::SplitLine { .. }))
+        .expect("split line");
+    app.scroll = split_row;
+
+    let row = app.model.row(split_row).expect("row");
+    let keys = AnnotationKey::candidates_from_ui_row(&app.changeset, row);
+    let old_key = keys
+        .iter()
+        .find(|key| key.side == AnnotationSide::Old)
+        .cloned()
+        .expect("old-side key");
+    let new_key = keys
+        .iter()
+        .find(|key| key.side == AnnotationSide::New)
+        .cloned()
+        .expect("new-side key");
+    let left_width = app.viewport_width / 2;
+    let old_button_column = (left_width - 1) as u16;
+    app.update_diff_mouse_hover(old_button_column, 1);
+
+    let hover_lines = crate::render::diff::build_diff_viewport_lines(&mut app, 60, 3);
+    let hover_text = line_text(&hover_lines[0]);
+    let (old_button_text, _) = skip_display_prefix(&hover_text, left_width - 4);
+    assert!(
+        old_button_text.starts_with(" [+]"),
+        "old-side add button missing from {hover_text:?}"
+    );
+
+    assert!(app.handle_diff_click(old_button_column, 1));
+    let draft = app.annotation_draft.as_ref().expect("draft");
+    assert_eq!(draft.key, old_key);
+
+    for character in "old note".chars() {
+        app.handle_annotation_input_key(KeyEvent::new(
+            KeyCode::Char(character),
+            KeyModifiers::NONE,
+        ));
+    }
+    app.handle_annotation_input_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+
+    assert_eq!(
+        app.annotations.get(&old_key).map(String::as_str),
+        Some("old note")
+    );
+    assert!(!app.annotations.contains_key(&new_key));
+}
+
+#[test]
 fn annotation_save_preserves_body_whitespace_but_deletes_blank_drafts() {
     use crate::annotation::{AnnotationDraft, AnnotationKey};
 
