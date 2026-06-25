@@ -6866,22 +6866,39 @@ fn annotation_add_button_opens_input_under_hovered_line() {
     assert_eq!(app.annotations.get(&key).map(String::as_str), Some("note"));
 
     let lines = crate::render::diff::build_diff_viewport_lines(&mut app, 40, 6);
-    assert!(line_text(&lines[2]).contains("note"));
-    assert!(line_text(&lines[1]).ends_with("[x]"));
-    assert!(line_text(&lines[3]).ends_with("[↻]"));
+    let close_row = lines
+        .iter()
+        .position(|line| line_text(line).ends_with("[x]"))
+        .expect("saved annotation close row");
+    let body_row = lines
+        .iter()
+        .position(|line| line_text(line).contains("note"))
+        .expect("saved annotation body row");
+    let edit_row = lines
+        .iter()
+        .position(|line| line_text(line).ends_with("[↻]"))
+        .expect("saved annotation edit row");
+    assert!(close_row < body_row);
+    assert!(body_row < edit_row);
     assert_eq!(
-        lines[3].spans.last().and_then(|span| span.style.fg),
+        lines[edit_row].spans.last().and_then(|span| span.style.fg),
         Some(app.theme.search_match_bg)
     );
 
-    assert!(app.handle_diff_click(38, 4));
+    let diff_y = app.rendered_diff_area.expect("diff area").y;
+    assert!(app.handle_diff_click(38, diff_y.saturating_add(edit_row as u16)));
     assert!(app.annotation_draft.is_some());
     app.handle_annotation_input_key(KeyEvent::new(KeyCode::Char('!'), KeyModifiers::NONE));
     app.handle_annotation_input_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
     assert_eq!(app.annotations.get(&key).map(String::as_str), Some("note!"));
 
-    app.update_diff_mouse_hover(38, 2);
-    assert!(app.handle_diff_click(38, 2));
+    let lines = crate::render::diff::build_diff_viewport_lines(&mut app, 40, 6);
+    let close_row = lines
+        .iter()
+        .position(|line| line_text(line).ends_with("[x]"))
+        .expect("saved annotation close row");
+    app.update_diff_mouse_hover(38, diff_y.saturating_add(close_row as u16));
+    assert!(app.handle_diff_click(38, diff_y.saturating_add(close_row as u16)));
     assert!(!app.annotations.contains_key(&key));
 }
 
