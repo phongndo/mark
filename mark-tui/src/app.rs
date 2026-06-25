@@ -56,9 +56,9 @@ use crate::{
         },
         sidebar::max_file_sidebar_width,
         viewport_plan::{
-            annotation_saved_model_at_top_border, compose_block_bottom_viewport_row,
-            compose_block_top_viewport_row, model_row_for_viewport_row,
-            saved_block_bottom_viewport_row, visual_scroll_for_viewport_row,
+            annotation_saved_key_at_bottom_border, annotation_saved_key_at_top_border,
+            compose_block_bottom_viewport_row, compose_block_top_viewport_row,
+            model_row_for_viewport_row, visual_scroll_for_viewport_row,
         },
     },
     runtime,
@@ -3232,13 +3232,11 @@ impl DiffApp {
         if self.annotation_draft.is_some() {
             return false;
         }
-        let Some(model_row) = model_row_for_viewport_row(self, viewport_row) else {
+        let Some((model_row, key)) = annotation_saved_key_at_bottom_border(self, viewport_row)
+        else {
             return false;
         };
-        if saved_block_bottom_viewport_row(self, model_row) != Some(viewport_row) {
-            return false;
-        }
-        self.open_annotation_draft_for_model_row(model_row)
+        self.open_annotation_draft_for_key(key, model_row)
     }
 
     fn handle_annotation_close_click(&mut self, viewport_row: u16) -> bool {
@@ -3256,13 +3254,7 @@ impl DiffApp {
             return false;
         }
 
-        let Some(model_row) = annotation_saved_model_at_top_border(self, viewport_row) else {
-            return false;
-        };
-        let Some(ui_row) = self.model.row(model_row) else {
-            return false;
-        };
-        let Some(key) = AnnotationKey::from_ui_row(&self.changeset, ui_row) else {
+        let Some((_model_row, key)) = annotation_saved_key_at_top_border(self, viewport_row) else {
             return false;
         };
         if self.annotations.remove(&key).is_some() {
@@ -3278,6 +3270,9 @@ impl DiffApp {
         viewport_row: u16,
         column: u16,
     ) -> bool {
+        if self.filter_input.is_some() {
+            return false;
+        }
         if self.annotation_draft.is_some() {
             return false;
         }
@@ -3310,21 +3305,14 @@ impl DiffApp {
         self.open_annotation_draft_for_key(key, row_index)
     }
 
-    fn open_annotation_draft_for_model_row(&mut self, row_index: usize) -> bool {
-        let Some(row) = self.model.row(row_index) else {
-            return false;
-        };
-        let Some(key) = AnnotationKey::from_ui_row(&self.changeset, row) else {
-            return false;
-        };
-        self.open_annotation_draft_for_key(key, row_index)
-    }
-
     fn open_annotation_draft_for_key(
         &mut self,
         key: AnnotationKey,
         model_row_index: usize,
     ) -> bool {
+        if self.filter_input.is_some() {
+            return false;
+        }
         let existing = self.annotations.get(&key).cloned().unwrap_or_default();
         let cursor = existing.len();
         self.annotation_draft = Some(AnnotationDraft {
@@ -3353,7 +3341,7 @@ impl DiffApp {
         if compose_block_bottom_viewport_row(self, model_row).is_some() {
             return;
         }
-        if desired_scroll > self.scroll {
+        if desired_scroll != self.scroll {
             self.set_scroll_with_grep_sync(
                 desired_scroll,
                 false,
@@ -3379,8 +3367,10 @@ impl DiffApp {
 
     fn annotation_model_row(&self, key: &AnnotationKey) -> Option<usize> {
         self.model.rows.iter().enumerate().find_map(|(index, row)| {
-            let row_key = AnnotationKey::from_ui_row(&self.changeset, *row)?;
-            (row_key == *key).then_some(index)
+            AnnotationKey::candidates_from_ui_row(&self.changeset, *row)
+                .into_iter()
+                .any(|row_key| row_key == *key)
+                .then_some(index)
         })
     }
 
@@ -3546,6 +3536,7 @@ impl DiffApp {
             || self.diff_menu_open
             || self.commit_menu_open
             || self.branch_menu_open.is_some()
+            || self.filter_input.is_some()
             || self.annotation_draft.is_some()
     }
 
@@ -6575,6 +6566,7 @@ impl DiffApp {
 
     pub(crate) fn open_filter_input(&mut self, kind: DiffFilterKind) {
         self.filter_input = Some(kind);
+        self.clear_diff_mouse_hover();
         self.diff_menu_open = false;
         self.diff_menu_input.clear();
         self.diff_menu_input_cursor = 0;

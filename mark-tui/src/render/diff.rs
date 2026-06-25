@@ -99,7 +99,9 @@ pub(crate) fn build_diff_viewport_lines(
             && draft.is_none()
         {
             line = highlighted_mouse_diff_content_line(line, layout, width, theme);
-            line = append_annotation_add_button(line, width, theme);
+            if AnnotationKey::from_ui_row(&app.changeset, row).is_some() {
+                line = append_annotation_add_button(line, width, theme);
+            }
         }
         lines.push(line);
 
@@ -117,16 +119,17 @@ pub(crate) fn build_diff_viewport_lines(
             continue;
         }
 
-        if let Some(key) = AnnotationKey::from_ui_row(&app.changeset, row)
-            && let Some(text) = annotations.get(&key)
-            && draft.as_ref().is_none_or(|d| d.key != key)
-        {
-            let label = app.annotation_label(&key);
-            push_annotation_block(
-                &mut lines,
-                render_annotation_saved_block(text, width, theme, label.as_deref()),
-                visible_rows,
-            );
+        for key in AnnotationKey::candidates_from_ui_row(&app.changeset, row) {
+            if let Some(text) = annotations.get(&key)
+                && draft.as_ref().is_none_or(|d| d.key != key)
+            {
+                let label = app.annotation_label(&key);
+                push_annotation_block(
+                    &mut lines,
+                    render_annotation_saved_block(text, width, theme, label.as_deref()),
+                    visible_rows,
+                );
+            }
         }
     }
 
@@ -171,7 +174,9 @@ fn build_wrapped_viewport_lines(
                 && draft.is_none()
             {
                 line = highlighted_mouse_diff_content_line(line, layout, width, theme);
-                if visual_row == anchor_visual {
+                if visual_row == anchor_visual
+                    && AnnotationKey::from_ui_row(&app.changeset, row).is_some()
+                {
                     line = append_annotation_add_button(line, width, theme);
                 }
             }
@@ -192,16 +197,19 @@ fn build_wrapped_viewport_lines(
                         render_annotation_compose_block(draft, width, theme, label.as_deref()),
                         visible_rows,
                     );
-                } else if let Some(key) = AnnotationKey::from_ui_row(&app.changeset, row)
-                    && let Some(text) = annotations.get(&key)
-                    && draft.as_ref().is_none_or(|d| d.key != key)
-                {
-                    let label = app.annotation_label(&key);
-                    push_annotation_block(
-                        &mut lines,
-                        render_annotation_saved_block(text, width, theme, label.as_deref()),
-                        visible_rows,
-                    );
+                } else {
+                    for key in AnnotationKey::candidates_from_ui_row(&app.changeset, row) {
+                        if let Some(text) = annotations.get(&key)
+                            && draft.as_ref().is_none_or(|d| d.key != key)
+                        {
+                            let label = app.annotation_label(&key);
+                            push_annotation_block(
+                                &mut lines,
+                                render_annotation_saved_block(text, width, theme, label.as_deref()),
+                                visible_rows,
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -235,10 +243,7 @@ fn mouse_line_highlight_for_viewport(app: &DiffApp) -> Option<usize> {
 fn row_has_diff_code_content(row: UiRow) -> bool {
     matches!(
         row,
-        UiRow::UnifiedLine { .. }
-            | UiRow::MetaLine { .. }
-            | UiRow::SplitLine { .. }
-            | UiRow::ContextLine { .. }
+        UiRow::UnifiedLine { .. } | UiRow::SplitLine { .. } | UiRow::ContextLine { .. }
     )
 }
 

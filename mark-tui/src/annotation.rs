@@ -39,11 +39,22 @@ impl AnnotationSide {
 
 impl AnnotationKey {
     pub(crate) fn from_ui_row(changeset: &Changeset, row: UiRow) -> Option<Self> {
+        Self::candidates_from_ui_row(changeset, row)
+            .into_iter()
+            .next()
+    }
+
+    pub(crate) fn candidates_from_ui_row(changeset: &Changeset, row: UiRow) -> Vec<Self> {
         match row {
             UiRow::UnifiedLine { file, hunk, line } | UiRow::MetaLine { file, hunk, line } => {
-                let file = changeset.files.get(file)?;
-                let diff_line = file.hunks.get(hunk)?.lines.get(line)?;
-                Self::from_diff_line(file.display_path(), diff_line)
+                let Some(file) = changeset.files.get(file) else {
+                    return Vec::new();
+                };
+                let Some(diff_line) = file.hunks.get(hunk).and_then(|hunk| hunk.lines.get(line))
+                else {
+                    return Vec::new();
+                };
+                Self::candidates_from_diff_line(file.display_path(), diff_line)
             }
             UiRow::SplitLine {
                 file,
@@ -51,35 +62,49 @@ impl AnnotationKey {
                 left,
                 right,
             } => {
-                let file = changeset.files.get(file)?;
-                let lines = &file.hunks.get(hunk)?.lines;
+                let Some(file) = changeset.files.get(file) else {
+                    return Vec::new();
+                };
+                let Some(hunk) = file.hunks.get(hunk) else {
+                    return Vec::new();
+                };
+                let lines = &hunk.lines;
+                let mut candidates = Vec::with_capacity(2);
                 if let Some(index) = right {
-                    let line = lines.get(index)?.new_line?;
-                    return Some(Self::new(file.display_path(), AnnotationSide::New, line));
+                    if let Some(line) = lines.get(index).and_then(|line| line.new_line) {
+                        candidates.push(Self::new(file.display_path(), AnnotationSide::New, line));
+                    }
                 }
-                let index = left?;
-                let line = lines.get(index)?.old_line?;
-                Some(Self::new(file.display_path(), AnnotationSide::Old, line))
+                if let Some(index) = left
+                    && let Some(line) = lines.get(index).and_then(|line| line.old_line)
+                {
+                    candidates.push(Self::new(file.display_path(), AnnotationSide::Old, line));
+                }
+                candidates
             }
             UiRow::ContextLine { file, new_line, .. } => {
-                let file = changeset.files.get(file)?;
-                Some(Self::new(
+                let Some(file) = changeset.files.get(file) else {
+                    return Vec::new();
+                };
+                vec![Self::new(
                     file.display_path(),
                     AnnotationSide::New,
                     new_line,
-                ))
+                )]
             }
-            _ => None,
+            _ => Vec::new(),
         }
     }
 
-    fn from_diff_line(path: &str, line: &DiffLine) -> Option<Self> {
-        line.new_line
-            .map(|line| Self::new(path, AnnotationSide::New, line))
-            .or_else(|| {
-                line.old_line
-                    .map(|line| Self::new(path, AnnotationSide::Old, line))
-            })
+    fn candidates_from_diff_line(path: &str, line: &DiffLine) -> Vec<Self> {
+        let mut candidates = Vec::with_capacity(2);
+        if let Some(line) = line.new_line {
+            candidates.push(Self::new(path, AnnotationSide::New, line));
+        }
+        if let Some(line) = line.old_line {
+            candidates.push(Self::new(path, AnnotationSide::Old, line));
+        }
+        candidates
     }
 
     fn new(path: &str, side: AnnotationSide, line: usize) -> Self {
