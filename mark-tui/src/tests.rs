@@ -3032,7 +3032,7 @@ fn copy_marks_writes_structured_json_to_clipboard_sequence() {
         .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
         .expect("unified line");
     let row = app.model.row(code_row).expect("row");
-    let key = AnnotationKey::from_ui_row(row, code_row).expect("key");
+    let key = AnnotationKey::from_ui_row(&app.changeset, row).expect("key");
     app.annotations
         .insert(key, "Needs \"escaping\"\nand context".to_owned());
     let expected = concat!(
@@ -6435,7 +6435,7 @@ fn annotation_add_button_opens_input_under_hovered_line() {
 
     assert!(app.annotation_draft.is_none());
     let row = app.model.row(code_row).expect("row");
-    let key = AnnotationKey::from_ui_row(row, code_row).expect("key");
+    let key = AnnotationKey::from_ui_row(&app.changeset, row).expect("key");
     assert_eq!(app.annotations.get(&key).map(String::as_str), Some("note"));
 
     let lines = crate::render::diff::build_diff_viewport_lines(&mut app, 40, 6);
@@ -6456,6 +6456,112 @@ fn annotation_add_button_opens_input_under_hovered_line() {
     app.update_diff_mouse_hover(38, 2);
     assert!(app.handle_diff_click(38, 2));
     assert!(!app.annotations.contains_key(&key));
+}
+
+#[test]
+fn annotation_button_hit_tests_use_diff_relative_columns() {
+    let changeset = changeset_with_line_text("hello");
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_rendered_diff_area(Rect {
+        x: 10,
+        y: 1,
+        width: 40,
+        height: 5,
+    });
+    app.set_viewport_width(40);
+    app.set_viewport_rows(5);
+    let code_row = app
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
+        .expect("unified line");
+    app.scroll = code_row;
+    app.update_diff_mouse_hover(48, 1);
+
+    assert!(!app.handle_diff_click(38, 1));
+    assert!(app.annotation_draft.is_none());
+
+    assert!(app.handle_diff_click(48, 1));
+    assert!(app.annotation_draft.is_some());
+}
+
+#[test]
+fn annotation_draft_opened_on_last_row_scrolls_block_into_view() {
+    let lines: Vec<&str> = (0..10).map(|_| "line").collect();
+    let changeset = changeset_with_line_texts(&lines);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_rendered_diff_area(Rect {
+        x: 0,
+        y: 1,
+        width: 40,
+        height: 4,
+    });
+    app.set_viewport_width(40);
+    app.set_viewport_rows(4);
+    let code_row = app
+        .model
+        .rows
+        .iter()
+        .rposition(|row| matches!(row, UiRow::UnifiedLine { .. }))
+        .expect("unified line");
+    app.set_scroll(app.max_scroll());
+    let previous_scroll = app.scroll;
+    let viewport_row = code_row.saturating_sub(app.scroll) as u16;
+
+    app.update_diff_mouse_hover(38, viewport_row.saturating_add(1));
+    assert!(app.handle_diff_click(38, viewport_row.saturating_add(1)));
+
+    let draft_row = app
+        .annotation_draft
+        .as_ref()
+        .map(|draft| draft.model_row_index)
+        .expect("draft");
+    assert_eq!(draft_row, code_row);
+    assert!(app.scroll > previous_scroll);
+    assert!(
+        crate::render::viewport_plan::compose_block_bottom_viewport_row(&app, draft_row).is_some()
+    );
+
+    let rendered = crate::render::diff::build_diff_viewport_lines(&mut app, 40, 4);
+    assert!(
+        rendered
+            .iter()
+            .any(|line| line_text(line).contains(INPUT_CURSOR))
+    );
+    assert!(rendered.iter().any(|line| line_text(line).ends_with("[✓]")));
+}
+
+#[test]
+fn annotations_are_keyed_by_path_and_line_across_model_changes() {
+    use crate::annotation::AnnotationKey;
+
+    let changeset = changeset_with_line_text("hello");
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_width(40);
+    app.set_viewport_rows(6);
+    let code_row = app
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
+        .expect("unified line");
+    let row = app.model.row(code_row).expect("row");
+    let key = AnnotationKey::from_ui_row(&app.changeset, row).expect("key");
+    app.annotations.insert(key, "note".to_owned());
+
+    app.set_layout(DiffLayoutMode::Split);
+    let rendered = crate::render::diff::build_diff_viewport_lines(&mut app, 40, 6);
+    assert!(rendered.iter().any(|line| line_text(line).contains("note")));
+
+    let mut replacement = changeset_with_line_text("hello");
+    replacement.files[0].old_path = Some("other.rs".to_owned());
+    replacement.files[0].new_path = Some("other.rs".to_owned());
+    app.replace_loaded_diff(DiffOptions::default(), replacement);
+
+    let rendered = crate::render::diff::build_diff_viewport_lines(&mut app, 40, 6);
+    assert!(!rendered.iter().any(|line| line_text(line).contains("note")));
+    assert_eq!(app.marks_clipboard_json(), None);
 }
 
 #[test]
@@ -6512,7 +6618,7 @@ fn annotation_input_wraps_words_and_ctrl_s_saves() {
 
     assert!(app.annotation_draft.is_none());
     let row = app.model.row(code_row).expect("row");
-    let key = AnnotationKey::from_ui_row(row, code_row).expect("key");
+    let key = AnnotationKey::from_ui_row(&app.changeset, row).expect("key");
     assert_eq!(
         app.annotations.get(&key).map(String::as_str),
         Some("alpha beta gamma delta\nnext")
@@ -6586,7 +6692,7 @@ fn annotation_input_supports_native_cursor_shortcuts() {
     app.handle_annotation_input_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
 
     let row = app.model.row(code_row).expect("row");
-    let key = AnnotationKey::from_ui_row(row, code_row).expect("key");
+    let key = AnnotationKey::from_ui_row(&app.changeset, row).expect("key");
     assert_eq!(
         app.annotations.get(&key).map(String::as_str),
         Some(">hello world!")
@@ -6630,7 +6736,7 @@ fn annotation_save_and_cancel_use_configured_keybindings() {
     app.handle_annotation_input_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL));
 
     let row = app.model.row(code_row).expect("row");
-    let key = AnnotationKey::from_ui_row(row, code_row).expect("key");
+    let key = AnnotationKey::from_ui_row(&app.changeset, row).expect("key");
     assert_eq!(app.annotations.get(&key).map(String::as_str), Some("n"));
 
     assert!(app.handle_diff_click(38, 4));

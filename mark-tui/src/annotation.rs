@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use mark_diff::{Changeset, DiffLine};
+
 use crate::model::UiRow;
 
 pub(crate) const ANNOTATION_ADD_BUTTON: &str = " [+]";
@@ -15,58 +17,76 @@ pub(crate) const ANNOTATION_EDIT_BUTTON_WIDTH: usize = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct AnnotationKey {
-    pub(crate) file: usize,
-    pub(crate) model_row_index: usize,
-    pub(crate) kind: AnnotationLineKind,
+    pub(crate) path: String,
+    pub(crate) side: AnnotationSide,
+    pub(crate) line: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) enum AnnotationLineKind {
-    Unified {
-        hunk: usize,
-        line: usize,
-    },
-    Split {
-        hunk: usize,
-        left: Option<usize>,
-        right: Option<usize>,
-    },
-    Context {
-        old_line: usize,
-        new_line: usize,
-    },
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum AnnotationSide {
+    Old,
+    New,
+}
+
+impl AnnotationSide {
+    pub(crate) fn label(self) -> char {
+        match self {
+            Self::Old => 'L',
+            Self::New => 'R',
+        }
+    }
 }
 
 impl AnnotationKey {
-    pub(crate) fn from_ui_row(row: UiRow, row_index: usize) -> Option<Self> {
+    pub(crate) fn from_ui_row(changeset: &Changeset, row: UiRow) -> Option<Self> {
         match row {
             UiRow::UnifiedLine { file, hunk, line } | UiRow::MetaLine { file, hunk, line } => {
-                Some(Self {
-                    file,
-                    model_row_index: row_index,
-                    kind: AnnotationLineKind::Unified { hunk, line },
-                })
+                let file = changeset.files.get(file)?;
+                let diff_line = file.hunks.get(hunk)?.lines.get(line)?;
+                Self::from_diff_line(file.display_path(), diff_line)
             }
             UiRow::SplitLine {
                 file,
                 hunk,
                 left,
                 right,
-            } => Some(Self {
-                file,
-                model_row_index: row_index,
-                kind: AnnotationLineKind::Split { hunk, left, right },
-            }),
-            UiRow::ContextLine {
-                file,
-                old_line,
-                new_line,
-            } => Some(Self {
-                file,
-                model_row_index: row_index,
-                kind: AnnotationLineKind::Context { old_line, new_line },
-            }),
+            } => {
+                let file = changeset.files.get(file)?;
+                let lines = &file.hunks.get(hunk)?.lines;
+                if let Some(index) = right {
+                    let line = lines.get(index)?.new_line?;
+                    return Some(Self::new(file.display_path(), AnnotationSide::New, line));
+                }
+                let index = left?;
+                let line = lines.get(index)?.old_line?;
+                Some(Self::new(file.display_path(), AnnotationSide::Old, line))
+            }
+            UiRow::ContextLine { file, new_line, .. } => {
+                let file = changeset.files.get(file)?;
+                Some(Self::new(
+                    file.display_path(),
+                    AnnotationSide::New,
+                    new_line,
+                ))
+            }
             _ => None,
+        }
+    }
+
+    fn from_diff_line(path: &str, line: &DiffLine) -> Option<Self> {
+        line.new_line
+            .map(|line| Self::new(path, AnnotationSide::New, line))
+            .or_else(|| {
+                line.old_line
+                    .map(|line| Self::new(path, AnnotationSide::Old, line))
+            })
+    }
+
+    fn new(path: &str, side: AnnotationSide, line: usize) -> Self {
+        Self {
+            path: path.to_owned(),
+            side,
+            line,
         }
     }
 }
@@ -74,6 +94,7 @@ impl AnnotationKey {
 #[derive(Debug, Clone)]
 pub(crate) struct AnnotationDraft {
     pub(crate) key: AnnotationKey,
+    pub(crate) model_row_index: usize,
     pub(crate) input: String,
     pub(crate) cursor: usize,
 }

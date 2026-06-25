@@ -27,7 +27,7 @@ use tokio::sync::{mpsc::Receiver, oneshot};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::{
-    annotation::{AnnotationDraft, AnnotationKey, AnnotationLineKind, AnnotationStore},
+    annotation::{AnnotationDraft, AnnotationKey, AnnotationSide, AnnotationStore},
     controls::{
         BranchMenu, CrosstermTerminal, DiffChoice, DiffFilterKind, DiffLayoutMode, GitCommit,
         branch_base_from_options, branch_head_from_options, branch_match_score, commit_match_score,
@@ -45,8 +45,9 @@ use crate::{
     },
     render::{
         annotations::{
-            annotation_close_hit_at_column, annotation_edit_hit_at_column,
-            annotation_hit_at_column, annotation_submit_hit_at_column,
+            annotation_close_hit_at_column, annotation_compose_block_height,
+            annotation_edit_hit_at_column, annotation_hit_at_column, annotation_saved_block_height,
+            annotation_submit_hit_at_column,
         },
         draw,
         menus::{
@@ -167,7 +168,6 @@ pub(crate) struct Notice {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct MarkExport {
-    model_row_index: usize,
     path: String,
     old_line: Option<usize>,
     new_line: Option<usize>,
@@ -2415,7 +2415,13 @@ impl DiffApp {
         if marks.is_empty() {
             return None;
         }
-        marks.sort_by_key(|mark| mark.model_row_index);
+        marks.sort_by(|left, right| {
+            (&left.path, left.old_line, left.new_line).cmp(&(
+                &right.path,
+                right.old_line,
+                right.new_line,
+            ))
+        });
 
         let mut out = String::from("{\n  \"version\": 1,\n  \"marks\": [\n");
         for (index, mark) in marks.iter().enumerate() {
@@ -2449,11 +2455,14 @@ impl DiffApp {
     }
 
     fn export_mark(&self, key: &AnnotationKey, body: &str) -> Option<MarkExport> {
-        let file = self.changeset.files.get(key.file)?;
+        self.changeset
+            .files
+            .iter()
+            .any(|file| file.display_path() == key.path)
+            .then_some(())?;
         let (old_line, new_line) = self.annotation_key_lines(key)?;
         Some(MarkExport {
-            model_row_index: key.model_row_index,
-            path: file.display_path().to_owned(),
+            path: key.path.clone(),
             old_line,
             new_line,
             body: body.to_owned(),
@@ -2461,26 +2470,9 @@ impl DiffApp {
     }
 
     fn annotation_key_lines(&self, key: &AnnotationKey) -> Option<(Option<usize>, Option<usize>)> {
-        match key.kind {
-            AnnotationLineKind::Unified { hunk, line } => {
-                let line = self.changeset.files[key.file]
-                    .hunks
-                    .get(hunk)?
-                    .lines
-                    .get(line)?;
-                Some((line.old_line, line.new_line))
-            }
-            AnnotationLineKind::Split { hunk, left, right } => {
-                let lines = &self.changeset.files[key.file].hunks.get(hunk)?.lines;
-                let old_line =
-                    left.and_then(|index| lines.get(index).and_then(|line| line.old_line));
-                let new_line =
-                    right.and_then(|index| lines.get(index).and_then(|line| line.new_line));
-                Some((old_line, new_line))
-            }
-            AnnotationLineKind::Context { old_line, new_line } => {
-                Some((Some(old_line), Some(new_line)))
-            }
+        match key.side {
+            AnnotationSide::Old => Some((Some(key.line), None)),
+            AnnotationSide::New => Some((None, Some(key.line))),
         }
     }
 
@@ -3161,32 +3153,30 @@ impl DiffApp {
     }
 
     pub(crate) fn handle_diff_click(&mut self, column: u16, row: u16) -> bool {
-        if row == 0 || self.is_file_sidebar_position(column, row) {
+        let Some((diff_column, viewport_row)) = self.diff_viewport_position(column, row) else {
             return false;
-        }
-
-        let viewport_row = row.saturating_sub(1);
+        };
         let width = self.viewport_width;
-        if annotation_submit_hit_at_column(column, width)
+        if annotation_submit_hit_at_column(diff_column, width)
             && self.handle_annotation_submit_click(viewport_row)
         {
             return true;
         }
-        if annotation_edit_hit_at_column(column, width)
+        if annotation_edit_hit_at_column(diff_column, width)
             && self.handle_annotation_edit_click(viewport_row)
         {
             return true;
         }
-        if annotation_close_hit_at_column(column, width)
+        if annotation_close_hit_at_column(diff_column, width)
             && self.handle_annotation_close_click(viewport_row)
         {
             return true;
         }
-        if annotation_hit_at_column(column, width)
+        if annotation_hit_at_column(diff_column, width)
             && self
                 .mouse_hover
                 .is_some_and(|(_, hover_row)| hover_row == viewport_row)
-            && self.try_open_annotation_draft_at_viewport_row(viewport_row, column)
+            && self.try_open_annotation_draft_at_viewport_row(viewport_row, diff_column)
         {
             return true;
         }
@@ -3195,6 +3185,21 @@ impl DiffApp {
             return false;
         };
         self.handle_context_at_row(model_row)
+    }
+
+    fn diff_viewport_position(&self, column: u16, row: u16) -> Option<(u16, u16)> {
+        let area = self.rendered_diff_area?;
+        if area.width == 0
+            || area.height == 0
+            || column < area.x
+            || row < area.y
+            || column >= area.x.saturating_add(area.width)
+            || row >= area.y.saturating_add(area.height)
+        {
+            return None;
+        }
+
+        Some((column.saturating_sub(area.x), row.saturating_sub(area.y)))
     }
 
     pub(crate) fn annotation_anchor_visual_scroll(&self, model_row_index: usize) -> usize {
@@ -3208,42 +3213,14 @@ impl DiffApp {
     }
 
     pub(crate) fn annotation_label(&self, key: &AnnotationKey) -> Option<String> {
-        let file = self.changeset.files.get(key.file)?;
-        let path = file.display_path();
-        let (side, line) = match key.kind {
-            AnnotationLineKind::Unified { hunk, line } => {
-                let diff_line = self.changeset.files[key.file]
-                    .hunks
-                    .get(hunk)?
-                    .lines
-                    .get(line)?;
-                diff_line
-                    .new_line
-                    .map(|line| ('R', line))
-                    .or_else(|| diff_line.old_line.map(|line| ('L', line)))?
-            }
-            AnnotationLineKind::Split { hunk, left, right } => {
-                let lines = &self.changeset.files[key.file].hunks.get(hunk)?.lines;
-                if let Some(index) = right {
-                    let line = lines.get(index)?.new_line?;
-                    ('R', line)
-                } else {
-                    let index = left?;
-                    let line = lines.get(index)?.old_line?;
-                    ('L', line)
-                }
-            }
-            AnnotationLineKind::Context { new_line, .. } => ('R', new_line),
-        };
-        Some(format!("{path} {side}{line}"))
+        Some(format!("{} {}{}", key.path, key.side.label(), key.line))
     }
 
     fn handle_annotation_submit_click(&mut self, viewport_row: u16) -> bool {
         let Some(draft) = self.annotation_draft.as_ref() else {
             return false;
         };
-        if compose_block_bottom_viewport_row(self, draft.key.model_row_index) != Some(viewport_row)
-        {
+        if compose_block_bottom_viewport_row(self, draft.model_row_index) != Some(viewport_row) {
             return false;
         }
         let draft = self.annotation_draft.take().expect("draft");
@@ -3266,9 +3243,13 @@ impl DiffApp {
 
     fn handle_annotation_close_click(&mut self, viewport_row: u16) -> bool {
         if let Some(draft) = self.annotation_draft.as_ref() {
-            if compose_block_top_viewport_row(self, draft.key.model_row_index) == Some(viewport_row)
-            {
+            if compose_block_top_viewport_row(self, draft.model_row_index) == Some(viewport_row) {
                 self.annotation_draft = None;
+                self.set_scroll_with_grep_sync(
+                    self.scroll,
+                    false,
+                    HunkFocusScrollBehavior::Preserve,
+                );
                 self.dirty = true;
                 return true;
             }
@@ -3281,10 +3262,11 @@ impl DiffApp {
         let Some(ui_row) = self.model.row(model_row) else {
             return false;
         };
-        let Some(key) = AnnotationKey::from_ui_row(ui_row, model_row) else {
+        let Some(key) = AnnotationKey::from_ui_row(&self.changeset, ui_row) else {
             return false;
         };
         if self.annotations.remove(&key).is_some() {
+            self.set_scroll_with_grep_sync(self.scroll, false, HunkFocusScrollBehavior::Preserve);
             self.dirty = true;
             return true;
         }
@@ -3322,32 +3304,105 @@ impl DiffApp {
         if self.annotation_anchor_visual_scroll(row_index) != visual_row {
             return false;
         }
-        let Some(key) = AnnotationKey::from_ui_row(row, row_index) else {
+        let Some(key) = AnnotationKey::from_ui_row(&self.changeset, row) else {
             return false;
         };
-        self.open_annotation_draft_for_key(key)
+        self.open_annotation_draft_for_key(key, row_index)
     }
 
     fn open_annotation_draft_for_model_row(&mut self, row_index: usize) -> bool {
         let Some(row) = self.model.row(row_index) else {
             return false;
         };
-        let Some(key) = AnnotationKey::from_ui_row(row, row_index) else {
+        let Some(key) = AnnotationKey::from_ui_row(&self.changeset, row) else {
             return false;
         };
-        self.open_annotation_draft_for_key(key)
+        self.open_annotation_draft_for_key(key, row_index)
     }
 
-    fn open_annotation_draft_for_key(&mut self, key: AnnotationKey) -> bool {
+    fn open_annotation_draft_for_key(
+        &mut self,
+        key: AnnotationKey,
+        model_row_index: usize,
+    ) -> bool {
         let existing = self.annotations.get(&key).cloned().unwrap_or_default();
         let cursor = existing.len();
         self.annotation_draft = Some(AnnotationDraft {
             key,
+            model_row_index,
             input: existing,
             cursor,
         });
+        self.ensure_annotation_draft_visible();
         self.dirty = true;
         true
+    }
+
+    fn ensure_annotation_draft_visible(&mut self) {
+        let Some((model_row, desired_scroll)) = self.annotation_draft.as_ref().map(|draft| {
+            let anchor = self.annotation_anchor_visual_scroll(draft.model_row_index);
+            let height = annotation_compose_block_height(draft, self.viewport_width);
+            (
+                draft.model_row_index,
+                annotation_scroll_for_block(anchor, height, self.viewport_rows),
+            )
+        }) else {
+            return;
+        };
+
+        if compose_block_bottom_viewport_row(self, model_row).is_some() {
+            return;
+        }
+        if desired_scroll > self.scroll {
+            self.set_scroll_with_grep_sync(
+                desired_scroll,
+                false,
+                HunkFocusScrollBehavior::Preserve,
+            );
+        }
+
+        let max_scroll = self.max_scroll();
+        while compose_block_bottom_viewport_row(self, model_row).is_none()
+            && self.scroll < max_scroll
+        {
+            let previous_scroll = self.scroll;
+            self.set_scroll_with_grep_sync(
+                self.scroll.saturating_add(1),
+                false,
+                HunkFocusScrollBehavior::Preserve,
+            );
+            if self.scroll == previous_scroll {
+                break;
+            }
+        }
+    }
+
+    fn annotation_model_row(&self, key: &AnnotationKey) -> Option<usize> {
+        self.model.rows.iter().enumerate().find_map(|(index, row)| {
+            let row_key = AnnotationKey::from_ui_row(&self.changeset, *row)?;
+            (row_key == *key).then_some(index)
+        })
+    }
+
+    fn reanchor_annotation_draft(&mut self) {
+        let Some(key) = self
+            .annotation_draft
+            .as_ref()
+            .map(|draft| draft.key.clone())
+        else {
+            return;
+        };
+        let Some(model_row_index) = self.annotation_model_row(&key) else {
+            self.annotation_draft = None;
+            self.dirty = true;
+            return;
+        };
+        if let Some(draft) = self.annotation_draft.as_mut()
+            && draft.model_row_index != model_row_index
+        {
+            draft.model_row_index = model_row_index;
+            self.dirty = true;
+        }
     }
 
     pub(crate) fn handle_annotation_input_key(&mut self, key: KeyEvent) -> bool {
@@ -3356,6 +3411,7 @@ impl DiffApp {
         }
         if self.keymap.matches_single(GlobalAction::CancelMark, key) {
             self.annotation_draft = None;
+            self.set_scroll_with_grep_sync(self.scroll, false, HunkFocusScrollBehavior::Preserve);
             self.dirty = true;
             return true;
         }
@@ -3367,16 +3423,24 @@ impl DiffApp {
         let Some(draft) = self.annotation_draft.as_mut() else {
             return false;
         };
+        let mut keep_visible = false;
         match key.code {
             KeyCode::Enter => {
                 draft.input.insert(draft.cursor, '\n');
                 draft.cursor += 1;
                 self.dirty = true;
+                keep_visible = true;
             }
             _ => match handle_text_input_key(&mut draft.input, &mut draft.cursor, key) {
-                TextInputKeyResult::Edited | TextInputKeyResult::Moved => self.dirty = true,
+                TextInputKeyResult::Edited | TextInputKeyResult::Moved => {
+                    self.dirty = true;
+                    keep_visible = true;
+                }
                 TextInputKeyResult::Ignored | TextInputKeyResult::Handled => {}
             },
+        }
+        if keep_visible {
+            self.ensure_annotation_draft_visible();
         }
         true
     }
@@ -3388,6 +3452,7 @@ impl DiffApp {
         } else {
             self.annotations.insert(draft.key, text);
         }
+        self.set_scroll_with_grep_sync(self.scroll, false, HunkFocusScrollBehavior::Preserve);
         self.dirty = true;
     }
 
@@ -5778,6 +5843,7 @@ impl DiffApp {
                 .filter(|(file, hunk)| self.model.hunk_start_row(*file, *hunk).is_some()),
             HunkFocusModelBehavior::Clear => None,
         };
+        self.reanchor_annotation_draft();
     }
 
     pub(crate) fn set_scroll_centered_on(&mut self, row: usize) {
@@ -5879,7 +5945,32 @@ impl DiffApp {
         } else {
             self.model.len()
         };
-        max_scroll_for_viewport(row_count, self.viewport_rows)
+        self.max_scroll_with_annotations(row_count)
+    }
+
+    fn max_scroll_with_annotations(&self, row_count: usize) -> usize {
+        let mut max_scroll = max_scroll_for_viewport(row_count, self.viewport_rows);
+        for (key, text) in &self.annotations {
+            if let Some(model_row) = self.annotation_model_row(key) {
+                let anchor = self.annotation_anchor_visual_scroll(model_row);
+                let height = annotation_saved_block_height(text, self.viewport_width);
+                max_scroll = max_scroll.max(anchor).max(annotation_scroll_for_block(
+                    anchor,
+                    height,
+                    self.viewport_rows,
+                ));
+            }
+        }
+        if let Some(draft) = self.annotation_draft.as_ref() {
+            let anchor = self.annotation_anchor_visual_scroll(draft.model_row_index);
+            let height = annotation_compose_block_height(draft, self.viewport_width);
+            max_scroll = max_scroll.max(anchor).max(annotation_scroll_for_block(
+                anchor,
+                height,
+                self.viewport_rows,
+            ));
+        }
+        max_scroll
     }
 
     pub(crate) fn max_horizontal_scroll(&self) -> usize {
@@ -6239,6 +6330,7 @@ impl DiffApp {
             self.set_scroll(self.scroll);
         }
         self.clamp_file_sidebar_scroll(self.visible_file_sidebar_rows());
+        self.ensure_annotation_draft_visible();
     }
 
     pub(crate) fn set_viewport_width(&mut self, width: usize) {
@@ -6261,6 +6353,7 @@ impl DiffApp {
                 row_scroll.saturating_add(row_offset.min(row_height.saturating_sub(1))),
             );
         }
+        self.ensure_annotation_draft_visible();
     }
 
     pub(crate) fn scroll_file_sidebar_by(&mut self, delta: isize) {
@@ -6833,6 +6926,7 @@ impl DiffApp {
             self.sync_grep_match_selection_to_scroll();
         }
 
+        self.ensure_annotation_draft_visible();
         self.dirty = true;
     }
 
@@ -7210,6 +7304,7 @@ impl DiffApp {
             .unwrap_or_default();
         self.set_scroll(scroll);
         self.sync_grep_match_selection_to_scroll();
+        self.ensure_annotation_draft_visible();
         self.dirty = true;
     }
 
@@ -7378,6 +7473,7 @@ impl DiffApp {
                 DiffLayoutMode::Unified => unified_model,
             };
             self.invalidate_wrapped_visual_layout();
+            self.reanchor_annotation_draft();
             self.manual_hunk_focus = None;
             self.selected_file = selected_path
                 .and_then(|path| {
@@ -7402,6 +7498,7 @@ impl DiffApp {
             self.set_scroll_with_grep_sync(scroll, true, HunkFocusScrollBehavior::ClearOnScroll);
             self.set_horizontal_scroll(self.horizontal_scroll);
             self.ensure_file_sidebar_selection_visible(self.visible_file_sidebar_rows());
+            self.ensure_annotation_draft_visible();
             self.dirty = true;
         }
     }
@@ -7480,6 +7577,18 @@ impl DiffApp {
 
 pub(crate) fn max_scroll_for_viewport(row_count: usize, viewport_rows: usize) -> usize {
     row_count.saturating_sub(viewport_rows.max(1))
+}
+
+fn annotation_scroll_for_block(
+    anchor_visual_scroll: usize,
+    block_height: usize,
+    viewport_rows: usize,
+) -> usize {
+    anchor_visual_scroll
+        .saturating_add(1)
+        .saturating_add(block_height)
+        .saturating_sub(viewport_rows.max(1))
+        .min(anchor_visual_scroll)
 }
 
 pub(crate) fn viewport_center_offset(viewport_rows: usize) -> usize {

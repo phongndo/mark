@@ -52,7 +52,7 @@ fn plan_unwrapped_viewport_rows(app: &DiffApp, visible_rows: usize) -> Vec<Viewp
             },
         });
 
-        if let Some(draft) = draft.filter(|d| d.key.model_row_index == visual_row) {
+        if let Some(draft) = draft.filter(|d| d.model_row_index == visual_row) {
             push_compose_plan_slots(
                 &mut plans,
                 visual_row,
@@ -63,7 +63,7 @@ fn plan_unwrapped_viewport_rows(app: &DiffApp, visible_rows: usize) -> Vec<Viewp
             continue;
         }
 
-        if let Some(key) = AnnotationKey::from_ui_row(row, visual_row)
+        if let Some(key) = AnnotationKey::from_ui_row(&app.changeset, row)
             && annotations.contains_key(&key)
             && draft.is_none_or(|d| d.key != key)
         {
@@ -119,7 +119,7 @@ fn plan_wrapped_viewport_rows(app: &DiffApp, visible_rows: usize) -> Vec<Viewpor
             break;
         }
         if wraps_left == 0 {
-            if let Some(draft) = draft.filter(|d| d.key.model_row_index == row_index) {
+            if let Some(draft) = draft.filter(|d| d.model_row_index == row_index) {
                 push_compose_plan_slots(
                     &mut plans,
                     row_index,
@@ -127,7 +127,7 @@ fn plan_wrapped_viewport_rows(app: &DiffApp, visible_rows: usize) -> Vec<Viewpor
                     app.viewport_width,
                     visible_rows,
                 );
-            } else if let Some(key) = AnnotationKey::from_ui_row(row, row_index)
+            } else if let Some(key) = AnnotationKey::from_ui_row(&app.changeset, row)
                 && let Some(text) = annotations.get(&key)
                 && draft.is_none_or(|d| d.key != key)
             {

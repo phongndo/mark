@@ -105,7 +105,7 @@ pub(crate) fn build_diff_viewport_lines(
 
         if draft
             .as_ref()
-            .is_some_and(|d| d.key.model_row_index == visual_row)
+            .is_some_and(|d| d.model_row_index == visual_row)
         {
             let draft = draft.as_ref().expect("draft");
             let label = app.annotation_label(&draft.key);
@@ -117,7 +117,7 @@ pub(crate) fn build_diff_viewport_lines(
             continue;
         }
 
-        if let Some(key) = AnnotationKey::from_ui_row(row, visual_row)
+        if let Some(key) = AnnotationKey::from_ui_row(&app.changeset, row)
             && let Some(text) = annotations.get(&key)
             && draft.as_ref().is_none_or(|d| d.key != key)
         {
@@ -183,7 +183,7 @@ fn build_wrapped_viewport_lines(
             if is_last_wrap {
                 if draft
                     .as_ref()
-                    .is_some_and(|d| d.key.model_row_index == row_index)
+                    .is_some_and(|d| d.model_row_index == row_index)
                 {
                     let draft = draft.as_ref().expect("draft");
                     let label = app.annotation_label(&draft.key);
@@ -192,7 +192,7 @@ fn build_wrapped_viewport_lines(
                         render_annotation_compose_block(draft, width, theme, label.as_deref()),
                         visible_rows,
                     );
-                } else if let Some(key) = AnnotationKey::from_ui_row(row, row_index)
+                } else if let Some(key) = AnnotationKey::from_ui_row(&app.changeset, row)
                     && let Some(text) = annotations.get(&key)
                     && draft.as_ref().is_none_or(|d| d.key != key)
                 {
