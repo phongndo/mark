@@ -30,14 +30,26 @@ pub(crate) struct ViewportSlot {
 }
 
 pub(crate) fn plan_diff_viewport_rows(app: &DiffApp, visible_rows: usize) -> Vec<ViewportSlot> {
+    plan_diff_viewport_rows_at_scroll(app, app.scroll, visible_rows)
+}
+
+pub(crate) fn plan_diff_viewport_rows_at_scroll(
+    app: &DiffApp,
+    scroll: usize,
+    visible_rows: usize,
+) -> Vec<ViewportSlot> {
     if app.line_wrapping {
-        plan_wrapped_viewport_rows(app, visible_rows)
+        plan_wrapped_viewport_rows(app, scroll, visible_rows)
     } else {
-        plan_unwrapped_viewport_rows(app, visible_rows)
+        plan_unwrapped_viewport_rows(app, scroll, visible_rows)
     }
 }
 
-fn plan_unwrapped_viewport_rows(app: &DiffApp, visible_rows: usize) -> Vec<ViewportSlot> {
+fn plan_unwrapped_viewport_rows(
+    app: &DiffApp,
+    scroll: usize,
+    visible_rows: usize,
+) -> Vec<ViewportSlot> {
     let draft = app.annotation_draft.as_ref();
     let annotations = &app.annotations;
     let mut plans = Vec::with_capacity(visible_rows);
@@ -46,7 +58,7 @@ fn plan_unwrapped_viewport_rows(app: &DiffApp, visible_rows: usize) -> Vec<Viewp
         if plans.len() >= visible_rows {
             break;
         }
-        let visual_row = app.scroll.saturating_add(offset);
+        let visual_row = scroll.saturating_add(offset);
         let Some(row) = app.model.row(visual_row) else {
             break;
         };
@@ -87,14 +99,18 @@ fn plan_unwrapped_viewport_rows(app: &DiffApp, visible_rows: usize) -> Vec<Viewp
     plans
 }
 
-fn plan_wrapped_viewport_rows(app: &DiffApp, visible_rows: usize) -> Vec<ViewportSlot> {
+fn plan_wrapped_viewport_rows(
+    app: &DiffApp,
+    scroll: usize,
+    visible_rows: usize,
+) -> Vec<ViewportSlot> {
     let draft = app.annotation_draft.as_ref();
     let annotations = &app.annotations;
     let mut plans = Vec::with_capacity(visible_rows);
-    let Some((mut row_index, mut row_offset)) = app.model_row_at_scroll(app.scroll) else {
+    let Some((mut row_index, mut row_offset)) = app.model_row_at_scroll(scroll) else {
         return plans;
     };
-    let mut visual_row = app.scroll;
+    let mut visual_row = scroll;
 
     while plans.len() < visible_rows {
         let Some(row) = app.model.row(row_index) else {

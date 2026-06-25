@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use mark_diff::{Changeset, DiffLine};
+use mark_diff::{Changeset, DiffFile, DiffLine};
 
 use crate::model::UiRow;
 
@@ -54,7 +54,7 @@ impl AnnotationKey {
                 else {
                     return Vec::new();
                 };
-                Self::candidates_from_diff_line(file.display_path(), diff_line)
+                Self::candidates_from_diff_line(file, diff_line)
             }
             UiRow::SplitLine {
                 file,
@@ -72,13 +72,13 @@ impl AnnotationKey {
                 let mut candidates = Vec::with_capacity(2);
                 if let Some(index) = right {
                     if let Some(line) = lines.get(index).and_then(|line| line.new_line) {
-                        candidates.push(Self::new(file.display_path(), AnnotationSide::New, line));
+                        Self::push_candidate(&mut candidates, file, AnnotationSide::New, line);
                     }
                 }
                 if let Some(index) = left
                     && let Some(line) = lines.get(index).and_then(|line| line.old_line)
                 {
-                    candidates.push(Self::new(file.display_path(), AnnotationSide::Old, line));
+                    Self::push_candidate(&mut candidates, file, AnnotationSide::Old, line);
                 }
                 candidates
             }
@@ -86,25 +86,41 @@ impl AnnotationKey {
                 let Some(file) = changeset.files.get(file) else {
                     return Vec::new();
                 };
-                vec![Self::new(
-                    file.display_path(),
-                    AnnotationSide::New,
-                    new_line,
-                )]
+                Self::path_for_side(file, AnnotationSide::New)
+                    .map(|path| vec![Self::new(path, AnnotationSide::New, new_line)])
+                    .unwrap_or_default()
             }
             _ => Vec::new(),
         }
     }
 
-    fn candidates_from_diff_line(path: &str, line: &DiffLine) -> Vec<Self> {
+    fn candidates_from_diff_line(file: &DiffFile, line: &DiffLine) -> Vec<Self> {
         let mut candidates = Vec::with_capacity(2);
         if let Some(line) = line.new_line {
-            candidates.push(Self::new(path, AnnotationSide::New, line));
+            Self::push_candidate(&mut candidates, file, AnnotationSide::New, line);
         }
         if let Some(line) = line.old_line {
-            candidates.push(Self::new(path, AnnotationSide::Old, line));
+            Self::push_candidate(&mut candidates, file, AnnotationSide::Old, line);
         }
         candidates
+    }
+
+    fn push_candidate(
+        candidates: &mut Vec<Self>,
+        file: &DiffFile,
+        side: AnnotationSide,
+        line: usize,
+    ) {
+        if let Some(path) = Self::path_for_side(file, side) {
+            candidates.push(Self::new(path, side, line));
+        }
+    }
+
+    pub(crate) fn path_for_side(file: &DiffFile, side: AnnotationSide) -> Option<&str> {
+        match side {
+            AnnotationSide::Old => file.old_path.as_deref().or(file.new_path.as_deref()),
+            AnnotationSide::New => file.new_path.as_deref().or(file.old_path.as_deref()),
+        }
     }
 
     fn new(path: &str, side: AnnotationSide, line: usize) -> Self {

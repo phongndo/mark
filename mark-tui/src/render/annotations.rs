@@ -206,49 +206,48 @@ fn wrap_annotation_text(text: &str, width: usize) -> Vec<String> {
 }
 
 fn wrap_annotation_paragraph(paragraph: &str, width: usize, lines: &mut Vec<String>) {
-    let mut line = String::new();
-    let mut line_width = 0usize;
+    if paragraph.is_empty() {
+        lines.push(String::new());
+        return;
+    }
 
-    for word in paragraph.split_whitespace() {
-        let mut rest = word;
-        while !rest.is_empty() {
-            let rest_width = rest.width();
-            if line.is_empty() {
-                if rest_width <= width {
-                    line.push_str(rest);
-                    line_width = rest_width;
-                    break;
-                }
+    let mut rest = paragraph;
+    while !rest.is_empty() {
+        let (segment, _, complete) = fit_with_width(rest, width);
+        if complete {
+            lines.push(segment);
+            break;
+        }
 
-                let (segment, _, complete) = fit_with_width(rest, width);
-                if segment.is_empty() {
-                    break;
-                }
-                let segment_len = segment.len();
-                lines.push(segment);
-                rest = &rest[segment_len..];
-                if complete {
-                    break;
-                }
-            } else if line_width.saturating_add(1).saturating_add(rest_width) <= width {
-                line.push(' ');
-                line.push_str(rest);
-                line_width = line_width.saturating_add(1).saturating_add(rest_width);
+        let break_len = annotation_wrap_boundary(rest, segment.len()).unwrap_or(segment.len());
+        if break_len == 0 {
+            let Some(character) = rest.chars().next() else {
                 break;
-            } else {
-                lines.push(std::mem::take(&mut line));
-                line_width = 0;
-            }
+            };
+            let character_len = character.len_utf8();
+            lines.push(rest[..character_len].to_owned());
+            rest = &rest[character_len..];
+            continue;
         }
-    }
 
-    if line.is_empty() {
-        if paragraph.trim().is_empty() {
-            lines.push(String::new());
-        }
-    } else {
-        lines.push(line);
+        lines.push(rest[..break_len].to_owned());
+        rest = &rest[break_len..];
     }
+}
+
+fn annotation_wrap_boundary(text: &str, fit_len: usize) -> Option<usize> {
+    let mut seen_content = false;
+    let mut boundary = None;
+    for (index, character) in text[..fit_len].char_indices() {
+        if character.is_whitespace() {
+            if seen_content {
+                boundary = Some(index + character.len_utf8());
+            }
+        } else {
+            seen_content = true;
+        }
+    }
+    boundary
 }
 
 pub(crate) fn render_annotation_saved_block(

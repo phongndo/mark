@@ -59,8 +59,8 @@ use crate::{
         viewport_plan::{
             ViewportSlotKind, annotation_saved_key_at_bottom_border,
             annotation_saved_key_at_top_border, compose_block_bottom_viewport_row,
-            compose_block_top_viewport_row, model_row_for_viewport_row, plan_diff_viewport_rows,
-            visual_scroll_for_viewport_row,
+            compose_block_top_viewport_row, model_row_for_viewport_row,
+            plan_diff_viewport_rows_at_scroll, visual_scroll_for_viewport_row,
         },
     },
     runtime,
@@ -2473,7 +2473,7 @@ impl DiffApp {
         self.changeset
             .files
             .iter()
-            .any(|file| file.display_path() == key.path)
+            .any(|file| AnnotationKey::path_for_side(file, key.side) == Some(key.path.as_str()))
             .then_some(())?;
         let (old_line, new_line) = self.annotation_key_lines(key)?;
         Some(MarkExport {
@@ -5873,7 +5873,7 @@ impl DiffApp {
     }
 
     pub(crate) fn set_scroll_focused_on_hunk(&mut self, file: usize, hunk: usize) {
-        let Some((range, hunk_start)) = hunk_focus_row_range(&self.model, file, hunk) else {
+        let Some((range, hunk_start_row)) = hunk_focus_row_range(&self.model, file, hunk) else {
             return;
         };
 
@@ -5881,7 +5881,7 @@ impl DiffApp {
         let focus_end = self
             .scroll_for_model_row(range.end)
             .max(focus_start.saturating_add(1));
-        let hunk_start = self.scroll_for_model_row(hunk_start);
+        let hunk_start = self.scroll_for_model_row(hunk_start_row);
         let focus_rows = focus_end.saturating_sub(focus_start).max(1);
         let scroll = if focus_rows > self.viewport_rows {
             // Oversized focus ranges cannot be fully centered. Keep the first
@@ -5896,11 +5896,45 @@ impl DiffApp {
             let focus_center = focus_start.saturating_add(focus_rows.saturating_sub(1) / 2);
             focus_center.saturating_sub(viewport_center_offset(self.viewport_rows))
         };
+        let scroll = self.scroll_with_model_row_rendered(scroll, hunk_start_row);
         self.set_scroll_with_grep_sync(scroll, false, HunkFocusScrollBehavior::Preserve);
     }
 
+    fn scroll_with_model_row_rendered(&self, preferred_scroll: usize, model_row: usize) -> usize {
+        let max_scroll = self.max_scroll();
+        let preferred_scroll = preferred_scroll.min(max_scroll);
+        if self.model_row_rendered_at_scroll(preferred_scroll, self.viewport_rows, model_row) {
+            return preferred_scroll;
+        }
+
+        let target_scroll = self.scroll_for_model_row(model_row).min(max_scroll);
+        if preferred_scroll <= target_scroll {
+            for scroll in preferred_scroll.saturating_add(1)..=target_scroll {
+                if self.model_row_rendered_at_scroll(scroll, self.viewport_rows, model_row) {
+                    return scroll;
+                }
+            }
+        } else {
+            for scroll in (target_scroll..preferred_scroll).rev() {
+                if self.model_row_rendered_at_scroll(scroll, self.viewport_rows, model_row) {
+                    return scroll;
+                }
+            }
+        }
+
+        target_scroll
+    }
+
     fn rendered_diff_rows_for_viewport(&self, visible_rows: usize) -> Vec<RenderedDiffRow> {
-        plan_diff_viewport_rows(self, visible_rows)
+        self.rendered_diff_rows_for_viewport_at_scroll(self.scroll, visible_rows)
+    }
+
+    fn rendered_diff_rows_for_viewport_at_scroll(
+        &self,
+        scroll: usize,
+        visible_rows: usize,
+    ) -> Vec<RenderedDiffRow> {
+        plan_diff_viewport_rows_at_scroll(self, scroll, visible_rows)
             .into_iter()
             .enumerate()
             .filter_map(|(viewport_row, slot)| match slot.kind {
@@ -5912,6 +5946,17 @@ impl DiffApp {
                 | ViewportSlotKind::AnnotationSaved { .. } => None,
             })
             .collect()
+    }
+
+    fn model_row_rendered_at_scroll(
+        &self,
+        scroll: usize,
+        visible_rows: usize,
+        model_row: usize,
+    ) -> bool {
+        self.rendered_diff_rows_for_viewport_at_scroll(scroll, visible_rows)
+            .iter()
+            .any(|rendered_row| rendered_row.model_row == model_row)
     }
 
     fn rendered_viewport_focus_row(&self, visible_rows: usize) -> usize {
@@ -7258,12 +7303,8 @@ impl DiffApp {
 
         self.set_scroll_focused_on_hunk(file, hunk);
 
-        let Some(visible_range) = self.visible_model_range_for_viewport(self.viewport_rows) else {
-            return;
-        };
         if let Some(row) = self.model.hunk_start_row(file, hunk)
-            && row >= visible_range.start
-            && row < visible_range.end
+            && self.model_row_rendered_at_scroll(self.scroll, self.viewport_rows, row)
         {
             let previous_file = self.selected_file;
             self.manual_hunk_focus = Some((file, hunk));

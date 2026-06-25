@@ -199,6 +199,71 @@ fn hunk_focus_uses_rendered_rows_when_annotations_hide_model_rows() {
 }
 
 #[test]
+fn hunk_navigation_scrolls_past_annotation_blocks_to_show_target_hunk() {
+    use crate::annotation::AnnotationKey;
+    use crate::render::viewport_plan::{ViewportSlotKind, plan_diff_viewport_rows};
+
+    let changeset = changeset_with_hunks_at(PathBuf::from("/repo"), &[10, 20, 30]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_width(40);
+    app.set_viewport_rows(5);
+
+    let annotated_row = app
+        .model
+        .rows
+        .iter()
+        .position(|row| {
+            matches!(
+                row,
+                UiRow::UnifiedLine {
+                    file: 0,
+                    hunk: 0,
+                    ..
+                }
+            )
+        })
+        .expect("first hunk should have a rendered line");
+    let key = AnnotationKey::from_ui_row(
+        &app.changeset,
+        app.model.row(annotated_row).expect("annotated row"),
+    )
+    .expect("annotation key");
+    app.annotations.insert(key, "one\ntwo\nthree".to_owned());
+    app.set_scroll(annotated_row.saturating_sub(1));
+
+    assert_eq!(
+        app.focused_hunk_for_viewport(app.viewport_rows),
+        Some((0, 0))
+    );
+
+    app.next_hunk();
+
+    let target_hunk_row = app
+        .model
+        .hunk_start_row(0, 1)
+        .expect("target hunk should have a header row");
+    let rendered_rows: Vec<_> = plan_diff_viewport_rows(&app, app.viewport_rows)
+        .into_iter()
+        .filter_map(|slot| match slot.kind {
+            ViewportSlotKind::DiffVisual { model_row, .. } => Some(model_row),
+            _ => None,
+        })
+        .collect();
+    assert!(rendered_rows.contains(&target_hunk_row));
+    assert_eq!(app.manual_hunk_focus, Some((0, 1)));
+    assert_eq!(
+        app.focused_hunk_for_viewport(app.viewport_rows),
+        Some((0, 1))
+    );
+
+    app.next_hunk();
+    assert_eq!(
+        app.focused_hunk_for_viewport(app.viewport_rows),
+        Some((0, 2))
+    );
+}
+
+#[test]
 fn max_scroll_reaches_rows_hidden_by_saved_annotation() {
     use crate::annotation::AnnotationKey;
     use crate::render::viewport_plan::{ViewportSlotKind, plan_diff_viewport_rows};
@@ -6925,6 +6990,70 @@ fn old_side_annotation_renders_and_edits_on_paired_split_row() {
 }
 
 #[test]
+fn renamed_file_annotations_use_side_specific_paths() {
+    use crate::annotation::{AnnotationKey, AnnotationSide};
+
+    let mut changeset = changeset_with_replacement_pair();
+    changeset.files[0].old_path = Some("old.rs".to_owned());
+    changeset.files[0].new_path = Some("new.rs".to_owned());
+    changeset.files[0].status = FileStatus::Renamed;
+
+    let app = DiffApp::new(
+        DiffOptions::default(),
+        changeset.clone(),
+        DiffLayoutMode::Unified,
+    );
+    let deletion_row = app
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { line: 0, .. }))
+        .expect("deletion line");
+    let old_key = AnnotationKey::from_ui_row(
+        &app.changeset,
+        app.model.row(deletion_row).expect("deletion row"),
+    )
+    .expect("old-side key");
+    assert_eq!(old_key.path, "old.rs");
+    assert_eq!(old_key.side, AnnotationSide::Old);
+
+    let addition_row = app
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { line: 1, .. }))
+        .expect("addition line");
+    let new_key = AnnotationKey::from_ui_row(
+        &app.changeset,
+        app.model.row(addition_row).expect("addition row"),
+    )
+    .expect("new-side key");
+    assert_eq!(new_key.path, "new.rs");
+    assert_eq!(new_key.side, AnnotationSide::New);
+
+    let split_app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Split);
+    let split_row = split_app
+        .model
+        .rows
+        .iter()
+        .find(|row| matches!(row, UiRow::SplitLine { .. }))
+        .copied()
+        .expect("split row");
+    let split_keys = AnnotationKey::candidates_from_ui_row(&split_app.changeset, split_row);
+    assert!(split_keys.contains(&old_key));
+    assert!(split_keys.contains(&new_key));
+
+    let mut export_app = split_app;
+    export_app
+        .annotations
+        .insert(old_key, "old note".to_owned());
+    let json = export_app.marks_clipboard_json().expect("marks JSON");
+    assert!(json.contains("\"path\": \"old.rs\""));
+    assert!(json.contains("\"old_line\": 1"));
+    assert!(!json.contains("\"path\": \"new.rs\""));
+}
+
+#[test]
 fn meta_rows_do_not_render_annotation_add_button() {
     let mut changeset = changeset_with_line_text("placeholder");
     let line = &mut changeset.files[0].hunks[0].lines[0];
@@ -7047,6 +7176,39 @@ fn annotation_input_wraps_words_and_ctrl_s_saves() {
         app.annotations.get(&key).map(String::as_str),
         Some("alpha beta gamma delta\nnext")
     );
+}
+
+#[test]
+fn annotation_rendering_preserves_whitespace_while_wrapping() {
+    use crate::annotation::AnnotationKey;
+
+    let changeset = changeset_with_line_text("hello");
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_width(12);
+    app.set_viewport_rows(8);
+    let code_row = app
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
+        .expect("unified line");
+    let key = AnnotationKey::from_ui_row(
+        &app.changeset,
+        app.model.row(code_row).expect("annotated row"),
+    )
+    .expect("annotation key");
+    app.annotations
+        .insert(key, "  indented  code\na\t\tb".to_owned());
+    app.scroll = code_row;
+
+    let rendered: Vec<String> = crate::render::diff::build_diff_viewport_lines(&mut app, 12, 8)
+        .iter()
+        .map(line_text)
+        .collect();
+
+    assert!(rendered.iter().any(|line| line.starts_with("  indented  ")));
+    assert!(rendered.iter().any(|line| line.starts_with("code")));
+    assert!(rendered.iter().any(|line| line.contains("a\t\tb")));
 }
 
 #[test]
