@@ -239,6 +239,9 @@ fn push_annotation_block(
 }
 
 fn mouse_highlight_for_viewport(app: &DiffApp) -> Option<(u16, usize)> {
+    if app.diff_modal_blocks_mouse_hover() {
+        return None;
+    }
     let (column, _) = app.mouse_hover?;
     app.diff_mouse_highlight_visual_row()
         .map(|visual_row| (column, visual_row))

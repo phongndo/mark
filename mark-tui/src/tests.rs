@@ -7077,6 +7077,77 @@ fn filter_input_blocks_annotation_hover_drafts() {
 }
 
 #[test]
+fn diff_modals_suppress_stale_mouse_hover_highlight() {
+    type ModalOpener = (&'static str, fn(&mut DiffApp));
+    let modal_openers: [ModalOpener; 6] = [
+        ("help menu", |app| app.toggle_help_menu()),
+        ("options menu", |app| app.open_options_menu()),
+        ("diff menu", |app| app.open_diff_menu()),
+        ("branch menu", |app| {
+            app.comparison_branches = vec!["main".to_owned(), "topic".to_owned()];
+            app.toggle_branch_menu(BranchMenu::Head);
+        }),
+        ("commit menu", |app| {
+            app.comparison_commits = vec![GitCommit {
+                sha: "abcdef0".to_owned(),
+                subject: "commit".to_owned(),
+            }];
+            app.toggle_commit_menu();
+        }),
+        ("color scheme picker", |app| {
+            app.open_options_menu();
+            app.open_color_scheme_picker();
+        }),
+    ];
+
+    for (label, open_modal) in modal_openers {
+        let changeset = changeset_with_line_text("hello");
+        let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+        app.set_rendered_diff_area(Rect {
+            x: 0,
+            y: 1,
+            width: 40,
+            height: 5,
+        });
+        app.set_viewport_width(40);
+        app.set_viewport_rows(5);
+        let code_row = app
+            .model
+            .rows
+            .iter()
+            .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
+            .expect("unified line");
+        app.scroll = code_row;
+        app.update_diff_mouse_hover(38, 1);
+
+        let hovered_lines = crate::render::diff::build_diff_viewport_lines(&mut app, 40, 5);
+        assert!(
+            line_text(&hovered_lines[0]).contains("[+]"),
+            "{label} baseline should show hover add button"
+        );
+
+        open_modal(&mut app);
+        assert!(
+            app.diff_modal_blocks_mouse_hover(),
+            "{label} should block diff mouse hover"
+        );
+
+        let modal_lines = crate::render::diff::build_diff_viewport_lines(&mut app, 40, 5);
+        assert!(
+            !line_text(&modal_lines[0]).contains("[+]"),
+            "{label} should hide stale hover add button"
+        );
+        assert!(
+            !modal_lines[0]
+                .spans
+                .iter()
+                .any(|span| span.style.bg == Some(app.theme.cursor_line_bg)),
+            "{label} should hide stale hover highlight"
+        );
+    }
+}
+
+#[test]
 fn old_side_annotation_renders_and_edits_on_paired_split_row() {
     use crate::annotation::{AnnotationKey, AnnotationSide};
 
