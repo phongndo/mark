@@ -141,6 +141,64 @@ fn hunk_focus_uses_sliding_viewport_anchor() {
 }
 
 #[test]
+fn hunk_focus_uses_rendered_rows_when_annotations_hide_model_rows() {
+    use crate::annotation::AnnotationKey;
+    use crate::render::viewport_plan::{ViewportSlotKind, plan_diff_viewport_rows};
+
+    let repo = PathBuf::from("/repo");
+    let changeset = changeset_with_hunks_at(repo.clone(), &[10, 20, 30]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_width(40);
+    app.set_viewport_rows(5);
+
+    let annotated_row = app
+        .model
+        .rows
+        .iter()
+        .position(|row| {
+            matches!(
+                row,
+                UiRow::UnifiedLine {
+                    file: 0,
+                    hunk: 0,
+                    ..
+                }
+            )
+        })
+        .expect("first hunk should have a rendered line");
+    let key = AnnotationKey::from_ui_row(
+        &app.changeset,
+        app.model.row(annotated_row).expect("annotated row"),
+    )
+    .expect("annotation key");
+    app.annotations.insert(key, "one\ntwo\nthree".to_owned());
+    app.set_scroll(annotated_row.saturating_sub(1));
+
+    let rendered_hunks: Vec<_> = plan_diff_viewport_rows(&app, app.viewport_rows)
+        .into_iter()
+        .filter_map(|slot| match slot.kind {
+            ViewportSlotKind::DiffVisual { model_row, .. } => {
+                app.model.row(model_row).and_then(|row| row.hunk_key())
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(rendered_hunks.contains(&(0, 0)));
+    assert!(!rendered_hunks.contains(&(0, 1)));
+    assert_eq!(
+        app.focused_hunk_for_viewport(app.viewport_rows),
+        Some((0, 0))
+    );
+    assert_eq!(
+        app.focused_hunk_editor_target(),
+        Some(EditorTarget {
+            path: repo.join("file.rs"),
+            line: 10,
+        })
+    );
+}
+
+#[test]
 fn hunk_focus_moves_between_hunks_when_diff_fits_viewport() {
     let changeset = changeset_with_hunks_at(PathBuf::from("/repo"), &[1, 2, 3]);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);

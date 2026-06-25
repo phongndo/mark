@@ -1,17 +1,17 @@
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet, VecDeque},
-    env, fs,
-    hash::{Hash, Hasher},
+    fs,
     io::{self, Write},
     ops::Range,
     path::{Path, PathBuf},
+    process,
     sync::Arc,
     time::{Duration, Instant, SystemTime},
 };
 
 #[cfg(unix)]
-use std::os::unix::fs::MetadataExt;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 
 use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
@@ -23,6 +23,7 @@ use mark_syntax::{
     SyntaxSettings, SyntaxThemeConfig, SyntaxThemeSource,
 };
 use ratatui::layout::Rect;
+use tempfile::TempDir;
 use tokio::sync::{mpsc::Receiver, oneshot};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -56,9 +57,10 @@ use crate::{
         },
         sidebar::max_file_sidebar_width,
         viewport_plan::{
-            annotation_saved_key_at_bottom_border, annotation_saved_key_at_top_border,
-            compose_block_bottom_viewport_row, compose_block_top_viewport_row,
-            model_row_for_viewport_row, visual_scroll_for_viewport_row,
+            ViewportSlotKind, annotation_saved_key_at_bottom_border,
+            annotation_saved_key_at_top_border, compose_block_bottom_viewport_row,
+            compose_block_top_viewport_row, model_row_for_viewport_row, plan_diff_viewport_rows,
+            visual_scroll_for_viewport_row,
         },
     },
     runtime,
@@ -1097,6 +1099,18 @@ pub(crate) enum SyntaxStartupMode {
 enum HunkFocusSearch {
     FirstVisible,
     NearestTo(usize),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RenderedDiffRow {
+    viewport_row: usize,
+    model_row: usize,
+}
+
+#[derive(Debug)]
+struct AnnotationScratchFile {
+    _dir: TempDir,
+    path: PathBuf,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -3455,24 +3469,19 @@ impl DiffApp {
             self.set_notice("set $VISUAL, $GIT_EDITOR, or $EDITOR to edit annotation");
             return;
         };
-        let path = match annotation_scratch_path(&draft.key) {
-            Ok(path) => path,
+        let scratch = match create_annotation_scratch_file(&draft.input) {
+            Ok(scratch) => scratch,
             Err(error) => {
                 self.annotation_draft = Some(draft);
                 self.set_notice(format!("annotation editor failed: {error}"));
                 return;
             }
         };
-        if let Err(error) = fs::write(&path, &draft.input) {
-            self.annotation_draft = Some(draft);
-            self.set_notice(format!("annotation editor failed: {error}"));
-            return;
-        }
         self.terminal_clear_requested = true;
-        let status_result = open_text_in_editor(&editor, &path);
+        let status_result = open_text_in_editor(&editor, &scratch.path);
         self.post_editor_quit_key_ignore_until = Some(Instant::now() + POST_EDITOR_QUIT_KEY_IGNORE);
         match status_result {
-            Ok(status) if status.success() => match fs::read_to_string(&path) {
+            Ok(status) if status.success() => match fs::read_to_string(&scratch.path) {
                 Ok(contents) => {
                     let mut updated = draft;
                     updated.input = contents.trim_end_matches('\n').to_owned();
@@ -5873,25 +5882,53 @@ impl DiffApp {
         self.set_scroll_with_grep_sync(scroll, false, HunkFocusScrollBehavior::Preserve);
     }
 
-    fn focused_hunk_in_visible_range(
+    fn rendered_diff_rows_for_viewport(&self, visible_rows: usize) -> Vec<RenderedDiffRow> {
+        plan_diff_viewport_rows(self, visible_rows)
+            .into_iter()
+            .enumerate()
+            .filter_map(|(viewport_row, slot)| match slot.kind {
+                ViewportSlotKind::DiffVisual { model_row, .. } => Some(RenderedDiffRow {
+                    viewport_row,
+                    model_row,
+                }),
+                ViewportSlotKind::AnnotationCompose { .. }
+                | ViewportSlotKind::AnnotationSaved { .. } => None,
+            })
+            .collect()
+    }
+
+    fn rendered_viewport_focus_row(&self, visible_rows: usize) -> usize {
+        let row_count = if self.line_wrapping {
+            self.wrapped_visual_row_count()
+        } else {
+            self.model.len()
+        };
+        viewport_focus_offset(self.scroll, row_count, visible_rows)
+    }
+
+    fn focused_hunk_in_rendered_rows(
         &self,
-        visible_start: usize,
-        visible_end: usize,
+        rendered_rows: &[RenderedDiffRow],
         search: HunkFocusSearch,
     ) -> Option<(usize, usize)> {
         match search {
             HunkFocusSearch::FirstVisible => {
-                for row_index in visible_start..visible_end {
-                    if let Some(hunk_key) = self.model.row(row_index).and_then(|row| row.hunk_key())
+                for rendered_row in rendered_rows {
+                    if let Some(hunk_key) = self
+                        .model
+                        .row(rendered_row.model_row)
+                        .and_then(|row| row.hunk_key())
                     {
                         return Some(hunk_key);
                     }
                 }
                 None
             }
-            HunkFocusSearch::NearestTo(focus_row) => {
-                find_visible_row_outward(visible_start, visible_end, focus_row, |row_index| {
-                    self.model.row(row_index).and_then(|row| row.hunk_key())
+            HunkFocusSearch::NearestTo(focus_viewport_row) => {
+                find_rendered_diff_row_outward(rendered_rows, focus_viewport_row, |rendered_row| {
+                    self.model
+                        .row(rendered_row.model_row)
+                        .and_then(|row| row.hunk_key())
                 })
             }
         }
@@ -5974,14 +6011,16 @@ impl DiffApp {
     }
 
     pub(crate) fn focused_hunk_for_viewport(&self, visible_rows: usize) -> Option<(usize, usize)> {
-        let visible_range = self.visible_model_range_for_viewport(visible_rows)?;
-        let visible_start = visible_range.start;
-        let visible_end = visible_range.end;
+        let rendered_rows = self.rendered_diff_rows_for_viewport(visible_rows);
+        if rendered_rows.is_empty() {
+            return None;
+        }
 
         if let Some((file, hunk)) = self.manual_hunk_focus
             && let Some(row) = self.model.hunk_start_row(file, hunk)
-            && row >= visible_start
-            && row < visible_end
+            && rendered_rows
+                .iter()
+                .any(|rendered_row| rendered_row.model_row == row)
         {
             return Some((file, hunk));
         }
@@ -5995,29 +6034,10 @@ impl DiffApp {
             // When the whole diff fits, start at the first visible hunk; explicit hunk
             // navigation is tracked separately with manual_hunk_focus.
             HunkFocusSearch::FirstVisible
-        } else if self.line_wrapping {
-            let focus_visual_row = self.scroll.saturating_add(viewport_focus_offset(
-                self.scroll,
-                row_count,
-                visible_rows,
-            ));
-            HunkFocusSearch::NearestTo(
-                self.model_row_at_scroll(focus_visual_row)
-                    .map(|(row, _)| row)
-                    .unwrap_or(visible_start),
-            )
         } else {
-            HunkFocusSearch::NearestTo(
-                visible_start
-                    .saturating_add(viewport_focus_offset(
-                        self.scroll,
-                        self.model.len(),
-                        visible_rows,
-                    ))
-                    .min(visible_end.saturating_sub(1)),
-            )
+            HunkFocusSearch::NearestTo(self.rendered_viewport_focus_row(visible_rows))
         };
-        self.focused_hunk_in_visible_range(visible_start, visible_end, search)
+        self.focused_hunk_in_rendered_rows(&rendered_rows, search)
     }
 
     pub(crate) fn focused_hunk_editor_target(&self) -> Option<EditorTarget> {
@@ -6055,13 +6075,11 @@ impl DiffApp {
     }
 
     pub(crate) fn focused_hunk_editor_line(&self, file: usize, hunk: usize) -> Option<usize> {
-        let visible_range = self.visible_model_range_for_viewport(self.viewport_rows)?;
-
-        find_visible_row_outward(
-            visible_range.start,
-            visible_range.end,
-            self.viewport_focus_row(),
-            |row_index| self.editor_line_at_hunk_row(row_index, file, hunk),
+        let rendered_rows = self.rendered_diff_rows_for_viewport(self.viewport_rows);
+        find_rendered_diff_row_outward(
+            &rendered_rows,
+            self.rendered_viewport_focus_row(self.viewport_rows),
+            |rendered_row| self.editor_line_at_hunk_row(rendered_row.model_row, file, hunk),
         )
     }
 
@@ -7657,31 +7675,30 @@ fn row_extends_hunk_focus_after(row: UiRow) -> bool {
     )
 }
 
-fn find_visible_row_outward<T>(
-    visible_start: usize,
-    visible_end: usize,
-    focus_row: usize,
-    mut find: impl FnMut(usize) -> Option<T>,
+fn find_rendered_diff_row_outward<T>(
+    rendered_rows: &[RenderedDiffRow],
+    focus_viewport_row: usize,
+    mut find: impl FnMut(RenderedDiffRow) -> Option<T>,
 ) -> Option<T> {
-    if visible_start >= visible_end {
-        return None;
-    }
+    let max_viewport_row = rendered_rows.iter().map(|row| row.viewport_row).max()?;
+    let max_distance = focus_viewport_row.max(max_viewport_row.saturating_sub(focus_viewport_row));
 
-    let focus_row = focus_row.clamp(visible_start, visible_end.saturating_sub(1));
-    let max_distance = focus_row
-        .saturating_sub(visible_start)
-        .max(visible_end.saturating_sub(1).saturating_sub(focus_row));
     for distance in 0..=max_distance {
-        if let Some(row_index) = focus_row.checked_add(distance)
-            && row_index < visible_end
-            && let Some(found) = find(row_index)
+        if let Some(viewport_row) = focus_viewport_row.checked_add(distance)
+            && viewport_row <= max_viewport_row
+            && let Some(rendered_row) = rendered_rows
+                .iter()
+                .find(|row| row.viewport_row == viewport_row)
+            && let Some(found) = find(*rendered_row)
         {
             return Some(found);
         }
         if distance > 0
-            && let Some(row_index) = focus_row.checked_sub(distance)
-            && row_index >= visible_start
-            && let Some(found) = find(row_index)
+            && let Some(viewport_row) = focus_viewport_row.checked_sub(distance)
+            && let Some(rendered_row) = rendered_rows
+                .iter()
+                .find(|row| row.viewport_row == viewport_row)
+            && let Some(found) = find(*rendered_row)
         {
             return Some(found);
         }
@@ -7819,11 +7836,72 @@ fn for_wrapped_line_start_after_first(
     }
 }
 
-fn annotation_scratch_path(key: &AnnotationKey) -> MarkResult<PathBuf> {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    key.hash(&mut hasher);
-    let id = hasher.finish();
-    let dir = env::temp_dir().join("mark-annotations");
-    fs::create_dir_all(&dir)?;
-    Ok(dir.join(format!("{id}.md")))
+fn create_annotation_scratch_file(contents: &str) -> MarkResult<AnnotationScratchFile> {
+    let prefix = format!("mark-annotations-{}-", process::id());
+    let dir = tempfile::Builder::new().prefix(&prefix).tempdir()?;
+    #[cfg(unix)]
+    fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o700))?;
+
+    let path = dir.path().join("annotation.md");
+    write_annotation_scratch_file(&path, contents)?;
+
+    Ok(AnnotationScratchFile { _dir: dir, path })
+}
+
+#[cfg(unix)]
+fn write_annotation_scratch_file(path: &Path, contents: &str) -> io::Result<()> {
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)?;
+    file.write_all(contents.as_bytes())?;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+}
+
+#[cfg(not(unix))]
+fn write_annotation_scratch_file(path: &Path, contents: &str) -> io::Result<()> {
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)?;
+    file.write_all(contents.as_bytes())
+}
+
+#[cfg(all(test, unix))]
+mod annotation_scratch_tests {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    use super::*;
+
+    #[test]
+    fn annotation_scratch_file_is_private_and_removed_on_drop() {
+        let scratch = create_annotation_scratch_file("secret").expect("scratch file");
+        let dir = scratch.path.parent().expect("scratch dir").to_path_buf();
+
+        assert_eq!(
+            fs::metadata(&dir)
+                .expect("scratch dir metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::metadata(&scratch.path)
+                .expect("scratch file metadata")
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        assert_eq!(
+            fs::read_to_string(&scratch.path).expect("scratch contents"),
+            "secret"
+        );
+
+        drop(scratch);
+
+        assert!(!dir.exists());
+    }
 }
