@@ -3269,6 +3269,10 @@ impl DiffApp {
             return false;
         }
 
+        if self.filter_input.is_some() {
+            return false;
+        }
+
         let Some((_model_row, key)) = annotation_saved_key_at_top_border(self, viewport_row) else {
             return false;
         };
@@ -3501,7 +3505,7 @@ impl DiffApp {
             Ok(status) if status.success() => match fs::read_to_string(&scratch.path) {
                 Ok(contents) => {
                     let mut updated = draft;
-                    updated.input = contents.trim_end_matches('\n').to_owned();
+                    updated.input = normalize_annotation_editor_contents(&contents);
                     updated.cursor = updated.input.len();
                     self.commit_annotation_draft(updated);
                     self.set_notice("annotation saved");
@@ -7964,6 +7968,13 @@ fn for_wrapped_line_start_after_first(
     }
 }
 
+fn normalize_annotation_editor_contents(contents: &str) -> String {
+    contents
+        .replace("\r\n", "\n")
+        .trim_end_matches('\n')
+        .to_owned()
+}
+
 fn create_annotation_scratch_file(contents: &str) -> MarkResult<AnnotationScratchFile> {
     let prefix = format!("mark-annotations-{}-", process::id());
     let dir = tempfile::Builder::new().prefix(&prefix).tempdir()?;
@@ -7994,6 +8005,31 @@ fn write_annotation_scratch_file(path: &Path, contents: &str) -> io::Result<()> 
         .create_new(true)
         .open(path)?;
     file.write_all(contents.as_bytes())
+}
+
+#[cfg(test)]
+mod annotation_editor_tests {
+    use super::*;
+
+    #[test]
+    fn annotation_editor_contents_normalize_crlf_line_endings() {
+        assert_eq!(
+            normalize_annotation_editor_contents("first\r\nsecond\r\n"),
+            "first\nsecond"
+        );
+        assert_eq!(
+            normalize_annotation_editor_contents("first\r\nsecond"),
+            "first\nsecond"
+        );
+        assert_eq!(
+            normalize_annotation_editor_contents("first\r\n\r\nsecond\r\n"),
+            "first\n\nsecond"
+        );
+        assert_eq!(
+            normalize_annotation_editor_contents("trailing spaces  \r\n"),
+            "trailing spaces  "
+        );
+    }
 }
 
 #[cfg(all(test, unix))]

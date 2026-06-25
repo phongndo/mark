@@ -6939,7 +6939,9 @@ fn filter_input_blocks_annotation_hover_drafts() {
         app.model.row(code_row).expect("annotated row"),
     )
     .expect("key");
-    app.annotations.insert(key, "note".to_owned());
+    app.annotations.insert(key.clone(), "note".to_owned());
+    assert!(!app.handle_diff_click(38, 2));
+    assert_eq!(app.annotations.get(&key).map(String::as_str), Some("note"));
     assert!(!app.handle_diff_click(38, 4));
 
     assert!(app.annotation_draft.is_none());
