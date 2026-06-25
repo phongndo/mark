@@ -292,7 +292,7 @@ fn handle_ready_events(
 
 pub(crate) fn drain_live_diff_invalidation(app: &mut DiffApp, live_diff: Option<&LiveDiff>) {
     if live_diff.is_some_and(|live_diff| live_diff.take_invalidated()) {
-        app.mark_live_reload_pending();
+        app.mark_live_reload_invalidated();
     }
 }
 
@@ -308,6 +308,7 @@ pub(crate) fn sync_live_diff(
     {
         *live_diff = None;
         app.live_diff_failed_options = None;
+        app.live_reload_invalidated = false;
         app.live_reload_pending = false;
         app.clear_cached_diff_choices();
         return;
@@ -326,12 +327,14 @@ pub(crate) fn sync_live_diff(
     match LiveDiff::start(app.options.clone(), &app.changeset.repo) {
         Ok(next_live_diff) => {
             app.live_diff_failed_options = None;
+            app.live_reload_invalidated = false;
             app.live_reload_pending = false;
             *live_diff = Some(next_live_diff);
         }
         Err(error) => {
             *live_diff = None;
             app.live_diff_failed_options = Some(app.options.clone());
+            app.live_reload_invalidated = false;
             app.live_reload_pending = false;
             app.clear_cached_diff_choices();
             app.set_error_log(format!("live reload unavailable: {error}"));
@@ -356,6 +359,7 @@ pub(crate) fn drain_live_reloads(
             }
             LiveDiffReload::Loaded(Ok(changeset)) => app.replace_changeset(changeset),
             LiveDiffReload::Loaded(Err(error)) => {
+                app.live_reload_invalidated = false;
                 app.live_reload_pending = false;
                 app.set_error_log(format!("live reload failed: {error}"));
             }
@@ -1022,6 +1026,7 @@ pub(crate) struct DiffApp {
     pub(crate) post_editor_quit_key_ignore_until: Option<Instant>,
     pub(crate) live_updates_allowed: bool,
     pub(crate) live_updates_enabled: bool,
+    pub(crate) live_reload_invalidated: bool,
     pub(crate) live_reload_pending: bool,
     pub(crate) pending_diff_load: Option<PendingDiffLoad>,
     pub(crate) diff_cache: Vec<DiffCacheEntry>,
@@ -1317,6 +1322,7 @@ impl DiffApp {
             post_editor_quit_key_ignore_until: None,
             live_updates_allowed: true,
             live_updates_enabled: settings.live_reload,
+            live_reload_invalidated: false,
             live_reload_pending: false,
             pending_diff_load: None,
             diff_cache: Vec::new(),
@@ -2030,8 +2036,13 @@ impl DiffApp {
         }
     }
 
-    pub(crate) fn mark_live_reload_pending(&mut self) {
+    pub(crate) fn mark_live_reload_invalidated(&mut self) {
         self.invalidate_diff_cache();
+        self.live_reload_invalidated = true;
+    }
+
+    pub(crate) fn mark_live_reload_pending(&mut self) {
+        self.mark_live_reload_invalidated();
         self.live_reload_pending = true;
         self.dirty = true;
     }
@@ -2372,6 +2383,7 @@ impl DiffApp {
     fn diff_cache_invalidator_active(&self) -> bool {
         self.live_updates_allowed
             && self.live_updates_enabled
+            && !self.live_reload_invalidated
             && !self.live_reload_pending
             && live_diff_supported(&self.options)
             && self.live_diff_failed_options.as_ref() != Some(&self.options)
@@ -3413,6 +3425,7 @@ impl DiffApp {
         }
         if draft.live_updates_enabled != self.live_updates_enabled {
             self.live_updates_enabled = draft.live_updates_enabled;
+            self.live_reload_invalidated = false;
             self.live_reload_pending = false;
             self.live_diff_failed_options = None;
             self.dirty = true;
@@ -6344,6 +6357,7 @@ impl DiffApp {
         let previous_branch_head = self.branch_head.clone();
         let previous_repo = self.changeset.repo.clone();
         self.options = options;
+        self.live_reload_invalidated = false;
         self.live_reload_pending = false;
         if !refresh_branch_metadata && previous_repo == changeset.repo {
             self.branch_base = branch_base_from_options(&self.options).or(previous_branch_base);
@@ -6459,7 +6473,8 @@ impl DiffApp {
     pub(crate) fn replace_loaded_diff(&mut self, options: DiffOptions, changeset: Changeset) {
         let options_changed = self.options != options;
         if !options_changed && self.base_changeset == changeset {
-            if self.live_reload_pending {
+            if self.live_reload_invalidated || self.live_reload_pending {
+                self.live_reload_invalidated = false;
                 self.live_reload_pending = false;
             }
             self.dirty = true;
@@ -6476,6 +6491,7 @@ impl DiffApp {
         let previous_branch_base = self.branch_base.clone();
         let previous_branch_head = self.branch_head.clone();
         self.options = options;
+        self.live_reload_invalidated = false;
         self.live_reload_pending = false;
         self.current_head = current_head_label(&changeset.repo);
         self.branch_base = branch_base_from_options(&self.options)
