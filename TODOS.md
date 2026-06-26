@@ -1,7 +1,16 @@
-- [ ] Add a toast notification system that is customizable with corner locations. 
-- [ ] Lua configuration
-- [ ] improve the fzf of the selection menus
-- [ ] have all actions have a keyboard mapping.
-- [ ] refine architecture, remove all god files and improve modularity
-- [ ] Add mourse highlight copy like opencode.
-- [ ] Annotation search menu with actions like remove, edit. also quick movement buttoms to each annotation.
+# TODOS
+
+## Configuration
+- [ ] Lua-based configuration system
+
+## TUI
+- [ ] Fuzzy-finder improvements for selection menus
+- [ ] Mouse-driven highlight-to-copy (like opencode)
+- [ ] Annotation search menu with actions: remove, edit, and quick-jump navigation to each annotation
+
+## Architecture
+- [ ] Refine architecture: reduce god-file surface and improve modularity
+
+## Done
+- [x] Toast notification system with customizable corner positioning
+- [x] Keyboard mappings for all actions

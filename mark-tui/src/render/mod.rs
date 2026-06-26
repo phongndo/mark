@@ -7,6 +7,7 @@ pub(crate) mod sidebar;
 pub(crate) mod statusline;
 pub(crate) mod style;
 pub(crate) mod text;
+pub(crate) mod toast;
 pub(crate) mod viewport_plan;
 
 use crate::app::DiffApp;
@@ -16,12 +17,13 @@ use self::{
     diff::draw_diff,
     menus::{
         draw_branch_menu, draw_color_scheme_picker, draw_commit_menu, draw_diff_menu,
-        draw_help_menu, draw_options_menu,
+        draw_help_menu, draw_options_menu, draw_review_input,
     },
     sidebar::{draw_file_sidebar, file_sidebar_width},
     statusline::{
         draw_error_log, draw_filter_bar, draw_header, error_log_height, filter_bar_visible,
     },
+    toast::draw_toasts,
 };
 
 pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut DiffApp) {
@@ -107,7 +109,9 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut DiffApp) {
     if let Some(error_log_area) = error_log_area {
         draw_error_log(frame, app, error_log_area);
     }
+    draw_toasts(frame, app, body_area);
     draw_diff_menu(frame, app, area);
+    draw_review_input(frame, app, area);
     draw_options_menu(frame, app, area);
     draw_color_scheme_picker(frame, app, area);
     draw_branch_menu(frame, app, area);
