@@ -1,2 +1,7 @@
 - [x] Add a toast notification system that is customizable with corner locations.
-- [ ] Create a "system" colorscheme variable so when users define bg = system, mark knows to use the user's terminal colorscheme
+- [ ] Lua configuration
+- [ ] improve the fzf of the selection menus
+- [ ] have all actions have a keyboard mapping.
+- [ ] refine architecture, remove all god files and improve modularity
+- [ ] Add mourse highlight copy like opencode.
+- [ ] Annotation search menu with actions like remove, edit. also quick movement buttoms to each annotation.
