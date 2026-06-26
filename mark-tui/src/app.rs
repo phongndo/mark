@@ -1961,9 +1961,10 @@ impl DiffApp {
                 Ok(Some(false))
             }
             GlobalAction::CopyErrorLog => {
-                if self.error_log.is_some() {
-                    self.copy_error_log_to_terminal_clipboard();
+                if self.error_log.is_none() {
+                    return Ok(None);
                 }
+                self.copy_error_log_to_terminal_clipboard();
                 Ok(Some(false))
             }
             GlobalAction::ClearFilters => {
@@ -2172,7 +2173,6 @@ impl DiffApp {
             && self.key_prefix_pending.is_none()
             && !self.color_scheme_picker_open
             && !self.commit_menu_open
-            && self.annotation_draft.is_none()
     }
 
     pub(crate) fn event_poll(&self) -> Duration {
@@ -2586,7 +2586,60 @@ impl DiffApp {
             }
 
             key.line >= new_start && key.line.saturating_sub(new_start) < lines
-        })
+        }) || self.trailing_context_contains_annotation_key(key)
+    }
+
+    fn trailing_context_contains_annotation_key(&self, key: &AnnotationKey) -> bool {
+        // Collapsed trailing context has no UiRow::Collapsed sentinel; derive
+        // the hidden range from the final hunk and the available source lines.
+        self.changeset
+            .files
+            .iter()
+            .enumerate()
+            .any(|(file_index, file)| {
+                if AnnotationKey::path_for_side(file, AnnotationSide::New)
+                    != Some(key.path.as_str())
+                {
+                    return false;
+                }
+                let Some(last_hunk) = file.hunks.last() else {
+                    return false;
+                };
+                let old_start = last_hunk.old_start.saturating_add(last_hunk.old_count);
+                let new_start = last_hunk.new_start.saturating_add(last_hunk.new_count);
+                if key.line < new_start {
+                    return false;
+                }
+
+                let Some((side, source_line_count)) = self.context_source_line_count(file_index)
+                else {
+                    return false;
+                };
+                let source_start = match side {
+                    DiffSide::Old => old_start,
+                    DiffSide::New => new_start,
+                };
+                let available =
+                    available_context_lines(source_start, usize::MAX, source_line_count);
+
+                key.line.saturating_sub(new_start) < available
+            })
+    }
+
+    fn context_source_line_count(&self, file: usize) -> Option<(DiffSide, usize)> {
+        for side in [DiffSide::New, DiffSide::Old] {
+            let key = ContextSourceKey { file, side };
+            match self.context_cache.get(&key) {
+                Some(ContextSourceEntry::Lines(lines)) => return Some((side, lines.len())),
+                Some(ContextSourceEntry::Unavailable) => continue,
+                None => {
+                    if let Some(lines) = self.load_context_lines(file, side) {
+                        return Some((side, lines.len()));
+                    }
+                }
+            }
+        }
+        None
     }
 
     fn export_mark(&self, key: &AnnotationKey, body: &str) -> Option<MarkExport> {
@@ -3545,48 +3598,67 @@ impl DiffApp {
             return;
         }
 
-        let mut anchors = self
+        let mut targets = self
             .annotations
             .keys()
             .filter_map(|key| self.annotation_model_row(key))
-            .map(|row| self.annotation_anchor_visual_scroll(row))
+            .map(|row| (self.annotation_anchor_visual_scroll(row), row))
             .collect::<Vec<_>>();
-        anchors.sort_unstable();
-        anchors.dedup();
+        targets.sort_unstable();
+        targets.dedup();
 
-        if anchors.is_empty() {
+        if targets.is_empty() {
             self.set_notice("annotations are hidden");
             return;
         }
 
-        let focus_row = self
-            .scroll
-            .saturating_add(self.rendered_viewport_focus_row(self.viewport_rows));
+        let focus_scroll = self.annotation_navigation_focus_scroll();
         let target = if delta < 0 {
-            anchors
+            targets
                 .iter()
                 .rev()
                 .copied()
-                .find(|anchor| *anchor < focus_row)
+                .find(|(anchor, _)| *anchor < focus_scroll)
                 .unwrap_or_else(|| {
-                    *anchors
+                    *targets
                         .last()
-                        .expect("annotation anchors should not be empty")
+                        .expect("annotation targets should not be empty")
                 })
         } else {
-            anchors
+            targets
                 .iter()
                 .copied()
-                .find(|anchor| *anchor > focus_row)
-                .unwrap_or_else(|| anchors[0])
+                .find(|(anchor, _)| *anchor > focus_scroll)
+                .unwrap_or_else(|| targets[0])
         };
-        let target_scroll = target.saturating_sub(viewport_center_offset(self.viewport_rows));
+        let (target_anchor, target_model_row) = target;
+        let target_scroll =
+            target_anchor.saturating_sub(viewport_center_offset(self.viewport_rows));
+        let target_scroll = self.scroll_with_model_row_rendered(target_scroll, target_model_row);
 
         self.set_scroll_with_grep_sync(
             target_scroll.min(self.max_scroll()),
             false,
             HunkFocusScrollBehavior::Preserve,
         );
+    }
+
+    fn annotation_navigation_focus_scroll(&self) -> usize {
+        let focus_viewport_row = self.rendered_viewport_focus_row(self.viewport_rows);
+        let plans = plan_diff_viewport_rows_at_scroll(self, self.scroll, self.viewport_rows.max(1));
+
+        let Some(slot) = plans.get(focus_viewport_row).or_else(|| plans.last()) else {
+            return self.scroll.saturating_add(focus_viewport_row);
+        };
+        // When the viewport focus lands inside an annotation block, navigate from
+        // that block's owner row instead of a raw scroll position hidden by notes.
+        match &slot.kind {
+            ViewportSlotKind::DiffVisual { visual_scroll, .. } => *visual_scroll,
+            ViewportSlotKind::AnnotationCompose { model_row, .. }
+            | ViewportSlotKind::AnnotationSaved { model_row, .. } => {
+                self.annotation_anchor_visual_scroll(*model_row)
+            }
+        }
     }
 
     fn reanchor_annotation_draft(&mut self) {
@@ -3784,19 +3856,72 @@ impl DiffApp {
             let Some(next_hunk) = hunk.checked_add(1) else {
                 return false;
             };
-            if self
+            let Some(hunk_count) = self
                 .changeset
                 .files
                 .get(file)
-                .and_then(|file_diff| file_diff.hunks.get(next_hunk))
-                .is_none()
-            {
+                .map(|file_diff| file_diff.hunks.len())
+            else {
+                return false;
+            };
+            if next_hunk == hunk_count {
+                return self.expand_trailing_context_for_key(file, next_hunk);
+            }
+            if next_hunk > hunk_count {
                 return false;
             }
             next_hunk
         };
 
         self.expand_context_for_key(file, target_hunk)
+    }
+
+    pub(crate) fn expand_trailing_context_for_key(&mut self, file: usize, hunk: usize) -> bool {
+        let Some(file_diff) = self.changeset.files.get(file) else {
+            return false;
+        };
+        if hunk != file_diff.hunks.len() {
+            return false;
+        }
+        let Some(last_hunk) = hunk
+            .checked_sub(1)
+            .and_then(|hunk| file_diff.hunks.get(hunk))
+        else {
+            return false;
+        };
+        let old_start = last_hunk.old_start.saturating_add(last_hunk.old_count);
+        let new_start = last_hunk.new_start.saturating_add(last_hunk.new_count);
+
+        let Some((side, source_lines)) = self.ensure_context_lines(file) else {
+            self.set_notice("context unavailable for this diff");
+            return true;
+        };
+
+        let source_start = match side {
+            DiffSide::Old => old_start,
+            DiffSide::New => new_start,
+        };
+        let available = available_context_lines(source_start, usize::MAX, source_lines.len());
+        let current = self
+            .context_expansions
+            .get(&ContextKey { file, hunk })
+            .copied()
+            .unwrap_or_default()
+            .min(available);
+        if current == available {
+            self.set_notice("no more context");
+            return true;
+        }
+
+        self.update_max_line_width_for_expanded_context(
+            &source_lines,
+            source_start,
+            current..available,
+        );
+        self.context_expansions
+            .insert(ContextKey { file, hunk }, available);
+        self.rebuild_model_after_context_visibility_change();
+        true
     }
 
     pub(crate) fn expand_context_for_key(&mut self, file: usize, hunk: usize) -> bool {

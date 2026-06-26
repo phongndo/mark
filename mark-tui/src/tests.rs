@@ -406,6 +406,52 @@ fn annotation_navigation_centers_and_advances_from_centered_annotation() {
 }
 
 #[test]
+fn annotation_navigation_renders_target_after_previous_saved_block() {
+    use crate::annotation::AnnotationKey;
+    use crate::render::viewport_plan::{ViewportSlotKind, plan_diff_viewport_rows};
+
+    let lines = vec!["line"; 40];
+    let changeset = changeset_with_line_texts(&lines);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_width(40);
+    app.set_viewport_rows(5);
+
+    let unified_rows = app
+        .model
+        .rows
+        .iter()
+        .enumerate()
+        .filter_map(|(index, row)| matches!(row, UiRow::UnifiedLine { .. }).then_some(index))
+        .collect::<Vec<_>>();
+    let first_row = unified_rows[8];
+    let second_row = unified_rows[10];
+    for (row, note) in [(first_row, "one\ntwo\nthree"), (second_row, "target")] {
+        let key =
+            AnnotationKey::from_ui_row(&app.changeset, app.model.row(row).expect("annotated row"))
+                .expect("annotation key");
+        app.annotations.insert(key, note.to_owned());
+    }
+
+    app.move_annotation(1);
+    app.move_annotation(1);
+
+    fn rendered_rows(app: &DiffApp) -> Vec<usize> {
+        plan_diff_viewport_rows(app, app.viewport_rows)
+            .into_iter()
+            .filter_map(|slot| match slot.kind {
+                ViewportSlotKind::DiffVisual { model_row, .. } => Some(model_row),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    }
+
+    assert!(rendered_rows(&app).contains(&second_row));
+
+    app.move_annotation(-1);
+    assert!(rendered_rows(&app).contains(&first_row));
+}
+
+#[test]
 fn hunk_focus_moves_between_hunks_when_diff_fits_viewport() {
     let changeset = changeset_with_hunks_at(PathBuf::from("/repo"), &[1, 2, 3]);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
@@ -1928,6 +1974,52 @@ fn context_keyboard_shortcuts_expand_and_collapse_by_default() {
 }
 
 #[test]
+fn context_keyboard_expand_down_reveals_context_after_final_hunk() {
+    let repo = temp_test_dir("context-keyboard-trailing");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    let text = (1..=80)
+        .map(|line| format!("line {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(repo.join("file.rs"), text).expect("context file should be written");
+    let changeset = changeset_with_hunk_at(repo, 50);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(8);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('.'), KeyModifiers::NONE))
+        .expect(". should expand context below the final hunk");
+
+    assert_eq!(
+        app.context_expansions.get(&ContextKey { file: 0, hunk: 1 }),
+        Some(&30)
+    );
+    assert_eq!(
+        app.model.row(4),
+        Some(UiRow::ContextHide {
+            file: 0,
+            hunk: 1,
+            lines: 30,
+        })
+    );
+    assert_eq!(
+        app.model.row(5),
+        Some(UiRow::ContextLine {
+            file: 0,
+            old_line: 51,
+            new_line: 51,
+        })
+    );
+    assert_eq!(
+        app.model.row(34),
+        Some(UiRow::ContextLine {
+            file: 0,
+            old_line: 80,
+            new_line: 80,
+        })
+    );
+}
+
+#[test]
 fn context_source_side_uses_loaded_fallback_side() {
     let repo = temp_test_dir("context-source-side-fallback");
     fs::create_dir_all(&repo).expect("repo directory should be created");
@@ -3441,6 +3533,29 @@ fn copy_error_log_key_ignores_absent_error_log() {
 }
 
 #[test]
+fn copy_error_log_key_falls_through_without_error_log() {
+    let changeset = changeset_with_files(&[
+        "a.rs", "b.rs", "c.rs", "d.rs", "e.rs", "f.rs", "g.rs", "h.rs",
+    ]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(6);
+    app.keymap = Keymap::parse(
+        r#"
+        [keymap.global]
+        copy_error_log = "d"
+        "#,
+    )
+    .expect("keymap should parse");
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE))
+        .expect("copy key without error log should fall through");
+
+    assert_eq!(app.scroll, 20);
+    assert!(app.error_log.is_none());
+    assert!(app.notice.is_none());
+}
+
+#[test]
 fn copy_error_log_key_does_not_preempt_filter_input() {
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
@@ -3671,6 +3786,71 @@ fn copy_marks_includes_marks_on_collapsed_context_lines() {
             "      \"path\": \"file.rs\",\n",
             "      \"new_line\": {},\n",
             "      \"body\": \"context note\"\n",
+            "    }}\n",
+            "  ]\n",
+            "}}"
+        ),
+        key.line
+    );
+
+    assert_eq!(
+        app.marks_clipboard_json().as_deref(),
+        Some(expected.as_str())
+    );
+}
+
+#[test]
+fn copy_marks_includes_marks_on_collapsed_trailing_context_lines() {
+    use crate::annotation::AnnotationKey;
+
+    let repo = temp_test_dir("copy-collapsed-trailing-context-mark");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    let text = (1..=80)
+        .map(|line| format!("line {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(repo.join("file.rs"), text).expect("context file should be written");
+    let changeset = changeset_with_hunk_at(repo, 50);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+
+    assert!(app.expand_trailing_context_for_key(0, 1));
+    let context_row = app
+        .model
+        .rows
+        .iter()
+        .copied()
+        .find(|row| matches!(row, UiRow::ContextLine { new_line: 51, .. }))
+        .expect("expanded trailing context line");
+    let key = AnnotationKey::from_ui_row(&app.changeset, context_row).expect("context key");
+    app.annotations
+        .insert(key.clone(), "trailing context note".to_owned());
+
+    assert!(app.hide_context(0, 1));
+    assert!(
+        !app.model.rows.iter().any(|row| matches!(
+            row,
+            UiRow::ContextLine { new_line, .. } if *new_line == key.line
+        )),
+        "marked trailing context line should be collapsed"
+    );
+    app.annotations.insert(
+        AnnotationKey {
+            path: key.path.clone(),
+            side: key.side,
+            line: 81,
+        },
+        "stale trailing note".to_owned(),
+    );
+
+    let expected = format!(
+        concat!(
+            "{{\n",
+            "  \"version\": 1,\n",
+            "  \"marks\": [\n",
+            "    {{\n",
+            "      \"path\": \"file.rs\",\n",
+            "      \"new_line\": {},\n",
+            "      \"body\": \"trailing context note\"\n",
             "    }}\n",
             "  ]\n",
             "}}"

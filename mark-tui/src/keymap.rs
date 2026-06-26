@@ -365,9 +365,11 @@ impl Keymap {
         ]
         .into_iter()
         .any(|bindings| {
-            bindings
-                .iter()
-                .any(|sequence| self.copy_marks.iter().any(|copy| copy == sequence))
+            bindings.iter().any(|sequence| {
+                self.copy_marks
+                    .iter()
+                    .any(|copy| sequences_conflict(copy, sequence))
+            })
         });
         if conflicts {
             self.copy_marks.clear();
@@ -639,6 +641,14 @@ fn validate_conflicts(context: &str, bindings: &[(&str, &Vec<KeySequence>)]) -> 
         }
     }
     Ok(())
+}
+
+fn sequences_conflict(first: &KeySequence, second: &KeySequence) -> bool {
+    first == second
+        || matches!(
+            (first.0.as_slice(), second.0.as_slice()),
+            ([single], [prefix, _]) | ([prefix, _], [single]) if single == prefix
+        )
 }
 
 fn validate_prefix_conflicts(
@@ -1225,6 +1235,29 @@ mod tests {
             KeyPress::from(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE)),
             KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE)
         ));
+    }
+
+    #[test]
+    fn keymap_clears_unconfigured_copy_marks_when_used_as_prefix() {
+        let keymap = Keymap::parse(
+            r#"
+            [keymap.global]
+            diff_menu = "y d"
+            "#,
+        )
+        .expect("unconfigured copy_marks should not reserve y as a prefix");
+
+        let y = KeyPress::from(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE));
+        assert!(keymap.is_prefix(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE)));
+        assert!(keymap.matches_prefix(
+            GlobalAction::DiffMenu,
+            y,
+            KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE)
+        ));
+        assert_eq!(
+            keymap.global_action_label(GlobalAction::CopyMarks),
+            "unbound"
+        );
     }
 
     #[test]
