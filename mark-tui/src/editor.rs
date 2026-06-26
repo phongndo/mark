@@ -109,7 +109,13 @@ impl SuspendedTerminal {
         let terminal = Self { active: true };
         disable_raw_mode()?;
         let mut stdout = io::stdout();
-        execute!(stdout, DisableMouseCapture, LeaveAlternateScreen, Show)?;
+        execute!(
+            stdout,
+            DisableMouseCapture,
+            LeaveAlternateScreen,
+            SetCursorStyle::DefaultUserShape,
+            Show
+        )?;
         stdout.flush()?;
         Ok(terminal)
     }
