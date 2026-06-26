@@ -1,5 +1,9 @@
 # TODOS
 
+---
+
+7.0
+
 ## Configuration
 - [ ] Lua-based configuration system
 
@@ -14,3 +18,8 @@
 ## Done
 - [x] Toast notification system with customizable corner positioning
 - [x] Keyboard mappings for all actions
+
+# Performance
+- [ ] Bench & optimizations 
+
+---
