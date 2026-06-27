@@ -13,7 +13,7 @@
 - [ ] Annotation search menu with actions: remove, edit, and quick-jump navigation to each annotation
 
 ## Architecture
-- [ ] Refine architecture: reduce god-file surface and improve modularity
+- [x] Refine architecture: reduce god-file surface and improve modularity
 
 ## Done
 - [x] Toast notification system with customizable corner positioning
