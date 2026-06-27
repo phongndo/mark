@@ -7,13 +7,14 @@ use std::{
 use mark_core::{MarkError, MarkResult};
 
 use crate::{
-    DiffOptions, DiffSource, DiffStats, PatchSource, diff_patch_bytes, git_diff_numstat_args,
-    git_numstat_stats, git_numstat_stats_with_untracked,
+    DiffOptions, DiffSource, DiffStats, PatchSource, diff_patch_bytes,
+    difftool::patch_line_parts,
+    git_args::{git_diff_numstat_args, should_include_untracked, validate_options},
+    git_io::{git_numstat_stats, git_numstat_stats_with_untracked},
     parser::{
         diff_git_paths, git_metadata_path, parse_hunk_header, strip_prefix_path,
         unified_header_path,
     },
-    patch_line_parts, should_include_untracked, validate_options,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
