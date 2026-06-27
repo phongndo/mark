@@ -216,6 +216,36 @@ fn render_selector_scrollbar(
     frame.render_stateful_widget(scrollbar, area, &mut state);
 }
 
+struct ScrollableSelectorMenu {
+    menu_area: Rect,
+    block: Block<'static>,
+    inner: Rect,
+    lines: Vec<Line<'static>>,
+    list_start_row: u16,
+    item_count: usize,
+    visible_rows: usize,
+    scroll: usize,
+    theme: DiffTheme,
+}
+
+fn render_scrollable_selector_menu(frame: &mut Frame<'_>, menu: ScrollableSelectorMenu) {
+    frame.render_widget(Clear, menu.menu_area);
+    frame.render_widget(menu.block, menu.menu_area);
+    frame.render_widget(
+        Paragraph::new(Text::from(menu.lines)).style(Style::default().bg(base_bg(menu.theme))),
+        menu.inner,
+    );
+    render_selector_scrollbar(
+        frame,
+        menu.inner,
+        menu.list_start_row,
+        menu.item_count,
+        menu.visible_rows,
+        menu.scroll,
+        menu.theme,
+    );
+}
+
 pub(crate) fn draw_diff_menu(frame: &mut Frame<'_>, app: &mut DiffApp, area: Rect) {
     let choices = app.filtered_diff_choices();
     let Some(menu_area) = diff_menu_area(app, area, &choices) else {
@@ -606,20 +636,19 @@ pub(crate) fn draw_options_menu(frame: &mut Frame<'_>, app: &mut DiffApp, area: 
         ));
     }
 
-    frame.render_widget(Clear, menu_area);
-    frame.render_widget(block, menu_area);
-    frame.render_widget(
-        Paragraph::new(Text::from(lines)).style(Style::default().bg(base_bg(app.theme))),
-        inner,
-    );
-    render_selector_scrollbar(
+    render_scrollable_selector_menu(
         frame,
-        inner,
-        list_start_row,
-        items.len(),
-        remaining_rows,
-        app.options_menu.scroll,
-        app.theme,
+        ScrollableSelectorMenu {
+            menu_area,
+            block,
+            inner,
+            lines,
+            list_start_row,
+            item_count: items.len(),
+            visible_rows: remaining_rows,
+            scroll: app.options_menu.scroll,
+            theme: app.theme,
+        },
     );
 }
 
@@ -744,20 +773,19 @@ pub(crate) fn draw_color_scheme_picker(frame: &mut Frame<'_>, app: &mut DiffApp,
         );
     }
 
-    frame.render_widget(Clear, picker_area);
-    frame.render_widget(block, picker_area);
-    frame.render_widget(
-        Paragraph::new(Text::from(lines)).style(Style::default().bg(base_bg(app.theme))),
-        inner,
-    );
-    render_selector_scrollbar(
+    render_scrollable_selector_menu(
         frame,
-        inner,
-        list_start_row,
-        choices.len(),
-        remaining_rows,
-        app.color_scheme_picker.scroll,
-        app.theme,
+        ScrollableSelectorMenu {
+            menu_area: picker_area,
+            block,
+            inner,
+            lines,
+            list_start_row,
+            item_count: choices.len(),
+            visible_rows: remaining_rows,
+            scroll: app.color_scheme_picker.scroll,
+            theme: app.theme,
+        },
     );
 }
 
@@ -870,20 +898,19 @@ pub(crate) fn draw_branch_menu(frame: &mut Frame<'_>, app: &mut DiffApp, area: R
         );
     }
 
-    frame.render_widget(Clear, menu_area);
-    frame.render_widget(block, menu_area);
-    frame.render_widget(
-        Paragraph::new(Text::from(lines)).style(Style::default().bg(base_bg(app.theme))),
-        inner,
-    );
-    render_selector_scrollbar(
+    render_scrollable_selector_menu(
         frame,
-        inner,
-        list_start_row,
-        matches.len(),
-        remaining_rows,
-        app.branch_menu.scroll,
-        app.theme,
+        ScrollableSelectorMenu {
+            menu_area,
+            block,
+            inner,
+            lines,
+            list_start_row,
+            item_count: matches.len(),
+            visible_rows: remaining_rows,
+            scroll: app.branch_menu.scroll,
+            theme: app.theme,
+        },
     );
 }
 
@@ -1075,20 +1102,19 @@ pub(crate) fn draw_commit_menu(frame: &mut Frame<'_>, app: &mut DiffApp, area: R
         );
     }
 
-    frame.render_widget(Clear, menu_area);
-    frame.render_widget(block, menu_area);
-    frame.render_widget(
-        Paragraph::new(Text::from(lines)).style(Style::default().bg(base_bg(app.theme))),
-        inner,
-    );
-    render_selector_scrollbar(
+    render_scrollable_selector_menu(
         frame,
-        inner,
-        list_start_row,
-        matches.len(),
-        remaining_rows,
-        app.commit_menu.scroll,
-        app.theme,
+        ScrollableSelectorMenu {
+            menu_area,
+            block,
+            inner,
+            lines,
+            list_start_row,
+            item_count: matches.len(),
+            visible_rows: remaining_rows,
+            scroll: app.commit_menu.scroll,
+            theme: app.theme,
+        },
     );
 }
 
