@@ -845,10 +845,8 @@ fn measure_diff_options_run(
     options: mark_tui::DiffBenchmarkOptions,
 ) -> BenchResult<MeasureRunReport> {
     let load_start = Instant::now();
-    let changeset = mark_diff::load_review_ref(diff_options)
-        .map_err(|error| BenchError::Mark(error.to_string()))?;
+    let (changeset, patch_bytes) = load_benchmark_changeset(diff_options, patch_bytes_hint)?;
     let load_micros = load_start.elapsed().as_micros();
-    let patch_bytes = patch_bytes_hint.unwrap_or_else(|| estimate_patch_bytes(&changeset));
 
     let rss_before = current_rss_bytes();
     let tui = mark_tui::benchmark_diff_view(changeset, syntax_languages, options);
@@ -868,8 +866,19 @@ fn measure_diff_options_run(
     })
 }
 
-fn estimate_patch_bytes(changeset: &mark_diff::Changeset) -> u64 {
-    changeset.raw_patch.len().try_into().unwrap_or(u64::MAX)
+fn load_benchmark_changeset(
+    diff_options: &mark_diff::DiffOptions,
+    patch_bytes_hint: Option<u64>,
+) -> BenchResult<(mark_diff::Changeset, u64)> {
+    match patch_bytes_hint {
+        Some(patch_bytes) => {
+            let changeset = mark_diff::load_review_ref(diff_options)
+                .map_err(|error| BenchError::Mark(error.to_string()))?;
+            Ok((changeset, patch_bytes))
+        }
+        None => mark_diff::load_review_ref_with_patch_bytes(diff_options)
+            .map_err(|error| BenchError::Mark(error.to_string())),
+    }
 }
 
 fn tui_report(report: mark_tui::DiffBenchmarkReport) -> TuiMeasureReport {
@@ -1838,6 +1847,7 @@ fn binary_blob(size: usize, seed: u8) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -1945,6 +1955,26 @@ mod tests {
         );
 
         fs::remove_dir_all(repo).expect("test repo should be removed");
+    }
+
+    #[test]
+    fn load_benchmark_changeset_counts_patch_bytes_without_hint() {
+        let patch = Arc::<[u8]>::from(
+            b"diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n"
+                .as_slice(),
+        );
+        let options = mark_diff::DiffOptions {
+            source: mark_diff::DiffSource::Patch(mark_diff::PatchSource::Stdin(patch.clone())),
+            include_untracked: false,
+            ..mark_diff::DiffOptions::default()
+        };
+
+        let (changeset, patch_bytes) =
+            load_benchmark_changeset(&options, None).expect("changeset should load");
+
+        assert_eq!(patch_bytes, u64::try_from(patch.len()).unwrap());
+        assert_eq!(changeset.files.len(), 1);
+        assert!(changeset.raw_patch.is_empty());
     }
 
     fn temp_test_dir(name: &str) -> PathBuf {

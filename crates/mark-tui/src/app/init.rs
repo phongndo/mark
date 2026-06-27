@@ -92,6 +92,29 @@ pub(crate) fn layout_override_from_settings(
         .and_then(layout_override_from_setting)
 }
 
+fn load_user_settings_for_syntax_mode(syntax_mode: &SyntaxStartupMode) -> bool {
+    matches!(
+        syntax_mode,
+        SyntaxStartupMode::Config | SyntaxStartupMode::Disabled
+    ) && !cfg!(test)
+}
+
+struct LoadedSyntaxSettings {
+    settings: SyntaxSettings,
+    startup_error_log: Option<String>,
+    load_user_settings: bool,
+}
+
+fn loaded_syntax_settings_for_mode(syntax_mode: &SyntaxStartupMode) -> LoadedSyntaxSettings {
+    let load_user_settings = load_user_settings_for_syntax_mode(syntax_mode);
+    let (settings, startup_error_log) = load_syntax_settings_for_diff(load_user_settings);
+    LoadedSyntaxSettings {
+        settings,
+        startup_error_log,
+        load_user_settings,
+    }
+}
+
 impl DiffApp {
     #[cfg(test)]
     pub(crate) fn new(options: DiffOptions, changeset: Changeset, layout: DiffLayoutMode) -> Self {
@@ -136,11 +159,14 @@ impl DiffApp {
         layout: DiffLayoutMode,
         syntax_mode: SyntaxStartupMode,
     ) -> Self {
-        let mut app = Self::new_static_with_syntax(options, changeset, layout, syntax_mode);
-        app.viewport.layout_override = Some(layout);
-        app.overlays.options_menu_draft.layout =
-            layout_setting_from_override(app.viewport.layout_override);
-        app
+        let loaded_syntax_settings = loaded_syntax_settings_for_mode(&syntax_mode);
+        Self::new_static_with_explicit_layout_from_loaded_settings(
+            options,
+            changeset,
+            layout,
+            syntax_mode,
+            loaded_syntax_settings,
+        )
     }
 
     #[cfg(test)]
@@ -150,7 +176,7 @@ impl DiffApp {
         layout: DiffLayoutMode,
         syntax_mode: SyntaxStartupMode,
     ) -> Self {
-        let mut app = Self::new_with_syntax_and_layout_settings(
+        let app = Self::new_with_syntax_and_layout_settings(
             options,
             changeset,
             layout,
@@ -158,6 +184,52 @@ impl DiffApp {
             false,
             true,
         );
+        Self::with_explicit_layout(app, layout)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_static_with_explicit_layout_and_settings(
+        options: DiffOptions,
+        changeset: Changeset,
+        layout: DiffLayoutMode,
+        syntax_mode: SyntaxStartupMode,
+        settings: SyntaxSettings,
+    ) -> Self {
+        Self::new_static_with_explicit_layout_from_loaded_settings(
+            options,
+            changeset,
+            layout,
+            syntax_mode,
+            LoadedSyntaxSettings {
+                settings,
+                startup_error_log: None,
+                load_user_settings: false,
+            },
+        )
+    }
+
+    fn new_static_with_explicit_layout_from_loaded_settings(
+        options: DiffOptions,
+        changeset: Changeset,
+        layout: DiffLayoutMode,
+        syntax_mode: SyntaxStartupMode,
+        loaded_syntax_settings: LoadedSyntaxSettings,
+    ) -> Self {
+        Self::with_explicit_layout(
+            Self::new_with_loaded_syntax_settings(
+                options,
+                changeset,
+                layout,
+                syntax_mode,
+                false,
+                false,
+                loaded_syntax_settings,
+            ),
+            layout,
+        )
+    }
+
+    fn with_explicit_layout(mut app: Self, layout: DiffLayoutMode) -> Self {
         app.viewport.layout_override = Some(layout);
         app.overlays.options_menu_draft.layout =
             layout_setting_from_override(app.viewport.layout_override);
@@ -167,18 +239,39 @@ impl DiffApp {
     fn new_with_syntax_and_layout_settings(
         options: DiffOptions,
         changeset: Changeset,
-        mut layout: DiffLayoutMode,
+        layout: DiffLayoutMode,
         syntax_mode: SyntaxStartupMode,
         honor_settings_layout: bool,
         build_search_index: bool,
     ) -> Self {
+        let loaded_syntax_settings = loaded_syntax_settings_for_mode(&syntax_mode);
+        Self::new_with_loaded_syntax_settings(
+            options,
+            changeset,
+            layout,
+            syntax_mode,
+            honor_settings_layout,
+            build_search_index,
+            loaded_syntax_settings,
+        )
+    }
+
+    fn new_with_loaded_syntax_settings(
+        options: DiffOptions,
+        changeset: Changeset,
+        mut layout: DiffLayoutMode,
+        syntax_mode: SyntaxStartupMode,
+        honor_settings_layout: bool,
+        build_search_index: bool,
+        loaded_syntax_settings: LoadedSyntaxSettings,
+    ) -> Self {
+        let LoadedSyntaxSettings {
+            settings,
+            mut startup_error_log,
+            load_user_settings,
+        } = loaded_syntax_settings;
         let context_expansions = HashMap::new();
         let context_cache = HashMap::new();
-        let load_user_settings = matches!(
-            syntax_mode,
-            SyntaxStartupMode::Config | SyntaxStartupMode::Disabled
-        ) && !cfg!(test);
-        let (settings, mut startup_error_log) = load_syntax_settings_for_diff(load_user_settings);
         let layout_override = layout_override_from_settings(&settings, honor_settings_layout);
         if let Some(setting_layout) = layout_override {
             layout = setting_layout;

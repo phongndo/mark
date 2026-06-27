@@ -20,7 +20,7 @@
 - [x] Keyboard mappings for all actions
 
 # Performance
-- [ ] Bench & optimizations 
+- [x] Bench & optimizations
 
 # Minor
 
