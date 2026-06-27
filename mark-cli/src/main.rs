@@ -1,26 +1,22 @@
 mod args;
 mod config;
+mod dispatch;
 mod pager;
+mod preflight;
+mod review;
 mod syntax;
 mod update;
 
 use std::{
     fmt,
     io::{self, IsTerminal, Write},
-    path::Path,
-    process::Command as ProcessCommand,
     process::ExitCode,
 };
 
-use clap::{CommandFactory, Parser, error::ErrorKind};
+use clap::Parser;
 use mark_core::{MarkError, MarkResult};
 
-use crate::{
-    args::{Cli, Command},
-    pager::pager,
-    syntax::{diff_options, difftool_options, patch_options, review_options, show_options, syntax},
-    update::update,
-};
+use crate::{args::Cli, dispatch::run_cli};
 
 fn main() -> ExitCode {
     if let Some(exit_code) = syntax_validation_child_exit_code() {
@@ -132,274 +128,18 @@ fn run() -> CliResult<()> {
     run_cli(cli)
 }
 
-fn run_cli(cli: Cli) -> CliResult<()> {
-    reject_pre_subcommand_diff_args(&cli)?;
-    let Cli { command, diff } = cli;
-    match command {
-        None => {
-            reject_likely_unknown_command(&diff)?;
-            run_diff(diff)
-        }
-        Some(Command::Config) => config::config(),
-        Some(Command::Diff(args)) => run_diff(args),
-        Some(Command::Difftool(args)) => run_difftool(args),
-        Some(Command::Pager(args)) => pager(args),
-        Some(Command::Show(args)) => run_show(args),
-        Some(Command::Review(args)) => run_hosted_review(args),
-        Some(Command::Patch(args)) => run_patch(args),
-        Some(Command::Syntax { command }) => syntax(command),
-        Some(Command::Update(args)) => update(args),
-    }
-}
-
-fn reject_pre_subcommand_diff_args(cli: &Cli) -> MarkResult<()> {
-    if cli.command.is_some() && has_diff_args(&cli.diff) {
-        return Err(MarkError::Usage(
-            "top-level diff options cannot be used before a subcommand; move supported options after the subcommand".to_owned(),
-        ));
-    }
-
-    Ok(())
-}
-
-fn has_diff_args(args: &args::DiffArgs) -> bool {
-    !args.revs.is_empty()
-        || args.repo.is_some()
-        || args.base.is_some()
-        || args.staged
-        || args.unstaged
-        || args.no_untracked
-        || args.no_watch
-        || args.no_syntax
-        || args.stat
-}
-
-fn run_diff(args: args::DiffArgs) -> CliResult<()> {
-    let stat = args.stat;
-    let live_updates = !args.no_watch;
-    let syntax_enabled = !args.no_syntax;
-    let options = diff_options(args)?;
-    run_review(options, live_updates, syntax_enabled, stat)
-}
-
-fn reject_likely_unknown_command(args: &args::DiffArgs) -> CliResult<()> {
-    if args.base.is_some() || args.revs.is_empty() || args.revs[0].starts_with('-') {
-        return Ok(());
-    }
-
-    let rev = &args.revs[0];
-    let revision_kind = if args.revs.len() == 1 {
-        RevisionKind::Commit
-    } else {
-        RevisionKind::Object
-    };
-    match revision_status(args.repo.as_deref(), rev, revision_kind) {
-        RevisionStatus::Exists => return Ok(()),
-        RevisionStatus::Missing => {}
-        RevisionStatus::Unknown if looks_like_command(rev) => {}
-        RevisionStatus::Unknown => return Ok(()),
-    }
-
-    Err(CliError::Clap(unknown_command_or_revision_error(rev)))
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RevisionStatus {
-    Exists,
-    Missing,
-    Unknown,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RevisionKind {
-    Commit,
-    Object,
-}
-
-fn unknown_command_or_revision_error(rev: &str) -> clap::Error {
-    Cli::command().error(
-        ErrorKind::InvalidSubcommand,
-        format!("unrecognized subcommand or revision '{rev}'"),
-    )
-}
-
-fn revision_status(repo: Option<&Path>, rev: &str, kind: RevisionKind) -> RevisionStatus {
-    match kind {
-        RevisionKind::Commit => commit_revision_status(repo, rev),
-        RevisionKind::Object => match revision_expression_exists(repo, rev) {
-            Some(true) => RevisionStatus::Exists,
-            Some(false) => missing_revision_status(repo),
-            None => RevisionStatus::Unknown,
-        },
-    }
-}
-
-fn commit_revision_status(repo: Option<&Path>, rev: &str) -> RevisionStatus {
-    let Some(object) = resolve_revision(repo, rev) else {
-        return missing_revision_status(repo);
-    };
-
-    match revision_object_matches(repo, &object, "commit") {
-        Some(true) => RevisionStatus::Exists,
-        Some(false) => RevisionStatus::Missing,
-        None => RevisionStatus::Unknown,
-    }
-}
-
-fn missing_revision_status(repo: Option<&Path>) -> RevisionStatus {
-    if git_repository_available(repo) {
-        RevisionStatus::Missing
-    } else {
-        RevisionStatus::Unknown
-    }
-}
-
-fn revision_expression_exists(repo: Option<&Path>, rev: &str) -> Option<bool> {
-    let output = rev_parse_verify(repo, rev)?;
-    // `rev-parse --verify` exits non-zero for expressions that expand to
-    // multiple objects, but still writes the resolved objects. `git diff`
-    // accepts those expressions as range operands.
-    if output.status.success() || !output_stdout_is_empty(&output) {
-        return Some(true);
-    }
-
-    multi_revision_expression_exists(repo, rev)
-}
-
-fn resolve_revision(repo: Option<&Path>, rev: &str) -> Option<String> {
-    let output = rev_parse_verify(repo, rev)?;
-    if !output.status.success() {
-        return None;
-    }
-
-    let revision = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    if revision.is_empty() {
-        None
-    } else {
-        Some(revision)
-    }
-}
-
-fn rev_parse_verify(repo: Option<&Path>, rev: &str) -> Option<std::process::Output> {
-    let mut command = ProcessCommand::new("git");
-    if let Some(repo) = repo {
-        command.arg("-C").arg(repo);
-    }
-    command
-        .args(["rev-parse", "--verify", "--quiet", "--end-of-options"])
-        .arg(rev);
-
-    command.output().ok()
-}
-
-fn multi_revision_expression_exists(repo: Option<&Path>, rev: &str) -> Option<bool> {
-    let mut command = ProcessCommand::new("git");
-    if let Some(repo) = repo {
-        command.arg("-C").arg(repo);
-    }
-    command
-        .args(["rev-list", "--no-walk", "--quiet", "--end-of-options"])
-        .arg(rev);
-
-    command.output().ok().map(|output| output.status.success())
-}
-
-fn output_stdout_is_empty(output: &std::process::Output) -> bool {
-    String::from_utf8_lossy(&output.stdout).trim().is_empty()
-}
-
-fn revision_object_matches(repo: Option<&Path>, object: &str, peel: &str) -> Option<bool> {
-    let mut command = ProcessCommand::new("git");
-    if let Some(repo) = repo {
-        command.arg("-C").arg(repo);
-    }
-    command
-        .args(["rev-parse", "--verify", "--quiet", "--end-of-options"])
-        .arg(format!("{object}^{{{peel}}}"));
-
-    match command.output() {
-        Ok(output) => Some(output.status.success()),
-        Err(_) => None,
-    }
-}
-
-fn git_repository_available(repo: Option<&Path>) -> bool {
-    let mut command = ProcessCommand::new("git");
-    if let Some(repo) = repo {
-        command.arg("-C").arg(repo);
-    }
-    command.args(["rev-parse", "--show-toplevel"]);
-
-    command.output().is_ok_and(|output| output.status.success())
-}
-
-fn looks_like_command(value: &str) -> bool {
-    matches!(
-        value,
-        "ls" | "list" | "pwd" | "cd" | "rm" | "remove" | "new" | "fork" | "status"
-    )
-}
-
-fn run_show(args: args::ShowArgs) -> CliResult<()> {
-    let stat = args.stat;
-    let syntax_enabled = !args.no_syntax;
-    let options = show_options(args)?;
-    run_review(options, false, syntax_enabled, stat)
-}
-
-fn run_hosted_review(args: args::ReviewArgs) -> CliResult<()> {
-    let stat = args.stat;
-    let syntax_enabled = !args.no_syntax;
-    let options = review_options(args)?;
-    run_review(options, false, syntax_enabled, stat)
-}
-
-fn run_difftool(args: args::DifftoolArgs) -> CliResult<()> {
-    let stat = args.stat;
-    let live_updates = args.watch;
-    let syntax_enabled = !args.no_syntax;
-    let options = difftool_options(args)?;
-    run_review(options, live_updates, syntax_enabled, stat)
-}
-
-fn run_patch(args: args::PatchArgs) -> CliResult<()> {
-    let stat = args.stat;
-    let syntax_enabled = !args.no_syntax;
-    let options = patch_options(args)?;
-    run_review(options, false, syntax_enabled, stat)
-}
-
-fn run_review(
-    options: mark_command::DiffOptions,
-    live_updates: bool,
-    syntax_enabled: bool,
-    stat: bool,
-) -> CliResult<()> {
-    if io::stdout().is_terminal() && !stat {
-        mark_tui::run_diff_with_live_updates_and_syntax(options, live_updates, syntax_enabled)?;
-        Ok(())
-    } else {
-        stream_diff_to_stdout(options)
-    }
-}
-
-fn stream_diff_to_stdout(options: mark_command::DiffOptions) -> CliResult<()> {
-    match mark_command::diff_to_writer(options, io::stdout().lock()) {
-        Ok(()) => Ok(()),
-        Err(MarkError::Io(error)) if error.kind() == io::ErrorKind::BrokenPipe => Ok(()),
-        Err(error) => Err(error.into()),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::{
         env, fs,
         path::{Path, PathBuf},
+        process::Command as ProcessCommand,
         time::{SystemTime, UNIX_EPOCH},
     };
 
     use clap::Parser;
+
+    use crate::{args, preflight::reject_likely_unknown_command};
 
     use super::*;
 
