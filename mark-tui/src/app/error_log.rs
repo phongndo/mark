@@ -11,7 +11,7 @@ impl DiffApp {
         if self.notifications.error_log.take().is_some() {
             self.input.key_prefix_pending = None;
             self.notifications.error_log_resizing = false;
-            self.notifications.rendered_error_log_separator_row = None;
+            self.set_rendered_error_log_separator_row(None);
             self.runtime.dirty = true;
             true
         } else {
@@ -19,11 +19,7 @@ impl DiffApp {
         }
     }
 
-    pub(crate) fn copy_error_log_to_terminal_clipboard(&mut self) {
-        let mut stdout = io::stdout().lock();
-        self.copy_error_log_to_writer(&mut stdout);
-    }
-
+    #[cfg(test)]
     pub(crate) fn copy_error_log_to_writer<W: Write>(&mut self, writer: &mut W) {
         let Some(error_log) = self.notifications.error_log.clone() else {
             self.set_warning_notice("no error log to copy");
@@ -69,6 +65,8 @@ impl DiffApp {
     pub(crate) fn set_rendered_error_log_separator_row(&mut self, row: Option<u16>) {
         self.notifications.rendered_error_log_separator_row =
             row.filter(|_| self.notifications.error_log.is_some());
+        self.runtime.hit_map.error_log_separator_row =
+            self.notifications.rendered_error_log_separator_row;
     }
 
     pub(crate) fn start_error_log_resize(&mut self, row: u16) -> bool {

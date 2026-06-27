@@ -3,7 +3,7 @@ use super::*;
 impl DiffApp {
     pub(crate) fn diff_choice_at(&self, column: u16, row: u16) -> Option<DiffChoice> {
         let choices = self.filtered_diff_choices();
-        let menu_area = self.overlays.rendered_diff_menu_area?;
+        let menu_area = self.runtime.hit_map.diff_menu_area?;
         let inner = diff_menu_block(self.config.theme).inner(menu_area);
         if column < inner.x
             || column >= inner.x.saturating_add(inner.width)
@@ -31,13 +31,14 @@ impl DiffApp {
     }
 
     pub(crate) fn is_rendered_diff_menu_position(&self, column: u16, row: u16) -> bool {
-        self.overlays
-            .rendered_diff_menu_area
+        self.runtime
+            .hit_map
+            .diff_menu_area
             .is_some_and(|area| rect_contains(area, column, row))
     }
 
     pub(crate) fn color_scheme_index_at(&self, column: u16, row: u16) -> Option<usize> {
-        let menu_area = self.overlays.rendered_color_scheme_picker_area?;
+        let menu_area = self.runtime.hit_map.color_scheme_picker_area?;
         let inner = color_scheme_picker_block(self.config.theme).inner(menu_area);
         let choices = self.filtered_color_schemes();
         if column < inner.x
@@ -57,8 +58,9 @@ impl DiffApp {
     }
 
     pub(crate) fn is_rendered_color_scheme_picker_position(&self, column: u16, row: u16) -> bool {
-        self.overlays
-            .rendered_color_scheme_picker_area
+        self.runtime
+            .hit_map
+            .color_scheme_picker_area
             .is_some_and(|area| rect_contains(area, column, row))
     }
 
@@ -162,61 +164,33 @@ impl DiffApp {
     }
 
     pub(crate) fn move_diff_menu_selection(&mut self, delta: isize) {
-        let choices = self.filtered_diff_choices();
-        if choices.is_empty() {
+        let len = self.filtered_diff_choices().len();
+        if len == 0 {
             return;
         }
 
-        self.overlays.diff_menu.move_wrapping(choices.len(), delta);
-        self.runtime.dirty = true;
-    }
-
-    pub(crate) fn set_diff_menu_selection(&mut self, selected: usize) {
-        if self
-            .overlays
-            .diff_menu
-            .set_selected(selected, self.filtered_diff_choices().len())
+        if SelectorController::new(&mut self.overlays.diff_menu, len)
+            .move_by(delta, SelectorMovement::Wrapping)
         {
             self.runtime.dirty = true;
         }
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn push_diff_menu_input(&mut self, character: char) {
-        self.overlays.diff_menu.push_input(character);
-        self.runtime.dirty = true;
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn pop_diff_menu_input(&mut self) {
-        if matches!(
-            self.overlays.diff_menu.pop_input(),
-            TextInputKeyResult::Edited
-        ) {
-            self.runtime.dirty = true;
-        }
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn clear_diff_menu_input(&mut self) {
-        if self.overlays.diff_menu.clear_input_and_selection() {
+    pub(crate) fn set_diff_menu_selection(&mut self, selected: usize) {
+        let len = self.filtered_diff_choices().len();
+        if SelectorController::new(&mut self.overlays.diff_menu, len).set_selected(selected) {
             self.runtime.dirty = true;
         }
     }
 
     pub(super) fn apply_diff_menu_input_key(&mut self, key: KeyEvent) -> bool {
-        match self.overlays.diff_menu.apply_input_key(key) {
-            TextInputKeyResult::Edited => {
-                self.runtime.dirty = true;
-                true
-            }
-            TextInputKeyResult::Moved => {
-                self.runtime.dirty = true;
-                true
-            }
-            TextInputKeyResult::Handled => true,
-            TextInputKeyResult::Ignored => false,
+        let len = self.filtered_diff_choices().len();
+        let outcome =
+            SelectorController::new(&mut self.overlays.diff_menu, len).apply_input_key(key);
+        if outcome.changed {
+            self.runtime.dirty = true;
         }
+        outcome.handled
     }
 
     pub(crate) fn select_highlighted_diff_choice(&mut self) {

@@ -146,31 +146,31 @@ pub(crate) fn diff_options(args: DiffArgs) -> MarkResult<mark_command::DiffOptio
     };
 
     Ok(mark_command::DiffOptions {
-        repo: args.repo,
+        repo: args.repo.repo,
         source,
         scope,
         include_untracked: !args.no_untracked,
-        stat: args.stat,
+        stat: args.display.stat,
     })
 }
 
 pub(crate) fn show_options(args: ShowArgs) -> MarkResult<mark_command::DiffOptions> {
     Ok(mark_command::DiffOptions {
-        repo: args.repo,
+        repo: args.repo.repo,
         source: mark_command::DiffSource::Show(args.rev.unwrap_or_else(|| "HEAD".to_owned())),
         scope: mark_command::DiffScope::All,
         include_untracked: false,
-        stat: args.stat,
+        stat: args.display.stat,
     })
 }
 
 pub(crate) fn review_options(args: ReviewArgs) -> MarkResult<mark_command::DiffOptions> {
-    mark_command::review_diff_options(args.repo, &args.target, args.stat)
+    mark_command::review_diff_options(args.repo.repo, &args.target, args.display.stat)
 }
 
 pub(crate) fn difftool_options(args: DifftoolArgs) -> MarkResult<mark_command::DiffOptions> {
     Ok(mark_command::DiffOptions {
-        repo: args.repo,
+        repo: args.repo.repo,
         source: mark_command::DiffSource::Difftool {
             left: args.left,
             right: args.right,
@@ -178,17 +178,17 @@ pub(crate) fn difftool_options(args: DifftoolArgs) -> MarkResult<mark_command::D
         },
         scope: mark_command::DiffScope::All,
         include_untracked: false,
-        stat: args.stat,
+        stat: args.display.stat,
     })
 }
 
 pub(crate) fn patch_options(args: PatchArgs) -> MarkResult<mark_command::DiffOptions> {
     Ok(mark_command::DiffOptions {
-        repo: args.repo,
+        repo: args.repo.repo,
         source: patch_source(args.path)?,
         scope: mark_command::DiffScope::All,
         include_untracked: false,
-        stat: args.stat,
+        stat: args.display.stat,
     })
 }
 

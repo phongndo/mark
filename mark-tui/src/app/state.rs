@@ -158,4 +158,5 @@ pub(crate) struct AppConfigState {
 pub(crate) struct RuntimeState {
     pub(crate) terminal_clear_requested: bool,
     pub(crate) dirty: bool,
+    pub(crate) hit_map: HitMap,
 }

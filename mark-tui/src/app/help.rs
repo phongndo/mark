@@ -200,7 +200,7 @@ impl DiffApp {
         }
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn push_help_menu_input(&mut self, character: char) {
         self.overlays
             .help_menu_input
@@ -209,31 +209,6 @@ impl DiffApp {
         self.overlays.help_menu_scroll = 0;
         self.sync_help_menu_visible_rows();
         self.runtime.dirty = true;
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn pop_help_menu_input(&mut self) {
-        let result = handle_text_input_key(
-            &mut self.overlays.help_menu_input,
-            &mut self.overlays.help_menu_input_cursor,
-            KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
-        );
-        if matches!(result, TextInputKeyResult::Edited) {
-            self.overlays.help_menu_scroll = 0;
-            self.sync_help_menu_visible_rows();
-            self.runtime.dirty = true;
-        }
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn clear_help_menu_input(&mut self) {
-        if !self.overlays.help_menu_input.is_empty() || self.overlays.help_menu_scroll != 0 {
-            self.overlays.help_menu_input.clear();
-            self.overlays.help_menu_input_cursor = 0;
-            self.overlays.help_menu_scroll = 0;
-            self.sync_help_menu_visible_rows();
-            self.runtime.dirty = true;
-        }
     }
 
     fn apply_help_menu_input_key(&mut self, key: KeyEvent) -> bool {

@@ -100,3 +100,34 @@ pub(crate) struct RenderLayoutSnapshot {
     pub(crate) diff: Rect,
     pub(crate) body: Rect,
 }
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct HitMap {
+    pub(crate) diff_area: Option<Rect>,
+    pub(crate) diff_menu_area: Option<Rect>,
+    pub(crate) branch_menu_area: Option<Rect>,
+    pub(crate) commit_menu_area: Option<Rect>,
+    pub(crate) options_menu_area: Option<Rect>,
+    pub(crate) review_input_area: Option<Rect>,
+    pub(crate) color_scheme_picker_area: Option<Rect>,
+    pub(crate) error_log_separator_row: Option<u16>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RenderPlan {
+    pub(crate) layout: RenderLayoutSnapshot,
+    pub(crate) hit_map: HitMap,
+    pub(crate) state: RenderStatePlan,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RenderStatePlan {
+    pub(crate) terminal_area: Rect,
+    pub(crate) file_sidebar_render_width: u16,
+    pub(crate) viewport_rows: usize,
+    pub(crate) viewport_width: usize,
+    pub(crate) options_menu_visible_rows: Option<usize>,
+    pub(crate) branch_menu_visible_rows: Option<usize>,
+    pub(crate) commit_menu_visible_rows: Option<usize>,
+    pub(crate) help_menu_visible_rows: Option<usize>,
+}

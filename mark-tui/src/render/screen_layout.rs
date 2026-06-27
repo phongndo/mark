@@ -98,12 +98,4 @@ impl ScreenLayout {
             body: self.body,
         }
     }
-
-    pub(crate) fn apply_to_app(self, app: &mut DiffApp) {
-        app.sidebar.file_sidebar_render_width = self.sidebar_width;
-        app.set_rendered_error_log_separator_row(self.error_log.map(|area| area.y));
-        app.set_rendered_diff_area(self.diff);
-        app.set_viewport_rows(self.diff.height as usize);
-        app.set_viewport_width(self.diff.width as usize);
-    }
 }
