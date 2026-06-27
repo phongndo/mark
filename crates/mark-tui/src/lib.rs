@@ -24,6 +24,7 @@ pub use run::{
     run_diff_with_live_updates_and_syntax,
 };
 pub use static_pager::{
-    StaticPagerLayout, StaticPagerOptions, render_static_changeset, render_static_pager,
+    StaticPagerLayout, StaticPagerOptions, render_static_changeset,
+    render_static_changeset_to_writer, render_static_pager,
 };
 pub use theme::{DiffBenchmarkOptions, DiffBenchmarkReport, SyntaxBenchmarkReport};

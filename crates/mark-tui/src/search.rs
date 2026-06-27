@@ -66,6 +66,13 @@ struct FileSearchIndex {
 }
 
 impl DiffSearchIndex {
+    pub(crate) fn empty() -> Self {
+        Self {
+            files: Vec::new(),
+            searcher: Searcher::new(),
+        }
+    }
+
     pub(crate) fn new(changeset: &Changeset) -> Self {
         let files = changeset
             .files

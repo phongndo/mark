@@ -29,6 +29,30 @@ fn render_bytes_stat_matches_full_changeset_stat_for_repo_source() {
 }
 
 #[test]
+fn load_review_with_patch_bytes_reports_repo_patch_len_without_retention() {
+    let test_dir = temp_test_dir("repo-patch-bytes");
+    let repo = test_dir.join("repo");
+    fs::create_dir_all(&test_dir).expect("test directory should be created");
+    init_repo(&repo);
+    fs::write(repo.join("base.txt"), "base\nchanged\n").expect("tracked file should change");
+
+    let options = DiffOptions {
+        repo: Some(repo.clone()),
+        include_untracked: false,
+        ..DiffOptions::default()
+    };
+    let expected_patch_bytes = u64::try_from(render_bytes(options.clone()).unwrap().len()).unwrap();
+
+    let (changeset, patch_bytes) =
+        load_review_ref_with_patch_bytes(&options).expect("changeset should load");
+
+    assert_eq!(patch_bytes, expected_patch_bytes);
+    assert_eq!(changeset.files.len(), 1);
+    assert!(changeset.raw_patch.is_empty());
+    fs::remove_dir_all(test_dir).expect("test directory should be removed");
+}
+
+#[test]
 fn render_untracked_empty_and_noeol_files_as_applyable_patch() {
     let test_dir = temp_test_dir("untracked-exact");
     let repo = test_dir.join("repo");

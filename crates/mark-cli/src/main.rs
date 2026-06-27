@@ -106,6 +106,14 @@ pub(crate) fn write_stdout_bytes(bytes: &[u8]) -> CliResult<()> {
     Ok(())
 }
 
+pub(crate) fn write_stdout_io(
+    write: impl FnOnce(&mut dyn Write) -> io::Result<()>,
+) -> CliResult<()> {
+    let mut stdout = io::stdout().lock();
+    write(&mut stdout).map_err(stdout_write_error)?;
+    Ok(())
+}
+
 pub(crate) fn write_stderr(args: fmt::Arguments<'_>) -> MarkResult<()> {
     io::stderr().lock().write_fmt(args)?;
     Ok(())

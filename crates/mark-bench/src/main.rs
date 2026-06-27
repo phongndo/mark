@@ -70,6 +70,10 @@ enum BenchCommand {
     Fixtures(FixturesArgs),
     #[command(about = "Measure patch loading, TUI rendering, and syntax highlighting")]
     Measure(MeasureArgs),
+    #[command(about = "Measure a real Git repository diff")]
+    MeasureRepo(MeasureRepoArgs),
+    #[command(about = "Measure an existing patch file")]
+    MeasurePatch(MeasurePatchArgs),
     #[command(about = "Compare full editor reload with path-scoped editor reload")]
     EditorReload(EditorReloadArgs),
 }
@@ -126,6 +130,59 @@ struct MeasureArgs {
     #[arg(long, default_value_t = 20)]
     scroll_step: usize,
     /// Maximum measured scroll positions per scenario and mode.
+    #[arg(long, default_value_t = 200)]
+    max_scroll_steps: usize,
+    /// Emit JSON instead of a human table.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Parser)]
+struct MeasureRepoArgs {
+    /// Repository whose worktree diff should be measured.
+    #[arg(long, value_name = "DIR")]
+    repo: PathBuf,
+    /// Exclude untracked files from the measured diff.
+    #[arg(long)]
+    no_untracked: bool,
+    /// Language to enable for the syntax run. Repeat to enable several languages.
+    #[arg(long = "syntax-language", value_name = "LANG")]
+    syntax_languages: Vec<String>,
+    /// Terminal width used by the synthetic TUI renderer.
+    #[arg(long, default_value_t = 160)]
+    width: usize,
+    /// Visible rows used by the synthetic TUI renderer.
+    #[arg(long, default_value_t = 40)]
+    viewport_rows: usize,
+    /// Row delta between measured scroll positions.
+    #[arg(long, default_value_t = 20)]
+    scroll_step: usize,
+    /// Maximum measured scroll positions per mode.
+    #[arg(long, default_value_t = 200)]
+    max_scroll_steps: usize,
+    /// Emit JSON instead of a human table.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Parser)]
+struct MeasurePatchArgs {
+    /// Unified diff patch file to measure.
+    #[arg(value_name = "PATCH")]
+    patch: PathBuf,
+    /// Language to enable for the syntax run. Repeat to enable several languages.
+    #[arg(long = "syntax-language", value_name = "LANG")]
+    syntax_languages: Vec<String>,
+    /// Terminal width used by the synthetic TUI renderer.
+    #[arg(long, default_value_t = 160)]
+    width: usize,
+    /// Visible rows used by the synthetic TUI renderer.
+    #[arg(long, default_value_t = 40)]
+    viewport_rows: usize,
+    /// Row delta between measured scroll positions.
+    #[arg(long, default_value_t = 20)]
+    scroll_step: usize,
+    /// Maximum measured scroll positions per mode.
     #[arg(long, default_value_t = 200)]
     max_scroll_steps: usize,
     /// Emit JSON instead of a human table.
@@ -332,6 +389,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     match cli.command {
         BenchCommand::Fixtures(args) => generate_fixtures(args)?,
         BenchCommand::Measure(args) => measure_fixtures(args)?,
+        BenchCommand::MeasureRepo(args) => measure_repo(args)?,
+        BenchCommand::MeasurePatch(args) => measure_patch(args)?,
         BenchCommand::EditorReload(args) => measure_editor_reload(args)?,
     }
     Ok(())
@@ -393,8 +452,8 @@ struct MeasureOptionsReport {
 
 #[derive(Debug, Serialize)]
 struct MeasureRunReport {
-    scenario: &'static str,
-    mode: &'static str,
+    scenario: String,
+    mode: String,
     patch_bytes: u64,
     load_micros: u128,
     rss_before_bytes: Option<u64>,
@@ -462,6 +521,67 @@ struct EditorReloadReport {
     full_avg_micros: u128,
     scoped_avg_micros: u128,
     speedup: Option<f64>,
+}
+
+trait DiffBenchmarkSelection {
+    fn syntax_languages(&self) -> &[String];
+    fn width(&self) -> usize;
+    fn viewport_rows(&self) -> usize;
+    fn scroll_step(&self) -> usize;
+    fn max_scroll_steps(&self) -> usize;
+    fn json(&self) -> bool;
+}
+
+impl DiffBenchmarkSelection for MeasureRepoArgs {
+    fn syntax_languages(&self) -> &[String] {
+        &self.syntax_languages
+    }
+
+    fn width(&self) -> usize {
+        self.width
+    }
+
+    fn viewport_rows(&self) -> usize {
+        self.viewport_rows
+    }
+
+    fn scroll_step(&self) -> usize {
+        self.scroll_step
+    }
+
+    fn max_scroll_steps(&self) -> usize {
+        self.max_scroll_steps
+    }
+
+    fn json(&self) -> bool {
+        self.json
+    }
+}
+
+impl DiffBenchmarkSelection for MeasurePatchArgs {
+    fn syntax_languages(&self) -> &[String] {
+        &self.syntax_languages
+    }
+
+    fn width(&self) -> usize {
+        self.width
+    }
+
+    fn viewport_rows(&self) -> usize {
+        self.viewport_rows
+    }
+
+    fn scroll_step(&self) -> usize {
+        self.scroll_step
+    }
+
+    fn max_scroll_steps(&self) -> usize {
+        self.max_scroll_steps
+    }
+
+    fn json(&self) -> bool {
+        self.json
+    }
 }
 
 fn measure_fixtures(args: MeasureArgs) -> BenchResult<()> {
@@ -595,6 +715,96 @@ fn measure_editor_reload(args: EditorReloadArgs) -> BenchResult<()> {
     Ok(())
 }
 
+fn measure_repo(args: MeasureRepoArgs) -> BenchResult<()> {
+    let repo = args.repo.clone();
+    let diff_options = mark_diff::DiffOptions {
+        repo: Some(repo.clone()),
+        include_untracked: !args.no_untracked,
+        ..mark_diff::DiffOptions::default()
+    };
+    measure_one_diff_source(
+        format!("repo:{}", repo.display()),
+        repo.display().to_string(),
+        None,
+        diff_options,
+        &args,
+    )
+}
+
+fn measure_patch(args: MeasurePatchArgs) -> BenchResult<()> {
+    let patch = args.patch.clone();
+    let patch_bytes = fs::metadata(&patch).ok().map(|metadata| metadata.len());
+    let diff_options = mark_diff::DiffOptions {
+        repo: None,
+        source: mark_diff::DiffSource::Patch(mark_diff::PatchSource::File(patch.clone())),
+        scope: mark_diff::DiffScope::All,
+        include_untracked: false,
+        stat: false,
+    };
+    measure_one_diff_source(
+        format!("patch:{}", patch.display()),
+        patch.display().to_string(),
+        patch_bytes,
+        diff_options,
+        &args,
+    )
+}
+
+fn measure_one_diff_source(
+    scenario: String,
+    fixture_root: String,
+    patch_bytes_hint: Option<u64>,
+    diff_options: mark_diff::DiffOptions,
+    selection: &impl DiffBenchmarkSelection,
+) -> BenchResult<()> {
+    let options = mark_tui::DiffBenchmarkOptions {
+        width: selection.width(),
+        viewport_rows: selection.viewport_rows(),
+        scroll_step: selection.scroll_step(),
+        max_scroll_steps: selection.max_scroll_steps(),
+    };
+    let syntax_languages = selection.syntax_languages().to_vec();
+    let mut runs = Vec::new();
+    runs.push(measure_diff_options_run(
+        scenario.clone(),
+        "plain",
+        &diff_options,
+        None,
+        patch_bytes_hint,
+        options,
+    )?);
+    if !syntax_languages.is_empty() {
+        runs.push(measure_diff_options_run(
+            scenario,
+            "syntax",
+            &diff_options,
+            Some(syntax_languages.clone()),
+            patch_bytes_hint,
+            options,
+        )?);
+    }
+
+    let report = MeasureSuiteReport {
+        version: 1,
+        fixture_root,
+        options: MeasureOptionsReport {
+            width: options.width,
+            viewport_rows: options.viewport_rows,
+            scroll_step: options.scroll_step,
+            max_scroll_steps: options.max_scroll_steps,
+            syntax_languages,
+        },
+        runs,
+    };
+
+    if selection.json() {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        print_measure_report(&report);
+    }
+    Ok(())
+}
+
 fn load_manifest(scenario_dir: &Path) -> BenchResult<FixtureManifest> {
     let bytes = fs::read(scenario_dir.join("manifest.json"))?;
     Ok(serde_json::from_slice(&bytes)?)
@@ -609,15 +819,33 @@ fn measure_fixture_run(
     options: mark_tui::DiffBenchmarkOptions,
 ) -> BenchResult<MeasureRunReport> {
     let patch = scenario_dir.join(&manifest.paths.patch);
-    let load_start = Instant::now();
-    let changeset = mark_diff::load_review_ref(&mark_diff::DiffOptions {
+    let diff_options = mark_diff::DiffOptions {
         repo: None,
         source: mark_diff::DiffSource::Patch(mark_diff::PatchSource::File(patch)),
         scope: mark_diff::DiffScope::All,
         include_untracked: false,
         stat: false,
-    })
-    .map_err(|error| BenchError::Mark(error.to_string()))?;
+    };
+    measure_diff_options_run(
+        scenario.name().to_owned(),
+        mode,
+        &diff_options,
+        syntax_languages,
+        Some(manifest.patch_bytes),
+        options,
+    )
+}
+
+fn measure_diff_options_run(
+    scenario: String,
+    mode: &str,
+    diff_options: &mark_diff::DiffOptions,
+    syntax_languages: Option<Vec<String>>,
+    patch_bytes_hint: Option<u64>,
+    options: mark_tui::DiffBenchmarkOptions,
+) -> BenchResult<MeasureRunReport> {
+    let load_start = Instant::now();
+    let (changeset, patch_bytes) = load_benchmark_changeset(diff_options, patch_bytes_hint)?;
     let load_micros = load_start.elapsed().as_micros();
 
     let rss_before = current_rss_bytes();
@@ -625,9 +853,9 @@ fn measure_fixture_run(
     let rss_after = current_rss_bytes();
 
     Ok(MeasureRunReport {
-        scenario: scenario.name(),
-        mode,
-        patch_bytes: manifest.patch_bytes,
+        scenario,
+        mode: mode.to_owned(),
+        patch_bytes,
         load_micros,
         rss_before_bytes: rss_before,
         rss_after_bytes: rss_after,
@@ -636,6 +864,21 @@ fn measure_fixture_run(
             .map(|(before, after)| after as i128 - before as i128),
         tui: tui_report(tui),
     })
+}
+
+fn load_benchmark_changeset(
+    diff_options: &mark_diff::DiffOptions,
+    patch_bytes_hint: Option<u64>,
+) -> BenchResult<(mark_diff::Changeset, u64)> {
+    match patch_bytes_hint {
+        Some(patch_bytes) => {
+            let changeset = mark_diff::load_review_ref(diff_options)
+                .map_err(|error| BenchError::Mark(error.to_string()))?;
+            Ok((changeset, patch_bytes))
+        }
+        None => mark_diff::load_review_ref_with_patch_bytes(diff_options)
+            .map_err(|error| BenchError::Mark(error.to_string())),
+    }
 }
 
 fn tui_report(report: mark_tui::DiffBenchmarkReport) -> TuiMeasureReport {
@@ -1604,6 +1847,7 @@ fn binary_blob(size: usize, seed: u8) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -1711,6 +1955,26 @@ mod tests {
         );
 
         fs::remove_dir_all(repo).expect("test repo should be removed");
+    }
+
+    #[test]
+    fn load_benchmark_changeset_counts_patch_bytes_without_hint() {
+        let patch = Arc::<[u8]>::from(
+            b"diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n"
+                .as_slice(),
+        );
+        let options = mark_diff::DiffOptions {
+            source: mark_diff::DiffSource::Patch(mark_diff::PatchSource::Stdin(patch.clone())),
+            include_untracked: false,
+            ..mark_diff::DiffOptions::default()
+        };
+
+        let (changeset, patch_bytes) =
+            load_benchmark_changeset(&options, None).expect("changeset should load");
+
+        assert_eq!(patch_bytes, u64::try_from(patch.len()).unwrap());
+        assert_eq!(changeset.files.len(), 1);
+        assert!(changeset.raw_patch.is_empty());
     }
 
     fn temp_test_dir(name: &str) -> PathBuf {

@@ -388,6 +388,37 @@ fn explicit_layout_ignores_saved_layout_preference() {
 }
 
 #[test]
+fn static_explicit_layout_builds_model_before_saved_layout_preference() {
+    let app = DiffApp::new_static_with_explicit_layout_and_settings(
+        DiffOptions::default(),
+        changeset_with_replacement_pair(),
+        DiffLayoutMode::Split,
+        SyntaxStartupMode::Disabled,
+        SyntaxSettings {
+            layout: Some(LayoutSetting::Unified),
+            ..SyntaxSettings::default()
+        },
+    );
+
+    assert_eq!(app.viewport.layout, DiffLayoutMode::Split);
+    assert_eq!(app.viewport.layout_override, Some(DiffLayoutMode::Split));
+    assert!(
+        app.document
+            .model
+            .rows
+            .iter()
+            .any(|row| matches!(row, UiRow::SplitLine { .. }))
+    );
+    assert!(
+        app.document
+            .model
+            .rows
+            .iter()
+            .all(|row| !matches!(row, UiRow::UnifiedLine { .. }))
+    );
+}
+
+#[test]
 fn file_changed_since_compares_target_fingerprint() {
     let dir = temp_test_dir("file-changed-since");
     fs::create_dir_all(&dir).unwrap();

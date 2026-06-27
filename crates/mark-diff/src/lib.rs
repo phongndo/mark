@@ -44,6 +44,10 @@ pub fn load_review_ref(options: &DiffOptions) -> MarkResult<Changeset> {
     load_changeset(options, false)
 }
 
+pub fn load_review_ref_with_patch_bytes(options: &DiffOptions) -> MarkResult<(Changeset, u64)> {
+    load_changeset_with_patch_bytes(options, false)
+}
+
 pub fn load_review_ref_path(options: &DiffOptions, path: &Path) -> MarkResult<Changeset> {
     load_changeset_paths(options, &[path.to_path_buf()], false)
 }
@@ -53,9 +57,18 @@ pub fn load_review_ref_paths(options: &DiffOptions, paths: &[PathBuf]) -> MarkRe
 }
 
 fn load_changeset(options: &DiffOptions, keep_raw_patch: bool) -> MarkResult<Changeset> {
+    load_changeset_with_patch_bytes(options, keep_raw_patch).map(|(changeset, _)| changeset)
+}
+
+fn load_changeset_with_patch_bytes(
+    options: &DiffOptions,
+    keep_raw_patch: bool,
+) -> MarkResult<(Changeset, u64)> {
     let title = diff_title(options);
     let (repo, patch) = diff_patch_bytes(options)?;
-    changeset_from_patch(repo, title, patch, keep_raw_patch)
+    let patch_bytes = u64::try_from(patch.len()).unwrap_or(u64::MAX);
+    let changeset = changeset_from_patch(repo, title, patch, keep_raw_patch)?;
+    Ok((changeset, patch_bytes))
 }
 
 fn load_changeset_paths(
