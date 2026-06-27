@@ -1,5 +1,45 @@
 use super::*;
-use crate::render::compositor::{ComponentEventResult, Compositor, EventComponent};
+use crate::render::compositor::{
+    ComponentEventResult, ComponentId, EventLayer, route_event_through_layers,
+};
+
+type KeyLayer = EventLayer<KeyEvent>;
+
+const KEY_LAYERS: &[KeyLayer] = &[
+    KeyLayer::new(ComponentId::Navigation, handle_navigation_key_layer),
+    KeyLayer::new(
+        ComponentId::ErrorLogResize,
+        handle_error_log_resize_key_layer,
+    ),
+    KeyLayer::new(ComponentId::Prefix, handle_prefix_start_key_layer),
+    KeyLayer::new(ComponentId::GlobalAction, handle_single_global_key_layer),
+    KeyLayer::new(ComponentId::Prefix, handle_pending_prefix_key_layer),
+    KeyLayer::new(ComponentId::ErrorLog, handle_error_log_close_key_layer),
+    KeyLayer::new(ComponentId::OptionsMenu, handle_options_menu_key_layer),
+    KeyLayer::new(
+        ComponentId::ColorSchemePicker,
+        handle_color_scheme_picker_key_layer,
+    ),
+    KeyLayer::new(ComponentId::DiffMenu, handle_diff_menu_key_layer),
+    KeyLayer::new(ComponentId::ReviewInput, handle_review_input_key_layer),
+    KeyLayer::new(ComponentId::CommitMenu, handle_commit_menu_key_layer),
+    KeyLayer::new(ComponentId::BranchMenu, handle_branch_menu_key_layer),
+    KeyLayer::new(ComponentId::HelpMenu, handle_help_menu_key_layer),
+    KeyLayer::new(
+        ComponentId::AnnotationInput,
+        handle_annotation_input_key_layer,
+    ),
+    KeyLayer::new(ComponentId::FilterInput, handle_filter_input_key_layer),
+    KeyLayer::new(
+        ComponentId::MouseScrollReset,
+        handle_mouse_scroll_reset_key_layer,
+    ),
+    KeyLayer::new(ComponentId::QuitKey, handle_quit_key_layer),
+    KeyLayer::new(
+        ComponentId::AnnotationDraftBindings,
+        handle_annotation_save_or_cancel_key_layer,
+    ),
+];
 
 fn key_route_result(should_quit: bool) -> ComponentEventResult {
     if should_quit {
@@ -10,28 +50,7 @@ fn key_route_result(should_quit: bool) -> ComponentEventResult {
 }
 
 fn route_key_through_layers(app: &mut DiffApp, key: KeyEvent) -> MarkResult<ComponentEventResult> {
-    let mut compositor = Compositor::new();
-    compositor.push(EventComponent::key(handle_navigation_key_layer));
-    compositor.push(EventComponent::key(handle_error_log_resize_key_layer));
-    compositor.push(EventComponent::key(handle_prefix_start_key_layer));
-    compositor.push(EventComponent::key(handle_single_global_key_layer));
-    compositor.push(EventComponent::key(handle_pending_prefix_key_layer));
-    compositor.push(EventComponent::key(handle_error_log_close_key_layer));
-    compositor.push(EventComponent::key(handle_options_menu_key_layer));
-    compositor.push(EventComponent::key(handle_color_scheme_picker_key_layer));
-    compositor.push(EventComponent::key(handle_diff_menu_key_layer));
-    compositor.push(EventComponent::key(handle_review_input_key_layer));
-    compositor.push(EventComponent::key(handle_commit_menu_key_layer));
-    compositor.push(EventComponent::key(handle_branch_menu_key_layer));
-    compositor.push(EventComponent::key(handle_help_menu_key_layer));
-    compositor.push(EventComponent::key(handle_annotation_input_key_layer));
-    compositor.push(EventComponent::key(handle_filter_input_key_layer));
-    compositor.push(EventComponent::key(handle_mouse_scroll_reset_key_layer));
-    compositor.push(EventComponent::key(handle_quit_key_layer));
-    compositor.push(EventComponent::key(
-        handle_annotation_save_or_cancel_key_layer,
-    ));
-    compositor.handle_key(key, app)
+    route_event_through_layers(KEY_LAYERS, key, app)
 }
 
 fn handle_annotation_save_or_cancel_key_layer(

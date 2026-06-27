@@ -206,7 +206,6 @@ pub(crate) fn next_layout_setting(setting: LayoutSetting, delta: isize) -> Layou
 pub(crate) enum OptionsMenuItem {
     Layout,
     LiveReload,
-    #[allow(dead_code)] // Legacy settings persistence path; hidden from the options menu.
     ContextExpansion,
     SyntaxHighlighting,
     LineWrapping,
@@ -216,6 +215,10 @@ pub(crate) enum OptionsMenuItem {
     ToastTimeout,
     ToastMaxVisible,
 }
+
+// Construct the legacy-only variant so unused-option linting stays meaningful
+// while this hidden settings-persistence path remains available.
+const _: OptionsMenuItem = OptionsMenuItem::ContextExpansion;
 
 pub(crate) const COMMON_OPTIONS_MENU_ITEMS: &[OptionsMenuItem] = &[
     OptionsMenuItem::Layout,

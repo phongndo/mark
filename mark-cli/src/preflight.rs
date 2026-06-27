@@ -19,14 +19,14 @@ pub(crate) fn reject_pre_subcommand_diff_args(cli: &Cli) -> MarkResult<()> {
 
 fn has_diff_args(args: &args::DiffArgs) -> bool {
     !args.revs.is_empty()
-        || args.repo.is_some()
+        || args.repo.repo.is_some()
         || args.base.is_some()
         || args.staged
         || args.unstaged
         || args.no_untracked
-        || args.no_watch
-        || args.no_syntax
-        || args.stat
+        || args.watch.no_watch
+        || args.display.no_syntax
+        || args.display.stat
 }
 
 pub(crate) fn reject_likely_unknown_command(args: &args::DiffArgs) -> Result<(), CliError> {
@@ -40,7 +40,7 @@ pub(crate) fn reject_likely_unknown_command(args: &args::DiffArgs) -> Result<(),
     } else {
         RevisionKind::Object
     };
-    match revision_status(args.repo.as_deref(), rev, revision_kind) {
+    match revision_status(args.repo.repo.as_deref(), rev, revision_kind) {
         RevisionStatus::Exists => return Ok(()),
         RevisionStatus::Missing => {}
         RevisionStatus::Unknown if looks_like_command(rev) => {}

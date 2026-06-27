@@ -1,5 +1,31 @@
 use super::*;
-use crate::render::compositor::{ComponentEventResult, Compositor, EventComponent};
+use crate::render::compositor::{
+    ComponentEventResult, ComponentId, EventLayer, route_event_through_layers,
+};
+
+type MouseLayer = EventLayer<MouseEvent>;
+
+const MOUSE_LAYERS: &[MouseLayer] = &[
+    MouseLayer::new(ComponentId::DiffView, handle_diff_mouse_layer),
+    MouseLayer::new(
+        ComponentId::ErrorLogResize,
+        handle_error_log_resize_mouse_layer,
+    ),
+    MouseLayer::new(ComponentId::OptionsMenu, handle_options_menu_mouse_layer),
+    MouseLayer::new(
+        ComponentId::ColorSchemePicker,
+        handle_color_scheme_picker_mouse_layer,
+    ),
+    MouseLayer::new(
+        ComponentId::FileSidebarResize,
+        handle_file_sidebar_resize_mouse_layer,
+    ),
+    MouseLayer::new(ComponentId::HelpMenu, handle_help_menu_mouse_layer),
+    MouseLayer::new(
+        ComponentId::OpenMenuScroll,
+        handle_open_menu_scroll_mouse_layer,
+    ),
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MouseScrollDirection {
@@ -106,19 +132,7 @@ fn route_mouse_through_layers(
     app: &mut DiffApp,
     mouse: MouseEvent,
 ) -> MarkResult<ComponentEventResult> {
-    let mut compositor = Compositor::new();
-    compositor.push(EventComponent::mouse(handle_diff_mouse_layer));
-    compositor.push(EventComponent::mouse(handle_error_log_resize_mouse_layer));
-    compositor.push(EventComponent::mouse(handle_options_menu_mouse_layer));
-    compositor.push(EventComponent::mouse(
-        handle_color_scheme_picker_mouse_layer,
-    ));
-    compositor.push(EventComponent::mouse(
-        handle_file_sidebar_resize_mouse_layer,
-    ));
-    compositor.push(EventComponent::mouse(handle_help_menu_mouse_layer));
-    compositor.push(EventComponent::mouse(handle_open_menu_scroll_mouse_layer));
-    compositor.handle_mouse(mouse, app)
+    route_event_through_layers(MOUSE_LAYERS, mouse, app)
 }
 
 fn handle_open_menu_scroll_mouse_layer(

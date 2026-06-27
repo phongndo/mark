@@ -206,11 +206,46 @@ pub(crate) struct SyntaxAvailableArgs {
 }
 
 #[derive(Debug, Args, Default)]
+pub(crate) struct RepoArgs {
+    #[arg(short = 'r', long)]
+    pub(crate) repo: Option<PathBuf>,
+}
+
+#[derive(Debug, Args, Default)]
+pub(crate) struct DisplayArgs {
+    /// Disable syntax highlighting in the interactive diff viewer.
+    #[arg(long = "no-syntax")]
+    pub(crate) no_syntax: bool,
+    #[arg(short = 's', long)]
+    pub(crate) stat: bool,
+}
+
+#[derive(Debug, Args, Default)]
+pub(crate) struct DiffWatchArgs {
+    /// Disable live reload in the interactive diff viewer.
+    #[arg(long = "no-watch")]
+    pub(crate) no_watch: bool,
+}
+
+#[derive(Debug, Args, Default)]
+pub(crate) struct DifftoolWatchArgs {
+    /// Auto-reload when either difftool input file changes.
+    #[arg(long)]
+    pub(crate) watch: bool,
+}
+
+impl DisplayArgs {
+    pub(crate) fn syntax_enabled(&self) -> bool {
+        !self.no_syntax
+    }
+}
+
+#[derive(Debug, Args, Default)]
 pub(crate) struct DiffArgs {
     #[arg(value_name = "REV", num_args = 0..=2)]
     pub(crate) revs: Vec<String>,
-    #[arg(short = 'r', long)]
-    pub(crate) repo: Option<PathBuf>,
+    #[command(flatten)]
+    pub(crate) repo: RepoArgs,
     #[arg(short = 'b', long)]
     pub(crate) base: Option<String>,
     #[arg(long, conflicts_with = "unstaged", conflicts_with_all = ["base", "revs"])]
@@ -219,14 +254,10 @@ pub(crate) struct DiffArgs {
     pub(crate) unstaged: bool,
     #[arg(long = "no-untracked")]
     pub(crate) no_untracked: bool,
-    /// Disable live reload in the interactive diff viewer.
-    #[arg(long = "no-watch")]
-    pub(crate) no_watch: bool,
-    /// Disable syntax highlighting in the interactive diff viewer.
-    #[arg(long = "no-syntax")]
-    pub(crate) no_syntax: bool,
-    #[arg(short = 's', long)]
-    pub(crate) stat: bool,
+    #[command(flatten)]
+    pub(crate) watch: DiffWatchArgs,
+    #[command(flatten)]
+    pub(crate) display: DisplayArgs,
 }
 
 #[derive(Debug, Args, Default)]
@@ -259,16 +290,12 @@ pub(crate) struct DifftoolArgs {
     /// Display path for the compared file, usually Git's $MERGED value.
     #[arg(value_name = "PATH")]
     pub(crate) path: Option<PathBuf>,
-    #[arg(short = 'r', long)]
-    pub(crate) repo: Option<PathBuf>,
-    /// Auto-reload when either difftool input file changes.
-    #[arg(long)]
-    pub(crate) watch: bool,
-    /// Disable syntax highlighting in the interactive diff viewer.
-    #[arg(long = "no-syntax")]
-    pub(crate) no_syntax: bool,
-    #[arg(short = 's', long)]
-    pub(crate) stat: bool,
+    #[command(flatten)]
+    pub(crate) repo: RepoArgs,
+    #[command(flatten)]
+    pub(crate) watch: DifftoolWatchArgs,
+    #[command(flatten)]
+    pub(crate) display: DisplayArgs,
 }
 
 #[derive(Debug, Args, Default)]
@@ -276,13 +303,10 @@ pub(crate) struct ShowArgs {
     /// Revision to show. Defaults to HEAD.
     #[arg(value_name = "REV")]
     pub(crate) rev: Option<String>,
-    #[arg(short = 'r', long)]
-    pub(crate) repo: Option<PathBuf>,
-    /// Disable syntax highlighting in the interactive diff viewer.
-    #[arg(long = "no-syntax")]
-    pub(crate) no_syntax: bool,
-    #[arg(short = 's', long)]
-    pub(crate) stat: bool,
+    #[command(flatten)]
+    pub(crate) repo: RepoArgs,
+    #[command(flatten)]
+    pub(crate) display: DisplayArgs,
 }
 
 #[derive(Debug, Args)]
@@ -290,13 +314,10 @@ pub(crate) struct ReviewArgs {
     /// Hosted review target. Currently supports GitHub pull request numbers or URLs.
     #[arg(value_name = "TARGET")]
     pub(crate) target: String,
-    #[arg(short = 'r', long)]
-    pub(crate) repo: Option<PathBuf>,
-    /// Disable syntax highlighting in the interactive diff viewer.
-    #[arg(long = "no-syntax")]
-    pub(crate) no_syntax: bool,
-    #[arg(short = 's', long)]
-    pub(crate) stat: bool,
+    #[command(flatten)]
+    pub(crate) repo: RepoArgs,
+    #[command(flatten)]
+    pub(crate) display: DisplayArgs,
 }
 
 #[derive(Debug, Args)]
@@ -304,13 +325,10 @@ pub(crate) struct PatchArgs {
     /// Unified diff file to review, or stdin when FILE is `-`.
     #[arg(value_name = "FILE")]
     pub(crate) path: PathBuf,
-    #[arg(short = 'r', long)]
-    pub(crate) repo: Option<PathBuf>,
-    /// Disable syntax highlighting in the interactive diff viewer.
-    #[arg(long = "no-syntax")]
-    pub(crate) no_syntax: bool,
-    #[arg(short = 's', long)]
-    pub(crate) stat: bool,
+    #[command(flatten)]
+    pub(crate) repo: RepoArgs,
+    #[command(flatten)]
+    pub(crate) display: DisplayArgs,
 }
 
 #[derive(Debug, Args)]
@@ -345,7 +363,7 @@ mod tests {
         let cli = parse(&["mark", "--staged", "--stat"]);
         assert!(cli.command.is_none());
         assert!(cli.diff.staged);
-        assert!(cli.diff.stat);
+        assert!(cli.diff.display.stat);
 
         let cli = parse(&["mark", "main", "feature"]);
         assert!(cli.command.is_none());
@@ -363,7 +381,10 @@ mod tests {
         let cli = parse(&["mark", "show", "--stat", "HEAD~1"]);
         assert!(matches!(
             cli.command,
-            Some(Command::Show(ShowArgs { stat: true, .. }))
+            Some(Command::Show(ShowArgs {
+                display: DisplayArgs { stat: true, .. },
+                ..
+            }))
         ));
 
         let cli = parse(&[
@@ -374,7 +395,10 @@ mod tests {
         ]);
         assert!(matches!(
             cli.command,
-            Some(Command::Review(ReviewArgs { stat: true, .. }))
+            Some(Command::Review(ReviewArgs {
+                display: DisplayArgs { stat: true, .. },
+                ..
+            }))
         ));
 
         let cli = parse(&["mark", "patch", "changes.diff"]);
@@ -394,7 +418,7 @@ mod tests {
         ]);
         assert!(matches!(
             cli.command,
-            Some(Command::Difftool(DifftoolArgs { left, right, path: Some(path), watch: true, .. }))
+            Some(Command::Difftool(DifftoolArgs { left, right, path: Some(path), watch: DifftoolWatchArgs { watch: true }, .. }))
                 if left.as_path() == std::path::Path::new("left.rs")
                     && right.as_path() == std::path::Path::new("right.rs")
                     && path.as_path() == std::path::Path::new("src/file.rs")
@@ -403,7 +427,7 @@ mod tests {
         let cli = parse(&["mark", "difftool", "--", "-foo.txt", "--stat"]);
         assert!(matches!(
             cli.command,
-            Some(Command::Difftool(DifftoolArgs { left, right, path: None, stat: false, .. }))
+            Some(Command::Difftool(DifftoolArgs { left, right, path: None, display: DisplayArgs { stat: false, .. }, .. }))
                 if left.as_path() == std::path::Path::new("-foo.txt")
                     && right.as_path() == std::path::Path::new("--stat")
         ));
@@ -411,7 +435,7 @@ mod tests {
         let cli = parse(&["mark", "difftool", "--", "left.tmp", "right.tmp", "--stat"]);
         assert!(matches!(
             cli.command,
-            Some(Command::Difftool(DifftoolArgs { path: Some(path), stat: false, .. }))
+            Some(Command::Difftool(DifftoolArgs { path: Some(path), display: DisplayArgs { stat: false, .. }, .. }))
                 if path.as_path() == std::path::Path::new("--stat")
         ));
 
@@ -420,7 +444,7 @@ mod tests {
         ]);
         assert!(matches!(
             cli.command,
-            Some(Command::Difftool(DifftoolArgs { left, right, path: Some(path), watch: true, .. }))
+            Some(Command::Difftool(DifftoolArgs { left, right, path: Some(path), watch: DifftoolWatchArgs { watch: true }, .. }))
                 if left.as_path() == std::path::Path::new("-foo.txt")
                     && right.as_path() == std::path::Path::new("--stat")
                     && path.as_path() == std::path::Path::new("--merged")

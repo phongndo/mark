@@ -243,7 +243,9 @@ mod tests {
     fn non_command_target_without_repo_is_left_for_git_error() {
         reject_likely_unknown_command(&args::DiffArgs {
             revs: vec!["HEAD".to_owned()],
-            repo: Some(PathBuf::from("/definitely/not/a/repo")),
+            repo: args::RepoArgs {
+                repo: Some(PathBuf::from("/definitely/not/a/repo")),
+            },
             ..args::DiffArgs::default()
         })
         .expect("non-command targets should not hide repository errors");
@@ -257,7 +259,7 @@ mod tests {
 
         reject_likely_unknown_command(&args::DiffArgs {
             revs: vec!["HEAD^{tree}".to_owned(), "HEAD".to_owned()],
-            repo: Some(repo),
+            repo: args::RepoArgs { repo: Some(repo) },
             ..args::DiffArgs::default()
         })
         .expect("plain range operands should accept tree-ish revisions");
@@ -280,7 +282,7 @@ mod tests {
 
         reject_likely_unknown_command(&args::DiffArgs {
             revs: vec!["HEAD^@".to_owned(), "HEAD".to_owned()],
-            repo: Some(repo),
+            repo: args::RepoArgs { repo: Some(repo) },
             ..args::DiffArgs::default()
         })
         .expect("plain range operands should accept multi-object revisions");
@@ -303,7 +305,7 @@ mod tests {
 
         reject_likely_unknown_command(&args::DiffArgs {
             revs: vec!["HEAD~1:src".to_owned(), "HEAD:src".to_owned()],
-            repo: Some(repo),
+            repo: args::RepoArgs { repo: Some(repo) },
             ..args::DiffArgs::default()
         })
         .expect("plain range operands should accept rev:path tree revisions");
@@ -325,7 +327,7 @@ mod tests {
 
         reject_likely_unknown_command(&args::DiffArgs {
             revs: vec!["HEAD~1:file.txt".to_owned(), "HEAD:file.txt".to_owned()],
-            repo: Some(repo),
+            repo: args::RepoArgs { repo: Some(repo) },
             ..args::DiffArgs::default()
         })
         .expect("plain range operands should accept rev:path blob revisions");
@@ -341,7 +343,7 @@ mod tests {
 
         let error = reject_likely_unknown_command(&args::DiffArgs {
             revs: vec!["HEAD^{tree}".to_owned()],
-            repo: Some(repo),
+            repo: args::RepoArgs { repo: Some(repo) },
             ..args::DiffArgs::default()
         })
         .expect_err("single-revision base diffs should still require commit-ish revisions");

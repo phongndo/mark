@@ -1,4 +1,3 @@
-use crossterm::event::{KeyEvent, MouseEvent};
 use mark_core::MarkResult;
 use ratatui::{Frame, layout::Rect};
 
@@ -11,72 +10,86 @@ pub(crate) enum ComponentEventResult {
     Quit,
 }
 
-pub(crate) trait Component {
-    fn render(&mut self, _frame: &mut Frame<'_>, _app: &mut DiffApp) {}
+pub(crate) type EventHandler<E> = fn(E, &mut DiffApp) -> MarkResult<ComponentEventResult>;
 
-    fn handle_key(
-        &mut self,
-        _key: KeyEvent,
-        _app: &mut DiffApp,
-    ) -> MarkResult<ComponentEventResult> {
-        Ok(ComponentEventResult::Ignored)
-    }
+#[derive(Clone, Copy)]
+pub(crate) struct EventLayer<E> {
+    id: ComponentId,
+    handle: EventHandler<E>,
+}
 
-    fn handle_mouse(
-        &mut self,
-        _mouse: MouseEvent,
-        _app: &mut DiffApp,
-    ) -> MarkResult<ComponentEventResult> {
-        Ok(ComponentEventResult::Ignored)
+impl<E> EventLayer<E> {
+    pub(crate) const fn new(id: ComponentId, handle: EventHandler<E>) -> Self {
+        Self { id, handle }
     }
 }
 
-type KeyHandler = fn(KeyEvent, &mut DiffApp) -> MarkResult<ComponentEventResult>;
-type MouseHandler = fn(MouseEvent, &mut DiffApp) -> MarkResult<ComponentEventResult>;
-
-pub(crate) struct EventComponent {
-    handle_key: Option<KeyHandler>,
-    handle_mouse: Option<MouseHandler>,
+pub(crate) fn route_event_through_layers<E: Copy>(
+    layers: &[EventLayer<E>],
+    event: E,
+    app: &mut DiffApp,
+) -> MarkResult<ComponentEventResult> {
+    for layer in layers.iter().rev() {
+        let _component_id = layer.id;
+        let result = (layer.handle)(event, app)?;
+        if !matches!(result, ComponentEventResult::Ignored) {
+            return Ok(result);
+        }
+    }
+    Ok(ComponentEventResult::Ignored)
 }
 
-impl EventComponent {
-    pub(crate) fn key(handle_key: KeyHandler) -> Self {
-        Self {
-            handle_key: Some(handle_key),
-            handle_mouse: None,
-        }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ComponentId {
+    Header,
+    FileSidebar,
+    FilterBar,
+    ErrorLogPanel,
+    Toasts,
+    AnnotationDraftBindings,
+    QuitKey,
+    MouseScrollReset,
+    FilterInput,
+    AnnotationInput,
+    HelpMenu,
+    BranchMenu,
+    CommitMenu,
+    ReviewInput,
+    DiffMenu,
+    ColorSchemePicker,
+    OptionsMenu,
+    ErrorLog,
+    Prefix,
+    GlobalAction,
+    ErrorLogResize,
+    Navigation,
+    OpenMenuScroll,
+    FileSidebarResize,
+    DiffView,
+}
+
+pub(crate) struct AppCtx<'a> {
+    app: &'a mut DiffApp,
+}
+
+impl<'a> AppCtx<'a> {
+    pub(crate) fn new(app: &'a mut DiffApp) -> Self {
+        Self { app }
     }
 
-    pub(crate) fn mouse(handle_mouse: MouseHandler) -> Self {
-        Self {
-            handle_key: None,
-            handle_mouse: Some(handle_mouse),
-        }
+    pub(crate) fn app(&mut self) -> &mut DiffApp {
+        self.app
     }
 }
 
-impl Component for EventComponent {
-    fn handle_key(&mut self, key: KeyEvent, app: &mut DiffApp) -> MarkResult<ComponentEventResult> {
-        match self.handle_key {
-            Some(handle_key) => handle_key(key, app),
-            None => Ok(ComponentEventResult::Ignored),
-        }
-    }
+pub(crate) trait UiComponent {
+    fn id(&self) -> ComponentId;
 
-    fn handle_mouse(
-        &mut self,
-        mouse: MouseEvent,
-        app: &mut DiffApp,
-    ) -> MarkResult<ComponentEventResult> {
-        match self.handle_mouse {
-            Some(handle_mouse) => handle_mouse(mouse, app),
-            None => Ok(ComponentEventResult::Ignored),
-        }
-    }
+    fn render(&mut self, _frame: &mut Frame<'_>, _ctx: &mut AppCtx<'_>) {}
 }
 
 pub(crate) struct Compositor<'a> {
-    layers: Vec<Box<dyn Component + 'a>>,
+    layers: Vec<Box<dyn UiComponent + 'a>>,
 }
 
 impl<'a> Compositor<'a> {
@@ -84,58 +97,41 @@ impl<'a> Compositor<'a> {
         Self { layers: Vec::new() }
     }
 
-    pub(crate) fn push(&mut self, layer: impl Component + 'a) {
+    pub(crate) fn push(&mut self, layer: impl UiComponent + 'a) {
         self.layers.push(Box::new(layer));
     }
 
     pub(crate) fn render(&mut self, frame: &mut Frame<'_>, app: &mut DiffApp) {
         for layer in &mut self.layers {
-            layer.render(frame, app);
+            let _component_id = layer.id();
+            let mut ctx = AppCtx::new(app);
+            layer.render(frame, &mut ctx);
         }
-    }
-
-    pub(crate) fn handle_key(
-        &mut self,
-        key: KeyEvent,
-        app: &mut DiffApp,
-    ) -> MarkResult<ComponentEventResult> {
-        for layer in self.layers.iter_mut().rev() {
-            let result = layer.handle_key(key, app)?;
-            if !matches!(result, ComponentEventResult::Ignored) {
-                return Ok(result);
-            }
-        }
-        Ok(ComponentEventResult::Ignored)
-    }
-
-    pub(crate) fn handle_mouse(
-        &mut self,
-        mouse: MouseEvent,
-        app: &mut DiffApp,
-    ) -> MarkResult<ComponentEventResult> {
-        for layer in self.layers.iter_mut().rev() {
-            let result = layer.handle_mouse(mouse, app)?;
-            if !matches!(result, ComponentEventResult::Ignored) {
-                return Ok(result);
-            }
-        }
-        Ok(ComponentEventResult::Ignored)
     }
 }
 
 pub(crate) struct RectComponent {
+    id: ComponentId,
     area: Rect,
     render: fn(&mut Frame<'_>, &mut DiffApp, Rect),
 }
 
 impl RectComponent {
-    pub(crate) fn new(area: Rect, render: fn(&mut Frame<'_>, &mut DiffApp, Rect)) -> Self {
-        Self { area, render }
+    pub(crate) fn new(
+        id: ComponentId,
+        area: Rect,
+        render: fn(&mut Frame<'_>, &mut DiffApp, Rect),
+    ) -> Self {
+        Self { id, area, render }
     }
 }
 
-impl Component for RectComponent {
-    fn render(&mut self, frame: &mut Frame<'_>, app: &mut DiffApp) {
-        (self.render)(frame, app, self.area);
+impl UiComponent for RectComponent {
+    fn id(&self) -> ComponentId {
+        self.id
+    }
+
+    fn render(&mut self, frame: &mut Frame<'_>, ctx: &mut AppCtx<'_>) {
+        (self.render)(frame, ctx.app(), self.area);
     }
 }

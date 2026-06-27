@@ -110,7 +110,7 @@ impl DiffApp {
         self.sidebar.file_sidebar_resizing = false;
         self.overlays.diff_menu_open = false;
         self.overlays.diff_menu.reset_input();
-        self.overlays.rendered_diff_menu_area = None;
+        self.set_rendered_diff_menu_area(None);
         self.overlays.options_menu_open = false;
         self.close_color_scheme_picker();
         self.close_review_input();

@@ -1,11 +1,7 @@
 use super::*;
 
 impl DiffApp {
-    pub(crate) fn copy_marks_to_terminal_clipboard(&mut self) {
-        let mut stdout = io::stdout().lock();
-        self.copy_marks_to_writer(&mut stdout);
-    }
-
+    #[cfg(test)]
     pub(crate) fn copy_marks_to_writer<W: Write>(&mut self, writer: &mut W) {
         let Some(marks) = self.marks_clipboard_json() else {
             self.set_warning_notice("no marks to copy");
