@@ -104,9 +104,46 @@ impl DiffApp {
         layout: DiffLayoutMode,
         syntax_mode: SyntaxStartupMode,
     ) -> Self {
-        Self::new_with_syntax_and_layout_settings(options, changeset, layout, syntax_mode, true)
+        Self::new_with_syntax_and_layout_settings(
+            options,
+            changeset,
+            layout,
+            syntax_mode,
+            true,
+            true,
+        )
     }
 
+    pub(crate) fn new_static_with_syntax(
+        options: DiffOptions,
+        changeset: Changeset,
+        layout: DiffLayoutMode,
+        syntax_mode: SyntaxStartupMode,
+    ) -> Self {
+        Self::new_with_syntax_and_layout_settings(
+            options,
+            changeset,
+            layout,
+            syntax_mode,
+            true,
+            false,
+        )
+    }
+
+    pub(crate) fn new_static_with_explicit_layout(
+        options: DiffOptions,
+        changeset: Changeset,
+        layout: DiffLayoutMode,
+        syntax_mode: SyntaxStartupMode,
+    ) -> Self {
+        let mut app = Self::new_static_with_syntax(options, changeset, layout, syntax_mode);
+        app.viewport.layout_override = Some(layout);
+        app.overlays.options_menu_draft.layout =
+            layout_setting_from_override(app.viewport.layout_override);
+        app
+    }
+
+    #[cfg(test)]
     pub(crate) fn new_with_explicit_layout(
         options: DiffOptions,
         changeset: Changeset,
@@ -119,6 +156,7 @@ impl DiffApp {
             layout,
             syntax_mode,
             false,
+            true,
         );
         app.viewport.layout_override = Some(layout);
         app.overlays.options_menu_draft.layout =
@@ -132,6 +170,7 @@ impl DiffApp {
         mut layout: DiffLayoutMode,
         syntax_mode: SyntaxStartupMode,
         honor_settings_layout: bool,
+        build_search_index: bool,
     ) -> Self {
         let context_expansions = HashMap::new();
         let context_cache = HashMap::new();
@@ -145,7 +184,11 @@ impl DiffApp {
             layout = setting_layout;
         }
         let model = UiModel::new(&changeset, layout, &context_expansions);
-        let search_index = Arc::new(DiffSearchIndex::new(&changeset));
+        let search_index = Arc::new(if build_search_index {
+            DiffSearchIndex::new(&changeset)
+        } else {
+            DiffSearchIndex::empty()
+        });
         let manual_hunk_focus = model
             .hunk_start_rows
             .first()

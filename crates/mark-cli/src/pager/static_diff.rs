@@ -1,9 +1,12 @@
-use std::sync::Arc;
+use std::{
+    io::{BufWriter, Write},
+    sync::Arc,
+};
 
 use crate::{
     CliResult,
     args::{PagerArgs, PagerLayoutArg},
-    write_stderr, write_stdout_bytes,
+    write_stderr, write_stdout_bytes, write_stdout_io,
 };
 
 use super::{
@@ -15,10 +18,38 @@ const DEFAULT_STATIC_WIDTH: usize = 120;
 const MIN_STATIC_WIDTH: usize = 20;
 
 pub(super) fn write_static_diff(input: &[u8], args: &PagerArgs, color: bool) -> CliResult<()> {
-    let output = static_diff_output(input, args, color)?;
-    write_stdout_bytes(&output)
+    let patch = normalized_patch_input(input);
+    let (prelude, patch) = split_patch_prelude(&patch);
+    let options = patch_options(patch.to_vec());
+    let changeset = match mark_diff::load_review_ref(&options) {
+        Ok(changeset) => changeset,
+        Err(error) => {
+            write_stderr(format_args!(
+                "mark: static pager render failed; falling back to raw diff: {error}\n"
+            ))?;
+            return write_stdout_bytes(&sanitized_terminal_bytes(input));
+        }
+    };
+    if changeset.files.is_empty() {
+        return write_stdout_bytes(&sanitized_terminal_bytes(input));
+    }
+    let pager_options = static_pager_options(args, color);
+    let prelude = sanitized_terminal_bytes(prelude);
+    write_stdout_io(|stdout| {
+        let mut stdout = BufWriter::with_capacity(1024 * 1024, stdout);
+        stdout.write_all(&prelude)?;
+        mark_tui::render_static_changeset_to_writer(
+            options,
+            changeset,
+            pager_options,
+            &mut stdout,
+        )?;
+        stdout.flush()
+    })?;
+    Ok(())
 }
 
+#[cfg(test)]
 pub(super) fn static_diff_output(
     input: &[u8],
     args: &PagerArgs,
@@ -27,16 +58,7 @@ pub(super) fn static_diff_output(
     let patch = normalized_patch_input(input);
     let (prelude, patch) = split_patch_prelude(&patch);
     let options = patch_options(patch.to_vec());
-    let rendered = match mark_tui::render_static_pager(
-        options,
-        mark_tui::StaticPagerOptions {
-            width: static_terminal_width(),
-            layout: args.layout.into(),
-            color,
-            syntax: !args.no_syntax,
-            ..mark_tui::StaticPagerOptions::default()
-        },
-    ) {
+    let rendered = match mark_tui::render_static_pager(options, static_pager_options(args, color)) {
         Ok(rendered) => rendered,
         Err(error) => {
             write_stderr(format_args!(
@@ -52,6 +74,16 @@ pub(super) fn static_diff_output(
         let mut output = sanitized_terminal_bytes(prelude);
         output.extend_from_slice(rendered.as_bytes());
         Ok(output)
+    }
+}
+
+fn static_pager_options(args: &PagerArgs, color: bool) -> mark_tui::StaticPagerOptions {
+    mark_tui::StaticPagerOptions {
+        width: static_terminal_width(),
+        layout: args.layout.into(),
+        color,
+        syntax: !args.no_syntax,
+        ..mark_tui::StaticPagerOptions::default()
     }
 }
 

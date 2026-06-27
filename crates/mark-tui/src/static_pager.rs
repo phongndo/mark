@@ -1,4 +1,4 @@
-use std::{thread, time::Duration};
+use std::{borrow::Cow, io, thread, time::Duration};
 
 use mark_core::MarkResult;
 use mark_diff::{Changeset, DiffOptions};
@@ -65,26 +65,7 @@ pub fn render_static_changeset(
     }
 
     let width = pager_options.width.max(MIN_STATIC_WIDTH);
-    let layout = resolve_static_layout(pager_options.layout, width);
-    let syntax_mode = if pager_options.syntax {
-        SyntaxStartupMode::Config
-    } else {
-        SyntaxStartupMode::Disabled
-    };
-    let mut app = match pager_options.layout {
-        StaticPagerLayout::Auto => {
-            DiffApp::new_with_syntax(diff_options, changeset, layout, syntax_mode)
-        }
-        StaticPagerLayout::Split | StaticPagerLayout::Unified => {
-            DiffApp::new_with_explicit_layout(diff_options, changeset, layout, syntax_mode)
-        }
-    };
-    if pager_options.layout == StaticPagerLayout::Auto {
-        apply_static_auto_layout(&mut app, width);
-    }
-    configure_static_app(&mut app, width);
-    settle_static_syntax(&mut app, pager_options.syntax_timeout);
-
+    let mut app = static_app(diff_options, changeset, pager_options, width);
     let mut output = String::new();
     for row_index in 0..app.document.model.len() {
         let Some(row) = app.document.model.row(row_index) else {
@@ -94,6 +75,67 @@ pub fn render_static_changeset(
         push_ansi_line(&mut output, line, pager_options.color);
     }
     output
+}
+
+pub fn render_static_changeset_to_writer(
+    diff_options: DiffOptions,
+    changeset: Changeset,
+    pager_options: StaticPagerOptions,
+    writer: impl io::Write,
+) -> io::Result<bool> {
+    write_static_changeset(diff_options, changeset, pager_options, writer)
+}
+
+fn write_static_changeset(
+    diff_options: DiffOptions,
+    changeset: Changeset,
+    pager_options: StaticPagerOptions,
+    mut writer: impl io::Write,
+) -> io::Result<bool> {
+    if changeset.files.is_empty() {
+        return Ok(false);
+    }
+
+    let width = pager_options.width.max(MIN_STATIC_WIDTH);
+    let mut app = static_app(diff_options, changeset, pager_options, width);
+    let mut wrote = false;
+    for row_index in 0..app.document.model.len() {
+        let Some(row) = app.document.model.row(row_index) else {
+            continue;
+        };
+        let line = render_row(&mut app, row_index, row, width);
+        write_ansi_line(&mut writer, line, pager_options.color)?;
+        wrote = true;
+    }
+    Ok(wrote)
+}
+
+fn static_app(
+    diff_options: DiffOptions,
+    changeset: Changeset,
+    pager_options: StaticPagerOptions,
+    width: usize,
+) -> DiffApp {
+    let layout = resolve_static_layout(pager_options.layout, width);
+    let syntax_mode = if pager_options.syntax {
+        SyntaxStartupMode::Config
+    } else {
+        SyntaxStartupMode::Disabled
+    };
+    let mut app = match pager_options.layout {
+        StaticPagerLayout::Auto => {
+            DiffApp::new_static_with_syntax(diff_options, changeset, layout, syntax_mode)
+        }
+        StaticPagerLayout::Split | StaticPagerLayout::Unified => {
+            DiffApp::new_static_with_explicit_layout(diff_options, changeset, layout, syntax_mode)
+        }
+    };
+    if pager_options.layout == StaticPagerLayout::Auto {
+        apply_static_auto_layout(&mut app, width);
+    }
+    configure_static_app(&mut app, width);
+    settle_static_syntax(&mut app, pager_options.syntax_timeout);
+    app
 }
 
 fn configure_static_app(app: &mut DiffApp, width: usize) {
@@ -143,24 +185,47 @@ fn settle_static_syntax(app: &mut DiffApp, timeout: Duration) {
 fn push_ansi_line(output: &mut String, line: Line<'_>, color: bool) {
     for span in line.spans {
         let text = sanitize_terminal_fragment(&span.content);
-        if text.is_empty() {
+        if text.as_ref().is_empty() {
             continue;
         }
         if color {
             let style = line.style.patch(span.style);
             let start = ansi_style_start(style);
             if start.is_empty() {
-                output.push_str(&text);
+                output.push_str(text.as_ref());
             } else {
                 output.push_str(&start);
-                output.push_str(&text);
+                output.push_str(text.as_ref());
                 output.push_str("\x1b[0m");
             }
         } else {
-            output.push_str(&text);
+            output.push_str(text.as_ref());
         }
     }
     output.push('\n');
+}
+
+fn write_ansi_line(mut writer: impl io::Write, line: Line<'_>, color: bool) -> io::Result<()> {
+    for span in line.spans {
+        let text = sanitize_terminal_fragment(&span.content);
+        if text.as_ref().is_empty() {
+            continue;
+        }
+        if color {
+            let style = line.style.patch(span.style);
+            let start = ansi_style_start(style);
+            if start.is_empty() {
+                writer.write_all(text.as_ref().as_bytes())?;
+            } else {
+                writer.write_all(start.as_bytes())?;
+                writer.write_all(text.as_ref().as_bytes())?;
+                writer.write_all(b"\x1b[0m")?;
+            }
+        } else {
+            writer.write_all(text.as_ref().as_bytes())?;
+        }
+    }
+    writer.write_all(b"\n")
 }
 
 fn ansi_style_start(style: Style) -> String {
@@ -233,18 +298,28 @@ fn indexed_color(prefix: &str, index: u8) -> String {
     format!("{prefix};5;{index}")
 }
 
-fn sanitize_terminal_fragment(text: &str) -> String {
-    let mut output = String::with_capacity(text.len());
-    for character in text.chars() {
-        if character == '\t' {
-            output.push('\t');
-        } else if character.is_control() {
-            output.extend(character.escape_default());
-        } else {
-            output.push(character);
+fn sanitize_terminal_fragment(text: &str) -> Cow<'_, str> {
+    let mut chars = text.char_indices();
+    while let Some((index, character)) = chars.next() {
+        if character == '\t' || !character.is_control() {
+            continue;
         }
+
+        let mut output = String::with_capacity(text.len());
+        output.push_str(&text[..index]);
+        output.extend(character.escape_default());
+        for (_, character) in chars {
+            if character == '\t' {
+                output.push('\t');
+            } else if character.is_control() {
+                output.extend(character.escape_default());
+            } else {
+                output.push(character);
+            }
+        }
+        return Cow::Owned(output);
     }
-    output
+    Cow::Borrowed(text)
 }
 
 #[cfg(test)]
