@@ -1,5 +1,5 @@
 use super::DiffApp;
-use crate::model::FileIndex;
+use crate::model::{FileIndex, HunkIndex};
 use crate::render::sidebar::max_file_sidebar_width;
 use crate::theme::FILE_SIDEBAR_MIN_WIDTH;
 
@@ -95,14 +95,34 @@ impl DiffApp {
             return;
         }
 
-        if let Some(row) = self.document.model.hunk_start_row(next, 0) {
-            self.focus_hunk_row(row);
-            return;
-        }
-
-        self.sidebar.selected_file = FileIndex::new(next);
+        let selected_file = FileIndex::new(next);
+        self.sidebar.selected_file = selected_file;
+        self.runtime.dirty = true;
         if let Some(row) = self.document.model.file_start_row(next) {
-            self.set_scroll(self.scroll_for_model_row(row));
+            let mut scroll = self.scroll_for_model_row(row);
+            let first_hunk_row = self.document.model.hunk_start_row(next, 0);
+            if let Some(hunk_row) = first_hunk_row {
+                scroll = self.scroll_with_model_row_rendered(scroll, hunk_row);
+            }
+            self.clear_manual_hunk_focus();
+            self.set_scroll_with_grep_sync(
+                scroll,
+                true,
+                super::HunkFocusScrollBehavior::ClearOnScroll,
+            );
+            if self.sidebar.selected_file != selected_file {
+                self.sidebar.selected_file = selected_file;
+                self.runtime.dirty = true;
+            }
+            if let Some(hunk_row) = first_hunk_row
+                && self.model_row_rendered_at_scroll(
+                    self.viewport.scroll,
+                    self.viewport.viewport_rows,
+                    hunk_row,
+                )
+            {
+                self.viewport.manual_hunk_focus = Some((selected_file, HunkIndex::new(0)));
+            }
         } else {
             self.runtime.dirty = true;
         }

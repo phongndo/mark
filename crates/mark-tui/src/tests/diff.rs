@@ -184,27 +184,49 @@ fn hunk_navigation_includes_expanded_context_before_hunk() {
 }
 
 #[test]
-fn selecting_file_centers_and_focuses_its_first_hunk() {
+fn selecting_file_scrolls_file_to_top_and_focuses_its_first_hunk() {
     let changeset = changeset_with_files(&["a.rs", "b.rs", "c.rs"]);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
     app.set_viewport_rows(7);
 
     app.select_file(1);
 
-    let range = app
-        .document
-        .model
-        .hunk_row_range(1, 0)
-        .expect("selected file hunk should have rows");
-    let hunk_center = range
-        .start
-        .saturating_add(range.end.saturating_sub(range.start).saturating_sub(1) / 2);
     assert_eq!(
-        app.viewport.scroll + viewport_center_offset(app.viewport.viewport_rows),
-        hunk_center
+        app.viewport.scroll,
+        app.document.model.file_start_row(1).unwrap()
     );
     assert_eq!(app.sidebar.selected_file, FILE_1);
     assert_eq!(app.focused_hunk_for_viewport(7), Some((FILE_1, HUNK_0)));
+}
+
+#[test]
+fn selecting_file_keeps_first_hunk_visible_when_header_top_would_hide_it() {
+    let mut changeset = changeset_with_files(&["a.rs", "b.rs"]);
+    {
+        let hunk = &mut changeset.files[1].hunks_mut()[0];
+        hunk.ranges = HunkLineRanges::new(10, 1, 10, 1);
+        hunk.lines = vec![DiffLine::context(10, 10, "line 10".to_owned())];
+    }
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(2);
+
+    let file_start = app
+        .document
+        .model
+        .file_start_row(1)
+        .expect("selected file should have a header row");
+    let hunk_row = app
+        .document
+        .model
+        .hunk_start_row(1, 0)
+        .expect("selected file should have a first hunk");
+    assert!(hunk_row >= file_start.saturating_add(2));
+
+    app.select_file(1);
+
+    assert_eq!(app.sidebar.selected_file, FILE_1);
+    assert!(visible_hunk_keys(&app).contains(&(1, 0)));
+    assert_eq!(app.focused_hunk_for_viewport(2), Some((FILE_1, HUNK_0)));
 }
 
 #[test]
