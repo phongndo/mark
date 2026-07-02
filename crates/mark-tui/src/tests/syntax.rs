@@ -16,14 +16,14 @@ fn syntax_runtime_start_error_disables_syntax_with_visible_diagnostic() {
     let mut error_log = Some("syntax settings ignored: bad theme".to_owned());
 
     let syntax = syntax_runtime_for_diff(
-        Err(MarkError::Usage("bad tree-sitter config".to_owned())),
+        Err(MarkError::Usage("bad syntax config".to_owned())),
         &mut error_log,
     );
 
     assert!(syntax.is_none());
     assert_eq!(
         error_log.as_deref(),
-        Some("syntax settings ignored: bad theme\nsyntax disabled: bad tree-sitter config")
+        Some("syntax settings ignored: bad theme\nsyntax disabled: bad syntax config")
     );
 }
 

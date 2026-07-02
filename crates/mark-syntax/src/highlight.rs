@@ -1,50 +1,12 @@
-use crate::{
-    HIGHLIGHT_NAMES, HighlightedLine, HighlightedText, SyntaxClass, SyntaxSegment,
-    detect_language_name,
-};
-use mark_core::{MarkError, MarkResult};
-use tree_sitter_highlight::HighlightEvent;
+use crate::detect_language_name;
+#[cfg(test)]
+use crate::{HighlightedLine, SyntaxClass, SyntaxSegment};
 
 pub fn detect_language_from_path(path: &str) -> Option<String> {
-    detect_language_name(path).map(|language| language.to_owned())
+    detect_language_name(path)
 }
 
-pub(crate) fn highlighted_text_from_events<'a>(
-    source: &str,
-    highlights: impl Iterator<Item = Result<HighlightEvent, tree_sitter_highlight::Error>> + 'a,
-) -> MarkResult<HighlightedText> {
-    let line_count = source.split('\n').count();
-    let mut lines = vec![HighlightedLine::default(); line_count];
-    let mut line_index = 0;
-    let mut stack = Vec::new();
-
-    for event in highlights {
-        match event
-            .map_err(|error| MarkError::Usage(format!("failed to highlight source: {error}")))?
-        {
-            HighlightEvent::HighlightStart(highlight) => stack.push(highlight.0),
-            HighlightEvent::HighlightEnd => {
-                stack.pop();
-            }
-            HighlightEvent::Source { start, end } => {
-                let class = stack
-                    .last()
-                    .and_then(|index| HIGHLIGHT_NAMES.get(*index))
-                    .and_then(|name| syntax_class(name));
-                push_source_segment(
-                    &mut lines,
-                    &mut line_index,
-                    start,
-                    &source.as_bytes()[start..end],
-                    class,
-                );
-            }
-        }
-    }
-
-    Ok(HighlightedText { lines })
-}
-
+#[cfg(test)]
 pub(crate) fn push_source_segment(
     lines: &mut [HighlightedLine],
     line_index: &mut usize,
@@ -80,6 +42,7 @@ pub(crate) fn push_source_segment(
     );
 }
 
+#[cfg(test)]
 pub(crate) fn push_line_segment(
     lines: &mut [HighlightedLine],
     line_index: usize,
@@ -92,66 +55,27 @@ pub(crate) fn push_line_segment(
         return;
     }
 
-    let text = String::from_utf8_lossy(bytes).into_owned();
     let Some(last) = lines[line_index].segments.last_mut() else {
         lines[line_index].segments.push(SyntaxSegment {
             byte_start,
             byte_end,
-            text,
             class,
         });
         return;
     };
 
     if last.class == class && last.byte_end == byte_start {
-        last.text.push_str(&text);
         last.byte_end = byte_end;
     } else {
         lines[line_index].segments.push(SyntaxSegment {
             byte_start,
             byte_end,
-            text,
             class,
         });
     }
 }
 
+#[cfg(test)]
 pub(crate) fn syntax_class(name: &str) -> Option<SyntaxClass> {
-    let namespace = name.split('.').next().unwrap_or(name);
-    let class = if namespace == "comment" {
-        SyntaxClass::Comment
-    } else if namespace == "keyword" || name == "boolean" {
-        SyntaxClass::Keyword
-    } else if namespace == "string" || name == "character" {
-        SyntaxClass::String
-    } else if namespace == "number" {
-        SyntaxClass::Number
-    } else if namespace == "type" {
-        SyntaxClass::Type
-    } else if namespace == "function" {
-        SyntaxClass::Function
-    } else if namespace == "constructor" {
-        SyntaxClass::Constructor
-    } else if namespace == "constant" {
-        SyntaxClass::Constant
-    } else if namespace == "property" {
-        SyntaxClass::Property
-    } else if namespace == "punctuation" {
-        SyntaxClass::Punctuation
-    } else if namespace == "operator" {
-        SyntaxClass::Operator
-    } else if namespace == "tag" {
-        SyntaxClass::Tag
-    } else if namespace == "attribute" {
-        SyntaxClass::Attribute
-    } else if namespace == "module" || namespace == "namespace" {
-        SyntaxClass::Module
-    } else if namespace == "label" {
-        SyntaxClass::Label
-    } else if namespace == "variable" {
-        SyntaxClass::Variable
-    } else {
-        return None;
-    };
-    Some(class)
+    mark_textmate::classify_scope_name(name)
 }

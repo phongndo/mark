@@ -12,12 +12,11 @@ pub use language::{
     enabled_languages, installed_languages, language_statuses, remove_languages, update_languages,
 };
 pub use paths::{
-    cache_dir, colorscheme_dir, config_path, load_settings, parsers_dir, queries_dir,
-    settings_path, settings_write_path,
+    cache_dir, colorscheme_dir, config_path, load_settings, settings_path, settings_write_path,
 };
-pub use storage::run_validation_child_from_env;
 pub use types::*;
 
+#[cfg(test)]
 pub(crate) use highlight::*;
 #[cfg(test)]
 pub(crate) use language::*;

@@ -1,8 +1,8 @@
 use std::{fs, path::PathBuf};
 
 use crate::{
-    COLORSCHEME_DIR, CONFIG_DIR, CONFIG_FILE, LEGACY_SETTINGS_FILE, PARSER_DIR, QUERY_DIR,
-    SETTINGS_FILE, SyntaxSettings, config_home, parse_settings,
+    COLORSCHEME_DIR, CONFIG_DIR, CONFIG_FILE, LEGACY_SETTINGS_FILE, SETTINGS_FILE, SyntaxSettings,
+    config_home, parse_settings,
 };
 use mark_core::{MarkError, MarkResult};
 
@@ -40,14 +40,6 @@ pub fn colorscheme_dir() -> MarkResult<PathBuf> {
     config_home().map(|path| path.join(CONFIG_DIR).join(COLORSCHEME_DIR))
 }
 
-pub fn queries_dir() -> MarkResult<PathBuf> {
-    config_home().map(|path| path.join(CONFIG_DIR).join(QUERY_DIR))
-}
-
-pub fn parsers_dir() -> MarkResult<PathBuf> {
-    config_home().map(|path| path.join(CONFIG_DIR).join(PARSER_DIR))
-}
-
 pub fn load_settings() -> MarkResult<SyntaxSettings> {
     let mut path = settings_path()?;
     if !path.exists() {
@@ -66,6 +58,5 @@ pub fn load_settings() -> MarkResult<SyntaxSettings> {
 }
 
 pub fn cache_dir() -> MarkResult<String> {
-    tree_sitter_language_pack::cache_dir()
-        .map_err(|error| MarkError::Usage(format!("failed to resolve tree-sitter cache: {error}")))
+    config_home().map(|path| path.join(CONFIG_DIR).join("cache").display().to_string())
 }

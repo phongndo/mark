@@ -53,14 +53,6 @@ pub fn syntax_colorscheme_dir() -> MarkResult<PathBuf> {
     mark_syntax::colorscheme_dir()
 }
 
-pub fn syntax_queries_dir() -> MarkResult<PathBuf> {
-    mark_syntax::queries_dir()
-}
-
-pub fn syntax_parsers_dir() -> MarkResult<PathBuf> {
-    mark_syntax::parsers_dir()
-}
-
 pub fn syntax_doctor() -> MarkResult<SyntaxDoctorReport> {
     mark_syntax::doctor()
 }

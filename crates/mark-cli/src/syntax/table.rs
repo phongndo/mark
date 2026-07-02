@@ -125,11 +125,11 @@ pub(crate) enum SyntaxStatusKind {
 }
 
 pub(crate) fn syntax_status_kind(status: &mark_command::SyntaxLanguageStatus) -> SyntaxStatusKind {
-    if !status.enabled {
+    if !status.enablement.is_enabled() {
         SyntaxStatusKind::Disabled
-    } else if !status.installed || !status.trusted {
+    } else if !status.grammar.is_available() {
         SyntaxStatusKind::Error
-    } else if !status.has_highlights {
+    } else if !status.highlighting.is_ready() {
         SyntaxStatusKind::Warning
     } else {
         SyntaxStatusKind::Ready
@@ -137,23 +137,14 @@ pub(crate) fn syntax_status_kind(status: &mark_command::SyntaxLanguageStatus) ->
 }
 
 pub(crate) fn syntax_source_label(status: &mark_command::SyntaxLanguageStatus) -> &'static str {
-    if status.source.as_deref() == Some("bundled") {
-        "bundled"
-    } else if status.source.as_deref() == Some("custom") {
-        "custom"
-    } else if status.artifact.is_some() {
-        "cache"
-    } else {
-        "-"
+    match status.grammar {
+        mark_command::SyntaxGrammarState::Bundled => "bundled",
+        mark_command::SyntaxGrammarState::Unavailable => "-",
     }
 }
 
 pub(crate) fn syntax_version_label(status: &mark_command::SyntaxLanguageStatus) -> &str {
     status.version.as_deref().unwrap_or("-")
-}
-
-pub(crate) fn short_sha(sha: &str) -> &str {
-    sha.get(..12).unwrap_or(sha)
 }
 
 #[derive(Clone, Copy)]

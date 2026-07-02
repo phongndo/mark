@@ -15,8 +15,6 @@ pub(crate) fn syntax(command: SyntaxCommand) -> CliResult<()> {
             let result = mark_command::syntax_add_with_options(
                 &args.languages,
                 mark_command::SyntaxAddOptions {
-                    parser: args.parser,
-                    query: args.query,
                     extensions: args.extensions,
                     filenames: args.filenames,
                 },
@@ -44,8 +42,8 @@ pub(crate) fn syntax(command: SyntaxCommand) -> CliResult<()> {
         SyntaxCommand::Clean => {
             let result = mark_command::syntax_clean_cache()?;
             write_stdout(format_args!(
-                "removed {} parser artifacts and {} checksum records\n",
-                result.parser_artifacts_removed, result.artifact_records_removed
+                "removed {} stale language config entries\n",
+                result.stale_records_removed
             ))?;
             write_stdout(format_args!(
                 "kept {} enabled-language config entries\n",
@@ -68,14 +66,6 @@ pub(crate) fn syntax(command: SyntaxCommand) -> CliResult<()> {
             write_stdout(format_args!(
                 "colorscheme {}\n",
                 mark_command::syntax_colorscheme_dir()?.display()
-            ))?;
-            write_stdout(format_args!(
-                "queries     {}\n",
-                mark_command::syntax_queries_dir()?.display()
-            ))?;
-            write_stdout(format_args!(
-                "parsers     {}\n",
-                mark_command::syntax_parsers_dir()?.display()
             ))?;
         }
         SyntaxCommand::Doctor => {

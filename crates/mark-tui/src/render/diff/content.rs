@@ -145,16 +145,18 @@ pub(crate) fn content_spans_at_scroll(
         ContentSpanWriter::new(inline, kind, width, theme, horizontal_scroll, span_capacity);
 
     if let Some(syntax) = syntax {
-        let mut byte_start = 0usize;
         for segment in &syntax.segments {
+            let byte_start = segment.byte_start;
+            let byte_end = segment.byte_end;
+            debug_assert!(byte_start <= byte_end);
+            debug_assert!(byte_end <= text.len());
             if !writer.push_segment(
-                &segment.text,
+                &text[byte_start..byte_end],
                 byte_start,
                 syntax_style(segment.class, kind, theme),
             ) {
                 break;
             }
-            byte_start += segment.text.len();
         }
     } else {
         writer.push_segment(text, 0, line_style(kind, theme));
@@ -315,14 +317,22 @@ impl<'a> ContentSpanWriter<'a> {
 }
 
 pub(crate) fn syntax_line_matches_text(syntax: &HighlightedLine, text: &str) -> bool {
-    let mut remaining = text;
+    if !syntax.matches_text(text) {
+        return false;
+    }
+    let mut cursor = 0usize;
     for segment in &syntax.segments {
-        if !remaining.starts_with(&segment.text) {
+        if segment.byte_start != cursor
+            || segment.byte_end < segment.byte_start
+            || segment.byte_end > text.len()
+            || !text.is_char_boundary(segment.byte_start)
+            || !text.is_char_boundary(segment.byte_end)
+        {
             return false;
         }
-        remaining = &remaining[segment.text.len()..];
+        cursor = segment.byte_end;
     }
-    remaining.is_empty()
+    cursor == text.len()
 }
 
 pub(crate) fn syntax_style(

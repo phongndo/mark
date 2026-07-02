@@ -119,11 +119,7 @@ examples:
   cat changes.diff | mark patch -"
     )]
     Patch(PatchArgs),
-    #[command(
-        alias = "ts",
-        alias = "tree-sitter",
-        about = "Manage syntax highlighting languages"
-    )]
+    #[command(alias = "ts", about = "Manage syntax highlighting languages")]
     Syntax {
         #[command(subcommand)]
         command: SyntaxCommand,
@@ -145,7 +141,7 @@ examples:
 pub(crate) enum SyntaxCommand {
     #[command(about = "Install and enable syntax highlighting languages")]
     Add(SyntaxAddArgs),
-    #[command(about = "Update cached syntax highlighting parsers")]
+    #[command(about = "Report bundled syntax highlighting grammar status")]
     Update(SyntaxUpdateArgs),
     #[command(alias = "remove", about = "Remove syntax highlighting languages")]
     Rm(SyntaxLanguagesArgs),
@@ -156,9 +152,9 @@ pub(crate) enum SyntaxCommand {
     List,
     #[command(about = "List syntax highlighting languages")]
     Available(SyntaxAvailableArgs),
-    #[command(about = "Remove cached tree-sitter parser libraries")]
+    #[command(about = "Remove stale syntax language config entries")]
     Clean,
-    #[command(about = "Print tree-sitter cache and user config paths")]
+    #[command(about = "Print syntax cache and user config paths")]
     Path,
     #[command(about = "Validate enabled syntax highlighting languages")]
     Doctor,
@@ -168,12 +164,6 @@ pub(crate) enum SyntaxCommand {
 pub(crate) struct SyntaxAddArgs {
     #[arg(value_name = "LANG", required = true)]
     pub(crate) languages: Vec<String>,
-    /// Register a local tree-sitter parser library for this language.
-    #[arg(long, value_name = "PATH")]
-    pub(crate) parser: Option<PathBuf>,
-    /// Install a local tree-sitter highlights.scm query for this language.
-    #[arg(long, value_name = "PATH")]
-    pub(crate) query: Option<PathBuf>,
     /// Map a file extension to this language. Can be repeated.
     #[arg(long = "ext", value_name = "EXT")]
     pub(crate) extensions: Vec<String>,

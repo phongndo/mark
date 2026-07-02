@@ -160,7 +160,8 @@ Keybindings can be customized in the user config file. See
 
 ## Syntax languages
 
-Core languages are bundled. Extra languages can be installed and managed with:
+Bundled TextMate grammars are enabled by default. If you set `mode = "enabled"`
+for an explicit allow-list, languages can be managed with:
 
 ```sh
 mark syntax add ruby elixir
@@ -173,17 +174,13 @@ mark syntax clean
 mark syntax path
 ```
 
-Custom Tree-sitter support can be registered without rebuilding `mark`:
+Custom extension and filename mappings can be registered without rebuilding
+`mark`:
 
 ```sh
 mark syntax add mylang \
-  --parser ~/parsers/libtree_sitter_mylang.dylib \
-  --query ~/parsers/mylang/highlights.scm \
   --ext mylang
 ```
-
-User highlight queries are read from `~/.config/mark/queries/<lang>/highlights.scm`
-and take precedence over bundled queries.
 
 ## Pi package
 
