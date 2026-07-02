@@ -125,11 +125,11 @@ pub(crate) enum SyntaxStatusKind {
 }
 
 pub(crate) fn syntax_status_kind(status: &mark_command::SyntaxLanguageStatus) -> SyntaxStatusKind {
-    if !status.enablement.is_enabled() {
+    if !status.state.is_enabled() {
         SyntaxStatusKind::Disabled
-    } else if !status.grammar.is_available() {
+    } else if !status.state.is_grammar_available() {
         SyntaxStatusKind::Error
-    } else if !status.highlighting.is_ready() {
+    } else if !status.state.is_highlight_ready() {
         SyntaxStatusKind::Warning
     } else {
         SyntaxStatusKind::Ready
@@ -137,14 +137,19 @@ pub(crate) fn syntax_status_kind(status: &mark_command::SyntaxLanguageStatus) ->
 }
 
 pub(crate) fn syntax_source_label(status: &mark_command::SyntaxLanguageStatus) -> &'static str {
-    match status.grammar {
-        mark_command::SyntaxGrammarState::Bundled => "bundled",
-        mark_command::SyntaxGrammarState::Unavailable => "-",
-    }
+    status
+        .state
+        .grammar()
+        .map(|grammar| grammar.source().as_str())
+        .unwrap_or("-")
 }
 
 pub(crate) fn syntax_version_label(status: &mark_command::SyntaxLanguageStatus) -> &str {
-    status.version.as_deref().unwrap_or("-")
+    status
+        .state
+        .grammar()
+        .map(|grammar| grammar.version())
+        .unwrap_or("-")
 }
 
 #[derive(Clone, Copy)]

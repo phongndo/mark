@@ -8,10 +8,11 @@ pub use mark_diff::{
     RepoArg, RepoRelativePath, RepoRoot, RevSpec, ReviewId, UntrackedMode, WorktreePath,
 };
 pub use mark_syntax::{
-    SyntaxAddOptions, SyntaxAddResult, SyntaxAvailableFilter, SyntaxCleanResult,
-    SyntaxDoctorReport, SyntaxGrammarState, SyntaxHighlightState, SyntaxLanguageEnablement,
+    SyntaxAddOptions, SyntaxAddRequest, SyntaxAddResult, SyntaxAvailableFilter,
+    SyntaxAvailableRuntimeState, SyntaxCleanResult, SyntaxDoctorReport, SyntaxGrammarInfo,
+    SyntaxGrammarSource, SyntaxLanguageRuntimeState, SyntaxLanguageSelection, SyntaxLanguageState,
     SyntaxLanguageStatus, SyntaxLimits, SyntaxMode, SyntaxRemoveResult, SyntaxSettings,
-    SyntaxThemeConfig, SyntaxThemeSource, SyntaxUpdateResult,
+    SyntaxThemeConfig, SyntaxThemeSource, SyntaxUpdateResult, SyntaxUpdateSelection,
 };
 
 pub use config::config_path;

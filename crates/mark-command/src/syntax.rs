@@ -1,8 +1,9 @@
 use std::path::PathBuf;
 
 use crate::{
-    SyntaxAddOptions, SyntaxAddResult, SyntaxAvailableFilter, SyntaxCleanResult,
+    SyntaxAddRequest, SyntaxAddResult, SyntaxAvailableFilter, SyntaxCleanResult,
     SyntaxDoctorReport, SyntaxLanguageStatus, SyntaxRemoveResult, SyntaxUpdateResult,
+    SyntaxUpdateSelection,
 };
 use mark_core::MarkResult;
 
@@ -10,15 +11,12 @@ pub fn syntax_add(languages: &[String]) -> MarkResult<SyntaxAddResult> {
     mark_syntax::add_languages(languages)
 }
 
-pub fn syntax_add_with_options(
-    languages: &[String],
-    options: SyntaxAddOptions,
-) -> MarkResult<SyntaxAddResult> {
-    mark_syntax::add_languages_with_options(languages, options)
+pub fn syntax_add_with_options(request: SyntaxAddRequest) -> MarkResult<SyntaxAddResult> {
+    mark_syntax::add_languages_with_options(request)
 }
 
-pub fn syntax_update(languages: &[String], all: bool) -> MarkResult<SyntaxUpdateResult> {
-    mark_syntax::update_languages(languages, all)
+pub fn syntax_update(selection: SyntaxUpdateSelection) -> MarkResult<SyntaxUpdateResult> {
+    mark_syntax::update_languages(selection)
 }
 
 pub fn syntax_remove(languages: &[String]) -> MarkResult<SyntaxRemoveResult> {

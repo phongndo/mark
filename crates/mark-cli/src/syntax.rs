@@ -24,25 +24,27 @@ mod tests {
         available: bool,
         has_highlights: bool,
     ) -> mark_command::SyntaxLanguageStatus {
+        let runtime = if available {
+            let grammar = mark_command::SyntaxGrammarInfo::bundled("0.0.0");
+            if has_highlights {
+                mark_command::SyntaxLanguageRuntimeState::Ready(grammar)
+            } else {
+                mark_command::SyntaxLanguageRuntimeState::MissingHighlights(grammar)
+            }
+        } else {
+            mark_command::SyntaxLanguageRuntimeState::MissingGrammar
+        };
+        let state = if enabled {
+            mark_command::SyntaxLanguageState::enabled(runtime)
+        } else {
+            let runtime = runtime
+                .into_available()
+                .expect("disabled test status should have an available grammar");
+            mark_command::SyntaxLanguageState::disabled(runtime)
+        };
         mark_command::SyntaxLanguageStatus {
             language: language.to_owned(),
-            enablement: if enabled {
-                mark_command::SyntaxLanguageEnablement::Enabled
-            } else {
-                mark_command::SyntaxLanguageEnablement::Disabled
-            },
-            grammar: if available {
-                mark_command::SyntaxGrammarState::Bundled
-            } else {
-                mark_command::SyntaxGrammarState::Unavailable
-            },
-            highlighting: if has_highlights {
-                mark_command::SyntaxHighlightState::Ready
-            } else {
-                mark_command::SyntaxHighlightState::Unavailable
-            },
-            version: available.then(|| "0.0.0".to_owned()),
-            source: available.then(|| "bundled".to_owned()),
+            state,
         }
     }
 

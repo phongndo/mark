@@ -62,11 +62,10 @@ pub(crate) fn parse_settings(contents: &str) -> Result<SyntaxSettings, toml::de:
 }
 
 pub(crate) fn settings_from_stored(stored: StoredSyntaxSettings) -> SyntaxSettings {
-    let colorscheme = stored.colorscheme.or(stored.theme);
-
     SyntaxSettings {
         mode: stored.mode.unwrap_or_default(),
-        theme: colorscheme
+        theme: stored
+            .colorscheme
             .map(theme_config_from_stored)
             .unwrap_or_default(),
         layout: stored.layout,

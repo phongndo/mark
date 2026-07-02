@@ -166,7 +166,7 @@ pub(crate) fn handle_event(
         Event::Key(key) => handle_key_event(app, key, live_diff, events),
         Event::Mouse(mouse) => {
             let outcome = app.handle_mouse_with_effects(mouse)?;
-            let should_quit = outcome.clone().into_legacy_quit().unwrap_or(false);
+            let should_quit = outcome.handled_quit_request().unwrap_or(false);
             run_event_effects(app, outcome.into_effects(), live_diff, events)?;
             Ok(should_quit)
         }
@@ -196,7 +196,7 @@ fn handle_key_event(
     events: &mut TerminalEventReader,
 ) -> MarkResult<bool> {
     let outcome = app.handle_key_with_effects(key)?;
-    let should_quit = outcome.clone().into_legacy_quit().unwrap_or(false);
+    let should_quit = outcome.handled_quit_request().unwrap_or(false);
     run_event_effects(app, outcome.into_effects(), live_diff, events)?;
     Ok(should_quit)
 }

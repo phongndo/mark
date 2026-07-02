@@ -13,9 +13,9 @@ impl DiffApp {
     #[cfg(test)]
     pub(crate) fn handle_key(&mut self, key: KeyEvent) -> MarkResult<bool> {
         let outcome = self.handle_key_with_effects(key)?;
-        let legacy = outcome.clone().into_legacy_quit().unwrap_or(false);
+        let quit_request = outcome.handled_quit_request().unwrap_or(false);
         self.run_effects(outcome.into_effects())?;
-        Ok(legacy)
+        Ok(quit_request)
     }
 
     pub(crate) fn handle_key_with_effects(&mut self, key: KeyEvent) -> MarkResult<ActionOutcome> {

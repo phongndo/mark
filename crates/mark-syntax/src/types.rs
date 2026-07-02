@@ -14,7 +14,6 @@ use serde::{Deserialize, Serialize};
 pub(crate) const CONFIG_DIR: &str = "mark";
 pub(crate) const CONFIG_FILE: &str = "syntax.json";
 pub(crate) const SETTINGS_FILE: &str = "config.toml";
-pub(crate) const LEGACY_SETTINGS_FILE: &str = "syntax.toml";
 pub(crate) const COLORSCHEME_DIR: &str = "colorscheme";
 pub(crate) const TEXTMATE_BUNDLE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -26,178 +25,18 @@ pub const DEFAULT_HIGHLIGHT_PREFETCH_VIEWPORTS: usize = 1;
 pub const MAX_NOTIFICATION_TIMEOUT_MS: u64 = 10_000;
 
 pub(crate) const CORE_LANGUAGES: &[&str] = &[
-    "asciidoc-asciidoctor",
-    "agda",
-    "angular-html",
-    "angular-ts",
-    "apache-conf",
-    "apl",
-    "arm-assembly",
-    "asm",
-    "astro",
-    "bash",
-    "ballerina",
-    "beancount",
-    "bibtex",
-    "bicep",
-    "blade",
-    "c",
-    "c3",
-    "cadence",
-    "cairo",
-    "chapel",
-    "codeowners",
-    "codeql",
-    "clojure",
-    "cmake",
-    "common-lisp",
-    "coq",
-    "cpp",
-    "csharp",
-    "css",
-    "crystal",
-    "cuda",
-    "cue",
-    "cypher",
-    "dart",
-    "dax",
-    "dhall",
-    "dockerfile",
-    "dockerfile-with-bash",
-    "dotenv",
-    "elixir",
-    "elm",
-    "erlang",
-    "emacs-lisp",
-    "edge",
-    "ejs",
-    "fennel",
-    "fish",
-    "fortran-fixed-form",
-    "fortran-modern",
-    "forth",
-    "f#",
-    "gn",
-    "glsl",
-    "go",
-    "gomod",
-    "gosum",
-    "graphql",
-    "haskell",
-    "handlebars",
-    "hack",
-    "hlsl",
-    "hy",
-    "idris",
-    "html",
-    "html-jinja2",
-    "html-rails",
-    "html-twig",
-    "ini",
-    "java",
-    "java-properties",
-    "javascript",
-    "json",
-    "json-terraform",
-    "jsonnet",
-    "julia",
-    "just",
-    "kotlin",
-    "kusto",
-    "latex",
-    "lean-4",
-    "liquid",
-    "lisp",
-    "llvm",
-    "lua",
-    "make",
-    "markdown",
-    "matlab",
-    "marko",
-    "mdc",
-    "mdx",
-    "mermaid",
-    "meson",
-    "metal",
-    "mipsasm",
-    "mlir",
-    "mojo",
-    "moonbit",
-    "move",
-    "nginx",
-    "nim",
-    "ninja",
-    "nix",
-    "nushell",
-    "objective-c",
-    "objective-c++",
-    "ocaml",
-    "ocamllex",
-    "ocamlyacc",
-    "opencl",
-    "odin",
-    "orgmode",
-    "perl",
-    "php",
-    "pkl",
-    "pony",
-    "powershell",
-    "powerquery",
-    "prisma",
-    "prolog",
-    "pug",
-    "protocol-buffer",
-    "protocol-buffer-text",
-    "python",
-    "qml",
-    "r",
-    "racket",
-    "raku",
-    "razor",
-    "rego",
-    "restructuredtext",
-    "ruby",
-    "ruby-haml",
     "rust",
-    "sas",
-    "scala",
-    "scheme",
-    "scss",
-    "shell-unix-generic",
-    "smalltalk",
-    "sml",
-    "solidity",
-    "sparql",
-    "spirv",
-    "sql",
-    "starlark",
-    "stata",
-    "surrealql",
-    "svelte",
-    "swift",
-    "systemd",
-    "systemverilog",
-    "tablegen",
-    "templ",
-    "terraform",
-    "tex",
-    "toml",
-    "tsx",
-    "twig",
+    "c",
+    "cpp",
+    "python",
     "typescript",
-    "typespec",
-    "v",
-    "vala",
-    "verilog",
-    "vue-component",
-    "vyper",
-    "vhdl",
-    "wasm",
-    "wgsl",
-    "wolfram",
-    "x86-64-assembly",
+    "javascript",
+    "tsx",
+    "bash",
+    "toml",
+    "json",
     "yaml",
-    "zig",
+    "markdown",
 ];
 
 pub(crate) const LANGUAGE_ALIASES: &[(&str, &str)] = &[
@@ -277,7 +116,6 @@ pub(crate) struct StoredLanguageMapping {
 pub(crate) struct StoredSyntaxSettings {
     pub(crate) mode: Option<SyntaxMode>,
     pub(crate) colorscheme: Option<StoredSyntaxThemeConfig>,
-    pub(crate) theme: Option<StoredSyntaxThemeConfig>,
     pub(crate) layout: Option<LayoutSetting>,
     pub(crate) live_reload: Option<bool>,
     pub(crate) syntax_highlighting: Option<bool>,
@@ -749,57 +587,143 @@ impl Default for SyntaxLimits {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SyntaxLanguageEnablement {
-    Enabled,
-    Disabled,
-}
-
-impl SyntaxLanguageEnablement {
-    pub fn is_enabled(&self) -> bool {
-        matches!(self, Self::Enabled)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SyntaxGrammarState {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyntaxGrammarSource {
     Bundled,
-    Unavailable,
 }
 
-impl SyntaxGrammarState {
-    pub fn is_available(&self) -> bool {
-        matches!(self, Self::Bundled)
+impl SyntaxGrammarSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Bundled => "bundled",
+        }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SyntaxHighlightState {
-    Ready,
-    Unavailable,
+pub struct SyntaxGrammarInfo {
+    version: String,
+    source: SyntaxGrammarSource,
 }
 
-impl SyntaxHighlightState {
-    pub fn is_ready(&self) -> bool {
-        matches!(self, Self::Ready)
+impl SyntaxGrammarInfo {
+    pub fn bundled(version: impl Into<String>) -> Self {
+        Self {
+            version: version.into(),
+            source: SyntaxGrammarSource::Bundled,
+        }
+    }
+
+    pub fn version(&self) -> &str {
+        &self.version
+    }
+
+    pub fn source(&self) -> SyntaxGrammarSource {
+        self.source
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SyntaxLanguageRuntimeState {
+    Ready(SyntaxGrammarInfo),
+    MissingHighlights(SyntaxGrammarInfo),
+    MissingGrammar,
+}
+
+impl SyntaxLanguageRuntimeState {
+    pub fn into_available(self) -> Option<SyntaxAvailableRuntimeState> {
+        match self {
+            Self::Ready(grammar) => Some(SyntaxAvailableRuntimeState::Ready(grammar)),
+            Self::MissingHighlights(grammar) => {
+                Some(SyntaxAvailableRuntimeState::MissingHighlights(grammar))
+            }
+            Self::MissingGrammar => None,
+        }
+    }
+
+    pub fn grammar(&self) -> Option<&SyntaxGrammarInfo> {
+        match self {
+            Self::Ready(grammar) | Self::MissingHighlights(grammar) => Some(grammar),
+            Self::MissingGrammar => None,
+        }
+    }
+
+    pub fn is_grammar_available(&self) -> bool {
+        self.grammar().is_some()
+    }
+
+    pub fn is_highlight_ready(&self) -> bool {
+        matches!(self, Self::Ready(_))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SyntaxAvailableRuntimeState {
+    Ready(SyntaxGrammarInfo),
+    MissingHighlights(SyntaxGrammarInfo),
+}
+
+impl SyntaxAvailableRuntimeState {
+    pub fn grammar(&self) -> &SyntaxGrammarInfo {
+        match self {
+            Self::Ready(grammar) | Self::MissingHighlights(grammar) => grammar,
+        }
+    }
+
+    pub fn is_highlight_ready(&self) -> bool {
+        matches!(self, Self::Ready(_))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SyntaxLanguageState {
+    Enabled(SyntaxLanguageRuntimeState),
+    Disabled(SyntaxAvailableRuntimeState),
+}
+
+impl SyntaxLanguageState {
+    pub fn enabled(runtime: SyntaxLanguageRuntimeState) -> Self {
+        Self::Enabled(runtime)
+    }
+
+    pub fn disabled(runtime: SyntaxAvailableRuntimeState) -> Self {
+        Self::Disabled(runtime)
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        matches!(self, Self::Enabled(_))
+    }
+
+    pub fn grammar(&self) -> Option<&SyntaxGrammarInfo> {
+        match self {
+            Self::Enabled(runtime) => runtime.grammar(),
+            Self::Disabled(runtime) => Some(runtime.grammar()),
+        }
+    }
+
+    pub fn is_grammar_available(&self) -> bool {
+        self.grammar().is_some()
+    }
+
+    pub fn is_highlight_ready(&self) -> bool {
+        match self {
+            Self::Enabled(runtime) => runtime.is_highlight_ready(),
+            Self::Disabled(runtime) => runtime.is_highlight_ready(),
+        }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyntaxLanguageStatus {
     pub language: String,
-    pub enablement: SyntaxLanguageEnablement,
-    pub grammar: SyntaxGrammarState,
-    pub highlighting: SyntaxHighlightState,
-    pub version: Option<String>,
-    pub source: Option<String>,
+    pub state: SyntaxLanguageState,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyntaxAddResult {
     pub added: Vec<String>,
     pub already_enabled: Vec<String>,
-    pub without_highlights: Vec<String>,
+    pub unavailable: Vec<String>,
     pub custom_mappings: Vec<String>,
 }
 
@@ -807,6 +731,80 @@ pub struct SyntaxAddResult {
 pub struct SyntaxAddOptions {
     pub extensions: Vec<String>,
     pub filenames: Vec<String>,
+}
+
+impl SyntaxAddOptions {
+    pub fn has_mappings(&self) -> bool {
+        !self.extensions.is_empty() || !self.filenames.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SyntaxAddRequest {
+    Languages(SyntaxLanguageSelection),
+    LanguageWithMappings {
+        language: String,
+        options: SyntaxAddOptions,
+    },
+}
+
+impl SyntaxAddRequest {
+    pub fn from_cli(languages: Vec<String>, options: SyntaxAddOptions) -> MarkResult<Self> {
+        if options.has_mappings() {
+            match languages.as_slice() {
+                [language] => Ok(Self::LanguageWithMappings {
+                    language: language.clone(),
+                    options,
+                }),
+                [] => Err(MarkError::Usage("provide at least one language".to_owned())),
+                _ => Err(MarkError::Usage(
+                    "use --ext or --filename with exactly one language".to_owned(),
+                )),
+            }
+        } else {
+            SyntaxLanguageSelection::new(languages).map(Self::Languages)
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyntaxLanguageSelection {
+    languages: Vec<String>,
+}
+
+impl SyntaxLanguageSelection {
+    pub fn new(languages: Vec<String>) -> MarkResult<Self> {
+        if languages.is_empty() {
+            Err(MarkError::Usage("provide at least one language".to_owned()))
+        } else {
+            Ok(Self { languages })
+        }
+    }
+
+    pub fn as_slice(&self) -> &[String] {
+        &self.languages
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SyntaxUpdateSelection {
+    All,
+    Languages(SyntaxLanguageSelection),
+}
+
+impl SyntaxUpdateSelection {
+    pub fn from_cli(languages: Vec<String>, all: bool) -> MarkResult<Self> {
+        match (all, languages.is_empty()) {
+            (true, true) => Ok(Self::All),
+            (true, false) => Err(MarkError::Usage(
+                "use `mark syntax update --all` without language names".to_owned(),
+            )),
+            (false, true) => Err(MarkError::Usage(
+                "provide at least one language or use --all".to_owned(),
+            )),
+            (false, false) => SyntaxLanguageSelection::new(languages).map(Self::Languages),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -821,7 +819,6 @@ pub enum SyntaxAvailableFilter {
 pub struct SyntaxUpdateResult {
     pub bundled: Vec<String>,
     pub unavailable: Vec<String>,
-    pub without_highlights: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

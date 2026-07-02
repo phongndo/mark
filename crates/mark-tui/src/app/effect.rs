@@ -60,7 +60,7 @@ impl ActionOutcome {
         }
     }
 
-    pub(crate) fn into_legacy_quit(self) -> Option<bool> {
+    pub(crate) fn handled_quit_request(&self) -> Option<bool> {
         match self {
             Self::Ignored => None,
             Self::Consumed { effects } => Some(

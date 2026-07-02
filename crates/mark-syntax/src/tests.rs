@@ -1,24 +1,6 @@
 use super::*;
 use mark_core::MarkError;
-use std::{
-    collections::BTreeSet,
-    env, fs,
-    path::PathBuf,
-    sync::atomic::{AtomicU64, Ordering},
-};
-
-static NEXT_TEST_DIR: AtomicU64 = AtomicU64::new(0);
-
-fn temp_syntax_test_dir(name: &str) -> PathBuf {
-    let path = env::temp_dir().join(format!(
-        "mark-syntax-{name}-{}-{}",
-        std::process::id(),
-        NEXT_TEST_DIR.fetch_add(1, Ordering::Relaxed)
-    ));
-    let _ = fs::remove_dir_all(&path);
-    fs::create_dir_all(&path).expect("test dir should be created");
-    path
-}
+use std::{collections::BTreeSet, path::PathBuf};
 
 #[test]
 fn maps_extensions_to_language_names() {
@@ -161,6 +143,28 @@ fn validates_custom_language_inputs() {
 }
 
 #[test]
+fn syntax_add_request_requires_one_language_for_custom_mappings() {
+    let options = SyntaxAddOptions {
+        extensions: vec!["foo".to_owned()],
+        filenames: Vec::new(),
+    };
+
+    assert!(SyntaxAddRequest::from_cli(vec!["rust".to_owned()], options.clone()).is_ok());
+    assert!(SyntaxAddRequest::from_cli(Vec::new(), options.clone()).is_err());
+    assert!(
+        SyntaxAddRequest::from_cli(vec!["rust".to_owned(), "ruby".to_owned()], options).is_err()
+    );
+}
+
+#[test]
+fn syntax_update_selection_rejects_ambiguous_all_flag() {
+    assert!(SyntaxUpdateSelection::from_cli(Vec::new(), true).is_ok());
+    assert!(SyntaxUpdateSelection::from_cli(vec!["rust".to_owned()], false).is_ok());
+    assert!(SyntaxUpdateSelection::from_cli(Vec::new(), false).is_err());
+    assert!(SyntaxUpdateSelection::from_cli(vec!["rust".to_owned()], true).is_err());
+}
+
+#[test]
 fn textmate_highlights_rust() {
     let mut highlighter = SyntaxHighlighter::new();
 
@@ -225,37 +229,6 @@ fn syntax_settings_default_to_builtin_system_colorscheme() {
     assert!(!settings.transparent_background);
     assert_eq!(settings.diff, DiffSettings::default());
     assert_eq!(settings.limits, SyntaxLimits::default());
-}
-
-#[test]
-fn settings_write_path_preserves_legacy_settings_source() {
-    let dir = temp_syntax_test_dir("settings-write-path");
-    let settings_path = dir.join("config.toml");
-    let legacy_settings_path = dir.join("syntax.toml");
-
-    assert_eq!(
-        crate::paths::settings_write_path_from_paths(
-            settings_path.clone(),
-            legacy_settings_path.clone()
-        ),
-        settings_path
-    );
-
-    fs::write(&legacy_settings_path, "colorscheme = \"ansi\"\n")
-        .expect("legacy settings should be written");
-    assert_eq!(
-        crate::paths::settings_write_path_from_paths(
-            settings_path.clone(),
-            legacy_settings_path.clone()
-        ),
-        legacy_settings_path
-    );
-
-    fs::write(&settings_path, "line_wrapping = true\n").expect("settings should be written");
-    assert_eq!(
-        crate::paths::settings_write_path_from_paths(settings_path.clone(), legacy_settings_path),
-        settings_path
-    );
 }
 
 #[test]
@@ -367,23 +340,6 @@ fn syntax_settings_clamps_zero_context_expansion_to_one() {
 }
 
 #[test]
-fn syntax_settings_supports_legacy_theme_key() {
-    let settings = parse_settings("theme = \"ansi\"\n").expect("legacy theme key should parse");
-
-    assert_eq!(settings.theme.source(), SyntaxThemeSource::Ansi);
-    assert_eq!(settings.theme.name(), None);
-}
-
-#[test]
-fn syntax_settings_prefers_colorscheme_over_legacy_theme() {
-    let settings = parse_settings("colorscheme = \"system\"\ntheme = \"ansi\"\n")
-        .expect("settings should parse");
-
-    assert_eq!(settings.theme.source(), SyntaxThemeSource::Builtin);
-    assert_eq!(settings.theme.name(), Some("system"));
-}
-
-#[test]
 fn syntax_settings_supports_color_overrides() {
     let settings = parse_settings(
         r##"
@@ -491,11 +447,7 @@ fn language_set_falls_back_when_grammar_is_missing() {
 fn doctor_reports_stale_enabled_config() {
     let issues = doctor_issues(&[SyntaxLanguageStatus {
         language: "definitely_not_a_language".to_owned(),
-        enablement: SyntaxLanguageEnablement::Enabled,
-        grammar: SyntaxGrammarState::Unavailable,
-        highlighting: SyntaxHighlightState::Unavailable,
-        version: None,
-        source: None,
+        state: SyntaxLanguageState::enabled(SyntaxLanguageRuntimeState::MissingGrammar),
     }]);
 
     assert_eq!(issues.len(), 1);

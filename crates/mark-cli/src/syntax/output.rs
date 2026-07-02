@@ -11,7 +11,7 @@ pub(crate) fn print_syntax_add_result(result: &mark_command::SyntaxAddResult) ->
     for language in &result.already_enabled {
         write_stdout(format_args!("= enabled {language}\n"))?;
     }
-    for language in &result.without_highlights {
+    for language in &result.unavailable {
         write_stdout(format_args!(
             "warning {language}: no bundled grammar; diff will render plain text\n"
         ))?;
@@ -32,9 +32,6 @@ pub(crate) fn print_syntax_update_result(
         write_stdout(format_args!("= bundled grammar {language}\n"))?;
     }
     for language in &result.unavailable {
-        write_stdout(format_args!("warning {language}: language is not known\n"))?;
-    }
-    for language in &result.without_highlights {
         write_stdout(format_args!(
             "warning {language}: no bundled grammar; diff will render plain text\n"
         ))?;

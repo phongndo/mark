@@ -107,35 +107,20 @@ pub struct HighlightedText {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct LanguageName(String);
+struct LanguageName(String);
 
 impl LanguageName {
-    pub fn new(value: impl Into<String>) -> Option<Self> {
+    fn new(value: impl Into<String>) -> Option<Self> {
         let value = normalize_language_token(&value.into());
         (!value.is_empty()).then_some(Self(value))
     }
 
-    pub fn as_str(&self) -> &str {
+    fn as_str(&self) -> &str {
         &self.0
     }
 
-    pub fn into_string(self) -> String {
+    fn into_string(self) -> String {
         self.0
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum GrammarLookup {
-    Found(LanguageName),
-    Unknown,
-}
-
-impl GrammarLookup {
-    pub fn into_option(self) -> Option<String> {
-        match self {
-            Self::Found(language) => Some(language.into_string()),
-            Self::Unknown => None,
-        }
     }
 }
 

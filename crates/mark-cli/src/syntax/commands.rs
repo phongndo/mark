@@ -12,17 +12,20 @@ use super::{
 pub(crate) fn syntax(command: SyntaxCommand) -> CliResult<()> {
     match command {
         SyntaxCommand::Add(args) => {
-            let result = mark_command::syntax_add_with_options(
-                &args.languages,
+            let request = mark_command::SyntaxAddRequest::from_cli(
+                args.languages,
                 mark_command::SyntaxAddOptions {
                     extensions: args.extensions,
                     filenames: args.filenames,
                 },
             )?;
+            let result = mark_command::syntax_add_with_options(request)?;
             print_syntax_add_result(&result)?;
         }
         SyntaxCommand::Update(args) => {
-            let result = mark_command::syntax_update(&args.languages, args.all)?;
+            let selection =
+                mark_command::SyntaxUpdateSelection::from_cli(args.languages, args.all)?;
+            let result = mark_command::syntax_update(selection)?;
             print_syntax_update_result(&result)?;
         }
         SyntaxCommand::Rm(args) => {
