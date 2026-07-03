@@ -1,5 +1,10 @@
 use super::*;
 use crossterm::event::KeyModifiers;
+use std::{
+    fs,
+    path::Path,
+    sync::{Mutex, OnceLock},
+};
 
 #[test]
 fn keymap_parses_configured_global_and_menu_bindings() {
@@ -96,6 +101,38 @@ fn keymap_preserves_shifted_character_bindings() {
         GlobalAction::Quit,
         KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)
     ));
+}
+
+#[test]
+fn keymap_loads_legacy_syntax_toml_keymaps() {
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let config_home = temp_dir.path();
+
+    with_xdg_config_home(config_home, || {
+        let mark_dir = config_home.join("mark");
+        fs::create_dir_all(&mark_dir).unwrap();
+        fs::write(
+            mark_dir.join("syntax.toml"),
+            r#"
+                theme = "ansi"
+
+                [keymap.global]
+                quit = "x"
+            "#,
+        )
+        .unwrap();
+
+        let keymap = Keymap::load().expect("legacy keymap should load");
+
+        assert!(keymap.matches_single(
+            GlobalAction::Quit,
+            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)
+        ));
+        assert!(!keymap.matches_single(
+            GlobalAction::Quit,
+            KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)
+        ));
+    });
 }
 
 #[test]
@@ -464,4 +501,31 @@ fn keymap_rejects_multi_key_editor_binding() {
     .expect_err("multi-key editor binding should fail");
 
     assert!(error.contains("edit_hunk must be a single key"));
+}
+
+fn with_xdg_config_home<T>(path: &Path, f: impl FnOnce() -> T) -> T {
+    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    let _guard = ENV_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+    let previous = std::env::var_os("XDG_CONFIG_HOME");
+
+    // SAFETY: tests that mutate XDG_CONFIG_HOME serialize through ENV_LOCK and
+    // do not spawn threads while the temporary value is installed.
+    unsafe { std::env::set_var("XDG_CONFIG_HOME", path) };
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+
+    // SAFETY: guarded by ENV_LOCK as above; restore the previous process
+    // environment value before allowing another test to continue.
+    unsafe {
+        match previous {
+            Some(value) => std::env::set_var("XDG_CONFIG_HOME", value),
+            None => std::env::remove_var("XDG_CONFIG_HOME"),
+        }
+    }
+
+    match result {
+        Ok(value) => value,
+        Err(payload) => std::panic::resume_unwind(payload),
+    }
 }

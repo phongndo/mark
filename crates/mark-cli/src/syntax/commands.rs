@@ -12,19 +12,20 @@ use super::{
 pub(crate) fn syntax(command: SyntaxCommand) -> CliResult<()> {
     match command {
         SyntaxCommand::Add(args) => {
-            let result = mark_command::syntax_add_with_options(
-                &args.languages,
+            let request = mark_command::SyntaxAddRequest::from_cli(
+                args.languages,
                 mark_command::SyntaxAddOptions {
-                    parser: args.parser,
-                    query: args.query,
                     extensions: args.extensions,
                     filenames: args.filenames,
                 },
             )?;
+            let result = mark_command::syntax_add_with_options(request)?;
             print_syntax_add_result(&result)?;
         }
         SyntaxCommand::Update(args) => {
-            let result = mark_command::syntax_update(&args.languages, args.all)?;
+            let selection =
+                mark_command::SyntaxUpdateSelection::from_cli(args.languages, args.all)?;
+            let result = mark_command::syntax_update(selection)?;
             print_syntax_update_result(&result)?;
         }
         SyntaxCommand::Rm(args) => {
@@ -44,8 +45,8 @@ pub(crate) fn syntax(command: SyntaxCommand) -> CliResult<()> {
         SyntaxCommand::Clean => {
             let result = mark_command::syntax_clean_cache()?;
             write_stdout(format_args!(
-                "removed {} parser artifacts and {} checksum records\n",
-                result.parser_artifacts_removed, result.artifact_records_removed
+                "removed {} stale language config entries\n",
+                result.stale_records_removed
             ))?;
             write_stdout(format_args!(
                 "kept {} enabled-language config entries\n",
@@ -54,11 +55,7 @@ pub(crate) fn syntax(command: SyntaxCommand) -> CliResult<()> {
         }
         SyntaxCommand::Path => {
             write_stdout(format_args!(
-                "cache       {}\n",
-                mark_command::syntax_cache_dir()?
-            ))?;
-            write_stdout(format_args!(
-                "registry    {}\n",
+                "mappings    {}\n",
                 mark_command::syntax_config_path()?.display()
             ))?;
             write_stdout(format_args!(
@@ -68,14 +65,6 @@ pub(crate) fn syntax(command: SyntaxCommand) -> CliResult<()> {
             write_stdout(format_args!(
                 "colorscheme {}\n",
                 mark_command::syntax_colorscheme_dir()?.display()
-            ))?;
-            write_stdout(format_args!(
-                "queries     {}\n",
-                mark_command::syntax_queries_dir()?.display()
-            ))?;
-            write_stdout(format_args!(
-                "parsers     {}\n",
-                mark_command::syntax_parsers_dir()?.display()
             ))?;
         }
         SyntaxCommand::Doctor => {

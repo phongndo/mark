@@ -13,9 +13,10 @@ mark config
 On XDG systems this is usually `~/.config/mark/config.toml`. `XDG_CONFIG_HOME` is
 honored. Windows uses `APPDATA` when `XDG_CONFIG_HOME` is unset.
 
-Parser registry state is stored separately as `tree-sitter.json` under the same
-`mark` config directory. Parser cache files live under the user cache directory.
-Inspect all syntax paths with:
+Syntax language state is stored separately as `syntax.json` under the same
+`mark` config directory. Bundled TextMate grammars ship with `mark` and do not
+need runtime downloads.
+Inspect syntax mappings, config, and colorscheme paths with:
 
 ```sh
 mark syntax path
@@ -24,7 +25,7 @@ mark syntax path
 ## Example
 
 ```toml
-mode = "enabled"
+mode = "builtin"
 colorscheme = "system"
 transparent_background = false
 layout = "dynamic"
@@ -101,14 +102,14 @@ close = "esc"
 `mode` controls which languages are eligible for syntax highlighting:
 
 ```toml
-mode = "enabled"
+mode = "builtin"
 ```
 
 Supported values:
 
-- `enabled` - core languages plus languages enabled with `mark syntax add`.
-- `builtin` - all bundled languages with parser and highlight support.
-- `all` - bundled languages plus trusted installed parser caches.
+- `builtin` - all bundled languages with TextMate grammar support. This is the default.
+- `enabled` - core languages plus languages enabled with `mark syntax add`, for users who want a smaller explicit allow-list.
+- `all` - currently equivalent to `builtin`; kept for config compatibility.
 
 Use `mark --no-syntax`, `mark diff --no-syntax`, `mark show --no-syntax`, or
 `mark patch --no-syntax changes.diff` to disable syntax highlighting for one run.

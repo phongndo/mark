@@ -140,10 +140,10 @@ pub(crate) fn diff_theme_from_config(config: &SyntaxThemeConfig) -> MarkResult<D
             match builtin_diff_theme(name) {
                 Ok(theme) => Ok(theme),
                 Err(error) => {
-                    if let Some(name) = name {
-                        if let Some(theme) = load_named_colorscheme(name)? {
-                            return Ok(theme);
-                        }
+                    if let Some(name) = name
+                        && let Some(theme) = load_named_colorscheme(name)?
+                    {
+                        return Ok(theme);
                     }
                     Err(error)
                 }
@@ -223,10 +223,10 @@ pub(crate) fn expand_user_path(path: &Path) -> PathBuf {
             .map(PathBuf::from)
             .unwrap_or_else(|| path.to_path_buf());
     }
-    if let Some(rest) = path_text.strip_prefix("~/") {
-        if let Some(home) = env::var_os("HOME") {
-            return PathBuf::from(home).join(rest);
-        }
+    if let Some(rest) = path_text.strip_prefix("~/")
+        && let Some(home) = env::var_os("HOME")
+    {
+        return PathBuf::from(home).join(rest);
     }
     path.to_path_buf()
 }

@@ -21,19 +21,30 @@ mod tests {
     fn status(
         language: &str,
         enabled: bool,
-        installed: bool,
-        trusted: bool,
+        available: bool,
         has_highlights: bool,
     ) -> mark_command::SyntaxLanguageStatus {
+        let runtime = if available {
+            let grammar = mark_command::SyntaxGrammarInfo::bundled("0.0.0");
+            if has_highlights {
+                mark_command::SyntaxLanguageRuntimeState::Ready(grammar)
+            } else {
+                mark_command::SyntaxLanguageRuntimeState::MissingHighlights(grammar)
+            }
+        } else {
+            mark_command::SyntaxLanguageRuntimeState::MissingGrammar
+        };
+        let state = if enabled {
+            mark_command::SyntaxLanguageState::enabled(runtime)
+        } else {
+            let runtime = runtime
+                .into_available()
+                .expect("disabled test status should have an available grammar");
+            mark_command::SyntaxLanguageState::disabled(runtime)
+        };
         mark_command::SyntaxLanguageStatus {
             language: language.to_owned(),
-            enabled,
-            installed,
-            trusted,
-            has_highlights,
-            version: installed.then(|| "1.9.0-rc.18".to_owned()),
-            artifact: None,
-            source: installed.then(|| "bundled".to_owned()),
+            state,
         }
     }
 
@@ -41,9 +52,9 @@ mod tests {
     fn syntax_status_output_uses_compact_table() {
         let output = render_syntax_statuses(
             &[
-                status("rust", true, true, true, true),
-                status("typescript", true, true, true, false),
-                status("elixir", false, true, true, true),
+                status("rust", true, true, true),
+                status("typescript", true, true, false),
+                status("elixir", false, true, true),
             ],
             false,
             list_glyphs(false),
@@ -68,13 +79,12 @@ mod tests {
         assert!(output.contains("-"));
         assert!(!output.contains("enabled"));
         assert!(!output.contains("syntax"));
-        assert!(!output.contains("trusted"));
     }
 
     #[test]
     fn syntax_status_output_centers_unicode_status() {
         let output = render_syntax_statuses(
-            &[status("rust", true, true, true, true)],
+            &[status("rust", true, true, true)],
             false,
             list_glyphs(true),
             None,
@@ -91,7 +101,7 @@ mod tests {
     #[test]
     fn syntax_status_output_truncates_to_terminal_width() {
         let output = render_syntax_statuses(
-            &[status("very-long-language-name", true, true, true, true)],
+            &[status("very-long-language-name", true, true, true)],
             false,
             list_glyphs(false),
             Some(31),

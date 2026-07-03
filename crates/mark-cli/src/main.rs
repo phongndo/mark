@@ -20,10 +20,6 @@ use mark_core::{MarkError, MarkResult};
 use crate::{args::Cli, dispatch::run_cli};
 
 fn main() -> ExitCode {
-    if let Some(exit_code) = syntax_validation_child_exit_code() {
-        return exit_code;
-    }
-
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) if is_clean_exit_error(&error) => ExitCode::SUCCESS,
@@ -48,16 +44,6 @@ fn styled_error_prefix(color: bool) -> &'static str {
     } else {
         "mark:"
     }
-}
-
-fn syntax_validation_child_exit_code() -> Option<ExitCode> {
-    mark_command::run_validation_child_from_env().map(|result| match result {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
-            let _ = write_stderr(format_args!("{error}\n"));
-            ExitCode::from(1)
-        }
-    })
 }
 
 pub(crate) type CliResult<T> = Result<T, CliError>;

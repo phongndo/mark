@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{BTreeSet, HashSet},
     error::Error,
     fmt, fs, io,
     path::{Path, PathBuf},
@@ -74,6 +74,8 @@ enum BenchCommand {
     MeasureRepo(MeasureRepoArgs),
     #[command(about = "Measure an existing patch file")]
     MeasurePatch(MeasurePatchArgs),
+    #[command(about = "Compare raw Mark TextMate highlighting with Shiki on identical files")]
+    SyntaxCompare(SyntaxCompareArgs),
     #[command(about = "Compare full editor reload with path-scoped editor reload")]
     EditorReload(EditorReloadArgs),
 }
@@ -205,6 +207,40 @@ struct EditorReloadArgs {
     #[arg(long, default_value_t = 5)]
     iterations: usize,
     /// Emit JSON instead of a human line.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Parser)]
+struct SyntaxCompareArgs {
+    /// Repository whose changed files should be highlighted. Uses `git diff HEAD`.
+    #[arg(long, value_name = "DIR")]
+    repo: Option<PathBuf>,
+    /// Explicit file to highlight. May be repeated.
+    #[arg(long = "file", value_name = "PATH")]
+    files: Vec<PathBuf>,
+    /// Restrict to languages. Values use Mark canonical language names or aliases.
+    #[arg(long = "language", value_name = "LANG")]
+    languages: Vec<String>,
+    /// Maximum files to include after filtering.
+    #[arg(long, default_value_t = 512)]
+    max_files: usize,
+    /// Maximum total source bytes to include after filtering.
+    #[arg(long, default_value_t = 16 * 1024 * 1024)]
+    max_bytes: usize,
+    /// Number of measured highlight passes.
+    #[arg(long, default_value_t = 1)]
+    iterations: usize,
+    /// Also run Shiki via local target npm install.
+    #[arg(long)]
+    shiki: bool,
+    /// Shiki package version used when --shiki is set.
+    #[arg(long, default_value = "4.3.0")]
+    shiki_version: String,
+    /// Directory used for the local Shiki package and generated scripts.
+    #[arg(long, default_value = "target/shiki-syntax-compare")]
+    shiki_dir: PathBuf,
+    /// Emit JSON instead of a human summary.
     #[arg(long)]
     json: bool,
 }
@@ -382,6 +418,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         BenchCommand::Measure(args) => measure_fixtures(args)?,
         BenchCommand::MeasureRepo(args) => measure_repo(args)?,
         BenchCommand::MeasurePatch(args) => measure_patch(args)?,
+        BenchCommand::SyntaxCompare(args) => syntax_compare(args)?,
         BenchCommand::EditorReload(args) => measure_editor_reload(args)?,
     }
     Ok(())
@@ -512,6 +549,64 @@ struct EditorReloadReport {
     full_avg_micros: u128,
     scoped_avg_micros: u128,
     speedup: Option<f64>,
+}
+
+#[derive(Debug, Serialize)]
+struct SyntaxCompareReport {
+    version: u8,
+    source: SyntaxCompareSourceReport,
+    input: SyntaxCompareInputReport,
+    mark: RawSyntaxEngineReport,
+    shiki: Option<RawSyntaxEngineReport>,
+    notes: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct SyntaxCompareSourceReport {
+    repo: Option<String>,
+    explicit_files: usize,
+    languages: Vec<String>,
+    max_files: usize,
+    max_bytes: usize,
+    iterations: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct SyntaxCompareInputReport {
+    files: usize,
+    bytes: u64,
+    lines: u64,
+    languages: Vec<SyntaxCompareLanguageReport>,
+}
+
+#[derive(Debug, Serialize)]
+struct SyntaxCompareLanguageReport {
+    language: String,
+    files: usize,
+    bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SyntaxCompareInput {
+    path: PathBuf,
+    display_path: String,
+    language: String,
+    shiki_language: String,
+    bytes: u64,
+    lines: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct RawSyntaxEngineReport {
+    engine: String,
+    iterations: usize,
+    files: usize,
+    bytes: u64,
+    lines: u64,
+    tokens: u64,
+    setup_micros: u128,
+    highlight_micros: u128,
+    bytes_per_second: f64,
 }
 
 trait DiffBenchmarkSelection {
@@ -739,6 +834,551 @@ fn measure_patch(args: MeasurePatchArgs) -> BenchResult<()> {
         &args,
     )
 }
+
+fn syntax_compare(args: SyntaxCompareArgs) -> BenchResult<()> {
+    if args.iterations == 0 {
+        return Err(BenchError::Usage(
+            "--iterations must be greater than zero".to_owned(),
+        ));
+    }
+    if args.repo.is_none() && args.files.is_empty() {
+        return Err(BenchError::Usage(
+            "provide --repo or at least one --file".to_owned(),
+        ));
+    }
+
+    let language_filter = canonical_language_filter(&args.languages)?;
+    let inputs = collect_syntax_compare_inputs(&args, &language_filter)?;
+    if inputs.is_empty() {
+        return Err(BenchError::Usage(
+            "no supported syntax inputs after filtering".to_owned(),
+        ));
+    }
+
+    let input_report = syntax_compare_input_report(&inputs);
+    let mark = measure_mark_textmate_raw(&inputs, args.iterations)?;
+    let shiki = if args.shiki {
+        Some(measure_shiki_raw(
+            &inputs,
+            args.iterations,
+            &args.shiki_dir,
+            &args.shiki_version,
+        )?)
+    } else {
+        None
+    };
+    let mut notes = vec![
+        "apples-to-apples raw comparison: both engines highlight the same full source files"
+            .to_owned(),
+        "timings exclude source collection; Shiki npm install and highlighter construction are reported as setup, not highlight time"
+            .to_owned(),
+    ];
+    if args.max_files < usize::MAX || args.max_bytes < usize::MAX {
+        notes.push("input may be capped by --max-files/--max-bytes".to_owned());
+    }
+    let report = SyntaxCompareReport {
+        version: 1,
+        source: SyntaxCompareSourceReport {
+            repo: args.repo.as_ref().map(|repo| repo.display().to_string()),
+            explicit_files: args.files.len(),
+            languages: language_filter.iter().cloned().collect(),
+            max_files: args.max_files,
+            max_bytes: args.max_bytes,
+            iterations: args.iterations,
+        },
+        input: input_report,
+        mark,
+        shiki,
+        notes,
+    };
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        print_syntax_compare_report(&report);
+    }
+
+    Ok(())
+}
+
+fn canonical_language_filter(languages: &[String]) -> BenchResult<BTreeSet<String>> {
+    let mut filter = BTreeSet::new();
+    for language in languages {
+        let canonical = mark_textmate::canonical_language(language).ok_or_else(|| {
+            BenchError::Usage(format!("unsupported syntax language filter: {language}"))
+        })?;
+        filter.insert(canonical);
+    }
+    Ok(filter)
+}
+
+fn collect_syntax_compare_inputs(
+    args: &SyntaxCompareArgs,
+    language_filter: &BTreeSet<String>,
+) -> BenchResult<Vec<SyntaxCompareInput>> {
+    let mut candidates = Vec::new();
+    if let Some(repo) = &args.repo {
+        candidates.extend(changed_repo_files(repo)?);
+    }
+    candidates.extend(args.files.iter().map(|file| (None, file.clone())));
+
+    let mut seen = HashSet::new();
+    let mut inputs = Vec::new();
+    let mut total_bytes = 0usize;
+
+    for (root, path) in candidates {
+        if inputs.len() >= args.max_files || total_bytes >= args.max_bytes {
+            break;
+        }
+        let full_path = root
+            .as_ref()
+            .map_or_else(|| path.clone(), |root| root.join(&path));
+        let dedupe_key = full_path.clone();
+        if !seen.insert(dedupe_key) || !full_path.is_file() {
+            continue;
+        }
+        let display_path = path.display().to_string();
+        let Some(language) = mark_textmate::detect_language_from_path(&display_path) else {
+            continue;
+        };
+        if !language_filter.is_empty() && !language_filter.contains(&language) {
+            continue;
+        }
+        let shiki_language = match shiki_language_name(&language) {
+            Some(shiki_language) => shiki_language.to_owned(),
+            None if args.shiki => continue,
+            None => language.clone(),
+        };
+        let metadata = fs::metadata(&full_path)?;
+        let bytes = usize::try_from(metadata.len()).unwrap_or(usize::MAX);
+        if bytes == 0 || total_bytes.saturating_add(bytes) > args.max_bytes {
+            continue;
+        }
+        let source = fs::read_to_string(&full_path).map_err(|error| {
+            BenchError::Usage(format!(
+                "failed to read UTF-8 source {}: {error}",
+                full_path.display()
+            ))
+        })?;
+        let lines = source.lines().count().max(1) as u64;
+        total_bytes = total_bytes.saturating_add(source.len());
+        inputs.push(SyntaxCompareInput {
+            path: full_path,
+            display_path,
+            language,
+            shiki_language,
+            bytes: source.len() as u64,
+            lines,
+        });
+    }
+
+    Ok(inputs)
+}
+
+fn changed_repo_files(repo: &Path) -> BenchResult<Vec<(Option<PathBuf>, PathBuf)>> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["diff", "--name-only", "--diff-filter=ACMR", "HEAD", "--"])
+        .output()?;
+    if !output.status.success() {
+        return Err(BenchError::Git {
+            command: format!("git -C {} diff --name-only HEAD", repo.display()),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        });
+    }
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| (Some(repo.to_path_buf()), PathBuf::from(line)))
+        .collect())
+}
+
+fn shiki_language_name(language: &str) -> Option<&'static str> {
+    match language {
+        "abap" => Some("abap"),
+        "agda" => Some("agda"),
+        "angular-html" => Some("angular-html"),
+        "angular-ts" => Some("angular-ts"),
+        "apex" => Some("apex"),
+        "apl" => Some("apl"),
+        "ara" => Some("ara"),
+        "astro" => Some("astro"),
+        "ballerina" => Some("ballerina"),
+        "beancount" => Some("beancount"),
+        "berry" => Some("berry"),
+        "bicep" => Some("bicep"),
+        "bird2" => Some("bird2"),
+        "bash" => Some("bash"),
+        "blade" => Some("blade"),
+        "bsl" => Some("bsl"),
+        "asm" | "arm-assembly" | "x86-64-assembly" => Some("asm"),
+        "c" => Some("c"),
+        "c3" => Some("c3"),
+        "cadence" => Some("cadence"),
+        "cairo" => Some("cairo"),
+        "chapel" => Some("chapel"),
+        "clarity" => Some("clarity"),
+        "codeql" => Some("codeql"),
+        "codeowners" => Some("codeowners"),
+        "cobol" => Some("cobol"),
+        "common-lisp" => Some("common-lisp"),
+        "coq" => Some("coq"),
+        "cpp" => Some("cpp"),
+        "csharp" => Some("csharp"),
+        "css" => Some("css"),
+        "crystal" => Some("crystal"),
+        "clojure" => Some("clojure"),
+        "cmake" => Some("cmake"),
+        "cuda" => Some("cuda"),
+        "cue" => Some("cue"),
+        "cypher" => Some("cypher"),
+        "dart" => Some("dart"),
+        "dax" => Some("dax"),
+        "dhall" => Some("dhall"),
+        "dream-maker" => Some("dream-maker"),
+        "dockerfile" => Some("dockerfile"),
+        "dockerfile-with-bash" => Some("dockerfile"),
+        "elixir" => Some("elixir"),
+        "elm" => Some("elm"),
+        "erlang" => Some("erlang"),
+        "emacs-lisp" => Some("emacs-lisp"),
+        "edge" => Some("edge"),
+        "ejs" => Some("erb"),
+        "fennel" => Some("fennel"),
+        "fluent" => Some("fluent"),
+        "forth" => Some("forth"),
+        "gdresource" => Some("gdresource"),
+        "gdshader" => Some("gdshader"),
+        "genie" => Some("genie"),
+        "gherkin" => Some("gherkin"),
+        "gleam" => Some("gleam"),
+        "glimmer-js" => Some("glimmer-js"),
+        "glimmer-ts" => Some("glimmer-ts"),
+        "gn" => Some("gn"),
+        "glsl" => Some("glsl"),
+        "go" => Some("go"),
+        "graphql" => Some("graphql"),
+        "haskell" => Some("haskell"),
+        "hlsl" => Some("hlsl"),
+        "haxe" => Some("haxe"),
+        "hurl" => Some("hurl"),
+        "hxml" => Some("hxml"),
+        "hy" => Some("hy"),
+        "hack" => Some("hack"),
+        "handlebars" => Some("handlebars"),
+        "html" => Some("html"),
+        "html-jinja2" => Some("jinja"),
+        "html-rails" => Some("erb"),
+        "html-twig" => Some("twig"),
+        "imba" => Some("imba"),
+        "jison" => Some("jison"),
+        "java" => Some("java"),
+        "javascript" => Some("javascript"),
+        "json" => Some("json"),
+        "jssm" => Some("jssm"),
+        "just" => Some("just"),
+        "kdl" => Some("kdl"),
+        "kotlin" => Some("kotlin"),
+        "kusto" => Some("kusto"),
+        "latex" => Some("latex"),
+        "lean-4" => Some("lean"),
+        "lisp" => Some("common-lisp"),
+        "liquid" => Some("liquid"),
+        "llvm" => Some("llvm"),
+        "logo" => Some("logo"),
+        "lua" => Some("lua"),
+        "luau" => Some("luau"),
+        "make" => Some("make"),
+        "markdown" => Some("markdown"),
+        "marko" => Some("marko"),
+        "mdc" => Some("mdc"),
+        "mdx" => Some("mdx"),
+        "mermaid" => Some("mermaid"),
+        "meson" => Some("meson"),
+        "metal" => Some("metal"),
+        "mipsasm" => Some("mipsasm"),
+        "mojo" => Some("mojo"),
+        "moonbit" => Some("moonbit"),
+        "move" => Some("move"),
+        "narrat" => Some("narrat"),
+        "nextflow" => Some("nextflow"),
+        "nextflow-groovy" => Some("nextflow-groovy"),
+        "nim" => Some("nim"),
+        "nix" => Some("nix"),
+        "nushell" => Some("nushell"),
+        "objective-c" => Some("objective-c"),
+        "objective-c++" => Some("objective-cpp"),
+        "odin" => Some("odin"),
+        "openscad" => Some("openscad"),
+        "orgmode" => Some("org"),
+        "perl" => Some("perl"),
+        "php" => Some("php"),
+        "pkl" => Some("pkl"),
+        "po" => Some("po"),
+        "polar" => Some("polar"),
+        "pony" => Some("pony"),
+        "powerquery" => Some("powerquery"),
+        "prisma" => Some("prisma"),
+        "python" => Some("python"),
+        "prolog" => Some("prolog"),
+        "pug" => Some("pug"),
+        "qmldir" => Some("qmldir"),
+        "qml" => Some("qml"),
+        "qss" => Some("qss"),
+        "r" => Some("r"),
+        "racket" => Some("racket"),
+        "raku" => Some("raku"),
+        "razor" => Some("razor"),
+        "rel" => Some("rel"),
+        "riscv" => Some("riscv"),
+        "ron" => Some("ron"),
+        "rosmsg" => Some("rosmsg"),
+        "ruby" => Some("ruby"),
+        "ruby-haml" => Some("haml"),
+        "rust" => Some("rust"),
+        "scala" => Some("scala"),
+        "scheme" => Some("scheme"),
+        "sas" => Some("sas"),
+        "sdbl" => Some("sdbl"),
+        "shaderlab" => Some("shaderlab"),
+        "solidity" => Some("solidity"),
+        "soy" => Some("soy"),
+        "sparql" => Some("sparql"),
+        "sql" => Some("sql"),
+        "splunk" => Some("splunk"),
+        "stata" => Some("stata"),
+        "surrealql" => Some("surrealql"),
+        "svelte" => Some("svelte"),
+        "swift" => Some("swift"),
+        "systemd" => Some("systemd"),
+        "systemverilog" => Some("system-verilog"),
+        "talonscript" => Some("talonscript"),
+        "tasl" => Some("tasl"),
+        "templ" => Some("templ"),
+        "terraform" => Some("terraform"),
+        "tex" => Some("tex"),
+        "toml" => Some("toml"),
+        "tsx" => Some("tsx"),
+        "twig" => Some("twig"),
+        "ts-tags" => Some("ts-tags"),
+        "turtle" => Some("turtle"),
+        "typescript" => Some("typescript"),
+        "typespec" => Some("typespec"),
+        "v" => Some("v"),
+        "vala" => Some("vala"),
+        "vue-component" => Some("vue"),
+        "verilog" => Some("verilog"),
+        "vhdl" => Some("vhdl"),
+        "wasm" => Some("wasm"),
+        "wgsl" => Some("wgsl"),
+        "wenyan" => Some("wenyan"),
+        "wit" => Some("wit"),
+        "wolfram" => Some("wolfram"),
+        "xsl" => Some("xsl"),
+        "yaml" => Some("yaml"),
+        "zenscript" => Some("zenscript"),
+        "zig" => Some("zig"),
+        _ => None,
+    }
+}
+
+fn syntax_compare_input_report(inputs: &[SyntaxCompareInput]) -> SyntaxCompareInputReport {
+    let mut languages = BTreeSet::<String>::new();
+    for input in inputs {
+        languages.insert(input.language.clone());
+    }
+    let language_reports = languages
+        .into_iter()
+        .map(|language| {
+            let matching = inputs.iter().filter(|input| input.language == language);
+            let mut files = 0usize;
+            let mut bytes = 0u64;
+            for input in matching {
+                files = files.saturating_add(1);
+                bytes = bytes.saturating_add(input.bytes);
+            }
+            SyntaxCompareLanguageReport {
+                language,
+                files,
+                bytes,
+            }
+        })
+        .collect::<Vec<_>>();
+    SyntaxCompareInputReport {
+        files: inputs.len(),
+        bytes: inputs.iter().map(|input| input.bytes).sum(),
+        lines: inputs.iter().map(|input| input.lines).sum(),
+        languages: language_reports,
+    }
+}
+
+fn measure_mark_textmate_raw(
+    inputs: &[SyntaxCompareInput],
+    iterations: usize,
+) -> BenchResult<RawSyntaxEngineReport> {
+    let setup_start = Instant::now();
+    let _ = mark_textmate::available_languages();
+    let mut highlighter = mark_textmate::TextMateHighlighter::new();
+    let setup_micros = setup_start.elapsed().as_micros();
+
+    let mut sources = Vec::with_capacity(inputs.len());
+    for input in inputs {
+        sources.push(fs::read_to_string(&input.path)?);
+    }
+
+    let start = Instant::now();
+    let mut tokens = 0u64;
+    for _ in 0..iterations {
+        for (input, source) in inputs.iter().zip(&sources) {
+            let highlighted = highlighter
+                .highlight(&input.language, source)
+                .map_err(|error| BenchError::Mark(error.to_string()))?;
+            tokens = tokens.saturating_add(
+                highlighted
+                    .lines
+                    .iter()
+                    .map(|line| line.segments.len() as u64)
+                    .sum::<u64>(),
+            );
+        }
+    }
+    let highlight_micros = start.elapsed().as_micros();
+    let bytes = inputs.iter().map(|input| input.bytes).sum::<u64>();
+    let lines = inputs.iter().map(|input| input.lines).sum::<u64>();
+    Ok(RawSyntaxEngineReport {
+        engine: "mark-textmate".to_owned(),
+        iterations,
+        files: inputs.len(),
+        bytes,
+        lines,
+        tokens,
+        setup_micros,
+        highlight_micros,
+        bytes_per_second: bytes_per_second(bytes, iterations, highlight_micros),
+    })
+}
+
+fn measure_shiki_raw(
+    inputs: &[SyntaxCompareInput],
+    iterations: usize,
+    shiki_dir: &Path,
+    shiki_version: &str,
+) -> BenchResult<RawSyntaxEngineReport> {
+    fs::create_dir_all(shiki_dir)?;
+    let manifest_path = shiki_dir.join("inputs.json");
+    let script_path = shiki_dir.join("syntax-compare.mjs");
+    fs::write(&manifest_path, serde_json::to_vec_pretty(inputs)?)?;
+    fs::write(&script_path, SHIKI_COMPARE_SCRIPT)?;
+
+    let package_spec = format!("shiki@{shiki_version}");
+    let install = Command::new("npm")
+        .args(["install", "--silent", "--no-audit", "--no-fund", "--prefix"])
+        .arg(shiki_dir)
+        .arg(package_spec)
+        .output()?;
+    if !install.status.success() {
+        return Err(BenchError::Usage(format!(
+            "npm install shiki failed: {}",
+            String::from_utf8_lossy(&install.stderr).trim()
+        )));
+    }
+
+    let output = Command::new("node")
+        .arg(&script_path)
+        .arg(&manifest_path)
+        .arg(iterations.to_string())
+        .output()?;
+    if !output.status.success() {
+        return Err(BenchError::Usage(format!(
+            "shiki syntax compare failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    serde_json::from_slice(&output.stdout).map_err(BenchError::Json)
+}
+
+fn bytes_per_second(bytes: u64, iterations: usize, micros: u128) -> f64 {
+    if micros == 0 {
+        return f64::INFINITY;
+    }
+    (bytes as f64 * iterations as f64) / (micros as f64 / 1_000_000.0)
+}
+
+fn print_syntax_compare_report(report: &SyntaxCompareReport) {
+    println!(
+        "inputs: {} files, {}, {} lines",
+        report.input.files,
+        human_bytes(report.input.bytes),
+        report.input.lines
+    );
+    print_raw_syntax_engine(&report.mark);
+    if let Some(shiki) = &report.shiki {
+        print_raw_syntax_engine(shiki);
+        if shiki.highlight_micros > 0 && report.mark.highlight_micros > 0 {
+            println!(
+                "mark/shiki highlight speedup: {:.2}x",
+                shiki.highlight_micros as f64 / report.mark.highlight_micros as f64
+            );
+        }
+    }
+}
+
+fn print_raw_syntax_engine(report: &RawSyntaxEngineReport) {
+    println!(
+        "{:<14} setup={}µs highlight={}µs throughput={}/s tokens={}",
+        report.engine,
+        report.setup_micros,
+        report.highlight_micros,
+        human_bytes(report.bytes_per_second as u64),
+        report.tokens
+    );
+}
+
+const SHIKI_COMPARE_SCRIPT: &str = r#"
+import fs from 'node:fs'
+import { createHighlighter } from 'shiki'
+
+const [manifestPath, iterationsText] = process.argv.slice(2)
+const iterations = Number(iterationsText || '1')
+const inputs = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+const langs = [...new Set(inputs.map(input => input.shiki_language))]
+
+const setupStart = process.hrtime.bigint()
+const highlighter = await createHighlighter({ themes: ['github-dark'], langs })
+const setupMicros = Number((process.hrtime.bigint() - setupStart) / 1000n)
+const sources = inputs.map(input => fs.readFileSync(input.path, 'utf8'))
+
+let tokens = 0
+const start = process.hrtime.bigint()
+for (let iteration = 0; iteration < iterations; iteration++) {
+  for (let index = 0; index < inputs.length; index++) {
+    const result = highlighter.codeToTokens(sources[index], {
+      lang: inputs[index].shiki_language,
+      theme: 'github-dark',
+    })
+    for (const line of result.tokens) tokens += line.length
+  }
+}
+const highlightMicros = Number((process.hrtime.bigint() - start) / 1000n)
+const bytes = inputs.reduce((sum, input) => sum + input.bytes, 0)
+const lines = inputs.reduce((sum, input) => sum + input.lines, 0)
+const bytesPerSecond = highlightMicros === 0
+  ? Number.POSITIVE_INFINITY
+  : (bytes * iterations) / (highlightMicros / 1_000_000)
+
+console.log(JSON.stringify({
+  engine: 'shiki',
+  iterations,
+  files: inputs.length,
+  bytes,
+  lines,
+  tokens,
+  setup_micros: setupMicros,
+  highlight_micros: highlightMicros,
+  bytes_per_second: bytesPerSecond,
+}))
+"#;
 
 fn measure_one_diff_source(
     scenario: String,
@@ -1809,6 +2449,41 @@ mod tests {
     }
 
     #[test]
+    fn syntax_compare_keeps_mark_only_inputs_without_shiki() {
+        let dir = temp_test_dir("syntax-compare-mark-only");
+        fs::create_dir_all(&dir).expect("test directory should be created");
+        let file = dir.join(".gitignore");
+        fs::write(&file, "target/\n").expect("test input should be written");
+
+        let args = syntax_compare_test_args(file.clone(), false);
+        let inputs = collect_syntax_compare_inputs(&args, &BTreeSet::new())
+            .expect("syntax inputs should collect");
+
+        assert_eq!(inputs.len(), 1);
+        assert_eq!(inputs[0].path, file);
+        assert_eq!(inputs[0].language, "git-ignore");
+        assert_eq!(inputs[0].shiki_language, "git-ignore");
+
+        fs::remove_dir_all(dir).expect("test directory should be removed");
+    }
+
+    #[test]
+    fn syntax_compare_skips_mark_only_inputs_when_shiki_requested() {
+        let dir = temp_test_dir("syntax-compare-shiki-only");
+        fs::create_dir_all(&dir).expect("test directory should be created");
+        let file = dir.join(".gitignore");
+        fs::write(&file, "target/\n").expect("test input should be written");
+
+        let args = syntax_compare_test_args(file, true);
+        let inputs = collect_syntax_compare_inputs(&args, &BTreeSet::new())
+            .expect("syntax inputs should collect");
+
+        assert!(inputs.is_empty());
+
+        fs::remove_dir_all(dir).expect("test directory should be removed");
+    }
+
+    #[test]
     fn initialize_repo_pins_deterministic_git_config() {
         let repo = temp_test_dir("git-config");
 
@@ -1845,6 +2520,21 @@ mod tests {
         assert_eq!(patch_bytes, u64::try_from(patch.len()).unwrap());
         assert_eq!(changeset.files.len(), 1);
         assert!(changeset.raw_patch.is_empty());
+    }
+
+    fn syntax_compare_test_args(file: PathBuf, shiki: bool) -> SyntaxCompareArgs {
+        SyntaxCompareArgs {
+            repo: None,
+            files: vec![file],
+            languages: Vec::new(),
+            max_files: usize::MAX,
+            max_bytes: usize::MAX,
+            iterations: 1,
+            shiki,
+            shiki_version: "4.3.0".to_owned(),
+            shiki_dir: PathBuf::from("target/shiki-syntax-compare-test"),
+            json: false,
+        }
     }
 
     fn temp_test_dir(name: &str) -> PathBuf {

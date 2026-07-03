@@ -61,9 +61,11 @@ impl HighlightedSide {
     pub(crate) fn memory_bytes(&self) -> usize {
         self.lines
             .iter()
-            .flat_map(|line| line.segments.iter())
-            .map(|segment| segment.text.len())
-            .sum::<usize>()
-            .saturating_add(self.lines.len() * std::mem::size_of::<HighlightedLine>())
+            .map(|line| {
+                std::mem::size_of::<HighlightedLine>().saturating_add(
+                    line.segments.len() * std::mem::size_of::<mark_syntax::SyntaxSegment>(),
+                )
+            })
+            .sum()
     }
 }

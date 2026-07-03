@@ -1172,10 +1172,10 @@ fn hunk_header_truncates_location_without_collapsing_range_styles() {
 #[test]
 fn content_spans_fall_back_when_syntax_text_mismatches_diff_text() {
     let syntax = HighlightedLine {
+        fingerprint: mark_syntax::LineTextFingerprint::from_text("wrong"),
         segments: vec![mark_syntax::SyntaxSegment {
             byte_start: 0,
             byte_end: 5,
-            text: "wrong".to_owned(),
             class: Some(SyntaxClass::Keyword),
         }],
     };
@@ -2533,23 +2533,21 @@ fn content_spans_layers_inline_emphasis_over_syntax() {
     let text = "let value = 2;";
     let number_start = text.find('2').unwrap();
     let syntax = HighlightedLine {
+        fingerprint: mark_syntax::LineTextFingerprint::from_text(text),
         segments: vec![
             mark_syntax::SyntaxSegment {
                 byte_start: 0,
                 byte_end: 12,
-                text: "let value = ".to_owned(),
                 class: Some(SyntaxClass::Keyword),
             },
             mark_syntax::SyntaxSegment {
                 byte_start: 12,
                 byte_end: 13,
-                text: "2".to_owned(),
                 class: Some(SyntaxClass::Number),
             },
             mark_syntax::SyntaxSegment {
                 byte_start: 13,
                 byte_end: 14,
-                text: ";".to_owned(),
                 class: Some(SyntaxClass::Punctuation),
             },
         ],

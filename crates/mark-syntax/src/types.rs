@@ -1,35 +1,23 @@
-use std::{
-    collections::{BTreeSet, HashMap},
-    path::PathBuf,
-};
+use std::{collections::BTreeSet, path::PathBuf};
 
 use crate::{
     detect_custom_language_from_path, detect_language_name, enabled_language_set_for_mode,
-    has_highlights, highlighted_text_from_events, highlights_query, installed_language_set,
-    is_language_trusted, language_vec_to_set, load_config, load_language_with_config,
-    load_settings, normalize_language_name, trusted_language_set,
+    has_highlights, installed_language_set, language_vec_to_set, load_config, load_settings,
+    normalize_language_name,
 };
 use mark_core::{MarkError, MarkResult};
+pub use mark_textmate::{
+    HighlightedLine, HighlightedText, LineTextFingerprint, SyntaxClass, SyntaxSegment,
+};
 use serde::{Deserialize, Serialize};
-use tree_sitter_highlight::{HighlightConfiguration, Highlighter};
 
 pub(crate) const CONFIG_DIR: &str = "mark";
-pub(crate) const CONFIG_FILE: &str = "tree-sitter.json";
+pub(crate) const CONFIG_FILE: &str = "syntax.json";
+pub(crate) const LEGACY_CONFIG_FILE: &str = "tree-sitter.json";
 pub(crate) const SETTINGS_FILE: &str = "config.toml";
 pub(crate) const LEGACY_SETTINGS_FILE: &str = "syntax.toml";
 pub(crate) const COLORSCHEME_DIR: &str = "colorscheme";
-pub(crate) const QUERY_DIR: &str = "queries";
-pub(crate) const PARSER_DIR: &str = "parsers";
-pub(crate) const LANGUAGE_PACK_VERSION: &str = "1.9.0-rc.18";
-// Lockfile copied from the matching tree-sitter-language-pack GitHub release.
-// Non-bundled parser installs seed this manifest before any download so the
-// release bundle hash is pinned by mark instead of trusted on first use.
-pub(crate) const TRUSTED_PARSER_MANIFEST: &str = include_str!("tree_sitter_parsers_lock.json");
-pub(crate) const TRUSTED_PARSER_MANIFEST_SHA256: &str =
-    "be3db342638e23ceac0844de831ce86baa2d7dacf2666fd42f42619d831da115";
-pub(crate) const ARTIFACT_SOURCE: &str = "github:kreuzberg-dev/tree-sitter-language-pack@parsers.json-sha256:be3db342638e23ceac0844de831ce86baa2d7dacf2666fd42f42619d831da115";
-pub(crate) const CUSTOM_PARSER_SOURCE: &str = "custom";
-pub(crate) const CUSTOM_PARSER_VERSION: &str = "custom";
+pub(crate) const TEXTMATE_BUNDLE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub const DEFAULT_MAX_HIGHLIGHT_SOURCE_BYTES: usize = 1024 * 1024;
 pub const DEFAULT_MAX_HIGHLIGHT_LINE_BYTES: usize = 8 * 1024;
@@ -45,6 +33,7 @@ pub(crate) const CORE_LANGUAGES: &[&str] = &[
     "python",
     "typescript",
     "javascript",
+    "jsx",
     "tsx",
     "bash",
     "toml",
@@ -58,17 +47,37 @@ pub(crate) const LANGUAGE_ALIASES: &[(&str, &str)] = &[
     ("c++", "cpp"),
     ("cc", "cpp"),
     ("c#", "csharp"),
+    ("coq", "coq"),
     ("cxx", "cpp"),
+    ("docker", "dockerfile"),
     ("gradle", "groovy"),
-    ("ignorefile", "gitignore"),
+    ("gitignore", "git-ignore"),
+    ("hcl", "terraform"),
+    ("ignorefile", "git-ignore"),
+    ("ipynb", "json"),
     ("js", "javascript"),
-    ("lisp", "commonlisp"),
+    ("jsx", "jsx"),
+    ("justfile", "just"),
+    ("commonlisp", "common-lisp"),
     ("node", "javascript"),
+    ("objc", "objective-c"),
+    ("proto", "protocol-buffer"),
+    ("protobuf", "protocol-buffer"),
+    ("prolog", "prolog"),
+    ("ps1", "powershell"),
+    ("pwsh", "powershell"),
     ("python3", "python"),
+    ("scm", "scheme"),
+    ("service", "systemd"),
     ("makefile", "make"),
     ("shell", "bash"),
     ("sh", "bash"),
+    ("tf", "terraform"),
+    ("timer", "systemd"),
     ("ts", "typescript"),
+    ("wast", "wasm"),
+    ("wat", "wasm"),
+    ("vue", "vue-component"),
 ];
 
 pub(crate) const BASENAME_LANGUAGES: &[(&str, &str)] = &[
@@ -77,7 +86,9 @@ pub(crate) const BASENAME_LANGUAGES: &[(&str, &str)] = &[
     ("workspace", "starlark"),
     ("workspace.bazel", "starlark"),
     ("module.bazel", "starlark"),
+    ("codeowners", "codeowners"),
     ("dockerfile", "dockerfile"),
+    ("justfile", "just"),
     ("makefile", "make"),
     ("gnumakefile", "make"),
     ("bsdmakefile", "make"),
@@ -85,98 +96,14 @@ pub(crate) const BASENAME_LANGUAGES: &[(&str, &str)] = &[
     (".bazelrc", "starlark"),
     (".clang-format", "yaml"),
     (".clang-tidy", "yaml"),
-    (".dockerignore", "gitignore"),
-    (".gitignore", "gitignore"),
+    (".dockerignore", "git-ignore"),
+    (".gitignore", "git-ignore"),
 ];
-
-pub(crate) const HIGHLIGHT_NAMES: &[&str] = &[
-    "attribute",
-    "boolean",
-    "character",
-    "comment",
-    "constant",
-    "constant.builtin",
-    "constructor",
-    "embedded",
-    "function",
-    "function.builtin",
-    "function.method",
-    "keyword",
-    "label",
-    "module",
-    "namespace",
-    "number",
-    "operator",
-    "property",
-    "property.builtin",
-    "punctuation",
-    "punctuation.bracket",
-    "punctuation.delimiter",
-    "punctuation.special",
-    "string",
-    "string.escape",
-    "string.special",
-    "tag",
-    "type",
-    "type.builtin",
-    "variable",
-    "variable.builtin",
-    "variable.parameter",
-];
-
-pub(crate) const ASM_HIGHLIGHTS_QUERY: &str = r#"
-(line_comment) @comment
-(meta kind: (meta_ident) @keyword)
-(label (ident) @label)
-(instruction kind: (word) @function)
-(reg (word) @variable.builtin)
-(int) @number
-"#;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum SyntaxClass {
-    Attribute,
-    Comment,
-    Constant,
-    Constructor,
-    Function,
-    Keyword,
-    Label,
-    Module,
-    Number,
-    Operator,
-    Property,
-    Punctuation,
-    String,
-    Tag,
-    Type,
-    Variable,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SyntaxSegment {
-    pub byte_start: usize,
-    pub byte_end: usize,
-    pub text: String,
-    pub class: Option<SyntaxClass>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct HighlightedLine {
-    pub segments: Vec<SyntaxSegment>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HighlightedText {
-    pub lines: Vec<HighlightedLine>,
-}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct StoredSyntaxConfig {
     #[serde(default)]
     pub(crate) languages: Vec<String>,
-    #[serde(default)]
-    pub(crate) parsers: Vec<StoredParserArtifact>,
     #[serde(default)]
     pub(crate) extensions: Vec<StoredLanguageMapping>,
     #[serde(default)]
@@ -187,16 +114,6 @@ pub(crate) struct StoredSyntaxConfig {
 pub(crate) struct StoredLanguageMapping {
     pub(crate) pattern: String,
     pub(crate) language: String,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct StoredParserArtifact {
-    pub(crate) language: String,
-    pub(crate) version: String,
-    pub(crate) path: PathBuf,
-    pub(crate) sha256: String,
-    pub(crate) installed_at_unix: u64,
-    pub(crate) source: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
@@ -319,7 +236,7 @@ pub struct SyntaxSettings {
 impl Default for SyntaxSettings {
     fn default() -> Self {
         Self {
-            mode: SyntaxMode::Enabled,
+            mode: SyntaxMode::Builtin,
             theme: SyntaxThemeConfig::default(),
             layout: None,
             live_reload: true,
@@ -599,8 +516,8 @@ pub enum LayoutSetting {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SyntaxMode {
-    #[default]
     Enabled,
+    #[default]
     Builtin,
     All,
 }
@@ -675,25 +592,128 @@ impl Default for SyntaxLimits {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SyntaxParserArtifact {
-    pub language: String,
-    pub version: String,
-    pub path: PathBuf,
-    pub sha256: String,
-    pub installed_at_unix: u64,
-    pub source: String,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyntaxGrammarSource {
+    Bundled,
 }
 
-impl From<&StoredParserArtifact> for SyntaxParserArtifact {
-    fn from(artifact: &StoredParserArtifact) -> Self {
+impl SyntaxGrammarSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Bundled => "bundled",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyntaxGrammarInfo {
+    version: String,
+    source: SyntaxGrammarSource,
+}
+
+impl SyntaxGrammarInfo {
+    pub fn bundled(version: impl Into<String>) -> Self {
         Self {
-            language: artifact.language.clone(),
-            version: artifact.version.clone(),
-            path: artifact.path.clone(),
-            sha256: artifact.sha256.clone(),
-            installed_at_unix: artifact.installed_at_unix,
-            source: artifact.source.clone(),
+            version: version.into(),
+            source: SyntaxGrammarSource::Bundled,
+        }
+    }
+
+    pub fn version(&self) -> &str {
+        &self.version
+    }
+
+    pub fn source(&self) -> SyntaxGrammarSource {
+        self.source
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SyntaxLanguageRuntimeState {
+    Ready(SyntaxGrammarInfo),
+    MissingHighlights(SyntaxGrammarInfo),
+    MissingGrammar,
+}
+
+impl SyntaxLanguageRuntimeState {
+    pub fn into_available(self) -> Option<SyntaxAvailableRuntimeState> {
+        match self {
+            Self::Ready(grammar) => Some(SyntaxAvailableRuntimeState::Ready(grammar)),
+            Self::MissingHighlights(grammar) => {
+                Some(SyntaxAvailableRuntimeState::MissingHighlights(grammar))
+            }
+            Self::MissingGrammar => None,
+        }
+    }
+
+    pub fn grammar(&self) -> Option<&SyntaxGrammarInfo> {
+        match self {
+            Self::Ready(grammar) | Self::MissingHighlights(grammar) => Some(grammar),
+            Self::MissingGrammar => None,
+        }
+    }
+
+    pub fn is_grammar_available(&self) -> bool {
+        self.grammar().is_some()
+    }
+
+    pub fn is_highlight_ready(&self) -> bool {
+        matches!(self, Self::Ready(_))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SyntaxAvailableRuntimeState {
+    Ready(SyntaxGrammarInfo),
+    MissingHighlights(SyntaxGrammarInfo),
+}
+
+impl SyntaxAvailableRuntimeState {
+    pub fn grammar(&self) -> &SyntaxGrammarInfo {
+        match self {
+            Self::Ready(grammar) | Self::MissingHighlights(grammar) => grammar,
+        }
+    }
+
+    pub fn is_highlight_ready(&self) -> bool {
+        matches!(self, Self::Ready(_))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SyntaxLanguageState {
+    Enabled(SyntaxLanguageRuntimeState),
+    Disabled(SyntaxAvailableRuntimeState),
+}
+
+impl SyntaxLanguageState {
+    pub fn enabled(runtime: SyntaxLanguageRuntimeState) -> Self {
+        Self::Enabled(runtime)
+    }
+
+    pub fn disabled(runtime: SyntaxAvailableRuntimeState) -> Self {
+        Self::Disabled(runtime)
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        matches!(self, Self::Enabled(_))
+    }
+
+    pub fn grammar(&self) -> Option<&SyntaxGrammarInfo> {
+        match self {
+            Self::Enabled(runtime) => runtime.grammar(),
+            Self::Disabled(runtime) => Some(runtime.grammar()),
+        }
+    }
+
+    pub fn is_grammar_available(&self) -> bool {
+        self.grammar().is_some()
+    }
+
+    pub fn is_highlight_ready(&self) -> bool {
+        match self {
+            Self::Enabled(runtime) => runtime.is_highlight_ready(),
+            Self::Disabled(runtime) => runtime.is_highlight_ready(),
         }
     }
 }
@@ -701,31 +721,95 @@ impl From<&StoredParserArtifact> for SyntaxParserArtifact {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyntaxLanguageStatus {
     pub language: String,
-    pub enabled: bool,
-    pub installed: bool,
-    pub trusted: bool,
-    pub has_highlights: bool,
-    pub version: Option<String>,
-    pub artifact: Option<SyntaxParserArtifact>,
-    pub source: Option<String>,
+    pub state: SyntaxLanguageState,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyntaxAddResult {
     pub added: Vec<String>,
     pub already_enabled: Vec<String>,
-    pub without_highlights: Vec<String>,
-    pub custom_parsers: Vec<String>,
-    pub custom_queries: Vec<String>,
+    pub unavailable: Vec<String>,
     pub custom_mappings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SyntaxAddOptions {
-    pub parser: Option<PathBuf>,
-    pub query: Option<PathBuf>,
     pub extensions: Vec<String>,
     pub filenames: Vec<String>,
+}
+
+impl SyntaxAddOptions {
+    pub fn has_mappings(&self) -> bool {
+        !self.extensions.is_empty() || !self.filenames.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SyntaxAddRequest {
+    Languages(SyntaxLanguageSelection),
+    LanguageWithMappings {
+        language: String,
+        options: SyntaxAddOptions,
+    },
+}
+
+impl SyntaxAddRequest {
+    pub fn from_cli(languages: Vec<String>, options: SyntaxAddOptions) -> MarkResult<Self> {
+        if options.has_mappings() {
+            match languages.as_slice() {
+                [language] => Ok(Self::LanguageWithMappings {
+                    language: language.clone(),
+                    options,
+                }),
+                [] => Err(MarkError::Usage("provide at least one language".to_owned())),
+                _ => Err(MarkError::Usage(
+                    "use --ext or --filename with exactly one language".to_owned(),
+                )),
+            }
+        } else {
+            SyntaxLanguageSelection::new(languages).map(Self::Languages)
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyntaxLanguageSelection {
+    languages: Vec<String>,
+}
+
+impl SyntaxLanguageSelection {
+    pub fn new(languages: Vec<String>) -> MarkResult<Self> {
+        if languages.is_empty() {
+            Err(MarkError::Usage("provide at least one language".to_owned()))
+        } else {
+            Ok(Self { languages })
+        }
+    }
+
+    pub fn as_slice(&self) -> &[String] {
+        &self.languages
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SyntaxUpdateSelection {
+    All,
+    Languages(SyntaxLanguageSelection),
+}
+
+impl SyntaxUpdateSelection {
+    pub fn from_cli(languages: Vec<String>, all: bool) -> MarkResult<Self> {
+        match (all, languages.is_empty()) {
+            (true, true) => Ok(Self::All),
+            (true, false) => Err(MarkError::Usage(
+                "use `mark syntax update --all` without language names".to_owned(),
+            )),
+            (false, true) => Err(MarkError::Usage(
+                "provide at least one language or use --all".to_owned(),
+            )),
+            (false, false) => SyntaxLanguageSelection::new(languages).map(Self::Languages),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -738,26 +822,21 @@ pub enum SyntaxAvailableFilter {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SyntaxUpdateResult {
-    pub updated: Vec<String>,
     pub bundled: Vec<String>,
-    pub custom: Vec<String>,
-    pub not_installed: Vec<String>,
     pub unavailable: Vec<String>,
-    pub without_highlights: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyntaxRemoveResult {
     pub removed: Vec<String>,
     pub missing: Vec<String>,
-    pub cache_deleted: Vec<String>,
-    pub cache_missing: Vec<String>,
+    pub kept_core: Vec<String>,
+    pub removed_custom_mappings: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyntaxCleanResult {
-    pub parser_artifacts_removed: usize,
-    pub artifact_records_removed: usize,
+    pub stale_records_removed: usize,
     pub enabled_languages_kept: usize,
 }
 
@@ -776,8 +855,6 @@ pub struct SyntaxDoctorReport {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyntaxLanguageSet {
     pub(crate) enabled: BTreeSet<String>,
-    pub(crate) installed: BTreeSet<String>,
-    pub(crate) trusted: BTreeSet<String>,
     pub(crate) extensions: Vec<StoredLanguageMapping>,
     pub(crate) filenames: Vec<StoredLanguageMapping>,
 }
@@ -791,23 +868,17 @@ impl SyntaxLanguageSet {
     pub fn load_with_mode(mode: SyntaxMode) -> MarkResult<Self> {
         let config = load_config()?;
         let installed = installed_language_set();
-        let trusted = trusted_language_set(&installed, &config);
         Ok(Self {
-            enabled: enabled_language_set_for_mode(mode, &config, &trusted),
-            trusted,
-            installed,
+            enabled: enabled_language_set_for_mode(mode, &config, &installed),
             extensions: config.extensions,
             filenames: config.filenames,
         })
     }
 
     pub fn from_enabled_languages(languages: &[String]) -> Self {
-        let installed = installed_language_set();
         let config = load_config().unwrap_or_default();
         Self {
             enabled: language_vec_to_set(languages),
-            trusted: trusted_language_set(&installed, &config),
-            installed,
             extensions: config.extensions,
             filenames: config.filenames,
         }
@@ -821,31 +892,34 @@ impl SyntaxLanguageSet {
     }
 
     pub fn language_for_path(&self, path: &str) -> Option<String> {
-        let language = detect_custom_language_from_path(path, &self.extensions, &self.filenames)
-            .or_else(|| detect_language_name(path).map(str::to_owned))?;
-        let language = normalize_language_name(language);
+        if let Some(language) =
+            detect_custom_language_from_path(path, &self.extensions, &self.filenames)
+        {
+            let language = normalize_language_name(language);
+            if self.is_highlight_ready(&language) {
+                return Some(language);
+            }
+        }
+
+        let language = normalize_language_name(detect_language_name(path)?);
         self.is_highlight_ready(&language).then_some(language)
     }
 
     pub fn is_highlight_ready(&self, language: &str) -> bool {
-        self.enabled.contains(language)
-            && (self.trusted.contains(language) || tree_sitter_language_pack::has_parser(language))
-            && has_highlights(language)
+        self.enabled.contains(language) && has_highlights(language)
     }
 }
 
 pub struct SyntaxHighlighter {
-    pub(crate) highlighter: Highlighter,
-    pub(crate) configs: HashMap<String, HighlightConfiguration>,
-    pub(crate) trusted_languages: BTreeSet<String>,
+    pub(crate) highlighter: mark_textmate::TextMateHighlighter,
+    pub(crate) loaded_languages: BTreeSet<String>,
 }
 
 impl Default for SyntaxHighlighter {
     fn default() -> Self {
         Self {
-            highlighter: Highlighter::new(),
-            configs: HashMap::new(),
-            trusted_languages: BTreeSet::new(),
+            highlighter: mark_textmate::TextMateHighlighter::new(),
+            loaded_languages: BTreeSet::new(),
         }
     }
 }
@@ -857,59 +931,11 @@ impl SyntaxHighlighter {
 
     pub fn highlight(&mut self, language: &str, source: &str) -> MarkResult<HighlightedText> {
         let language = normalize_language_name(language.to_owned());
-        if !self.ensure_language_trusted(&language) {
-            return Err(MarkError::Usage(format!(
-                "tree-sitter language '{language}' is not trusted; run `mark syntax add {language}`"
-            )));
-        }
-
-        self.ensure_config(&language)?;
-        let config = self
-            .configs
-            .get(&language)
-            .ok_or_else(|| MarkError::Usage(format!("failed to cache {language} highlights")))?;
-        let highlights = self
+        let highlighted = self
             .highlighter
-            .highlight(config, source.as_bytes(), None, |_| None)
-            .map_err(|error| {
-                MarkError::Usage(format!("failed to highlight {language}: {error}"))
-            })?;
-        highlighted_text_from_events(source, highlights)
-    }
-
-    pub(crate) fn ensure_language_trusted(&mut self, language: &str) -> bool {
-        if self.trusted_languages.contains(language) {
-            return true;
-        }
-        if !is_language_trusted(language) {
-            return false;
-        }
-        self.trusted_languages.insert(language.to_owned());
-        true
-    }
-
-    pub(crate) fn ensure_config(&mut self, language: &str) -> MarkResult<()> {
-        if !self.configs.contains_key(language) {
-            let config = load_config()?;
-            let language_fn = load_language_with_config(language, &config)
-                .map_err(|error| MarkError::Usage(format!("failed to load {language}: {error}")))?;
-            let highlights_query = highlights_query(language)
-                .ok_or_else(|| MarkError::Usage(format!("{language} has no highlights query")))?;
-            let mut config = HighlightConfiguration::new(
-                language_fn,
-                language,
-                highlights_query.as_ref(),
-                "",
-                "",
-            )
-            .map_err(|error| {
-                MarkError::Usage(format!(
-                    "failed to configure {language} highlights: {error}"
-                ))
-            })?;
-            config.configure(HIGHLIGHT_NAMES);
-            self.configs.insert(language.to_owned(), config);
-        }
-        Ok(())
+            .highlight(&language, source)
+            .map_err(|error| MarkError::Usage(error.to_string()))?;
+        self.loaded_languages.insert(language);
+        Ok(highlighted)
     }
 }
