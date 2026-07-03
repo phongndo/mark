@@ -61,20 +61,19 @@ pub(crate) fn commit_match_score(query: &str, commit: &GitCommit) -> Option<(usi
 
 pub(crate) fn comparison_commits(repo: &Path, selected_rev: Option<&str>) -> Vec<GitCommit> {
     let mut commits = git_log_commits(repo);
-    if let Some(rev) = selected_rev.filter(|rev| !rev.is_empty()) {
-        if !commits
+    if let Some(rev) = selected_rev.filter(|rev| !rev.is_empty())
+        && !commits
             .iter()
             .any(|commit| commit.sha.as_str() == rev || commit.sha.starts_with(rev))
-        {
-            let subject = git_commit_subject(repo, rev).unwrap_or_default();
-            commits.insert(
-                0,
-                GitCommit {
-                    sha: rev.into(),
-                    subject,
-                },
-            );
-        }
+    {
+        let subject = git_commit_subject(repo, rev).unwrap_or_default();
+        commits.insert(
+            0,
+            GitCommit {
+                sha: rev.into(),
+                subject,
+            },
+        );
     }
     commits
 }

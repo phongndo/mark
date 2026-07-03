@@ -90,11 +90,11 @@ fn git_diff_to_writer_with_index(
     }
 
     let mut child = command.spawn()?;
-    if let Some(mut stdout) = child.stdout.take() {
-        if let Err(error) = copy_to_writer(&mut stdout, &mut writer) {
-            abort_git_child(child, stderr);
-            return Err(error.into());
-        }
+    if let Some(mut stdout) = child.stdout.take()
+        && let Err(error) = copy_to_writer(&mut stdout, &mut writer)
+    {
+        abort_git_child(child, stderr);
+        return Err(error.into());
     }
     wait_for_git_child(child, stderr, "failed to render git diff")
 }

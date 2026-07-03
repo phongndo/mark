@@ -11,7 +11,7 @@ use super::{
 
 impl Keymap {
     pub(crate) fn load() -> MarkResult<Self> {
-        let path = mark_syntax::settings_path()?;
+        let path = mark_syntax::settings_read_path()?;
         if !path.exists() {
             return Ok(Self::default());
         }
@@ -363,12 +363,12 @@ fn validate_conflicts(context: &str, bindings: &[(&str, &Vec<KeySequence>)]) -> 
     for (action, sequences) in bindings.iter().copied() {
         for sequence in sequences {
             let key = sequence_label(sequence);
-            if let Some(previous) = seen.insert(key.clone(), action) {
-                if previous != action {
-                    return Err(format!(
-                        "{context} conflict: `{key}` is bound to both {previous} and {action}"
-                    ));
-                }
+            if let Some(previous) = seen.insert(key.clone(), action)
+                && previous != action
+            {
+                return Err(format!(
+                    "{context} conflict: `{key}` is bound to both {previous} and {action}"
+                ));
             }
         }
     }

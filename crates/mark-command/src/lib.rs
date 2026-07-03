@@ -21,7 +21,7 @@ pub use diff::{
     review_diff_options,
 };
 pub use syntax::{
-    syntax_add, syntax_add_with_options, syntax_available_languages, syntax_cache_dir,
-    syntax_clean_cache, syntax_colorscheme_dir, syntax_config_path, syntax_doctor, syntax_remove,
-    syntax_settings_path, syntax_statuses, syntax_update,
+    syntax_add, syntax_add_with_options, syntax_available_languages, syntax_clean_cache,
+    syntax_colorscheme_dir, syntax_config_path, syntax_doctor, syntax_remove, syntax_settings_path,
+    syntax_statuses, syntax_update,
 };

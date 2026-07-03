@@ -224,7 +224,7 @@ impl FastLanguage {
             "go" => Some(Self::CLike(CLikeLanguage::Go)),
             "hack" => Some(Self::CLike(CLikeLanguage::Php)),
             "haxe" | "java" => Some(Self::CLike(CLikeLanguage::Java)),
-            "javascript" | "typescript" | "tsx" => Some(Self::CLike(CLikeLanguage::EcmaScript)),
+            "javascript" | "typescript" => Some(Self::CLike(CLikeLanguage::EcmaScript)),
             "kotlin" | "nextflow" | "nextflow-groovy" => Some(Self::CLike(CLikeLanguage::Kotlin)),
             "llvm" | "mlir" | "asm" | "arm-assembly" | "mipsasm" | "spirv" | "wasm" | "riscv"
             | "x86-64-assembly" => Some(Self::CompilerIr),
@@ -253,7 +253,7 @@ impl FastLanguage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RustLexState {
     Normal,
-    BlockComment,
+    BlockComment { depth: usize },
     String,
     RawString { hashes: usize },
 }
@@ -272,15 +272,20 @@ fn highlight_rust_fast(source: &str) -> HighlightedText {
                 RustLexState::Normal => {
                     rust_normal_token(&mut line, chunk.text, cursor, &mut state)
                 }
-                RustLexState::BlockComment => {
-                    rust_block_comment_token(&mut line, chunk.text, cursor, &mut state)
+                RustLexState::BlockComment { .. } => {
+                    rust_block_comment_token(&mut line, chunk.text, cursor, false, &mut state)
                 }
                 RustLexState::String => {
-                    rust_string_token(&mut line, chunk.text, cursor, &mut state)
+                    rust_string_token(&mut line, chunk.text, cursor, false, &mut state)
                 }
-                RustLexState::RawString { hashes } => {
-                    rust_raw_string_token(&mut line, chunk.text, cursor, hashes, &mut state)
-                }
+                RustLexState::RawString { hashes } => rust_raw_string_token(
+                    &mut line,
+                    chunk.text,
+                    cursor,
+                    hashes,
+                    RawStringPosition::Continuation,
+                    &mut state,
+                ),
             };
         }
         lines.push(line);
@@ -310,22 +315,33 @@ fn rust_normal_token(
         return bytes.len();
     }
     if bytes[start..].starts_with(b"/*") {
-        *state = RustLexState::BlockComment;
-        return rust_block_comment_token(line, text, start, state);
+        return rust_block_comment_token(line, text, start, true, state);
     }
 
-    if let Some((hashes, content_start)) = rust_raw_string_start(bytes, start) {
-        *state = RustLexState::RawString { hashes };
-        return rust_raw_string_token(line, text, start, hashes, state).max(content_start);
+    if let Some(raw_string) = rust_raw_string_start(bytes, start) {
+        *state = RustLexState::RawString {
+            hashes: raw_string.hashes,
+        };
+        return rust_raw_string_token(
+            line,
+            text,
+            start,
+            raw_string.hashes,
+            RawStringPosition::OpeningDelimiter {
+                content_start: raw_string.content_start,
+            },
+            state,
+        );
     }
 
     if byte == b'"' {
         *state = RustLexState::String;
-        return rust_string_token(line, text, start, state);
+        return rust_string_token(line, text, start, true, state);
     }
 
-    if byte == b'\'' {
-        let end = rust_char_end(bytes, start);
+    if byte == b'\''
+        && let Some(end) = rust_char_literal_end(text, start)
+    {
         push_segment(line, start, end, text, Some(SyntaxClass::String));
         return end;
     }
@@ -372,35 +388,65 @@ fn rust_block_comment_token(
     line: &mut HighlightedLine,
     text: &str,
     start: usize,
+    starts_with_opening_delimiter: bool,
     state: &mut RustLexState,
 ) -> usize {
     let bytes = text.as_bytes();
-    let search_start = if bytes[start..].starts_with(b"/*") {
-        start.saturating_add(2)
+    let mut depth = if starts_with_opening_delimiter {
+        debug_assert!(bytes[start..].starts_with(b"/*"));
+        1usize
+    } else {
+        match *state {
+            RustLexState::BlockComment { depth } => depth.max(1),
+            _ => 1,
+        }
+    };
+    let mut cursor = if starts_with_opening_delimiter && bytes[start..].starts_with(b"/*") {
+        start + 2
     } else {
         start
     };
-    let end = find_bytes(bytes, search_start, b"*/")
-        .map(|end| end + 2)
-        .unwrap_or(bytes.len());
-    push_segment(line, start, end, text, Some(SyntaxClass::Comment));
-    if end < bytes.len() {
-        *state = RustLexState::Normal;
+
+    while cursor + 1 < bytes.len() {
+        if bytes[cursor..].starts_with(b"/*") {
+            depth = depth.saturating_add(1);
+            cursor += 2;
+        } else if bytes[cursor..].starts_with(b"*/") {
+            depth = depth.saturating_sub(1);
+            cursor += 2;
+            if depth == 0 {
+                push_segment(line, start, cursor, text, Some(SyntaxClass::Comment));
+                *state = RustLexState::Normal;
+                return cursor;
+            }
+        } else {
+            cursor += 1;
+        }
     }
-    end
+
+    push_segment(line, start, bytes.len(), text, Some(SyntaxClass::Comment));
+    *state = RustLexState::BlockComment { depth };
+    bytes.len()
 }
 
 fn rust_string_token(
     line: &mut HighlightedLine,
     text: &str,
     start: usize,
+    starts_with_opening_delimiter: bool,
     state: &mut RustLexState,
 ) -> usize {
+    debug_assert!(text.is_char_boundary(start));
     let bytes = text.as_bytes();
-    let mut cursor = start + 1;
+    let mut cursor = if starts_with_opening_delimiter {
+        debug_assert_eq!(bytes.get(start), Some(&b'"'));
+        start + 1
+    } else {
+        start
+    };
     while cursor < bytes.len() {
         match bytes[cursor] {
-            b'\\' => cursor = (cursor + 2).min(bytes.len()),
+            b'\\' => cursor = advance_escaped_char(text, cursor),
             b'"' => {
                 cursor += 1;
                 *state = RustLexState::Normal;
@@ -419,29 +465,53 @@ fn rust_raw_string_token(
     text: &str,
     start: usize,
     hashes: usize,
+    position: RawStringPosition,
     state: &mut RustLexState,
 ) -> usize {
     let bytes = text.as_bytes();
     let terminator_len = hashes + 1;
-    let end = find_raw_string_end(bytes, start + 1, hashes)
+    let search_start = match position {
+        RawStringPosition::OpeningDelimiter { content_start } => content_start,
+        RawStringPosition::Continuation => start,
+    };
+    let raw_string_end = find_raw_string_end(bytes, search_start, hashes);
+    let end = raw_string_end
         .map(|end| end + terminator_len)
         .unwrap_or(bytes.len());
     push_segment(line, start, end, text, Some(SyntaxClass::String));
-    if end < bytes.len() {
+    if raw_string_end.is_some() {
         *state = RustLexState::Normal;
     }
     end
 }
 
-fn rust_raw_string_start(bytes: &[u8], start: usize) -> Option<(usize, usize)> {
-    if bytes[start] != b'r' {
-        return None;
-    }
-    let mut cursor = start + 1;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RawStringPosition {
+    OpeningDelimiter { content_start: usize },
+    Continuation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RawStringStart {
+    hashes: usize,
+    content_start: usize,
+}
+
+fn rust_raw_string_start(bytes: &[u8], start: usize) -> Option<RawStringStart> {
+    let prefix_len = match bytes[start] {
+        b'r' => 1,
+        b'b' | b'c' if bytes.get(start + 1) == Some(&b'r') => 2,
+        _ => return None,
+    };
+
+    let mut cursor = start + prefix_len;
     while cursor < bytes.len() && bytes[cursor] == b'#' {
         cursor += 1;
     }
-    (cursor < bytes.len() && bytes[cursor] == b'"').then_some((cursor - start - 1, cursor + 1))
+    (cursor < bytes.len() && bytes[cursor] == b'"').then_some(RawStringStart {
+        hashes: cursor - start - prefix_len,
+        content_start: cursor + 1,
+    })
 }
 
 fn find_raw_string_end(bytes: &[u8], start: usize, hashes: usize) -> Option<usize> {
@@ -460,16 +530,48 @@ fn find_raw_string_end(bytes: &[u8], start: usize, hashes: usize) -> Option<usiz
     None
 }
 
-fn rust_char_end(bytes: &[u8], start: usize) -> usize {
-    let mut cursor = start + 1;
-    while cursor < bytes.len() {
-        match bytes[cursor] {
-            b'\\' => cursor = (cursor + 2).min(bytes.len()),
-            b'\'' => return cursor + 1,
-            _ => cursor += 1,
+fn rust_char_literal_end(text: &str, start: usize) -> Option<usize> {
+    let bytes = text.as_bytes();
+    debug_assert_eq!(bytes.get(start), Some(&b'\''));
+
+    let content_start = start + 1;
+    let content_end = if bytes.get(content_start) == Some(&b'\\') {
+        rust_escape_end(bytes, content_start)?
+    } else {
+        let ch = text.get(content_start..)?.chars().next()?;
+        if ch == '\'' {
+            return None;
         }
+        content_start + ch.len_utf8()
+    };
+
+    (bytes.get(content_end) == Some(&b'\'')).then_some(content_end + 1)
+}
+
+fn rust_escape_end(bytes: &[u8], start: usize) -> Option<usize> {
+    debug_assert_eq!(bytes.get(start), Some(&b'\\'));
+    let escaped = start + 1;
+    let byte = *bytes.get(escaped)?;
+    match byte {
+        b'x' => {
+            let end = escaped + 3;
+            (end <= bytes.len()
+                && bytes[escaped + 1..end]
+                    .iter()
+                    .all(|byte| byte.is_ascii_hexdigit()))
+            .then_some(end)
+        }
+        b'u' if bytes.get(escaped + 1) == Some(&b'{') => {
+            let digits_start = escaped + 2;
+            let mut cursor = digits_start;
+            while cursor < bytes.len() && bytes[cursor].is_ascii_hexdigit() {
+                cursor += 1;
+            }
+            (cursor > digits_start && bytes.get(cursor) == Some(&b'}')).then_some(cursor + 1)
+        }
+        b'\'' | b'"' | b'\\' | b'n' | b'r' | b't' | b'0' => Some(escaped + 1),
+        _ => None,
     }
-    bytes.len()
 }
 
 fn consume_rust_number(bytes: &[u8], start: usize) -> usize {
@@ -505,6 +607,15 @@ fn advance_char(text: &str, start: usize) -> usize {
         .next()
         .map(|ch| start + ch.len_utf8())
         .unwrap_or(text.len())
+}
+
+fn advance_escaped_char(text: &str, start: usize) -> usize {
+    let escaped = start + 1;
+    if escaped >= text.len() {
+        text.len()
+    } else {
+        advance_char(text, escaped)
+    }
 }
 
 fn is_ident_start(byte: u8) -> bool {
@@ -609,6 +720,10 @@ impl CLikeLanguage {
     fn allows_backtick_string(self) -> bool {
         matches!(self, Self::EcmaScript | Self::Go)
     }
+
+    fn escapes_backtick_string(self) -> bool {
+        matches!(self, Self::EcmaScript)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -654,9 +769,9 @@ fn highlight_c_like_fast(source: &str, language: CLikeLanguage) -> HighlightedTe
                 CLikeLexState::String(delimiter) => {
                     c_like_string_token(&mut line, chunk.text, cursor, delimiter, &mut state)
                 }
-                CLikeLexState::TemplateString => {
-                    c_like_template_string_token(&mut line, chunk.text, cursor, &mut state)
-                }
+                CLikeLexState::TemplateString => c_like_template_string_token(
+                    &mut line, chunk.text, cursor, false, language, &mut state,
+                ),
             };
         }
         if !matches!(
@@ -705,7 +820,15 @@ fn c_like_normal_token(
     }
     if language.allows_backtick_string() && byte == b'`' {
         *state = CLikeLexState::TemplateString;
-        return c_like_template_string_token(line, text, start, state);
+        return c_like_template_string_token(line, text, start, true, language, state);
+    }
+    if language == CLikeLanguage::EcmaScript
+        && byte == b'/'
+        && ecmascript_regex_literal_allowed(bytes, start)
+        && let Some(end) = consume_ecmascript_regex_literal(text, start)
+    {
+        push_segment(line, start, end, text, Some(SyntaxClass::String));
+        return end;
     }
     if byte.is_ascii_digit() {
         let end = consume_rust_number(bytes, start);
@@ -757,11 +880,10 @@ fn c_like_block_comment_token(
     } else {
         start
     };
-    let end = find_bytes(bytes, search_start, b"*/")
-        .map(|end| end + 2)
-        .unwrap_or(bytes.len());
+    let comment_end = find_bytes(bytes, search_start, b"*/");
+    let end = comment_end.map(|end| end + 2).unwrap_or(bytes.len());
     push_segment(line, start, end, text, Some(SyntaxClass::Comment));
-    if end < bytes.len() {
+    if comment_end.is_some() {
         *state = CLikeLexState::Normal;
     }
     end
@@ -779,7 +901,7 @@ fn c_like_string_token(
     let mut cursor = start + 1;
     while cursor < bytes.len() {
         match bytes[cursor] {
-            b'\\' => cursor = (cursor + 2).min(bytes.len()),
+            b'\\' => cursor = advance_escaped_char(text, cursor),
             byte if byte == quote => {
                 cursor += 1;
                 *state = CLikeLexState::Normal;
@@ -797,13 +919,22 @@ fn c_like_template_string_token(
     line: &mut HighlightedLine,
     text: &str,
     start: usize,
+    starts_with_opening_delimiter: bool,
+    language: CLikeLanguage,
     state: &mut CLikeLexState,
 ) -> usize {
     let bytes = text.as_bytes();
-    let mut cursor = start + 1;
+    let mut cursor = if starts_with_opening_delimiter {
+        debug_assert_eq!(bytes.get(start), Some(&b'`'));
+        start + 1
+    } else {
+        start
+    };
     while cursor < bytes.len() {
         match bytes[cursor] {
-            b'\\' => cursor = (cursor + 2).min(bytes.len()),
+            b'\\' if language.escapes_backtick_string() => {
+                cursor = advance_escaped_char(text, cursor)
+            }
             b'`' => {
                 cursor += 1;
                 *state = CLikeLexState::Normal;
@@ -815,6 +946,109 @@ fn c_like_template_string_token(
     }
     push_segment(line, start, bytes.len(), text, Some(SyntaxClass::String));
     bytes.len()
+}
+
+fn ecmascript_regex_literal_allowed(bytes: &[u8], start: usize) -> bool {
+    debug_assert_eq!(bytes.get(start), Some(&b'/'));
+    if matches!(bytes.get(start + 1).copied(), Some(b'/' | b'*')) {
+        return false;
+    }
+
+    let Some(previous) = previous_non_space(bytes, 0, start) else {
+        return true;
+    };
+
+    if matches!(previous, b'(' | b'{' | b'[' | b',' | b';') {
+        return true;
+    }
+    if is_operator(previous) {
+        let operator = previous_operator_token(bytes, start);
+        return operator != b"++" && operator != b"--";
+    }
+    if is_js_identifier_continue_byte(previous)
+        && let Some(keyword) = previous_identifier_token(bytes, start)
+    {
+        return is_ecmascript_regex_prefix_keyword(keyword);
+    }
+
+    false
+}
+
+fn previous_operator_token(bytes: &[u8], mut cursor: usize) -> &[u8] {
+    while cursor > 0 && bytes[cursor - 1].is_ascii_whitespace() {
+        cursor -= 1;
+    }
+    let end = cursor;
+    while cursor > 0 && is_operator(bytes[cursor - 1]) {
+        cursor -= 1;
+    }
+    &bytes[cursor..end]
+}
+
+fn previous_identifier_token(bytes: &[u8], mut cursor: usize) -> Option<&[u8]> {
+    while cursor > 0 && bytes[cursor - 1].is_ascii_whitespace() {
+        cursor -= 1;
+    }
+    let end = cursor;
+    while cursor > 0 && is_js_identifier_continue_byte(bytes[cursor - 1]) {
+        cursor -= 1;
+    }
+    (cursor < end).then_some(&bytes[cursor..end])
+}
+
+fn is_js_identifier_continue_byte(byte: u8) -> bool {
+    is_ident_continue(byte) || byte == b'$'
+}
+
+fn is_ecmascript_regex_prefix_keyword(keyword: &[u8]) -> bool {
+    matches!(
+        std::str::from_utf8(keyword),
+        Ok("await"
+            | "case"
+            | "delete"
+            | "do"
+            | "else"
+            | "in"
+            | "instanceof"
+            | "new"
+            | "of"
+            | "return"
+            | "throw"
+            | "typeof"
+            | "void"
+            | "yield")
+    )
+}
+
+fn consume_ecmascript_regex_literal(text: &str, start: usize) -> Option<usize> {
+    let bytes = text.as_bytes();
+    debug_assert_eq!(bytes.get(start), Some(&b'/'));
+
+    let mut cursor = start + 1;
+    let mut in_character_class = false;
+    while cursor < bytes.len() {
+        match bytes[cursor] {
+            b'\\' => cursor = advance_escaped_char(text, cursor),
+            b'[' if !in_character_class => {
+                in_character_class = true;
+                cursor += 1;
+            }
+            b']' if in_character_class => {
+                in_character_class = false;
+                cursor += 1;
+            }
+            b'/' if !in_character_class => {
+                cursor += 1;
+                while cursor < bytes.len() && is_js_identifier_continue_byte(bytes[cursor]) {
+                    cursor += 1;
+                }
+                return Some(cursor);
+            }
+            _ => cursor = advance_char(text, cursor),
+        }
+    }
+
+    None
 }
 
 fn is_c_like_keyword(ident: &str) -> bool {
@@ -1072,7 +1306,7 @@ fn quoted_string_token(
     let mut cursor = start + 1;
     while cursor < bytes.len() {
         match bytes[cursor] {
-            b'\\' => cursor = (cursor + 2).min(bytes.len()),
+            b'\\' => cursor = advance_escaped_char(text, cursor),
             b'"' => {
                 cursor += 1;
                 *state = StringLexState::Normal;
@@ -1352,9 +1586,7 @@ fn markup_normal_token(
         return end;
     }
     if byte == b'<' {
-        let end = find_bytes(bytes, start + 1, b">")
-            .map(|end| end + 1)
-            .unwrap_or(bytes.len());
+        let end = find_markup_tag_end(text, start);
         push_markup_tag(line, text, start, end);
         return end;
     }
@@ -1387,14 +1619,28 @@ fn markup_comment_token(
     state: &mut MarkupLexState,
 ) -> usize {
     let bytes = text.as_bytes();
-    let end = find_bytes(bytes, start, b"-->")
-        .map(|end| end + 3)
-        .unwrap_or(bytes.len());
+    let comment_end = find_bytes(bytes, start, b"-->");
+    let end = comment_end.map(|end| end + 3).unwrap_or(bytes.len());
     push_segment(line, start, end, text, Some(SyntaxClass::Comment));
-    if end < bytes.len() {
+    if comment_end.is_some() {
         *state = MarkupLexState::Normal;
     }
     end
+}
+
+fn find_markup_tag_end(text: &str, start: usize) -> usize {
+    let bytes = text.as_bytes();
+    debug_assert_eq!(bytes.get(start), Some(&b'<'));
+
+    let mut cursor = start + 1;
+    while cursor < bytes.len() {
+        match bytes[cursor] {
+            b'\'' | b'"' => cursor = find_quote_end(text, cursor + 1, bytes[cursor]),
+            b'>' => return cursor + 1,
+            _ => cursor = advance_char(text, cursor),
+        }
+    }
+    bytes.len()
 }
 
 fn push_markup_tag(line: &mut HighlightedLine, text: &str, start: usize, end: usize) {
@@ -1404,7 +1650,7 @@ fn push_markup_tag(line: &mut HighlightedLine, text: &str, start: usize, end: us
         match bytes[cursor] {
             b'\'' | b'"' => {
                 let quote = bytes[cursor];
-                let string_end = find_quote_end(bytes, cursor + 1, quote).min(end);
+                let string_end = find_quote_end(text, cursor + 1, quote).min(end);
                 push_segment(line, cursor, string_end, text, Some(SyntaxClass::String));
                 cursor = string_end;
             }
@@ -1433,13 +1679,14 @@ fn push_markup_tag(line: &mut HighlightedLine, text: &str, start: usize, end: us
     }
 }
 
-fn find_quote_end(bytes: &[u8], start: usize, quote: u8) -> usize {
+fn find_quote_end(text: &str, start: usize, quote: u8) -> usize {
+    let bytes = text.as_bytes();
     let mut cursor = start;
     while cursor < bytes.len() {
         match bytes[cursor] {
-            b'\\' => cursor = (cursor + 2).min(bytes.len()),
+            b'\\' => cursor = advance_escaped_char(text, cursor),
             byte if byte == quote => return cursor + 1,
-            _ => cursor += 1,
+            _ => cursor = advance_char(text, cursor),
         }
     }
     bytes.len()
@@ -1486,11 +1733,15 @@ pub fn detect_language_from_path(path: &str) -> Option<String> {
 }
 
 pub fn detect_language_from_extension(extension: &str) -> Option<String> {
-    let extension = extension.trim_start_matches('.');
+    let extension = normalize_language_token(extension);
     if extension.is_empty() {
         return None;
     }
-    canonical_language_name(extension).map(LanguageName::into_string)
+    grammar_catalog()
+        .extension_aliases
+        .get(extension.as_str())
+        .and_then(|language| LanguageName::new(language.clone()))
+        .map(LanguageName::into_string)
 }
 
 pub fn classify_scope_name(scope: &str) -> Option<SyntaxClass> {
@@ -1663,6 +1914,17 @@ struct ScopeClassifier {
 
 impl ScopeClassifier {
     fn class_for_stack(&mut self, stack: &ScopeStack) -> Option<SyntaxClass> {
+        for preferred in [SyntaxClass::Tag, SyntaxClass::Attribute] {
+            if stack
+                .as_slice()
+                .iter()
+                .rev()
+                .any(|scope| self.class_for_scope(*scope) == Some(preferred))
+            {
+                return Some(preferred);
+            }
+        }
+
         stack
             .as_slice()
             .iter()
@@ -1783,6 +2045,7 @@ fn canonical_from_syntax(syntax: &SyntaxReference) -> Option<LanguageName> {
 struct GrammarCatalog {
     languages: Vec<String>,
     aliases: BTreeMap<String, String>,
+    extension_aliases: BTreeMap<String, String>,
     syntax_to_language: BTreeMap<String, String>,
     language_to_syntax: BTreeMap<String, String>,
 }
@@ -1796,6 +2059,7 @@ fn build_grammar_catalog() -> GrammarCatalog {
     let mut syntax_to_language = BTreeMap::new();
     let mut language_to_syntax = BTreeMap::new();
     let mut aliases = BTreeMap::new();
+    let mut extension_aliases = BTreeMap::new();
 
     for syntax in syntax_set().syntaxes() {
         let language = known_language_for_syntax(&syntax.name)
@@ -1811,19 +2075,57 @@ fn build_grammar_catalog() -> GrammarCatalog {
             language.clone(),
         );
         for extension in &syntax.file_extensions {
-            aliases.insert(normalize_language_token(extension), language.clone());
+            let extension = normalize_language_token(extension);
+            if !extension.is_empty() {
+                aliases.insert(extension.clone(), language.clone());
+                extension_aliases.insert(extension, language.clone());
+            }
         }
     }
 
-    for (alias, language) in LANGUAGE_ALIASES {
-        aliases.insert((*alias).to_owned(), (*language).to_owned());
-    }
-    for language in FAST_ONLY_LANGUAGES {
-        aliases.insert((*language).to_owned(), (*language).to_owned());
-    }
     for (language, syntax) in LANGUAGE_SYNTAX_NAMES {
         language_to_syntax.insert((*language).to_owned(), (*syntax).to_owned());
         aliases.insert((*language).to_owned(), (*language).to_owned());
+    }
+    // Fast lexers do not come with TextMate grammar metadata, so seed their
+    // language names as extension matches before curated path overrides below.
+    for language in FAST_ONLY_LANGUAGES {
+        aliases.insert((*language).to_owned(), (*language).to_owned());
+        insert_language_alias(
+            &mut extension_aliases,
+            &language_to_syntax,
+            language,
+            language,
+        );
+    }
+    // The alias table is intentionally broader than the bundled grammars. Let
+    // curated aliases override ambiguous syntax-derived extension aliases, but
+    // only when their target is highlightable in this build.
+    for (alias, language) in LANGUAGE_ALIASES {
+        insert_language_alias(&mut aliases, &language_to_syntax, alias, language);
+    }
+    // Extension detection needs its own table so language-name aliases such as
+    // `v` (the V language) cannot override path mappings such as `*.v`
+    // (Verilog). Keep the existing code-fence/extension aliases available for
+    // paths, then let path-specific overrides correct ambiguous extensions.
+    for (extension, language) in LANGUAGE_ALIASES {
+        insert_language_alias(
+            &mut extension_aliases,
+            &language_to_syntax,
+            extension,
+            language,
+        );
+    }
+    // Curated extension aliases intentionally override bundled grammar
+    // extensions when the grammar bundle exposes a more specific or less
+    // stable syntax name.
+    for (extension, language) in EXTENSION_ALIASES {
+        insert_language_alias(
+            &mut extension_aliases,
+            &language_to_syntax,
+            extension,
+            language,
+        );
     }
 
     let mut languages = language_to_syntax.keys().cloned().collect::<Vec<_>>();
@@ -1838,9 +2140,31 @@ fn build_grammar_catalog() -> GrammarCatalog {
     GrammarCatalog {
         languages,
         aliases,
+        extension_aliases,
         syntax_to_language,
         language_to_syntax,
     }
+}
+
+fn insert_language_alias(
+    aliases: &mut BTreeMap<String, String>,
+    language_to_syntax: &BTreeMap<String, String>,
+    alias: &str,
+    language: &str,
+) {
+    let alias = normalize_language_token(alias);
+    let language = normalize_language_token(language);
+    if alias.is_empty() || !is_highlightable_language(&language, language_to_syntax) {
+        return;
+    }
+    aliases.insert(alias, language);
+}
+
+fn is_highlightable_language(
+    language: &str,
+    language_to_syntax: &BTreeMap<String, String>,
+) -> bool {
+    language_to_syntax.contains_key(language) || FAST_ONLY_LANGUAGES.contains(&language)
 }
 
 fn known_language_for_syntax(name: &str) -> Option<&'static str> {
@@ -2031,6 +2355,7 @@ const LANGUAGE_SYNTAX_NAMES: &[(&str, &str)] = &[
     ("html", "HTML"),
     ("java", "Java"),
     ("javascript", "JavaScript"),
+    ("jsx", "JavaScript (Babel)"),
     ("json", "JSON"),
     ("kotlin", "Kotlin"),
     ("llvm", "LLVM"),
@@ -2043,7 +2368,7 @@ const LANGUAGE_SYNTAX_NAMES: &[(&str, &str)] = &[
     ("rust", "Rust"),
     ("starlark", "Python"),
     ("toml", "TOML"),
-    ("tsx", "TypescriptReact"),
+    ("tsx", "TypeScriptReact"),
     ("typescript", "TypeScript"),
     ("yaml", "YAML"),
     ("zig", "Zig"),
@@ -2073,6 +2398,7 @@ const LANGUAGE_ALIASES: &[(&str, &str)] = &[
     ("cmd", "batch-file"),
     ("cob", "cobol"),
     ("coffee", "coffeescript"),
+    ("cjs", "javascript"),
     ("cl", "common-lisp"),
     ("code-owner", "codeowners"),
     ("codeowner", "codeowners"),
@@ -2081,6 +2407,8 @@ const LANGUAGE_ALIASES: &[(&str, &str)] = &[
     ("coq", "coq"),
     ("csv", "comma-separated-values"),
     ("cs", "csharp"),
+    ("cu", "cuda"),
+    ("cuh", "cuda"),
     ("cxx", "cpp"),
     ("cls", "apex"),
     ("dm", "dream-maker"),
@@ -2143,6 +2471,7 @@ const LANGUAGE_ALIASES: &[(&str, &str)] = &[
     ("mdx", "mdx"),
     ("ml", "ocaml"),
     ("mli", "ocaml"),
+    ("mjs", "javascript"),
     ("mlir", "mlir"),
     ("mips", "mipsasm"),
     ("mount", "systemd"),
@@ -2151,7 +2480,8 @@ const LANGUAGE_ALIASES: &[(&str, &str)] = &[
     ("ndjson", "json"),
     ("ignorefile", "git-ignore"),
     ("js", "javascript"),
-    ("jsx", "javascript"),
+    ("javascript-babel", "jsx"),
+    ("jsx", "jsx"),
     ("objective-cpp", "objective-c++"),
     ("node", "javascript"),
     ("objc", "objective-c"),
@@ -2233,6 +2563,34 @@ const LANGUAGE_ALIASES: &[(&str, &str)] = &[
     ("zsh", "bash"),
 ];
 
+const EXTENSION_ALIASES: &[(&str, &str)] = &[
+    ("bazel", "starlark"),
+    ("bzl", "starlark"),
+    ("c++", "cpp"),
+    ("cc", "cpp"),
+    ("cjs", "javascript"),
+    ("cls", "apex"),
+    ("cs", "csharp"),
+    ("cu", "cuda"),
+    ("cuh", "cuda"),
+    ("cxx", "cpp"),
+    ("fs", "f#"),
+    ("h", "c"),
+    ("h++", "cpp"),
+    ("hh", "cpp"),
+    ("hpp", "cpp"),
+    ("hxx", "cpp"),
+    ("js", "javascript"),
+    ("jsx", "jsx"),
+    ("mjs", "javascript"),
+    ("mts", "typescript"),
+    ("cts", "typescript"),
+    ("sv", "systemverilog"),
+    ("ts", "typescript"),
+    ("tsx", "tsx"),
+    ("v", "verilog"),
+];
+
 const BASENAME_ALIASES: &[(&str, &str)] = &[
     ("BUILD", "starlark"),
     ("BUILD.bazel", "starlark"),
@@ -2247,8 +2605,10 @@ const BASENAME_ALIASES: &[(&str, &str)] = &[
     ("GNUmakefile", "make"),
     ("BSDmakefile", "make"),
     ("CMakeLists.txt", "cmake"),
+    (".bazelrc", "starlark"),
     (".clang-format", "yaml"),
     (".clang-tidy", "yaml"),
+    (".dockerignore", "git-ignore"),
 ];
 
 #[cfg(test)]
@@ -2299,6 +2659,375 @@ mod tests {
     }
 
     #[test]
+    fn jsx_and_tsx_use_react_grammars_for_tags_and_attributes() {
+        let source = "const view = <Button data-id=\"x\" disabled />;";
+        let mut highlighter = TextMateHighlighter::new();
+
+        for language in ["jsx", "tsx"] {
+            let highlighted = highlighter.highlight(language, source).unwrap();
+            assert!(
+                span_has_class(source, &highlighted.lines[0], "Button", SyntaxClass::Tag),
+                "{language} should classify JSX tag names as tags"
+            );
+            assert!(
+                span_has_class(
+                    source,
+                    &highlighted.lines[0],
+                    "data-id",
+                    SyntaxClass::Attribute
+                ),
+                "{language} should classify JSX attribute names as attributes"
+            );
+            assert!(
+                span_has_class(
+                    source,
+                    &highlighted.lines[0],
+                    "disabled",
+                    SyntaxClass::Attribute
+                ),
+                "{language} should classify boolean JSX attribute names as attributes"
+            );
+        }
+    }
+
+    #[test]
+    fn rust_fast_path_does_not_treat_lifetimes_as_char_literals() {
+        let source = "struct Ref<'a> { value: &'a str }\nfn main() { let c = 'x'; }";
+        let highlighted = highlight_rust_fast(source);
+
+        assert!(!has_class(&highlighted.lines[0], SyntaxClass::String));
+        assert!(span_has_class(
+            "fn main() { let c = 'x'; }",
+            &highlighted.lines[1],
+            "'x'",
+            SyntaxClass::String,
+        ));
+    }
+
+    #[test]
+    fn rust_fast_path_handles_raw_string_delimiters() {
+        let source = "let value = r\"abc\";\nlet next = 1;";
+        let highlighted = highlight_rust_fast(source);
+
+        assert!(span_has_class(
+            "let value = r\"abc\";",
+            &highlighted.lines[0],
+            "r\"abc\"",
+            SyntaxClass::String,
+        ));
+        assert!(!has_class(&highlighted.lines[1], SyntaxClass::String));
+
+        let source = "let value = r#\"abc\n\"#;\nlet next = 1;";
+        let highlighted = highlight_rust_fast(source);
+
+        assert!(span_has_class(
+            "\"#;",
+            &highlighted.lines[1],
+            "\"#",
+            SyntaxClass::String,
+        ));
+        assert!(!has_class(&highlighted.lines[2], SyntaxClass::String));
+
+        let source = concat!(r##"let value = br#"\"#;"##, "\nlet next = 1;");
+        let highlighted = highlight_rust_fast(source);
+
+        assert!(span_has_class(
+            r##"let value = br#"\"#;"##,
+            &highlighted.lines[0],
+            r##"br#"\"#"##,
+            SyntaxClass::String,
+        ));
+        assert!(!has_class(&highlighted.lines[1], SyntaxClass::String));
+
+        let source = concat!(r##"let value = cr#"\"#;"##, "\nlet next = 1;");
+        let highlighted = highlight_rust_fast(source);
+
+        assert!(span_has_class(
+            r##"let value = cr#"\"#;"##,
+            &highlighted.lines[0],
+            r##"cr#"\"#"##,
+            SyntaxClass::String,
+        ));
+        assert!(!has_class(&highlighted.lines[1], SyntaxClass::String));
+    }
+
+    #[test]
+    fn rust_fast_path_closes_multiline_string_at_column_zero() {
+        let highlighted = highlight_rust_fast("let s = \"first\n\";\nlet n = 1;");
+
+        assert_eq!(
+            highlighted.lines[1].segments,
+            vec![
+                SyntaxSegment::new(0, 1, Some(SyntaxClass::String)),
+                SyntaxSegment::new(1, 2, Some(SyntaxClass::Punctuation)),
+            ]
+        );
+        assert_eq!(
+            highlighted.lines[2]
+                .segments
+                .first()
+                .map(|segment| segment.class),
+            Some(Some(SyntaxClass::Keyword))
+        );
+    }
+
+    #[test]
+    fn rust_fast_path_scans_multiline_string_continuation_from_utf8_boundary() {
+        let highlighted = highlight_rust_fast("let s = \"first\né\";");
+
+        assert_eq!(
+            highlighted.lines[1].segments,
+            vec![
+                SyntaxSegment::new(0, 3, Some(SyntaxClass::String)),
+                SyntaxSegment::new(3, 4, Some(SyntaxClass::Punctuation)),
+            ]
+        );
+    }
+
+    #[test]
+    fn rust_fast_path_tracks_nested_block_comments() {
+        let line_text = "/* outer /* inner */ still commented */ let value = 1;";
+        let highlighted = highlight_rust_fast(line_text);
+
+        assert!(span_has_class(
+            line_text,
+            &highlighted.lines[0],
+            "still commented */",
+            SyntaxClass::Comment,
+        ));
+        assert!(span_has_class(
+            line_text,
+            &highlighted.lines[0],
+            "let",
+            SyntaxClass::Keyword,
+        ));
+
+        let highlighted =
+            highlight_rust_fast("/* outer\n/* inner */\nstill commented */\nlet value = 1;");
+        assert!(span_has_class(
+            "still commented */",
+            &highlighted.lines[2],
+            "still commented */",
+            SyntaxClass::Comment,
+        ));
+        assert!(!has_class(&highlighted.lines[3], SyntaxClass::Comment));
+        assert!(span_has_class(
+            "let value = 1;",
+            &highlighted.lines[3],
+            "let",
+            SyntaxClass::Keyword,
+        ));
+    }
+
+    #[test]
+    fn go_fast_path_does_not_escape_raw_string_backticks() {
+        let source = "var s = `abc\\`;\nvar next = 1;";
+        let highlighted = highlight_c_like_fast(source, CLikeLanguage::Go);
+
+        assert!(span_has_class(
+            "var s = `abc\\`;",
+            &highlighted.lines[0],
+            "`abc\\`",
+            SyntaxClass::String,
+        ));
+        assert!(!has_class(&highlighted.lines[1], SyntaxClass::String));
+        assert!(span_has_class(
+            "var next = 1;",
+            &highlighted.lines[1],
+            "var",
+            SyntaxClass::Keyword,
+        ));
+
+        let javascript = highlight_c_like_fast(source, CLikeLanguage::EcmaScript);
+        assert!(has_class(&javascript.lines[1], SyntaxClass::String));
+    }
+
+    #[test]
+    fn ecmascript_fast_path_handles_regex_literals_with_slashes() {
+        let source = "const re = /https?:\\/\\//; const ok = true;";
+        let highlighted = highlight_c_like_fast(source, CLikeLanguage::EcmaScript);
+
+        assert!(span_has_class(
+            source,
+            &highlighted.lines[0],
+            "/https?:\\/\\//",
+            SyntaxClass::String,
+        ));
+        assert!(!has_class(&highlighted.lines[0], SyntaxClass::Comment));
+
+        let mut highlighter = TextMateHighlighter::new();
+        let typescript = highlighter.highlight("typescript", source).unwrap();
+        assert!(span_has_class(
+            source,
+            &typescript.lines[0],
+            "/https?:\\/\\//",
+            SyntaxClass::String,
+        ));
+        assert!(!has_class(&typescript.lines[0], SyntaxClass::Comment));
+
+        let source = "return /[/:]\\/\\//i.test(value); // trailing";
+        let highlighted = highlight_c_like_fast(source, CLikeLanguage::EcmaScript);
+
+        assert!(span_has_class(
+            source,
+            &highlighted.lines[0],
+            "/[/:]\\/\\//i",
+            SyntaxClass::String,
+        ));
+        assert!(span_has_class(
+            source,
+            &highlighted.lines[0],
+            "// trailing",
+            SyntaxClass::Comment,
+        ));
+    }
+
+    #[test]
+    fn ecmascript_fast_path_keeps_division_before_line_comment() {
+        let source = "const ratio = total / count; // trailing";
+        let highlighted = highlight_c_like_fast(source, CLikeLanguage::EcmaScript);
+
+        assert!(!span_has_class(
+            source,
+            &highlighted.lines[0],
+            "/ count",
+            SyntaxClass::String,
+        ));
+        assert!(span_has_class(
+            source,
+            &highlighted.lines[0],
+            "// trailing",
+            SyntaxClass::Comment,
+        ));
+    }
+
+    #[test]
+    fn fast_paths_reset_comments_closed_at_line_end() {
+        let rust = highlight_rust_fast("/* ok */\nlet value = 1;");
+        assert!(has_class(&rust.lines[0], SyntaxClass::Comment));
+        assert!(!has_class(&rust.lines[1], SyntaxClass::Comment));
+        assert!(has_class(&rust.lines[1], SyntaxClass::Keyword));
+
+        let c_like = highlight_c_like_fast("/* ok */\nreturn 1;", CLikeLanguage::C);
+        assert!(has_class(&c_like.lines[0], SyntaxClass::Comment));
+        assert!(!has_class(&c_like.lines[1], SyntaxClass::Comment));
+        assert!(has_class(&c_like.lines[1], SyntaxClass::Keyword));
+
+        let markup = highlight_markup_fast("<!-- ok -->\n<div></div>");
+        assert!(has_class(&markup.lines[0], SyntaxClass::Comment));
+        assert!(!has_class(&markup.lines[1], SyntaxClass::Comment));
+        assert!(has_class(&markup.lines[1], SyntaxClass::Tag));
+    }
+
+    #[test]
+    fn markup_fast_path_ignores_gt_inside_quoted_attributes() {
+        let source = "<a title=\"1 > 0\" href='#'>link</a>";
+        let highlighted = highlight_markup_fast(source);
+
+        assert!(span_has_class(
+            source,
+            &highlighted.lines[0],
+            "\"1 > 0\"",
+            SyntaxClass::String,
+        ));
+        assert!(span_has_class(
+            source,
+            &highlighted.lines[0],
+            "href",
+            SyntaxClass::Attribute,
+        ));
+        assert!(span_has_class(
+            source,
+            &highlighted.lines[0],
+            "'#'",
+            SyntaxClass::String,
+        ));
+
+        let source = "<Component data-test='a > b' disabled />";
+        let highlighted = highlight_markup_fast(source);
+
+        assert!(span_has_class(
+            source,
+            &highlighted.lines[0],
+            "'a > b'",
+            SyntaxClass::String,
+        ));
+        assert!(span_has_class(
+            source,
+            &highlighted.lines[0],
+            "disabled",
+            SyntaxClass::Attribute,
+        ));
+    }
+
+    #[test]
+    fn fast_string_scanners_advance_escapes_on_utf8_boundaries() {
+        let rust = highlight_rust_fast("let value = \"\\é\";\nlet next = 1;");
+        assert!(span_has_class(
+            "let value = \"\\é\";",
+            &rust.lines[0],
+            "\"\\é\"",
+            SyntaxClass::String,
+        ));
+        assert!(!has_class(&rust.lines[1], SyntaxClass::String));
+
+        let c_like = highlight_c_like_fast(
+            "const value = \"\\é\";\nconst next = 1;",
+            CLikeLanguage::EcmaScript,
+        );
+        assert!(span_has_class(
+            "const value = \"\\é\";",
+            &c_like.lines[0],
+            "\"\\é\"",
+            SyntaxClass::String,
+        ));
+        assert!(!has_class(&c_like.lines[1], SyntaxClass::String));
+
+        let template = highlight_c_like_fast(
+            "const value = `\\é`;\nconst next = 1;",
+            CLikeLanguage::EcmaScript,
+        );
+        assert!(span_has_class(
+            "const value = `\\é`;",
+            &template.lines[0],
+            "`\\é`",
+            SyntaxClass::String,
+        ));
+        assert!(!has_class(&template.lines[1], SyntaxClass::String));
+
+        let quoted = highlight_compiler_ir_fast("$value = \"\\é\"\n$next = 1");
+        assert!(span_has_class(
+            "$value = \"\\é\"",
+            &quoted.lines[0],
+            "\"\\é\"",
+            SyntaxClass::String,
+        ));
+        assert!(!has_class(&quoted.lines[1], SyntaxClass::String));
+
+        let markup = highlight_markup_fast("<tag title=\"\\é\"></tag>");
+        assert!(span_has_class(
+            "<tag title=\"\\é\"></tag>",
+            &markup.lines[0],
+            "\"\\é\"",
+            SyntaxClass::String,
+        ));
+    }
+
+    #[test]
+    fn language_aliases_resolve_to_highlightable_languages() {
+        for (alias, _) in LANGUAGE_ALIASES {
+            let Some(language) = canonical_language(alias) else {
+                continue;
+            };
+            assert!(
+                syntax_for_language(&language).is_some()
+                    || FastLanguage::for_name(&language).is_some(),
+                "alias {alias:?} resolved to unhighlightable language {language:?}"
+            );
+        }
+    }
+
+    #[test]
     fn all_available_languages_highlight_smoke() {
         let mut highlighter = TextMateHighlighter::new();
         let mut failures = Vec::new();
@@ -2332,6 +3061,71 @@ mod tests {
             detect_language_from_path("CMakeLists.txt").as_deref(),
             Some("cmake")
         );
+        assert_eq!(
+            detect_language_from_path(".bazelrc").as_deref(),
+            Some("starlark")
+        );
+        assert_eq!(
+            detect_language_from_path(".dockerignore").as_deref(),
+            Some("git-ignore")
+        );
+        assert_eq!(
+            detect_language_from_path("foo.js").as_deref(),
+            Some("javascript")
+        );
+        assert_eq!(detect_language_from_path("foo.jsx").as_deref(), Some("jsx"));
+        assert_eq!(detect_language_from_path("foo.tsx").as_deref(), Some("tsx"));
+        assert_eq!(
+            detect_language_from_path("foo.mjs").as_deref(),
+            Some("javascript")
+        );
+        assert_eq!(
+            detect_language_from_path("foo.cjs").as_deref(),
+            Some("javascript")
+        );
+        assert_eq!(
+            detect_language_from_path("foo.bzl").as_deref(),
+            Some("starlark")
+        );
+        assert_eq!(
+            detect_language_from_path("foo.cls").as_deref(),
+            Some("apex")
+        );
+        assert_eq!(detect_language_from_path("foo.fs").as_deref(), Some("f#"));
+        assert_eq!(detect_language_from_path("foo.h").as_deref(), Some("c"));
+        assert_eq!(detect_language_from_path("foo.hpp").as_deref(), Some("cpp"));
+        assert_eq!(detect_language_from_path("foo.cu").as_deref(), Some("cuda"));
+        assert_eq!(
+            detect_language_from_path("foo.cuh").as_deref(),
+            Some("cuda")
+        );
+        assert_eq!(
+            detect_language_from_path("foo.v").as_deref(),
+            Some("verilog")
+        );
+        assert_eq!(canonical_language("v").as_deref(), Some("v"));
+    }
+
+    #[test]
+    fn detects_fast_only_language_extensions_from_paths() {
+        for (path, language) in [
+            ("main.bicep", "bicep"),
+            ("foo.cue", "cue"),
+            ("foo.gleam", "gleam"),
+            ("foo.kdl", "kdl"),
+            ("foo.pkl", "pkl"),
+            ("schema.prisma", "prisma"),
+            ("foo.ron", "ron"),
+            ("build.meson", "meson"),
+        ] {
+            assert_eq!(detect_language_from_path(path).as_deref(), Some(language));
+        }
+
+        assert_eq!(
+            detect_language_from_path("foo.v").as_deref(),
+            Some("verilog")
+        );
+        assert_eq!(canonical_language("v").as_deref(), Some("v"));
     }
 
     #[test]
@@ -2345,5 +3139,24 @@ mod tests {
             Some(SyntaxClass::Function)
         );
         assert_eq!(classify_scope_name("typewriter"), None);
+    }
+
+    fn has_class(line: &HighlightedLine, class: SyntaxClass) -> bool {
+        line.segments
+            .iter()
+            .any(|segment| segment.class == Some(class))
+    }
+
+    fn span_has_class(
+        line_text: &str,
+        line: &HighlightedLine,
+        needle: &str,
+        class: SyntaxClass,
+    ) -> bool {
+        let start = line_text.find(needle).expect("test span should exist");
+        let end = start + needle.len();
+        line.segments.iter().any(|segment| {
+            segment.class == Some(class) && segment.byte_start <= start && segment.byte_end >= end
+        })
     }
 }

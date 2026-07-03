@@ -139,11 +139,14 @@ examples:
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum SyntaxCommand {
-    #[command(about = "Install and enable syntax highlighting languages")]
+    #[command(about = "Enable bundled syntax highlighting languages and mappings")]
     Add(SyntaxAddArgs),
     #[command(about = "Report bundled syntax highlighting grammar status")]
     Update(SyntaxUpdateArgs),
-    #[command(alias = "remove", about = "Remove syntax highlighting languages")]
+    #[command(
+        alias = "remove",
+        about = "Remove syntax highlighting languages and custom mappings"
+    )]
     Rm(SyntaxLanguagesArgs),
     #[command(
         visible_alias = "ls",
@@ -154,7 +157,7 @@ pub(crate) enum SyntaxCommand {
     Available(SyntaxAvailableArgs),
     #[command(about = "Remove stale syntax language config entries")]
     Clean,
-    #[command(about = "Print syntax cache and user config paths")]
+    #[command(about = "Print syntax config and colorscheme paths")]
     Path,
     #[command(about = "Validate enabled syntax highlighting languages")]
     Doctor,

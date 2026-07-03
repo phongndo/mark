@@ -102,7 +102,7 @@ pub(crate) fn empty_diff_fill_from(width: usize, row_index: usize, column_offset
     let mut fill = String::with_capacity(width.saturating_mul(EMPTY_DIFF_FILL.len_utf8()));
     for column in 0..width {
         fill.push(
-            if (column + column_offset + row_index) % EMPTY_DIFF_FILL_SPACING == 0 {
+            if (column + column_offset + row_index).is_multiple_of(EMPTY_DIFF_FILL_SPACING) {
                 EMPTY_DIFF_FILL
             } else {
                 ' '

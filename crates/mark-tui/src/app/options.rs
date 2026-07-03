@@ -286,7 +286,7 @@ fn toast_corner_config_value(corner: ToastCorner) -> toml::Value {
 }
 
 pub(crate) fn toast_timeout_label(timeout_ms: u64) -> String {
-    if timeout_ms % 1_000 == 0 {
+    if timeout_ms.is_multiple_of(1_000) {
         format!("{}s", timeout_ms / 1_000)
     } else {
         format!("{timeout_ms}ms")

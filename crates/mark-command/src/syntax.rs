@@ -35,16 +35,12 @@ pub fn syntax_clean_cache() -> MarkResult<SyntaxCleanResult> {
     mark_syntax::clean_cache()
 }
 
-pub fn syntax_cache_dir() -> MarkResult<String> {
-    mark_syntax::cache_dir()
-}
-
 pub fn syntax_config_path() -> MarkResult<PathBuf> {
     mark_syntax::config_path()
 }
 
 pub fn syntax_settings_path() -> MarkResult<PathBuf> {
-    mark_syntax::settings_path()
+    mark_syntax::settings_write_path()
 }
 
 pub fn syntax_colorscheme_dir() -> MarkResult<PathBuf> {

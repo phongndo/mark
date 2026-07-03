@@ -6,11 +6,11 @@ use std::{
 
 use crate::{
     BASENAME_LANGUAGES, CORE_LANGUAGES, DiffContextExpansion, DiffSettings, LANGUAGE_ALIASES,
-    NotificationSettings, StoredDiffContextExpansion, StoredDiffContextExpansionMode,
-    StoredDiffSettings, StoredLanguageMapping, StoredNotificationSettings, StoredSyntaxConfig,
-    StoredSyntaxLimits, StoredSyntaxSettings, StoredSyntaxThemeConfig, StoredSyntaxThemeTable,
-    SyntaxLimits, SyntaxMode, SyntaxSettings, SyntaxThemeConfig, SyntaxThemeSource, config_path,
-    load_settings,
+    LEGACY_CONFIG_FILE, NotificationSettings, StoredDiffContextExpansion,
+    StoredDiffContextExpansionMode, StoredDiffSettings, StoredLanguageMapping,
+    StoredNotificationSettings, StoredSyntaxConfig, StoredSyntaxLimits, StoredSyntaxSettings,
+    StoredSyntaxThemeConfig, StoredSyntaxThemeTable, SyntaxLimits, SyntaxMode, SyntaxSettings,
+    SyntaxThemeConfig, SyntaxThemeSource, config_path, load_settings,
 };
 use mark_core::{MarkError, MarkResult};
 
@@ -38,16 +38,37 @@ pub(crate) fn config_home() -> MarkResult<PathBuf> {
 
 pub(crate) fn load_config() -> MarkResult<StoredSyntaxConfig> {
     let path = config_path()?;
-    if !path.exists() {
-        return Ok(StoredSyntaxConfig::default());
+    load_config_from_path(&path)
+}
+
+pub(crate) fn load_config_from_path(path: &Path) -> MarkResult<StoredSyntaxConfig> {
+    if path.exists() {
+        return read_config(path);
     }
 
-    let contents = fs::read_to_string(&path)?;
+    let legacy_path = legacy_config_path_for(path);
+    if legacy_path.exists() {
+        return read_config(&legacy_path);
+    }
+
+    Ok(StoredSyntaxConfig::default())
+}
+
+fn legacy_config_path_for(path: &Path) -> PathBuf {
+    path.with_file_name(LEGACY_CONFIG_FILE)
+}
+
+fn read_config(path: &Path) -> MarkResult<StoredSyntaxConfig> {
+    let contents = fs::read_to_string(path)?;
     serde_json::from_str(&contents).map_err(Into::into)
 }
 
 pub(crate) fn save_config(config: &StoredSyntaxConfig) -> MarkResult<()> {
     let path = config_path()?;
+    write_config(&path, config)
+}
+
+fn write_config(path: &Path, config: &StoredSyntaxConfig) -> MarkResult<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -62,10 +83,11 @@ pub(crate) fn parse_settings(contents: &str) -> Result<SyntaxSettings, toml::de:
 }
 
 pub(crate) fn settings_from_stored(stored: StoredSyntaxSettings) -> SyntaxSettings {
+    let colorscheme = stored.colorscheme.or(stored.theme);
+
     SyntaxSettings {
         mode: stored.mode.unwrap_or_default(),
-        theme: stored
-            .colorscheme
+        theme: colorscheme
             .map(theme_config_from_stored)
             .unwrap_or_default(),
         layout: stored.layout,
@@ -287,9 +309,13 @@ pub(crate) fn normalize_language_name(language: String) -> String {
         return String::new();
     }
     if let Some(language) = detect_language_from_basename(&language) {
-        return language.to_owned();
+        return canonical_language_name(language);
     }
     let language = language.trim_start_matches('.');
+    canonical_language_name(language)
+}
+
+fn canonical_language_name(language: &str) -> String {
     let language = language_alias(language).unwrap_or(language);
     mark_textmate::canonical_language(language)
         .or_else(|| mark_textmate::detect_language_from_path(language))
@@ -425,11 +451,43 @@ pub(crate) fn upsert_filename_mappings(
     let mut added = Vec::new();
     for filename in filenames {
         let pattern = normalize_custom_filename(filename)?;
-        if upsert_mapping(mappings, &pattern, language) {
+        if upsert_filename_mapping(mappings, &pattern, language) {
             added.push(pattern);
         }
     }
     Ok(added)
+}
+
+fn upsert_filename_mapping(
+    mappings: &mut Vec<StoredLanguageMapping>,
+    pattern: &str,
+    language: &str,
+) -> bool {
+    if let Some(index) = mappings
+        .iter()
+        .position(|mapping| mapping.pattern.eq_ignore_ascii_case(pattern))
+    {
+        let mut changed =
+            mappings[index].pattern != pattern || mappings[index].language != language;
+        mappings[index].pattern = pattern.to_owned();
+        mappings[index].language = language.to_owned();
+
+        let mut cursor = index + 1;
+        while cursor < mappings.len() {
+            if mappings[cursor].pattern.eq_ignore_ascii_case(pattern) {
+                mappings.remove(cursor);
+                changed = true;
+            } else {
+                cursor += 1;
+            }
+        }
+        return changed;
+    }
+    mappings.push(StoredLanguageMapping {
+        pattern: pattern.to_owned(),
+        language: language.to_owned(),
+    });
+    true
 }
 
 pub(crate) fn upsert_mapping(

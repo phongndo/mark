@@ -174,12 +174,23 @@ mark syntax clean
 mark syntax path
 ```
 
-Custom extension and filename mappings can be registered without rebuilding
-`mark`:
+Custom extension and filename mappings can point additional paths at an
+existing bundled, highlight-ready language without rebuilding `mark`. They do
+not install new grammars; choose a target reported by
+`mark syntax available --installed`:
 
 ```sh
-mark syntax add mylang \
-  --ext mylang
+mark syntax add rust \
+  --ext rs.in \
+  --filename Rustfile
+```
+
+Remove those custom mappings by removing the target language's user syntax
+config. Core languages stay bundled and enabled; `rm` only clears their custom
+config:
+
+```sh
+mark syntax rm rust
 ```
 
 ## Pi package

@@ -16,7 +16,7 @@ honored. Windows uses `APPDATA` when `XDG_CONFIG_HOME` is unset.
 Syntax language state is stored separately as `syntax.json` under the same
 `mark` config directory. Bundled TextMate grammars ship with `mark` and do not
 need runtime downloads.
-Inspect all syntax paths with:
+Inspect syntax mappings, config, and colorscheme paths with:
 
 ```sh
 mark syntax path

@@ -5,7 +5,7 @@ resolver = "3"
 [workspace.package]
 version = "0.7.2"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 license = "MIT"
 description = "Fast terminal Git diff review tool."
 repository = "https://github.com/phongndo/mark"
@@ -28,8 +28,7 @@ tempfile = "3"
 toml = "1.1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time"] }
 two-face = { version = "0.5", default-features = false, features = ["syntect-onig"] }
-# time 0.3.47 raises MSRV above the workspace Rust 1.85.
-time = { version = "=0.3.45", default-features = false, features = ["local-offset", "std"] }
+time = { version = "0.3", default-features = false, features = ["local-offset", "std"] }
 unicode-width = "0.2"
 
 mark-core = { path = "crates/mark-core" }

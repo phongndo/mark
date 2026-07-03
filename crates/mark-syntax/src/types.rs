@@ -13,7 +13,9 @@ use serde::{Deserialize, Serialize};
 
 pub(crate) const CONFIG_DIR: &str = "mark";
 pub(crate) const CONFIG_FILE: &str = "syntax.json";
+pub(crate) const LEGACY_CONFIG_FILE: &str = "tree-sitter.json";
 pub(crate) const SETTINGS_FILE: &str = "config.toml";
+pub(crate) const LEGACY_SETTINGS_FILE: &str = "syntax.toml";
 pub(crate) const COLORSCHEME_DIR: &str = "colorscheme";
 pub(crate) const TEXTMATE_BUNDLE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -31,6 +33,7 @@ pub(crate) const CORE_LANGUAGES: &[&str] = &[
     "python",
     "typescript",
     "javascript",
+    "jsx",
     "tsx",
     "bash",
     "toml",
@@ -48,11 +51,12 @@ pub(crate) const LANGUAGE_ALIASES: &[(&str, &str)] = &[
     ("cxx", "cpp"),
     ("docker", "dockerfile"),
     ("gradle", "groovy"),
+    ("gitignore", "git-ignore"),
     ("hcl", "terraform"),
-    ("ignorefile", "gitignore"),
+    ("ignorefile", "git-ignore"),
     ("ipynb", "json"),
     ("js", "javascript"),
-    ("jsx", "javascript"),
+    ("jsx", "jsx"),
     ("justfile", "just"),
     ("commonlisp", "common-lisp"),
     ("node", "javascript"),
@@ -92,8 +96,8 @@ pub(crate) const BASENAME_LANGUAGES: &[(&str, &str)] = &[
     (".bazelrc", "starlark"),
     (".clang-format", "yaml"),
     (".clang-tidy", "yaml"),
-    (".dockerignore", "gitignore"),
-    (".gitignore", "gitignore"),
+    (".dockerignore", "git-ignore"),
+    (".gitignore", "git-ignore"),
 ];
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -116,6 +120,7 @@ pub(crate) struct StoredLanguageMapping {
 pub(crate) struct StoredSyntaxSettings {
     pub(crate) mode: Option<SyntaxMode>,
     pub(crate) colorscheme: Option<StoredSyntaxThemeConfig>,
+    pub(crate) theme: Option<StoredSyntaxThemeConfig>,
     pub(crate) layout: Option<LayoutSetting>,
     pub(crate) live_reload: Option<bool>,
     pub(crate) syntax_highlighting: Option<bool>,
@@ -825,6 +830,8 @@ pub struct SyntaxUpdateResult {
 pub struct SyntaxRemoveResult {
     pub removed: Vec<String>,
     pub missing: Vec<String>,
+    pub kept_core: Vec<String>,
+    pub removed_custom_mappings: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -885,9 +892,16 @@ impl SyntaxLanguageSet {
     }
 
     pub fn language_for_path(&self, path: &str) -> Option<String> {
-        let language = detect_custom_language_from_path(path, &self.extensions, &self.filenames)
-            .or_else(|| detect_language_name(path))?;
-        let language = normalize_language_name(language);
+        if let Some(language) =
+            detect_custom_language_from_path(path, &self.extensions, &self.filenames)
+        {
+            let language = normalize_language_name(language);
+            if self.is_highlight_ready(&language) {
+                return Some(language);
+            }
+        }
+
+        let language = normalize_language_name(detect_language_name(path)?);
         self.is_highlight_ready(&language).then_some(language)
     }
 

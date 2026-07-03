@@ -45,8 +45,14 @@ pub(crate) fn print_syntax_remove_result(
     for language in &result.removed {
         write_stdout(format_args!("- disabled {language} in config\n"))?;
     }
+    for language in &result.kept_core {
+        write_stdout(format_args!("= core language remains enabled {language}\n"))?;
+    }
     for language in &result.missing {
         write_stdout(format_args!("= not enabled in config {language}\n"))?;
+    }
+    for mapping in &result.removed_custom_mappings {
+        write_stdout(format_args!("- unmapped {mapping}\n"))?;
     }
     Ok(())
 }

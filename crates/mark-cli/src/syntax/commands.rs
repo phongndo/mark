@@ -55,11 +55,7 @@ pub(crate) fn syntax(command: SyntaxCommand) -> CliResult<()> {
         }
         SyntaxCommand::Path => {
             write_stdout(format_args!(
-                "cache       {}\n",
-                mark_command::syntax_cache_dir()?
-            ))?;
-            write_stdout(format_args!(
-                "registry    {}\n",
+                "mappings    {}\n",
                 mark_command::syntax_config_path()?.display()
             ))?;
             write_stdout(format_args!(

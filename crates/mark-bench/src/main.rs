@@ -944,8 +944,10 @@ fn collect_syntax_compare_inputs(
         if !language_filter.is_empty() && !language_filter.contains(&language) {
             continue;
         }
-        let Some(shiki_language) = shiki_language_name(&language) else {
-            continue;
+        let shiki_language = match shiki_language_name(&language) {
+            Some(shiki_language) => shiki_language.to_owned(),
+            None if args.shiki => continue,
+            None => language.clone(),
         };
         let metadata = fs::metadata(&full_path)?;
         let bytes = usize::try_from(metadata.len()).unwrap_or(usize::MAX);
@@ -964,7 +966,7 @@ fn collect_syntax_compare_inputs(
             path: full_path,
             display_path,
             language,
-            shiki_language: shiki_language.to_owned(),
+            shiki_language,
             bytes: source.len() as u64,
             lines,
         });
@@ -2447,6 +2449,41 @@ mod tests {
     }
 
     #[test]
+    fn syntax_compare_keeps_mark_only_inputs_without_shiki() {
+        let dir = temp_test_dir("syntax-compare-mark-only");
+        fs::create_dir_all(&dir).expect("test directory should be created");
+        let file = dir.join(".gitignore");
+        fs::write(&file, "target/\n").expect("test input should be written");
+
+        let args = syntax_compare_test_args(file.clone(), false);
+        let inputs = collect_syntax_compare_inputs(&args, &BTreeSet::new())
+            .expect("syntax inputs should collect");
+
+        assert_eq!(inputs.len(), 1);
+        assert_eq!(inputs[0].path, file);
+        assert_eq!(inputs[0].language, "git-ignore");
+        assert_eq!(inputs[0].shiki_language, "git-ignore");
+
+        fs::remove_dir_all(dir).expect("test directory should be removed");
+    }
+
+    #[test]
+    fn syntax_compare_skips_mark_only_inputs_when_shiki_requested() {
+        let dir = temp_test_dir("syntax-compare-shiki-only");
+        fs::create_dir_all(&dir).expect("test directory should be created");
+        let file = dir.join(".gitignore");
+        fs::write(&file, "target/\n").expect("test input should be written");
+
+        let args = syntax_compare_test_args(file, true);
+        let inputs = collect_syntax_compare_inputs(&args, &BTreeSet::new())
+            .expect("syntax inputs should collect");
+
+        assert!(inputs.is_empty());
+
+        fs::remove_dir_all(dir).expect("test directory should be removed");
+    }
+
+    #[test]
     fn initialize_repo_pins_deterministic_git_config() {
         let repo = temp_test_dir("git-config");
 
@@ -2483,6 +2520,21 @@ mod tests {
         assert_eq!(patch_bytes, u64::try_from(patch.len()).unwrap());
         assert_eq!(changeset.files.len(), 1);
         assert!(changeset.raw_patch.is_empty());
+    }
+
+    fn syntax_compare_test_args(file: PathBuf, shiki: bool) -> SyntaxCompareArgs {
+        SyntaxCompareArgs {
+            repo: None,
+            files: vec![file],
+            languages: Vec::new(),
+            max_files: usize::MAX,
+            max_bytes: usize::MAX,
+            iterations: 1,
+            shiki,
+            shiki_version: "4.3.0".to_owned(),
+            shiki_dir: PathBuf::from("target/shiki-syntax-compare-test"),
+            json: false,
+        }
     }
 
     fn temp_test_dir(name: &str) -> PathBuf {
