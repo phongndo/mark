@@ -11,13 +11,17 @@ fn viewport_focus_offset_slides_between_edges_and_center() {
 }
 
 #[test]
-fn n_and_p_do_not_navigate_without_grep_filter() {
+fn n_opens_annotation_menu_shortcut_without_grep_filter() {
     let changeset = changeset_with_files(&["a.rs", "b.rs", "c.rs"]);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
     app.set_viewport_rows(7);
 
     app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE))
-        .expect("n should be ignored without grep");
+        .expect("n should open annotation menu shortcut");
+    assert_eq!(
+        app.notifications.toasts.latest_text(),
+        Some("no annotations")
+    );
     assert_eq!(app.sidebar.selected_file, FILE_0);
     assert_eq!(app.focused_hunk_for_viewport(7), Some((FILE_0, HUNK_0)));
 

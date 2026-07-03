@@ -45,7 +45,6 @@ impl NavigationController {
             KeyCode::Char('p') | KeyCode::Char('N') if ctx.grep_filter_active() => {
                 ctx.move_grep_match(-1);
             }
-            KeyCode::Char('n') | KeyCode::Char('p') | KeyCode::Char('N') => {}
             _ => return false,
         }
 
