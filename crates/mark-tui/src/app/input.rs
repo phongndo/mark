@@ -26,6 +26,10 @@ impl DiffApp {
     }
 
     pub(crate) fn handle_single_global_key(&mut self, key: KeyEvent) -> MarkResult<Option<bool>> {
+        if self.filters.grep_active() && grep_navigation_key(key) {
+            return Ok(None);
+        }
+
         for action in NORMAL_GLOBAL_ACTIONS.iter().copied() {
             if self.config.keymap.matches_single(action, key) {
                 return self.perform_global_action(action);
@@ -232,4 +236,11 @@ impl DiffApp {
             && !self.overlays.color_scheme_picker_is_open()
             && !self.refs.commit_menu_is_open()
     }
+}
+
+fn grep_navigation_key(key: KeyEvent) -> bool {
+    matches!(
+        key.code,
+        KeyCode::Char('n') | KeyCode::Char('p') | KeyCode::Char('N')
+    )
 }
