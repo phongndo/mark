@@ -151,7 +151,7 @@ const GLOBAL_ACTION_SPECS: &[GlobalActionSpec] = &[
     global_action_spec!(GlobalAction::BaseBranch, "base_branch", []),
     global_action_spec!(GlobalAction::CommitPicker, "commit_picker", []),
     global_action_spec!(GlobalAction::OptionsMenu, "options_menu", ["o"]),
-    global_action_spec!(GlobalAction::AnnotationMenu, "annotation_menu", ["a"], 1),
+    global_action_spec!(GlobalAction::AnnotationMenu, "annotation_menu", ["n"], 1),
     global_action_spec!(GlobalAction::FileBrowser, "file_browser", ["b"]),
     global_action_spec!(GlobalAction::PreviousFile, "previous_file", ["("]),
     global_action_spec!(GlobalAction::NextFile, "next_file", [")"]),

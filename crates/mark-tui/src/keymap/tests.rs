@@ -198,6 +198,14 @@ fn default_review_actions_use_mnemonic_keys() {
         KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE)
     ));
     assert!(keymap.matches_single(
+        GlobalAction::AnnotationMenu,
+        KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE)
+    ));
+    assert!(!keymap.matches_single(
+        GlobalAction::AnnotationMenu,
+        KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)
+    ));
+    assert!(keymap.matches_single(
         GlobalAction::Layout,
         KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE)
     ));

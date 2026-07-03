@@ -139,7 +139,7 @@ n / p          next / previous grep match
 r              reload
 m              diff type selector
 o              settings menu
-a              annotation search menu
+n              annotation search menu
 b              file browser
 s              toggle split/unified layout
 Ctrl-G         open the focused hunk in `$VISUAL`, `$GIT_EDITOR`, or `$EDITOR`
