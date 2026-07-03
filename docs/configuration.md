@@ -126,7 +126,12 @@ Built-in colorschemes are `system`, `catppuccin-latte`,
 `catppuccin-frappe`, `catppuccin-macchiato`, `catppuccin-mocha`,
 `gruvbox-dark`, `gruvbox-light`, `github-dark`,
 `github-dark-high-contrast`, `github-light`, `github-light-high-contrast`,
-and `tokyonight`. Base16 themes can be loaded from a file:
+and `tokyonight`.
+
+Changing Colorscheme in the interactive settings menu updates the
+`colorscheme` config value.
+
+Base16 themes can be loaded from a file:
 
 ```toml
 [colorscheme]
@@ -173,8 +178,8 @@ number, operator, property, punctuation, string, tag, type, variable
 
 ## Diff rendering
 
-Top-level UI settings mirror the interactive settings menu and are persisted
-when changed there:
+Top-level UI settings are read at startup and mirror the interactive settings
+menu:
 
 ```toml
 layout = "dynamic"           # dynamic, unified, split
@@ -185,8 +190,8 @@ line_wrapping = false
 
 `layout = "dynamic"` uses split when the terminal is wide enough and unified
 when it is narrow.
-Changing Layout in the settings menu persists this value; the layout keybinding
-only toggles split/unified for the current session.
+Changing these values in the settings menu only affects the current session;
+only Colorscheme changes are written back to config.
 
 ## Notifications
 
@@ -209,7 +214,7 @@ make UI behavior easier to trace.
 The configured `timeout_ms` is clamped to 10,000 ms.
 
 These notification settings can also be changed from the interactive settings
-menu.
+menu for the current session.
 
 `[diff]` controls visual emphasis:
 

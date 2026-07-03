@@ -1220,8 +1220,8 @@ fn options_menu_toggles_setting_on_enter() {
 }
 
 #[test]
-fn options_menu_draft_persists_only_changed_setting() {
-    let dir = temp_test_dir("settings-menu-persist-changed-only");
+fn options_menu_persistence_writes_only_colorscheme() {
+    let dir = temp_test_dir("settings-menu-persist-colorscheme-only");
     let path = dir.join("config.toml");
     fs::create_dir_all(&dir).expect("test dir should be created");
     fs::write(
@@ -1250,17 +1250,20 @@ context_expand = 7
     persist_options_menu_draft_to_path(
         &path,
         OptionsDraft {
-            layout: LayoutSetting::Split,
+            layout: LayoutSetting::Dynamic,
             live_updates_enabled: false,
             context_expansion: DiffContextExpansion::Full,
             syntax_enabled: false,
             line_wrapping: true,
             color_scheme: ColorSchemeChoice::Tokyonight,
-            ..default_options_draft()
+            notification_mode: NotificationMode::Debug,
+            toast_corner: ToastCorner::BottomLeft,
+            toast_timeout_ms: 5_000,
+            toast_max_visible: 5,
         },
-        OptionsMenuItem::LiveReload,
+        OptionsMenuItem::ColorScheme,
     )
-    .expect("settings draft should persist");
+    .expect("colorscheme should persist");
 
     let saved = fs::read_to_string(&path).expect("settings file should be readable");
     let saved: toml::Value = toml::from_str(&saved).expect("settings should stay valid toml");
@@ -1271,10 +1274,10 @@ context_expand = 7
 
     assert_eq!(saved["mode"].as_str(), Some("enabled"));
     assert_eq!(saved["layout"].as_str(), Some("split"));
-    assert_eq!(saved["live_reload"].as_bool(), Some(false));
+    assert_eq!(saved["live_reload"].as_bool(), Some(true));
     assert_eq!(saved["syntax_highlighting"].as_bool(), Some(true));
     assert_eq!(saved["line_wrapping"].as_bool(), Some(false));
-    assert_eq!(saved["colorscheme"].as_str(), Some("system"));
+    assert_eq!(saved["colorscheme"].as_str(), Some("tokyonight"));
     assert_eq!(
         diff.get("line_background").and_then(toml::Value::as_str),
         Some("none")
@@ -1308,151 +1311,101 @@ context_expand = 7
 }
 
 #[test]
-fn options_menu_context_persistence_removes_context_aliases() {
-    let dir = temp_test_dir("settings-menu-persist-context-aliases");
+fn options_menu_session_only_settings_do_not_rewrite_config() {
+    let dir = temp_test_dir("settings-menu-session-only-no-rewrite");
     let path = dir.join("config.toml");
     fs::create_dir_all(&dir).expect("test dir should be created");
-    fs::write(
-        &path,
-        r#"
+    let original = r#"
+word_wrap = false
+wrap_lines = false
+
 [diff]
 line_background = "none"
 context_expansion = 5
 context_lines = 7
 expand_context = 9
-"#,
-    )
-    .expect("settings file should be written");
 
-    persist_options_menu_draft_to_path(
-        &path,
-        OptionsDraft {
-            layout: LayoutSetting::Split,
-            live_updates_enabled: false,
-            context_expansion: DiffContextExpansion::Full,
-            syntax_enabled: false,
-            line_wrapping: true,
-            color_scheme: ColorSchemeChoice::Tokyonight,
-            ..default_options_draft()
-        },
-        OptionsMenuItem::ContextExpansion,
-    )
-    .expect("settings draft should persist");
-
-    let saved = fs::read_to_string(&path).expect("settings file should be readable");
-    let saved: toml::Value = toml::from_str(&saved).expect("settings should stay valid toml");
-    let diff = saved["diff"].as_table().expect("diff should stay a table");
-
-    assert_eq!(
-        diff.get("line_background").and_then(toml::Value::as_str),
-        Some("none")
-    );
-    assert_eq!(
-        diff.get("context_expand").and_then(toml::Value::as_str),
-        Some("full")
-    );
-    assert!(diff.get("context_expansion").is_none());
-    assert!(diff.get("context_lines").is_none());
-    assert!(diff.get("expand_context").is_none());
-
-    let _ = fs::remove_dir_all(dir);
-}
-
-#[test]
-fn options_menu_line_wrapping_persistence_removes_line_wrapping_aliases() {
-    let dir = temp_test_dir("settings-menu-persist-line-wrapping-aliases");
-    let path = dir.join("config.toml");
-    fs::create_dir_all(&dir).expect("test dir should be created");
-    fs::write(
-        &path,
-        r#"
-word_wrap = false
-wrap_lines = false
-"#,
-    )
-    .expect("settings file should be written");
-
-    persist_options_menu_draft_to_path(
-        &path,
-        OptionsDraft {
-            layout: LayoutSetting::Split,
-            live_updates_enabled: false,
-            context_expansion: DiffContextExpansion::Full,
-            syntax_enabled: false,
-            line_wrapping: true,
-            color_scheme: ColorSchemeChoice::Tokyonight,
-            ..default_options_draft()
-        },
-        OptionsMenuItem::LineWrapping,
-    )
-    .expect("settings draft should persist");
-
-    let saved = fs::read_to_string(&path).expect("settings file should be readable");
-    let saved: toml::Value = toml::from_str(&saved).expect("settings should stay valid toml");
-
-    assert_eq!(saved["line_wrapping"].as_bool(), Some(true));
-    assert!(saved.get("word_wrap").is_none());
-    assert!(saved.get("wrap_lines").is_none());
-
-    let _ = fs::remove_dir_all(dir);
-}
-
-#[test]
-fn options_menu_notification_persistence_updates_nested_setting() {
-    let dir = temp_test_dir("settings-menu-persist-notifications");
-    let path = dir.join("config.toml");
-    fs::create_dir_all(&dir).expect("test dir should be created");
-    fs::write(
-        &path,
-        r#"
 [notifications]
 mode = "default"
 corner = "top-right"
 timeout_ms = 1500
 max_visible = 3
-"#,
-    )
-    .expect("settings file should be written");
+"#;
+    fs::write(&path, original).expect("settings file should be written");
+
+    let draft = OptionsDraft {
+        layout: LayoutSetting::Split,
+        live_updates_enabled: false,
+        context_expansion: DiffContextExpansion::Full,
+        syntax_enabled: false,
+        line_wrapping: true,
+        color_scheme: ColorSchemeChoice::Tokyonight,
+        notification_mode: NotificationMode::Debug,
+        toast_corner: ToastCorner::BottomLeft,
+        toast_timeout_ms: 5_000,
+        toast_max_visible: 5,
+    };
+
+    for changed_item in [
+        OptionsMenuItem::Layout,
+        OptionsMenuItem::LiveReload,
+        OptionsMenuItem::ContextExpansion,
+        OptionsMenuItem::SyntaxHighlighting,
+        OptionsMenuItem::LineWrapping,
+        OptionsMenuItem::NotificationMode,
+        OptionsMenuItem::ToastCorner,
+        OptionsMenuItem::ToastTimeout,
+        OptionsMenuItem::ToastMaxVisible,
+    ] {
+        persist_options_menu_draft_to_path(&path, draft, changed_item)
+            .expect("session-only setting should not fail persistence");
+        assert_eq!(
+            fs::read_to_string(&path).expect("settings file should be readable"),
+            original
+        );
+    }
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn options_menu_session_only_settings_do_not_create_config() {
+    let dir = temp_test_dir("settings-menu-session-only-no-create");
+    let path = dir.join("config.toml");
 
     persist_options_menu_draft_to_path(
         &path,
         OptionsDraft {
-            notification_mode: NotificationMode::Debug,
-            toast_corner: ToastCorner::BottomLeft,
-            toast_timeout_ms: 5_000,
-            toast_max_visible: 5,
+            live_updates_enabled: false,
             ..default_options_draft()
         },
-        OptionsMenuItem::ToastCorner,
+        OptionsMenuItem::LiveReload,
     )
-    .expect("settings draft should persist");
+    .expect("session-only setting should not create config");
+
+    assert!(!path.exists());
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn options_menu_colorscheme_persistence_creates_config() {
+    let dir = temp_test_dir("settings-menu-colorscheme-create");
+    let path = dir.join("config.toml");
+
+    persist_options_menu_draft_to_path(
+        &path,
+        OptionsDraft {
+            color_scheme: ColorSchemeChoice::GruvboxDark,
+            ..default_options_draft()
+        },
+        OptionsMenuItem::ColorScheme,
+    )
+    .expect("colorscheme should create config");
 
     let saved = fs::read_to_string(&path).expect("settings file should be readable");
     let saved: toml::Value = toml::from_str(&saved).expect("settings should stay valid toml");
-    let notifications = saved["notifications"]
-        .as_table()
-        .expect("notifications should be a table");
-
-    assert_eq!(
-        notifications.get("mode").and_then(toml::Value::as_str),
-        Some("default")
-    );
-    assert_eq!(
-        notifications.get("corner").and_then(toml::Value::as_str),
-        Some("bottom-left")
-    );
-    assert_eq!(
-        notifications
-            .get("timeout_ms")
-            .and_then(toml::Value::as_integer),
-        Some(1_500)
-    );
-    assert_eq!(
-        notifications
-            .get("max_visible")
-            .and_then(toml::Value::as_integer),
-        Some(3)
-    );
+    assert_eq!(saved["colorscheme"].as_str(), Some("gruvbox-dark"));
 
     let _ = fs::remove_dir_all(dir);
 }
@@ -1502,7 +1455,7 @@ fn options_menu_toggles_syntax_highlighting() {
 }
 
 #[test]
-fn options_menu_persists_post_apply_syntax_state_when_enable_fails() {
+fn options_menu_keeps_failed_syntax_enable_session_only() {
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new_with_syntax(
         DiffOptions::default(),
@@ -1518,16 +1471,7 @@ fn options_menu_persists_post_apply_syntax_state_when_enable_fails() {
 
     assert!(app.config.syntax.is_none());
     assert!(!app.overlays.options_menu_draft.syntax_enabled);
-    assert_eq!(
-        app.config.last_persisted_options_menu_draft,
-        Some((
-            OptionsDraft {
-                syntax_enabled: false,
-                ..app.overlays.options_menu_draft
-            },
-            OptionsMenuItem::SyntaxHighlighting,
-        ))
-    );
+    assert_eq!(app.config.last_persisted_options_menu_draft, None);
 }
 
 #[test]
@@ -1604,7 +1548,7 @@ fn options_menu_cycles_notification_settings() {
 }
 
 #[test]
-fn options_menu_cycles_custom_notification_values_to_nearest_choices() {
+fn options_menu_cycles_custom_notification_values_to_nearest_choices_session_only() {
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
     app.config.syntax_settings.notifications = NotificationSettings::new(
@@ -1623,14 +1567,7 @@ fn options_menu_cycles_custom_notification_values_to_nearest_choices() {
     app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE))
         .expect("right should cycle custom toast timeout to next choice");
     assert_eq!(app.config.syntax_settings.notifications.timeout_ms(), 2_500);
-    assert_eq!(
-        app.config
-            .last_persisted_options_menu_draft
-            .expect("timeout change should be persisted")
-            .0
-            .toast_timeout_ms,
-        2_500
-    );
+    assert_eq!(app.config.last_persisted_options_menu_draft, None);
 
     app.set_options_menu_selection(8);
     assert_eq!(
@@ -1640,14 +1577,7 @@ fn options_menu_cycles_custom_notification_values_to_nearest_choices() {
     app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE))
         .expect("right should cycle custom toast max visible to nearest choice");
     assert_eq!(app.config.syntax_settings.notifications.max_visible(), 5);
-    assert_eq!(
-        app.config
-            .last_persisted_options_menu_draft
-            .expect("max visible change should be persisted")
-            .0
-            .toast_max_visible,
-        5
-    );
+    assert_eq!(app.config.last_persisted_options_menu_draft, None);
 }
 
 #[test]

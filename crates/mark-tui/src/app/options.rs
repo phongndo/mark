@@ -222,8 +222,8 @@ pub(crate) enum OptionsMenuItem {
     ToastMaxVisible,
 }
 
-// Construct the legacy-only variant so unused-option linting stays meaningful
-// while this hidden settings-persistence path remains available.
+// Construct the legacy-only variant so unused-option linting stays meaningful.
+// It remains session-only like every non-colorscheme TUI option.
 const _: OptionsMenuItem = OptionsMenuItem::ContextExpansion;
 
 pub(crate) const COMMON_OPTIONS_MENU_ITEMS: &[OptionsMenuItem] = &[
@@ -268,10 +268,6 @@ pub(crate) fn notification_mode_label(mode: NotificationMode) -> &'static str {
     }
 }
 
-fn notification_mode_config_value(mode: NotificationMode) -> toml::Value {
-    toml::Value::String(notification_mode_label(mode).to_owned())
-}
-
 pub(crate) fn toast_corner_label(corner: ToastCorner) -> &'static str {
     match corner {
         ToastCorner::TopLeft => "top-left",
@@ -279,10 +275,6 @@ pub(crate) fn toast_corner_label(corner: ToastCorner) -> &'static str {
         ToastCorner::BottomLeft => "bottom-left",
         ToastCorner::BottomRight => "bottom-right",
     }
-}
-
-fn toast_corner_config_value(corner: ToastCorner) -> toml::Value {
-    toml::Value::String(toast_corner_label(corner).to_owned())
 }
 
 pub(crate) fn toast_timeout_label(timeout_ms: u64) -> String {
@@ -321,6 +313,16 @@ pub(crate) fn persist_options_menu_draft_to_path(
     draft: OptionsDraft,
     changed_item: OptionsMenuItem,
 ) -> MarkResult<()> {
+    if changed_item != OptionsMenuItem::ColorScheme {
+        return Ok(());
+    }
+
+    let Some(SyntaxThemeConfig::Builtin { name: Some(name) }) =
+        color_scheme_config(draft.color_scheme)
+    else {
+        return Ok(());
+    };
+
     let mut table = if path.exists() {
         let contents = fs::read_to_string(path)?;
         if contents.trim().is_empty() {
@@ -334,107 +336,7 @@ pub(crate) fn persist_options_menu_draft_to_path(
         toml::Table::new()
     };
 
-    match changed_item {
-        OptionsMenuItem::Layout => {
-            table.insert(
-                "layout".to_owned(),
-                toml::Value::String(layout_setting_label(draft.layout).to_owned()),
-            );
-        }
-        OptionsMenuItem::LiveReload => {
-            table.insert(
-                "live_reload".to_owned(),
-                toml::Value::Boolean(draft.live_updates_enabled),
-            );
-        }
-        OptionsMenuItem::ContextExpansion => {
-            let mut diff = match table.remove("diff") {
-                Some(toml::Value::Table(diff)) => diff,
-                Some(_) => {
-                    return Err(MarkError::Usage(format!(
-                        "failed to update {}: diff must be a table",
-                        path.display()
-                    )));
-                }
-                None => toml::Table::new(),
-            };
-            diff.remove("context_expansion");
-            diff.remove("context_lines");
-            diff.remove("expand_context");
-            diff.insert(
-                "context_expand".to_owned(),
-                context_expansion_config_value(draft.context_expansion),
-            );
-            table.insert("diff".to_owned(), toml::Value::Table(diff));
-        }
-        OptionsMenuItem::SyntaxHighlighting => {
-            table.insert(
-                "syntax_highlighting".to_owned(),
-                toml::Value::Boolean(draft.syntax_enabled),
-            );
-        }
-        OptionsMenuItem::LineWrapping => {
-            table.remove("word_wrap");
-            table.remove("wrap_lines");
-            table.insert(
-                "line_wrapping".to_owned(),
-                toml::Value::Boolean(draft.line_wrapping),
-            );
-        }
-        OptionsMenuItem::ColorScheme => {
-            if let Some(SyntaxThemeConfig::Builtin { name: Some(name) }) =
-                color_scheme_config(draft.color_scheme)
-            {
-                table.insert("colorscheme".to_owned(), toml::Value::String(name));
-            }
-        }
-        OptionsMenuItem::NotificationMode
-        | OptionsMenuItem::ToastCorner
-        | OptionsMenuItem::ToastTimeout
-        | OptionsMenuItem::ToastMaxVisible => {
-            let mut notifications = match table.remove("notifications") {
-                Some(toml::Value::Table(notifications)) => notifications,
-                Some(_) => {
-                    return Err(MarkError::Usage(format!(
-                        "failed to update {}: notifications must be a table",
-                        path.display()
-                    )));
-                }
-                None => toml::Table::new(),
-            };
-            match changed_item {
-                OptionsMenuItem::NotificationMode => {
-                    notifications.insert(
-                        "mode".to_owned(),
-                        notification_mode_config_value(draft.notification_mode),
-                    );
-                }
-                OptionsMenuItem::ToastCorner => {
-                    notifications.insert(
-                        "corner".to_owned(),
-                        toast_corner_config_value(draft.toast_corner),
-                    );
-                }
-                OptionsMenuItem::ToastTimeout => {
-                    notifications.insert(
-                        "timeout_ms".to_owned(),
-                        toml::Value::Integer(draft.toast_timeout_ms as i64),
-                    );
-                }
-                OptionsMenuItem::ToastMaxVisible => {
-                    notifications.insert(
-                        "max_visible".to_owned(),
-                        toml::Value::Integer(draft.toast_max_visible as i64),
-                    );
-                }
-                _ => {}
-            }
-            table.insert(
-                "notifications".to_owned(),
-                toml::Value::Table(notifications),
-            );
-        }
-    }
+    table.insert("colorscheme".to_owned(), toml::Value::String(name));
 
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -443,11 +345,4 @@ pub(crate) fn persist_options_menu_draft_to_path(
         .map_err(|error| MarkError::Usage(format!("failed to serialize settings: {error}")))?;
     fs::write(path, contents)?;
     Ok(())
-}
-
-fn context_expansion_config_value(expansion: DiffContextExpansion) -> toml::Value {
-    match expansion {
-        DiffContextExpansion::Lines(lines) => toml::Value::Integer(lines as i64),
-        DiffContextExpansion::Full => toml::Value::String("full".to_owned()),
-    }
 }

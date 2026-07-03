@@ -372,6 +372,10 @@ impl DiffApp {
     }
 
     fn persist_options_menu_draft(&mut self, changed_item: OptionsMenuItem) {
+        if changed_item != OptionsMenuItem::ColorScheme {
+            return;
+        }
+
         self.queue_effect(AppEffect::PersistOptionsMenuDraft {
             draft: self.overlays.options_menu_draft,
             changed_item,
