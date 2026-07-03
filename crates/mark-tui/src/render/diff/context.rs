@@ -1,14 +1,13 @@
 use mark_diff::{DiffLine, DiffLineKind};
 use mark_syntax::HighlightedLine;
 use ratatui::prelude::{Color, Line, Span, Style};
-use unicode_width::UnicodeWidthStr;
 
 use crate::{
     app::{DiffApp, split_cell_content_width, wrapped_line_start_columns},
     controls::DiffLayoutMode,
     render::{
         style::{diff_base_bg, diff_indicator_span},
-        text::{fit_padded, format_count},
+        text::{display_width, fit_padded, format_count},
     },
     syntax::DiffSide,
     theme::DiffTheme,
@@ -246,7 +245,7 @@ pub(crate) fn render_split_context_line_wrapped(
     let right_content_width = split_cell_content_width(right_width);
     let left_scrolls = wrapped_line_start_columns(line.text(), left_content_width);
     let right_scrolls = wrapped_line_start_columns(line.text(), right_content_width);
-    let text_width = line.text().width();
+    let text_width = display_width(line.text());
     let rows = left_scrolls.len().max(right_scrolls.len());
     let mut lines = Vec::with_capacity(rows);
     for wrap_index in 0..rows {

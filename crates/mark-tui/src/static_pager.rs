@@ -471,7 +471,7 @@ mod tests {
     }
 
     #[test]
-    fn static_pager_preserves_tabs_in_diff_lines() {
+    fn static_pager_expands_tabs_in_diff_lines() {
         let mut changeset = fixture_changeset();
         *changeset.files[0].hunks_mut()[0].lines[0].text_mut() = "\told".to_owned();
         *changeset.files[0].hunks_mut()[0].lines[1].text_mut() = "\tnew".to_owned();
@@ -488,8 +488,9 @@ mod tests {
             },
         );
 
-        assert!(output.contains("\told"));
-        assert!(output.contains("\tnew"));
+        assert!(!output.contains('\t'));
+        assert!(output.contains("    old"));
+        assert!(output.contains("    new"));
     }
 
     #[test]

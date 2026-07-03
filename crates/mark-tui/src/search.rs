@@ -1,13 +1,16 @@
 use std::{collections::HashSet, io};
 
 use fff_grep::{LineTerminator, Match, Matcher, NoError, Searcher, Sink, SinkMatch};
-use mark_diff::Changeset;
+use mark_diff::{Changeset, DiffLine};
 use memchr::{memchr, memchr2, memmem};
-use unicode_width::UnicodeWidthStr;
 
 use crate::{
     controls::diff_line_grep_prefix,
     model::{DiffLineIndex, FileIndex, HunkIndex, ModelRow, UiModel, UiRow},
+    render::{
+        headers::normalized_hunk_header_text,
+        text::{display_width, terminal_text},
+    },
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -133,18 +136,16 @@ impl DiffSearchIndex {
                         &mut grep_text,
                         &mut grep_lines,
                         SearchLineRef::hunk_header(file_index, hunk_index),
-                        hunk.header.as_bytes(),
+                        normalized_hunk_header_text(&hunk.header).as_bytes(),
                     );
                     for (line_index, line) in hunk.lines.iter().enumerate() {
                         let line_index = DiffLineIndex::new(line_index);
                         max_line_width = max_line_width.max(display_width(line.text()));
-                        let prefix = diff_line_grep_prefix(line.kind()) as u8;
-                        push_prefixed_search_line(
+                        push_diff_line_search_line(
                             &mut grep_text,
                             &mut grep_lines,
                             SearchLineRef::diff_line(file_index, hunk_index, line_index),
-                            prefix,
-                            line.text().as_bytes(),
+                            line,
                         );
                     }
                 }
@@ -262,14 +263,6 @@ impl DiffSearchIndex {
     }
 }
 
-fn display_width(text: &str) -> usize {
-    if text.bytes().all(|byte| (b' '..=b'~').contains(&byte)) {
-        text.len()
-    } else {
-        text.width()
-    }
-}
-
 impl FileSearchIndex {
     fn matches_file_filter(&self, query: &str) -> bool {
         query.is_empty()
@@ -291,16 +284,16 @@ fn push_search_line(
     grep_text.push(b'\n');
 }
 
-fn push_prefixed_search_line(
+fn push_diff_line_search_line(
     grep_text: &mut Vec<u8>,
     grep_lines: &mut Vec<SearchLineRef>,
     line_ref: SearchLineRef,
-    prefix: u8,
-    text: &[u8],
+    line: &DiffLine,
 ) {
+    let text = terminal_text(line.text());
     grep_lines.push(line_ref);
-    grep_text.push(prefix);
-    grep_text.extend_from_slice(text);
+    grep_text.push(diff_line_grep_prefix(line.kind()) as u8);
+    grep_text.extend_from_slice(text.as_bytes());
     grep_text.push(b'\n');
 }
 
@@ -516,7 +509,12 @@ fn row_matches_grep_refs(row: UiRow, matches: &HashSet<SearchLineRef>) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::find_ascii_case_insensitive;
+    use mark_diff::{
+        Changeset, DiffFile, DiffFileBody, DiffHunk, DiffLine, FileChange, HunkLineRanges, RepoRoot,
+    };
+
+    use super::{DiffSearchIndex, SearchLineRef, find_ascii_case_insensitive};
+    use crate::model::{DiffLineIndex, FileIndex, HunkIndex};
 
     #[test]
     fn case_insensitive_search_ignores_partial_tail_candidate() {
@@ -525,5 +523,69 @@ mod tests {
             find_ascii_case_insensitive(b"abc Search", b"search", 0),
             Some(4)
         );
+    }
+
+    #[test]
+    fn grep_search_uses_normalized_hunk_header_text() {
+        let index =
+            DiffSearchIndex::new(&changeset_with_hunk_header("@@ -1 +1 @@     def\tneedle"));
+        let result = index.search("", "@@ -1 +1 @@ def    needle");
+
+        assert_eq!(result.visible_files, vec![FileIndex::new(0)]);
+        assert_eq!(
+            result.grep_matches,
+            vec![SearchLineRef::hunk_header(
+                FileIndex::new(0),
+                HunkIndex::new(0)
+            )]
+        );
+    }
+
+    #[test]
+    fn grep_search_uses_terminal_text_for_diff_lines() {
+        let index = DiffSearchIndex::new(&changeset_with_diff_line("before\tmiddle\rneedle"));
+
+        let raw_result = index.search("", "before\tmiddle\rneedle");
+        assert!(raw_result.visible_files.is_empty());
+        assert!(raw_result.grep_matches.is_empty());
+
+        let visible_result = index.search("", "before    middle\\rneedle");
+        assert_eq!(visible_result.visible_files, vec![FileIndex::new(0)]);
+        assert_eq!(
+            visible_result.grep_matches,
+            vec![SearchLineRef::diff_line(
+                FileIndex::new(0),
+                HunkIndex::new(0),
+                DiffLineIndex::new(0)
+            )]
+        );
+    }
+
+    fn changeset_with_hunk_header(header: &str) -> Changeset {
+        changeset_with_hunk(header, vec![DiffLine::context(1, 1, "unchanged")])
+    }
+
+    fn changeset_with_diff_line(text: &str) -> Changeset {
+        changeset_with_hunk("@@ -1 +1 @@", vec![DiffLine::context(1, 1, text)])
+    }
+
+    fn changeset_with_hunk(header: &str, lines: Vec<DiffLine>) -> Changeset {
+        Changeset {
+            repo: RepoRoot::new("."),
+            title: String::new(),
+            files: vec![DiffFile {
+                change: FileChange::modified("src/lib.rs"),
+                additions: 0,
+                deletions: 0,
+                body: DiffFileBody::Text {
+                    hunks: vec![DiffHunk {
+                        header: header.to_owned(),
+                        ranges: HunkLineRanges::new(1, 1, 1, 1),
+                        lines,
+                    }],
+                },
+            }],
+            raw_patch: Vec::new(),
+        }
     }
 }

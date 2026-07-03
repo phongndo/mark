@@ -12,5 +12,5 @@ pub(crate) use file::{file_header_line, file_separator_line};
 pub(crate) use fit::{header_spans, hunk_header_spans_with_delta};
 #[cfg(test)]
 pub(crate) use hunk::hunk_header_spans;
-pub(crate) use hunk::{hunk_header_line, hunk_header_line_with_focus};
+pub(crate) use hunk::{hunk_header_line, hunk_header_line_with_focus, normalized_hunk_header_text};
 pub(crate) use types::{DeltaKind, DeltaPart, FittedPrefixedParts, HeaderSpanPart, HeaderStyles};

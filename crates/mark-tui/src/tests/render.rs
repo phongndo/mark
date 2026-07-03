@@ -514,6 +514,103 @@ fn grep_highlight_uses_logical_text_across_rendered_spans() {
 }
 
 #[test]
+fn grep_highlight_expands_matches_to_grapheme_boundaries() {
+    let theme = DiffTheme::default();
+
+    for (text, query) in [("❤️", "❤"), ("👩‍💻", "👩")] {
+        let line = Line::from(Span::styled(text, Style::default()));
+        let target =
+            grep_highlight_target_for_columns(text.to_owned(), &line.spans, 0, text.width(), 0)
+                .expect("target should cover the rendered grapheme");
+
+        let rendered = highlighted_grep_text_line(line, query, vec![target], theme);
+
+        assert_eq!(line_text(&rendered), text);
+        assert_eq!(rendered.spans.len(), 1);
+        assert_eq!(rendered.spans[0].content.as_ref(), text);
+        assert_eq!(rendered.spans[0].style.bg, Some(theme.search_match_bg));
+    }
+}
+
+#[test]
+fn grep_highlight_expands_matches_across_span_split_graphemes() {
+    let theme = DiffTheme::default();
+    let line = Line::from(vec![
+        Span::styled("❤", Style::default().add_modifier(Modifier::BOLD)),
+        Span::styled("\u{fe0f}", Style::default()),
+    ]);
+    let target = grep_highlight_target_for_columns("❤️".to_owned(), &line.spans, 0, 2, 0)
+        .expect("target should cover both rendered spans");
+
+    let rendered = highlighted_grep_text_line(line, "❤", vec![target], theme);
+
+    assert_eq!(line_text(&rendered), "❤️");
+    assert_eq!(rendered.spans.len(), 2);
+    assert!(
+        rendered
+            .spans
+            .iter()
+            .all(|span| span.style.bg == Some(theme.search_match_bg))
+    );
+    assert!(
+        rendered.spans[0]
+            .style
+            .add_modifier
+            .contains(Modifier::BOLD)
+    );
+}
+
+#[test]
+fn grep_highlight_hunk_header_uses_terminal_safe_text() {
+    let mut changeset = changeset_with_line_text("body");
+    changeset.files[0].hunks_mut()[0].header = "@@ -1 +1 @@ before\tneedle".to_owned();
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.filters.grep_filter = "needle".to_owned();
+
+    let row = app
+        .document
+        .model
+        .row(1)
+        .expect("hunk header should be visible");
+    let rendered = render_row(&mut app, 1, row, 80);
+
+    assert!(line_text(&rendered).contains("before    needle"));
+    assert!(
+        rendered
+            .spans
+            .iter()
+            .any(|span| span.content.contains("needle")
+                && span.style.bg == Some(app.config.theme.search_match_bg)),
+        "grep should highlight text after terminal-expanded hunk header tabs"
+    );
+}
+
+#[test]
+fn grep_highlight_hunk_header_uses_normalized_context() {
+    let mut changeset = changeset_with_line_text("body");
+    changeset.files[0].hunks_mut()[0].header = "@@ -1 +1 @@     def needle".to_owned();
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.filters.grep_filter = "needle".to_owned();
+
+    let row = app
+        .document
+        .model
+        .row(1)
+        .expect("hunk header should be visible");
+    let rendered = render_row(&mut app, 1, row, 80);
+
+    assert!(line_text(&rendered).contains("@@ -1 +1 @@ def needle"));
+    assert!(
+        rendered
+            .spans
+            .iter()
+            .any(|span| span.content.contains("needle")
+                && span.style.bg == Some(app.config.theme.search_match_bg)),
+        "grep should highlight text after hunk header context whitespace is normalized"
+    );
+}
+
+#[test]
 fn grep_highlight_ignores_unified_gutter_numbers() {
     let changeset = changeset_with_line_text("abc");
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
@@ -995,6 +1092,21 @@ fn line_wrapping_preserves_wide_glyphs_at_split_wrap_boundary() {
 }
 
 #[test]
+fn line_wrapping_splits_expanded_tabs_at_visual_boundaries() {
+    assert_eq!(wrapped_line_start_columns("abc\tdef", 6), vec![0, 6]);
+    assert_eq!(wrapped_line_count("abc\tdef", 6), 2);
+    assert_eq!(wrapped_line_start_columns("\t", 2), vec![0, 2]);
+}
+
+#[test]
+fn line_wrapping_keeps_emoji_sequences_on_one_visual_row() {
+    assert_eq!(wrapped_line_start_columns("👩‍💻", 2), vec![0]);
+    assert_eq!(wrapped_line_count("👩‍💻", 2), 1);
+    assert_eq!(wrapped_line_start_columns("👩‍💻a", 2), vec![0, 2]);
+    assert_eq!(wrapped_line_start_columns("❤️a", 2), vec![0, 2]);
+}
+
+#[test]
 fn file_header_truncates_path_before_delta() {
     let file = mark_diff::DiffFile {
         change: FileChange::from_status(
@@ -1059,6 +1171,26 @@ fn hunk_header_uses_raw_location_context_and_delta() {
     assert_eq!(text.width(), 48);
     assert!(text.starts_with("@@ -200,2 +211,3 @@ render_diff_hunk"));
     assert!(text.ends_with("+2 -1"));
+}
+
+#[test]
+fn hunk_header_fits_emoji_sequences_with_terminal_width() {
+    let hunk = mark_diff::DiffHunk {
+        header: "@@ -1 +1 @@ 👩‍💻❤️abc".to_owned(),
+        ranges: HunkLineRanges::new(1, 1, 1, 1),
+        lines: vec![DiffLine::addition(1, "new".to_owned())],
+    };
+
+    let theme = DiffTheme::default();
+    let text = line_text(&Line::from(hunk_header_spans(
+        &hunk,
+        22,
+        theme,
+        line_gutter_bg(DiffLineKind::Meta, theme),
+    )));
+
+    assert_eq!(text, "@@ -1 +1 @@ 👩‍💻❤️abc +1");
+    assert_eq!(text.width(), 22);
 }
 
 #[test]
@@ -1196,6 +1328,101 @@ fn content_spans_fall_back_when_syntax_text_mismatches_diff_text() {
 
     assert_eq!(text, "right   ");
     assert_eq!(spans.len(), 1);
+}
+
+#[test]
+fn content_spans_expand_tabs_and_escape_controls_before_rendering() {
+    let text = "\tif (ok)\u{1b}";
+    let syntax = HighlightedLine {
+        fingerprint: mark_syntax::LineTextFingerprint::from_text(text),
+        segments: vec![mark_syntax::SyntaxSegment {
+            byte_start: 0,
+            byte_end: text.len(),
+            class: Some(SyntaxClass::Keyword),
+        }],
+    };
+
+    let spans = content_spans_at_scroll(
+        text,
+        Some(&syntax),
+        &[],
+        DiffLineKind::Addition,
+        20,
+        DiffTheme::default(),
+        0,
+    );
+    let rendered = span_text(&spans);
+
+    assert_eq!(rendered, "    if (ok)\\u{1b}   ");
+    assert!(!rendered.contains('\t'));
+    assert!(!rendered.contains('\u{1b}'));
+}
+
+#[test]
+fn content_spans_align_inline_emphasis_to_grapheme_boundaries() {
+    let text = "❤️a";
+    let variation_selector_start = '❤'.len_utf8();
+    let variation_selector_end = variation_selector_start + '\u{fe0f}'.len_utf8();
+    let theme = DiffTheme::default();
+
+    // Inline tokenization can isolate only the variation selector for `❤a` -> `❤️a`.
+    let spans = content_spans_at_scroll(
+        text,
+        None,
+        &[InlineRange {
+            byte_start: variation_selector_start,
+            byte_end: variation_selector_end,
+        }],
+        DiffLineKind::Addition,
+        3,
+        theme,
+        0,
+    );
+
+    assert_eq!(span_text(&spans), text);
+    assert_eq!(span_text(&spans).width(), 3);
+    assert_eq!(spans[0].content.as_ref(), "❤️");
+    assert_eq!(spans[0].style.bg, Some(theme.addition_inline_bg));
+}
+
+#[test]
+fn content_spans_preserve_width_when_syntax_splits_graphemes() {
+    let text = "❤️a";
+    let heart_end = '❤'.len_utf8();
+    let emoji_end = heart_end + '\u{fe0f}'.len_utf8();
+    let syntax = HighlightedLine {
+        fingerprint: mark_syntax::LineTextFingerprint::from_text(text),
+        segments: vec![
+            mark_syntax::SyntaxSegment {
+                byte_start: 0,
+                byte_end: heart_end,
+                class: Some(SyntaxClass::Keyword),
+            },
+            mark_syntax::SyntaxSegment {
+                byte_start: heart_end,
+                byte_end: emoji_end,
+                class: Some(SyntaxClass::Operator),
+            },
+            mark_syntax::SyntaxSegment {
+                byte_start: emoji_end,
+                byte_end: text.len(),
+                class: None,
+            },
+        ],
+    };
+
+    let spans = content_spans_at_scroll(
+        text,
+        Some(&syntax),
+        &[],
+        DiffLineKind::Addition,
+        3,
+        DiffTheme::default(),
+        0,
+    );
+
+    assert_eq!(span_text(&spans), text);
+    assert_eq!(span_text(&spans).width(), 3);
 }
 
 #[test]

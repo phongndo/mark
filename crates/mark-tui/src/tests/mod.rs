@@ -24,8 +24,8 @@ use crate::render::{
     },
     style::{base_bg, diff_base_bg, header_bg, statusline_bg},
     text::{
-        fit, fit_padded, fit_padded_from, fit_with_ellipsis, format_count, progress_label,
-        skip_display_prefix,
+        display_width, fit, fit_padded, fit_padded_from, fit_with_ellipsis, format_count,
+        progress_label, skip_display_prefix, terminal_text,
     },
 };
 use crate::{

@@ -1,8 +1,10 @@
 use super::EditorReloadRequest;
-use crate::controls::DiffLayoutMode;
-use crate::theme::{GUTTER_WIDTH, UNIFIED_GUTTER_WIDTH};
+use crate::{
+    controls::DiffLayoutMode,
+    render::text::for_display_width_units,
+    theme::{GUTTER_WIDTH, UNIFIED_GUTTER_WIDTH},
+};
 use std::path::{Path, PathBuf};
-use unicode_width::UnicodeWidthChar;
 
 pub(crate) fn repo_relative_path(repo: &Path, path: &Path) -> Option<PathBuf> {
     path.strip_prefix(repo).ok().map(Path::to_path_buf)
@@ -114,20 +116,44 @@ fn for_wrapped_line_start_after_first(
 
     let mut line_width = 0usize;
     let mut consumed_width = 0usize;
-    for ch in text.chars() {
-        let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0);
-        if ch_width == 0 {
-            continue;
+    for_display_width_units(text, |unit_width, supports_partial_render| {
+        if unit_width == 0 {
+            return;
+        }
+
+        if supports_partial_render {
+            let mut remaining_width = unit_width;
+            while remaining_width > 0 {
+                if line_width >= content_width {
+                    visit(consumed_width);
+                    line_width = 0;
+                }
+
+                let available = content_width.saturating_sub(line_width);
+                if available == 0 {
+                    break;
+                }
+                let taken = remaining_width.min(available);
+                line_width = line_width.saturating_add(taken);
+                consumed_width = consumed_width.saturating_add(taken);
+                remaining_width -= taken;
+
+                if remaining_width > 0 {
+                    visit(consumed_width);
+                    line_width = 0;
+                }
+            }
+            return;
         }
 
         if line_width == content_width
-            || (line_width > 0 && line_width.saturating_add(ch_width) > content_width)
+            || (line_width > 0 && line_width.saturating_add(unit_width) > content_width)
         {
             visit(consumed_width);
             line_width = 0;
         }
 
-        line_width = line_width.saturating_add(ch_width);
-        consumed_width = consumed_width.saturating_add(ch_width);
-    }
+        line_width = line_width.saturating_add(unit_width);
+        consumed_width = consumed_width.saturating_add(unit_width);
+    });
 }

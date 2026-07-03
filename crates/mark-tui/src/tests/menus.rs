@@ -2887,12 +2887,26 @@ fn branch_combo_close_clears_input_without_changing_selection() {
 
 #[test]
 fn fit_helpers_use_terminal_display_width() {
+    assert_eq!(display_width("❤️"), 2);
+    assert_eq!(display_width("👩‍💻"), 2);
+    assert_eq!(display_width("\t👩‍💻\u{1b}"), 12);
+    assert_eq!(terminal_text("\t👩‍💻\u{1b}"), "    👩‍💻\\u{1b}");
     assert_eq!(fit("界a", 2), "界");
+    assert_eq!(fit("👩‍💻a", 3), "👩‍💻a");
+    assert_eq!(fit("❤️a", 2), "❤️");
     assert_eq!(fit_padded("e\u{301}", 2), "e\u{301} ");
     assert_eq!(fit_padded_from("abcdef", 2, 3), "cde");
+    assert_eq!(fit("\tab", 6), "    ab");
+    assert_eq!(fit("a\u{1b}b", 8), "a\\u{1b}b");
+    assert_eq!(fit_padded_from("\tab", 2, 4), "  ab");
+    assert_eq!(fit_padded_from("e\u{301}f", 1, 2), "f ");
+    assert_eq!(fit_padded_from("👩‍💻abc", 2, 3), "abc");
+    assert_eq!(fit_padded_from("a\u{1b}b", 3, 4), "{1b}");
     assert_eq!(skip_display_prefix("abcdef", 2), ("cdef", 2));
     assert_eq!(skip_display_prefix("e\u{301}f", 1), ("f", 1));
+    assert_eq!(skip_display_prefix("👩‍💻abc", 2), ("abc", 2));
     assert_eq!(fit_with_ellipsis("abcdef", 5), "ab...");
+    assert_eq!(fit_with_ellipsis("👩‍💻abc", 5), "👩‍💻abc");
 }
 
 #[test]

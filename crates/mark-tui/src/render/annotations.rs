@@ -10,7 +10,7 @@ use crate::{
     },
     controls::INPUT_CURSOR,
     render::style::{base_bg, input_cursor_style, spans_with_input_cursor},
-    render::text::{fit, fit_padded, fit_with_width, spaces},
+    render::text::{fit, fit_byte_prefix_with_width, fit_padded, spaces, terminal_text},
     theme::DiffTheme,
 };
 
@@ -204,7 +204,10 @@ fn wrap_annotation_text(text: &str, width: usize) -> Vec<String> {
 
     let mut lines = Vec::new();
     for paragraph in text.split('\n') {
-        wrap_annotation_paragraph(paragraph, width, &mut lines);
+        // Wrap terminal-safe text so expanded tabs/control escapes can be
+        // split across visual line boundaries without re-rendering bytes.
+        let display_paragraph = terminal_text(paragraph);
+        wrap_annotation_paragraph(&display_paragraph, width, &mut lines);
     }
     if lines.is_empty() {
         lines.push(String::new());
@@ -220,13 +223,13 @@ fn wrap_annotation_paragraph(paragraph: &str, width: usize, lines: &mut Vec<Stri
 
     let mut rest = paragraph;
     while !rest.is_empty() {
-        let (segment, _, complete) = fit_with_width(rest, width);
+        let (fit_len, _, complete) = fit_byte_prefix_with_width(rest, width);
         if complete {
-            lines.push(segment);
+            lines.push(rest.to_owned());
             break;
         }
 
-        let break_len = annotation_wrap_boundary(rest, segment.len()).unwrap_or(segment.len());
+        let break_len = annotation_wrap_boundary(rest, fit_len).unwrap_or(fit_len);
         if break_len == 0 {
             let Some(character) = rest.chars().next() else {
                 break;
