@@ -3,13 +3,13 @@ use crate::model::{
     ContextKey, ContextSourceEntry, ContextSourceKey, FileIndex, HunkIndex, UiRow,
     context_expands_up,
 };
+use crate::render::text::display_width;
 use crate::search::grep_match_rows;
 use crate::syntax::{
     DiffSide, available_context_lines, full_file_source, load_full_file_source,
     split_context_source_lines,
 };
 use std::sync::Arc;
-use unicode_width::UnicodeWidthStr;
 
 impl DiffApp {
     pub(super) fn context_source_line_count(&self, file: usize) -> Option<(DiffSide, usize)> {
@@ -365,7 +365,7 @@ impl DiffApp {
             let Some(text) = source_lines.get(source_index_start + offset) else {
                 continue;
             };
-            self.document.max_line_width = self.document.max_line_width.max(text.width());
+            self.document.max_line_width = self.document.max_line_width.max(display_width(text));
         }
     }
 }

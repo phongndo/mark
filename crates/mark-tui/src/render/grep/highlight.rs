@@ -1,4 +1,5 @@
 use ratatui::prelude::{Line, Span, Style};
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{controls::TextMatcher, theme::DiffTheme};
 
@@ -36,7 +37,11 @@ pub(crate) fn grep_highlight_ranges_by_span(
 ) -> Vec<Vec<std::ops::Range<usize>>> {
     let mut ranges_by_span = vec![Vec::new(); span_count];
     for target in targets {
-        let match_ranges = matcher.match_ranges(&target.text);
+        let match_ranges: Vec<_> = matcher
+            .match_ranges(&target.text)
+            .into_iter()
+            .filter_map(|range| expand_range_to_grapheme_boundaries(&target.text, range))
+            .collect();
         if match_ranges.is_empty() {
             continue;
         }
@@ -113,15 +118,14 @@ pub(super) fn push_highlighted_spans(
         return;
     }
 
+    let ranges = grapheme_aligned_ranges(text, ranges);
+    if ranges.is_empty() {
+        spans.push(span);
+        return;
+    }
+
     let mut start = 0;
-    for range in ranges {
-        if range.start >= range.end
-            || range.end > text.len()
-            || !text.is_char_boundary(range.start)
-            || !text.is_char_boundary(range.end)
-        {
-            continue;
-        }
+    for range in &ranges {
         if start < range.start {
             spans.push(Span::styled(
                 text[start..range.start].to_owned(),
@@ -137,4 +141,39 @@ pub(super) fn push_highlighted_spans(
     if start < text.len() {
         spans.push(Span::styled(text[start..].to_owned(), span.style));
     }
+}
+fn grapheme_aligned_ranges(
+    text: &str,
+    ranges: &[std::ops::Range<usize>],
+) -> Vec<std::ops::Range<usize>> {
+    let mut aligned = ranges
+        .iter()
+        .filter_map(|range| expand_range_to_grapheme_boundaries(text, range.clone()))
+        .collect();
+    merge_ranges(&mut aligned);
+    aligned
+}
+
+fn expand_range_to_grapheme_boundaries(
+    text: &str,
+    range: std::ops::Range<usize>,
+) -> Option<std::ops::Range<usize>> {
+    if range.start >= range.end || range.end > text.len() {
+        return None;
+    }
+
+    let mut expanded_start = None;
+    let mut expanded_end = None;
+    for (start, grapheme) in text.grapheme_indices(true) {
+        let end = start + grapheme.len();
+        if expanded_start.is_none() && range.start < end {
+            expanded_start = Some(start);
+        }
+        if range.end <= end {
+            expanded_end = Some(end);
+            break;
+        }
+    }
+
+    Some(expanded_start?..expanded_end?)
 }

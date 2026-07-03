@@ -1,14 +1,13 @@
 use mark_diff::{DiffLine, DiffLineKind};
 use mark_syntax::HighlightedLine;
 use ratatui::prelude::{Line, Span, Style};
-use unicode_width::UnicodeWidthStr;
 
 use crate::{
     app::{DiffApp, split_cell_content_width, wrapped_line_start_columns},
     render::{
         grep::{highlighted_grep_text_line, split_diff_line_grep_highlight_target},
         style::diff_base_bg,
-        text::spaces,
+        text::{display_width, spaces},
     },
     syntax::{DiffSide, InlineRange},
     theme::{DiffTheme, GUTTER_WIDTH, line_gutter_bg},
@@ -132,8 +131,12 @@ pub(crate) fn render_split_line_wrapped_with_focus(
     let right_scrolls = right_line
         .map(|line| wrapped_line_start_columns(line.text(), right_content_width))
         .unwrap_or_else(|| vec![0]);
-    let left_text_width = left_line.map(|line| line.text().width()).unwrap_or(0);
-    let right_text_width = right_line.map(|line| line.text().width()).unwrap_or(0);
+    let left_text_width = left_line
+        .map(|line| display_width(line.text()))
+        .unwrap_or(0);
+    let right_text_width = right_line
+        .map(|line| display_width(line.text()))
+        .unwrap_or(0);
     let rows = left_scrolls.len().max(right_scrolls.len()).max(1);
     let visual_row_start = app.wrapped_visual_scroll_for_model_row(row_index);
     let mut rendered_lines = Vec::with_capacity(rows);

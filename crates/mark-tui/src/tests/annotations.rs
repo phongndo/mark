@@ -1072,7 +1072,60 @@ fn annotation_rendering_preserves_whitespace_while_wrapping() {
 
     assert!(rendered.iter().any(|line| line.starts_with("  indented  ")));
     assert!(rendered.iter().any(|line| line.starts_with("code")));
-    assert!(rendered.iter().any(|line| line.contains("a\t\tb")));
+    assert!(rendered.iter().any(|line| line.contains("a        b")));
+}
+
+#[test]
+fn annotation_rendering_wraps_expanded_tabs_without_panic() {
+    let lines = crate::render::annotations::render_annotation_saved_block(
+        "\tab",
+        4,
+        DiffTheme::default(),
+        None,
+    );
+
+    assert_eq!(
+        lines.len(),
+        crate::render::annotations::annotation_saved_block_height("\tab", 4)
+    );
+    assert_eq!(line_text(&lines[1]), "    ");
+    assert_eq!(line_text(&lines[2]), "ab  ");
+}
+
+#[test]
+fn annotation_rendering_preserves_partial_tabs_across_wraps() {
+    let lines = crate::render::annotations::render_annotation_saved_block(
+        "a\tb",
+        4,
+        DiffTheme::default(),
+        None,
+    );
+
+    assert_eq!(line_text(&lines[1]), "a   ");
+    assert_eq!(line_text(&lines[2]), " b  ");
+
+    let narrow_lines = crate::render::annotations::render_annotation_saved_block(
+        "\t",
+        2,
+        DiffTheme::default(),
+        None,
+    );
+
+    assert_eq!(line_text(&narrow_lines[1]), "  ");
+    assert_eq!(line_text(&narrow_lines[2]), "  ");
+}
+
+#[test]
+fn annotation_rendering_preserves_partial_control_escapes_across_wraps() {
+    let lines = crate::render::annotations::render_annotation_saved_block(
+        "x\u{1}y",
+        4,
+        DiffTheme::default(),
+        None,
+    );
+
+    assert_eq!(line_text(&lines[1]), r"x\u{");
+    assert_eq!(line_text(&lines[2]), "1}y ");
 }
 
 #[test]

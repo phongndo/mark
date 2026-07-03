@@ -1,11 +1,12 @@
 use mark_diff::DiffLineKind;
 use mark_syntax::{DiffBackground, HighlightedLine, SyntaxClass};
 use ratatui::prelude::{Color, Modifier, Span, Style};
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
     render::{
         style::{diff_indicator_span, diff_sign_style, focused_diff_indicator_span},
-        text::{fit, fit_padded, fit_padded_from, fit_with_width, skip_display_prefix, spaces},
+        text::{fit, fit_padded, fit_padded_from, fit_with_width_from, spaces},
     },
     syntax::InlineRange,
     theme::{
@@ -170,14 +171,19 @@ pub(crate) fn valid_inline_ranges(text: &str, ranges: &[InlineRange]) -> Vec<Inl
         return Vec::new();
     }
 
+    let grapheme_boundaries = (!text.is_ascii()).then(|| grapheme_boundary_indices(text));
     let mut valid = Vec::with_capacity(ranges.len());
     for range in ranges {
-        let byte_start = range.byte_start.min(text.len());
-        let byte_end = range.byte_end.min(text.len());
+        let mut byte_start = range.byte_start.min(text.len());
+        let mut byte_end = range.byte_end.min(text.len());
         if byte_start < byte_end
             && text.is_char_boundary(byte_start)
             && text.is_char_boundary(byte_end)
         {
+            if let Some(boundaries) = grapheme_boundaries.as_deref() {
+                byte_start = previous_grapheme_boundary(boundaries, byte_start);
+                byte_end = next_grapheme_boundary(boundaries, byte_end);
+            }
             valid.push(InlineRange {
                 byte_start,
                 byte_end,
@@ -187,7 +193,8 @@ pub(crate) fn valid_inline_ranges(text: &str, ranges: &[InlineRange]) -> Vec<Inl
     if valid.len() > 1 {
         valid.sort_by_key(|range| (range.byte_start, range.byte_end));
     }
-    valid
+
+    merge_inline_ranges(valid)
 }
 
 pub(crate) struct ContentSpanWriter<'a> {
@@ -286,18 +293,12 @@ impl<'a> ContentSpanWriter<'a> {
 
         let relative_start = byte_start.saturating_sub(segment_byte_start);
         let relative_end = byte_end.saturating_sub(segment_byte_start);
-        let mut piece = &segment_text[relative_start..relative_end];
-        if self.skip > 0 {
-            let (visible, skipped) = skip_display_prefix(piece, self.skip);
-            self.skip = self.skip.saturating_sub(skipped);
-            piece = visible;
-            if piece.is_empty() {
-                return true;
-            }
-        }
-        let (fitted, fitted_width, complete) = fit_with_width(piece, remaining);
+        let piece = &segment_text[relative_start..relative_end];
+        let (fitted, skipped, fitted_width, complete) =
+            fit_with_width_from(piece, self.skip, remaining);
+        self.skip = self.skip.saturating_sub(skipped);
         if fitted.is_empty() {
-            return false;
+            return complete;
         }
 
         self.used += fitted_width;
@@ -320,6 +321,7 @@ pub(crate) fn syntax_line_matches_text(syntax: &HighlightedLine, text: &str) -> 
     if !syntax.matches_text(text) {
         return false;
     }
+    let grapheme_boundaries = (!text.is_ascii()).then(|| grapheme_boundary_indices(text));
     let mut cursor = 0usize;
     for segment in &syntax.segments {
         if segment.byte_start != cursor
@@ -327,12 +329,58 @@ pub(crate) fn syntax_line_matches_text(syntax: &HighlightedLine, text: &str) -> 
             || segment.byte_end > text.len()
             || !text.is_char_boundary(segment.byte_start)
             || !text.is_char_boundary(segment.byte_end)
+            || !is_grapheme_boundary(grapheme_boundaries.as_deref(), segment.byte_start)
+            || !is_grapheme_boundary(grapheme_boundaries.as_deref(), segment.byte_end)
         {
             return false;
         }
         cursor = segment.byte_end;
     }
     cursor == text.len()
+}
+
+fn grapheme_boundary_indices(text: &str) -> Vec<usize> {
+    let mut boundaries: Vec<usize> = text
+        .grapheme_indices(true)
+        .map(|(index, _)| index)
+        .collect();
+    boundaries.push(text.len());
+    boundaries
+}
+
+fn is_grapheme_boundary(boundaries: Option<&[usize]>, index: usize) -> bool {
+    boundaries.is_none_or(|boundaries| boundaries.binary_search(&index).is_ok())
+}
+
+fn previous_grapheme_boundary(boundaries: &[usize], index: usize) -> usize {
+    match boundaries.binary_search(&index) {
+        Ok(position) => boundaries[position],
+        Err(position) => boundaries[position.saturating_sub(1)],
+    }
+}
+
+fn next_grapheme_boundary(boundaries: &[usize], index: usize) -> usize {
+    match boundaries.binary_search(&index) {
+        Ok(position) => boundaries[position],
+        Err(position) => boundaries
+            .get(position)
+            .copied()
+            .unwrap_or_else(|| boundaries.last().copied().unwrap_or(0)),
+    }
+}
+
+fn merge_inline_ranges(ranges: Vec<InlineRange>) -> Vec<InlineRange> {
+    let mut merged: Vec<InlineRange> = Vec::with_capacity(ranges.len());
+    for range in ranges {
+        if let Some(last) = merged.last_mut()
+            && range.byte_start <= last.byte_end
+        {
+            last.byte_end = last.byte_end.max(range.byte_end);
+            continue;
+        }
+        merged.push(range);
+    }
+    merged
 }
 
 pub(crate) fn syntax_style(

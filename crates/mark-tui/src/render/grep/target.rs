@@ -6,7 +6,10 @@ use crate::{
     app::DiffApp,
     controls::diff_line_grep_prefix,
     model::UiRow,
-    render::text::skip_display_prefix,
+    render::{
+        headers::normalized_hunk_header_text,
+        text::{skip_display_prefix, terminal_text},
+    },
     theme::{GUTTER_WIDTH, UNIFIED_GUTTER_WIDTH},
 };
 
@@ -49,7 +52,7 @@ pub(crate) fn grep_highlight_targets_for_row(
             .and_then(|file| file.hunks().get(hunk.get()))
             .and_then(|hunk| {
                 grep_highlight_target_for_columns(
-                    hunk.header.clone(),
+                    normalized_hunk_header_text(&hunk.header),
                     &line.spans,
                     2.min(width),
                     width,
@@ -178,7 +181,7 @@ pub(crate) fn split_content_start_column(width: usize) -> usize {
 pub(crate) fn diff_line_grep_highlight_text(line: &DiffLine) -> String {
     let mut text = String::with_capacity(line.text().len().saturating_add(1));
     text.push(diff_line_grep_prefix(line.kind()));
-    text.push_str(line.text());
+    text.push_str(&terminal_text(line.text()));
     text
 }
 
@@ -190,7 +193,8 @@ pub(crate) fn diff_line_grep_rendered_text_byte_start(
 }
 
 pub(crate) fn scrolled_text_byte_start(text: &str, horizontal_scroll: usize) -> usize {
-    text.len() - skip_display_prefix(text, horizontal_scroll).0.len()
+    let text = terminal_text(text);
+    text.len() - skip_display_prefix(&text, horizontal_scroll).0.len()
 }
 
 pub(crate) fn grep_highlight_target_for_columns(

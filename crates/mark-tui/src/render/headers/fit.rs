@@ -6,7 +6,7 @@ use crate::render::{
         DeltaPart, FittedPrefixedParts, HeaderSpanPart, HeaderStyles, delta_parts_width,
         push_delta_spans, push_fitted_delta_spans,
     },
-    text::{fit, fit_with_ellipsis},
+    text::{display_width, fit, fit_with_ellipsis, terminal_text},
 };
 
 pub(crate) fn header_spans(
@@ -100,13 +100,13 @@ pub(crate) fn push_header_prefix_and_body_spans(
     spans.push(Span::styled(" ", styles.body));
     used += 1;
     let body = fit_with_ellipsis(body, body_width);
-    used += body.width();
+    used += display_width(&body);
     spans.push(Span::styled(body, styles.body));
     used
 }
 
 pub(crate) fn header_span_parts_width(parts: &[HeaderSpanPart]) -> usize {
-    parts.iter().map(|part| part.text.width()).sum()
+    parts.iter().map(|part| display_width(&part.text)).sum()
 }
 
 pub(crate) fn push_header_span_parts(
@@ -115,8 +115,8 @@ pub(crate) fn push_header_span_parts(
 ) -> usize {
     let mut used = 0;
     for part in parts {
-        used += part.text.width();
-        spans.push(Span::styled(part.text.clone(), part.style));
+        used += display_width(&part.text);
+        spans.push(Span::styled(terminal_text(&part.text), part.style));
     }
     used
 }
@@ -172,10 +172,10 @@ pub(crate) fn push_fitted_header_span_part_prefix(
         }
 
         let remaining = width - used;
-        let part_width = part.text.width();
+        let part_width = display_width(&part.text);
         if part_width <= remaining {
             if !part.text.is_empty() {
-                spans.push(Span::styled(part.text.clone(), part.style));
+                spans.push(Span::styled(terminal_text(&part.text), part.style));
             }
             used += part_width;
             continue;
@@ -214,7 +214,7 @@ pub(crate) fn fitted_prefixed_parts(prefix: &str, body: &str, width: usize) -> F
         };
     }
 
-    let prefix_width = prefix.width();
+    let prefix_width = display_width(prefix);
     if prefix_width >= width {
         return FittedPrefixedParts {
             prefix: fit_with_ellipsis(prefix, width),
@@ -233,7 +233,7 @@ pub(crate) fn fitted_prefixed_parts(prefix: &str, body: &str, width: usize) -> F
     }
 
     FittedPrefixedParts {
-        prefix: prefix.to_owned(),
+        prefix: terminal_text(prefix),
         gap: true,
         body: fit_with_ellipsis(body, body_width),
     }
