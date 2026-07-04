@@ -1426,7 +1426,7 @@ fn content_spans_preserve_width_when_syntax_splits_graphemes() {
 }
 
 #[test]
-fn split_empty_cells_use_default_gutter_and_hatched_fill() {
+fn split_empty_cells_use_default_gutter_and_blank_fill() {
     let spans = split_cell_spans_at_scroll(
         None,
         None,
@@ -1440,13 +1440,33 @@ fn split_empty_cells_use_default_gutter_and_hatched_fill() {
         0,
     );
 
-    assert_eq!(span_text(&spans), "▌        ╱  ");
+    assert_eq!(span_text(&spans), "▌           ");
     assert_eq!(spans[0].content.as_ref(), DIFF_INDICATOR);
     assert_eq!(spans[0].style.fg, Some(DiffTheme::default().muted));
     assert_eq!(spans[0].style.bg, Some(DiffTheme::default().gutter_bg));
     assert_eq!(spans[1].content.as_ref(), "       ");
     assert_eq!(spans[1].style.bg, Some(DiffTheme::default().gutter_bg));
     assert_eq!(spans[2].style.fg, Some(DiffTheme::default().empty_diff));
+}
+
+#[test]
+fn split_empty_cells_can_use_hatched_fill() {
+    let mut theme = DiffTheme::default();
+    theme.diff.empty_fill = true;
+    let spans = split_cell_spans_at_scroll(
+        None,
+        None,
+        &[],
+        SplitCellRender {
+            side: SplitSide::Old,
+            row_index: 0,
+            width: 12,
+            theme,
+        },
+        0,
+    );
+
+    assert_eq!(span_text(&spans), "▌        ╱  ");
 }
 
 #[test]
@@ -1476,6 +1496,7 @@ fn split_wrapped_empty_cells_follow_visual_rows() {
         raw_patch: Vec::new(),
     };
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Split);
+    app.config.theme.diff.empty_fill = true;
     app.viewport.line_wrapping = true;
     app.set_viewport_width(24);
 
@@ -1511,15 +1532,15 @@ fn split_wrapped_empty_cells_follow_visual_rows() {
     assert_eq!(second_visual_row, 4);
     assert_eq!(
         left_fill(&first[0]),
-        empty_diff_fill_from(content_width, first_visual_row, content_offset)
+        empty_diff_fill_from(content_width, first_visual_row, content_offset, true)
     );
     assert_eq!(
         left_fill(&first[1]),
-        empty_diff_fill_from(content_width, first_visual_row + 1, content_offset)
+        empty_diff_fill_from(content_width, first_visual_row + 1, content_offset, true)
     );
     assert_eq!(
         left_fill(&second[0]),
-        empty_diff_fill_from(content_width, second_visual_row, content_offset)
+        empty_diff_fill_from(content_width, second_visual_row, content_offset, true)
     );
     assert_ne!(left_fill(&first[0]), left_fill(&first[1]));
 }

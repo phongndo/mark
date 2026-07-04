@@ -44,6 +44,7 @@ line_background = "subtle"
 gutter_background = "delta"
 inline_background = "strong"
 sign_style = "bold"
+empty_fill = false
 
 [limits]
 max_source_kib = 1024
@@ -224,10 +225,12 @@ line_background = "subtle"   # none, subtle, strong
 gutter_background = "delta"  # base, delta
 inline_background = "strong" # none, subtle, strong
 sign_style = "bold"          # normal, bold
+empty_fill = false            # false leaves empty split cells blank; true uses diagonal fill
 ```
 
 `word_background` and `word_diff_background` are accepted aliases for
-`inline_background`. Collapsed unchanged context expands fully when clicked.
+`inline_background`. `empty_diff_fill` is accepted as an alias for
+`empty_fill`. Collapsed unchanged context expands fully when clicked.
 Legacy `context_lines`, `context_expand`, and `expand_context` settings are
 accepted for compatibility but no longer limit interactive context expansion.
 

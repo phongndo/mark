@@ -147,6 +147,7 @@ fn static_diff_output_prepends_git_show_prelude() {
     let input = b"commit abc123\nAuthor: Example <e@example.com>\n\n    message\n\ndiff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n";
     let args = PagerArgs {
         no_syntax: true,
+        empty_diff_fill: Default::default(),
         layout: PagerLayoutArg::Unified,
     };
 

@@ -83,6 +83,7 @@ fn static_pager_options(args: &PagerArgs, color: bool) -> mark_tui::StaticPagerO
         layout: args.layout.into(),
         color,
         syntax: !args.no_syntax,
+        empty_diff_fill: args.empty_diff_fill.override_value(),
         ..mark_tui::StaticPagerOptions::default()
     }
 }
@@ -101,6 +102,7 @@ pub(super) fn run_interactive_diff(
         mark_tui::DiffRunOptions {
             live_updates: false,
             syntax_enabled: !args.no_syntax,
+            empty_diff_fill: args.empty_diff_fill.override_value(),
         },
     )?;
     Ok(())

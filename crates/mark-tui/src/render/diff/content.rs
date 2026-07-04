@@ -99,7 +99,16 @@ pub(crate) fn gutter_spans(
     ]
 }
 
-pub(crate) fn empty_diff_fill_from(width: usize, row_index: usize, column_offset: usize) -> String {
+pub(crate) fn empty_diff_fill_from(
+    width: usize,
+    row_index: usize,
+    column_offset: usize,
+    enabled: bool,
+) -> String {
+    if !enabled {
+        return spaces(width).into_owned();
+    }
+
     let mut fill = String::with_capacity(width.saturating_mul(EMPTY_DIFF_FILL.len_utf8()));
     for column in 0..width {
         fill.push(

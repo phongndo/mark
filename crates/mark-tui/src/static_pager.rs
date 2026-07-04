@@ -28,6 +28,7 @@ pub struct StaticPagerOptions {
     pub layout: StaticPagerLayout,
     pub color: bool,
     pub syntax: bool,
+    pub empty_diff_fill: Option<bool>,
     pub syntax_timeout: Duration,
 }
 
@@ -38,6 +39,7 @@ impl Default for StaticPagerOptions {
             layout: StaticPagerLayout::Auto,
             color: true,
             syntax: true,
+            empty_diff_fill: None,
             syntax_timeout: STATIC_SYNTAX_SETTLE_TIMEOUT,
         }
     }
@@ -132,6 +134,9 @@ fn static_app(
     };
     if pager_options.layout == StaticPagerLayout::Auto {
         apply_static_auto_layout(&mut app, width);
+    }
+    if let Some(empty_diff_fill) = pager_options.empty_diff_fill {
+        app.config.theme.diff.empty_fill = empty_diff_fill;
     }
     configure_static_app(&mut app, width);
     settle_static_syntax(&mut app, pager_options.syntax_timeout);

@@ -174,6 +174,8 @@ pub(crate) struct StoredDiffSettings {
     #[serde(alias = "word_background", alias = "word_diff_background")]
     pub(crate) word_background: Option<DiffBackground>,
     pub(crate) sign_style: Option<DiffSignStyle>,
+    #[serde(alias = "empty_diff_fill")]
+    pub(crate) empty_fill: Option<bool>,
     #[serde(
         alias = "context_lines",
         alias = "context_expand",
@@ -449,6 +451,7 @@ pub struct DiffSettings {
     pub gutter_background: DiffGutterBackground,
     pub inline_background: DiffBackground,
     pub sign_style: DiffSignStyle,
+    pub empty_fill: bool,
     pub context_expansion: DiffContextExpansion,
 }
 
@@ -459,6 +462,7 @@ impl Default for DiffSettings {
             gutter_background: DiffGutterBackground::Delta,
             inline_background: DiffBackground::Strong,
             sign_style: DiffSignStyle::Bold,
+            empty_fill: false,
             context_expansion: DiffContextExpansion::Full,
         }
     }

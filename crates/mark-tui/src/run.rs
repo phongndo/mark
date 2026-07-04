@@ -30,6 +30,7 @@ use crate::{
 pub struct DiffRunOptions {
     pub live_updates: bool,
     pub syntax_enabled: bool,
+    pub empty_diff_fill: Option<bool>,
 }
 
 impl Default for DiffRunOptions {
@@ -37,6 +38,7 @@ impl Default for DiffRunOptions {
         Self {
             live_updates: true,
             syntax_enabled: true,
+            empty_diff_fill: None,
         }
     }
 }
@@ -69,6 +71,7 @@ pub fn run_diff_with_live_updates_and_syntax(
         DiffRunOptions {
             live_updates,
             syntax_enabled,
+            ..DiffRunOptions::default()
         },
     )
 }
@@ -97,6 +100,9 @@ async fn run_diff_with_options_async(
         SyntaxStartupMode::Disabled
     };
     let mut app = DiffApp::new_with_syntax(options, changeset, layout, syntax_mode);
+    if let Some(empty_diff_fill) = run_options.empty_diff_fill {
+        app.config.theme.diff.empty_fill = empty_diff_fill;
+    }
     app.jobs.live_updates = LiveUpdatesState::from_allowed_and_enabled(
         run_options.live_updates,
         run_options.live_updates && app.jobs.live_updates.enabled(),

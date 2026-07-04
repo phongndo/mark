@@ -8,6 +8,7 @@ pub(crate) struct ReviewRequest {
     pub(crate) options: mark_command::DiffOptions,
     pub(crate) live_updates: bool,
     pub(crate) syntax_enabled: bool,
+    pub(crate) empty_diff_fill: Option<bool>,
 }
 
 pub(crate) fn run_review(request: ReviewRequest) -> CliResult<()> {
@@ -17,6 +18,7 @@ pub(crate) fn run_review(request: ReviewRequest) -> CliResult<()> {
             mark_tui::DiffRunOptions {
                 live_updates: request.live_updates,
                 syntax_enabled: request.syntax_enabled,
+                empty_diff_fill: request.empty_diff_fill,
             },
         )?;
         Ok(())

@@ -208,8 +208,20 @@ pub(crate) struct DisplayArgs {
     /// Disable syntax highlighting in the interactive diff viewer.
     #[arg(long = "no-syntax")]
     pub(crate) no_syntax: bool,
+    #[command(flatten)]
+    pub(crate) empty_diff_fill: EmptyDiffFillArgs,
     #[arg(short = 's', long)]
     pub(crate) stat: bool,
+}
+
+#[derive(Debug, Args, Default)]
+pub(crate) struct EmptyDiffFillArgs {
+    /// Draw a diagonal fill pattern in empty split diff cells.
+    #[arg(long = "empty-diff-fill", conflicts_with = "no_empty_diff_fill")]
+    pub(crate) empty_diff_fill: bool,
+    /// Leave empty split diff cells blank.
+    #[arg(long = "no-empty-diff-fill")]
+    pub(crate) no_empty_diff_fill: bool,
 }
 
 #[derive(Debug, Args, Default)]
@@ -229,6 +241,22 @@ pub(crate) struct DifftoolWatchArgs {
 impl DisplayArgs {
     pub(crate) fn syntax_enabled(&self) -> bool {
         !self.no_syntax
+    }
+
+    pub(crate) fn empty_diff_fill_override(&self) -> Option<bool> {
+        self.empty_diff_fill.override_value()
+    }
+}
+
+impl EmptyDiffFillArgs {
+    pub(crate) fn override_value(&self) -> Option<bool> {
+        if self.empty_diff_fill {
+            Some(true)
+        } else if self.no_empty_diff_fill {
+            Some(false)
+        } else {
+            None
+        }
     }
 }
 
@@ -253,6 +281,8 @@ pub(crate) struct PagerArgs {
     /// Disable syntax highlighting in diff pager output.
     #[arg(long = "no-syntax")]
     pub(crate) no_syntax: bool,
+    #[command(flatten)]
+    pub(crate) empty_diff_fill: EmptyDiffFillArgs,
     /// Layout for static diff output.
     #[arg(long, alias = "mode", value_enum, default_value_t = PagerLayoutArg::Auto)]
     pub(crate) layout: PagerLayoutArg,
@@ -352,9 +382,27 @@ mod tests {
         assert!(cli.command.is_none());
         assert!(cli.diff.display.stat);
 
+        let cli = parse(&["mark", "--empty-diff-fill"]);
+        assert_eq!(cli.diff.display.empty_diff_fill_override(), Some(true));
+
         let cli = parse(&["mark", "main", "feature"]);
         assert!(cli.command.is_none());
         assert_eq!(cli.diff.revs, ["main", "feature"]);
+    }
+
+    #[test]
+    fn parses_empty_diff_fill_flags() {
+        let cli = parse(&["mark", "diff", "--no-empty-diff-fill"]);
+        assert!(
+            matches!(cli.command, Some(Command::Diff(args)) if args.display.empty_diff_fill_override() == Some(false))
+        );
+
+        let cli = parse(&["mark", "pager", "--empty-diff-fill"]);
+        assert!(
+            matches!(cli.command, Some(Command::Pager(args)) if args.empty_diff_fill.override_value() == Some(true))
+        );
+
+        parse_err(&["mark", "--empty-diff-fill", "--no-empty-diff-fill"]);
     }
 
     #[test]

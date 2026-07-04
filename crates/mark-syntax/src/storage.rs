@@ -126,6 +126,7 @@ pub(crate) fn diff_from_stored(stored: StoredDiffSettings) -> DiffSettings {
             .or(stored.word_background)
             .unwrap_or(defaults.inline_background),
         sign_style: stored.sign_style.unwrap_or(defaults.sign_style),
+        empty_fill: stored.empty_fill.unwrap_or(defaults.empty_fill),
         context_expansion: stored
             .context_expansion
             .map(diff_context_expansion_from_stored)

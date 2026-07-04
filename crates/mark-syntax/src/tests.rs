@@ -787,6 +787,7 @@ line_background = "subtle"
 gutter_background = "delta"
 inline_background = "strong"
 sign_style = "bold"
+empty_fill = true
 context_expand = 42
 "#,
     )
@@ -805,6 +806,7 @@ context_expand = 42
     assert_eq!(settings.diff.gutter_background, DiffGutterBackground::Delta);
     assert_eq!(settings.diff.inline_background, DiffBackground::Strong);
     assert_eq!(settings.diff.sign_style, DiffSignStyle::Bold);
+    assert!(settings.diff.empty_fill);
     assert_eq!(
         settings.diff.context_expansion,
         DiffContextExpansion::Lines(42)
@@ -818,6 +820,14 @@ fn syntax_settings_supports_full_context_expansion() {
 
     assert_eq!(settings.diff.context_expansion, DiffContextExpansion::Full);
     assert_eq!(settings.diff.context_expansion.expand_count(123), 123);
+}
+
+#[test]
+fn syntax_settings_accepts_empty_diff_fill_alias() {
+    let settings =
+        parse_settings("[diff]\nempty_diff_fill = true\n").expect("settings should parse");
+
+    assert!(settings.diff.empty_fill);
 }
 
 #[test]

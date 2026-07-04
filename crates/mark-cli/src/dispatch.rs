@@ -41,11 +41,13 @@ fn review_request(
     options: mark_command::DiffOptions,
     live_updates: bool,
     syntax_enabled: bool,
+    empty_diff_fill: Option<bool>,
 ) -> ReviewRequest {
     ReviewRequest {
         options,
         live_updates,
         syntax_enabled,
+        empty_diff_fill,
     }
 }
 
@@ -53,10 +55,12 @@ impl ReviewCommand for args::DiffArgs {
     fn into_review_request(self) -> CliResult<ReviewRequest> {
         let live_updates = !self.watch.no_watch;
         let syntax_enabled = self.display.syntax_enabled();
+        let empty_diff_fill = self.display.empty_diff_fill_override();
         Ok(review_request(
             diff_options(self)?,
             live_updates,
             syntax_enabled,
+            empty_diff_fill,
         ))
     }
 }
@@ -64,14 +68,26 @@ impl ReviewCommand for args::DiffArgs {
 impl ReviewCommand for args::ShowArgs {
     fn into_review_request(self) -> CliResult<ReviewRequest> {
         let syntax_enabled = self.display.syntax_enabled();
-        Ok(review_request(show_options(self)?, false, syntax_enabled))
+        let empty_diff_fill = self.display.empty_diff_fill_override();
+        Ok(review_request(
+            show_options(self)?,
+            false,
+            syntax_enabled,
+            empty_diff_fill,
+        ))
     }
 }
 
 impl ReviewCommand for args::ReviewArgs {
     fn into_review_request(self) -> CliResult<ReviewRequest> {
         let syntax_enabled = self.display.syntax_enabled();
-        Ok(review_request(review_options(self)?, false, syntax_enabled))
+        let empty_diff_fill = self.display.empty_diff_fill_override();
+        Ok(review_request(
+            review_options(self)?,
+            false,
+            syntax_enabled,
+            empty_diff_fill,
+        ))
     }
 }
 
@@ -79,10 +95,12 @@ impl ReviewCommand for args::DifftoolArgs {
     fn into_review_request(self) -> CliResult<ReviewRequest> {
         let live_updates = self.watch.watch;
         let syntax_enabled = self.display.syntax_enabled();
+        let empty_diff_fill = self.display.empty_diff_fill_override();
         Ok(review_request(
             difftool_options(self)?,
             live_updates,
             syntax_enabled,
+            empty_diff_fill,
         ))
     }
 }
@@ -90,6 +108,12 @@ impl ReviewCommand for args::DifftoolArgs {
 impl ReviewCommand for args::PatchArgs {
     fn into_review_request(self) -> CliResult<ReviewRequest> {
         let syntax_enabled = self.display.syntax_enabled();
-        Ok(review_request(patch_options(self)?, false, syntax_enabled))
+        let empty_diff_fill = self.display.empty_diff_fill_override();
+        Ok(review_request(
+            patch_options(self)?,
+            false,
+            syntax_enabled,
+            empty_diff_fill,
+        ))
     }
 }

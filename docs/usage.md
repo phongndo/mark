@@ -38,6 +38,10 @@ mark diff --no-watch
 mark diff --no-syntax
 ```
 
+Empty split diff cells are blank by default. Use `--empty-diff-fill` to draw
+the old diagonal fill pattern for one run, or `--no-empty-diff-fill` to override
+a config that enables it.
+
 Use `--stat` to print summary statistics instead of opening the interactive UI:
 
 ```sh
@@ -95,6 +99,7 @@ layout. Override the static layout when needed:
 mark pager --layout split
 mark pager --layout unified
 mark pager --no-syntax
+mark pager --empty-diff-fill
 ```
 
 ## Difftool mode

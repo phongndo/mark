@@ -1105,10 +1105,11 @@ fn live_diff_watch_paths_upgrade_to_recursive() {
 }
 
 #[test]
-fn empty_diff_fill_draws_shifted_diagonal_pattern() {
-    assert_eq!(empty_diff_fill_from(8, 0, 0), "╱  ╱  ╱ ");
-    assert_eq!(empty_diff_fill_from(8, 1, 0), "  ╱  ╱  ");
-    assert_eq!(empty_diff_fill_from(8, 2, 0), " ╱  ╱  ╱");
+fn empty_diff_fill_is_blank_unless_enabled() {
+    assert_eq!(empty_diff_fill_from(8, 0, 0, false), "        ");
+    assert_eq!(empty_diff_fill_from(8, 0, 0, true), "╱  ╱  ╱ ");
+    assert_eq!(empty_diff_fill_from(8, 1, 0, true), "  ╱  ╱  ");
+    assert_eq!(empty_diff_fill_from(8, 2, 0, true), " ╱  ╱  ╱");
 }
 
 #[test]
