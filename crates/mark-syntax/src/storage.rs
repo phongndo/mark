@@ -5,12 +5,12 @@ use std::{
 };
 
 use crate::{
-    BASENAME_LANGUAGES, CORE_LANGUAGES, DiffContextExpansion, DiffSettings, LANGUAGE_ALIASES,
-    LEGACY_CONFIG_FILE, NotificationSettings, StoredDiffContextExpansion,
-    StoredDiffContextExpansionMode, StoredDiffSettings, StoredLanguageMapping,
-    StoredNotificationSettings, StoredSyntaxConfig, StoredSyntaxLimits, StoredSyntaxSettings,
-    StoredSyntaxThemeConfig, StoredSyntaxThemeTable, SyntaxLimits, SyntaxMode, SyntaxSettings,
-    SyntaxThemeConfig, SyntaxThemeSource, config_path, load_settings,
+    BASENAME_LANGUAGES, CORE_LANGUAGES, DecorationSettings, DiffContextExpansion, DiffSettings,
+    LANGUAGE_ALIASES, LEGACY_CONFIG_FILE, NotificationSettings, StoredDecorationSettings,
+    StoredDiffContextExpansion, StoredDiffContextExpansionMode, StoredDiffSettings,
+    StoredLanguageMapping, StoredNotificationSettings, StoredSyntaxConfig, StoredSyntaxLimits,
+    StoredSyntaxSettings, StoredSyntaxThemeConfig, StoredSyntaxThemeTable, SyntaxLimits,
+    SyntaxMode, SyntaxSettings, SyntaxThemeConfig, SyntaxThemeSource, config_path, load_settings,
 };
 use mark_core::{MarkError, MarkResult};
 
@@ -84,12 +84,15 @@ pub(crate) fn parse_settings(contents: &str) -> Result<SyntaxSettings, toml::de:
 
 pub(crate) fn settings_from_stored(stored: StoredSyntaxSettings) -> SyntaxSettings {
     let colorscheme = stored.colorscheme.or(stored.theme);
+    let legacy_empty_fill = stored.diff.empty_fill;
+    let decorations = decorations_from_stored(stored.decorations, legacy_empty_fill);
 
     SyntaxSettings {
         mode: stored.mode.unwrap_or_default(),
         theme: colorscheme
             .map(theme_config_from_stored)
             .unwrap_or_default(),
+        decorations,
         layout: stored.layout,
         live_reload: stored.live_reload.unwrap_or(true),
         syntax_highlighting: stored.syntax_highlighting.unwrap_or(true),
@@ -99,6 +102,32 @@ pub(crate) fn settings_from_stored(stored: StoredSyntaxSettings) -> SyntaxSettin
         diff: diff_from_stored(stored.diff),
         notifications: notifications_from_stored(stored.notifications),
         limits: limits_from_stored(stored.limits),
+    }
+}
+
+pub(crate) fn decorations_from_stored(
+    stored: Option<StoredDecorationSettings>,
+    legacy_empty_fill: Option<bool>,
+) -> DecorationSettings {
+    let defaults = DecorationSettings::default();
+    match stored {
+        None => DecorationSettings {
+            empty_fill: legacy_empty_fill.unwrap_or(defaults.empty_fill),
+            ..defaults
+        },
+        Some(StoredDecorationSettings::Mode(mode)) => DecorationSettings {
+            mode,
+            empty_fill: legacy_empty_fill.unwrap_or(defaults.empty_fill),
+            ..defaults
+        },
+        Some(StoredDecorationSettings::Table(table)) => DecorationSettings {
+            mode: table.mode.unwrap_or(defaults.mode),
+            empty_fill: table
+                .empty_fill
+                .or(legacy_empty_fill)
+                .unwrap_or(defaults.empty_fill),
+            no_borders: table.no_borders,
+        },
     }
 }
 

@@ -143,8 +143,9 @@ impl DiffApp {
     }
 
     pub(crate) fn diff_choice_detail(&self, choice: DiffChoice) -> String {
+        let separator = self.config.theme.decorations.comparison_separator();
         match choice {
-            DiffChoice::All => "HEAD → working tree".to_owned(),
+            DiffChoice::All => format!("HEAD{separator}working tree"),
             DiffChoice::Branch => match self.refs.branch_base.as_deref() {
                 Some(base) => {
                     let head = self
@@ -153,7 +154,7 @@ impl DiffApp {
                         .as_deref()
                         .or(self.refs.current_head.as_deref())
                         .unwrap_or("HEAD");
-                    format!("{head} → {base}")
+                    format!("{head}{separator}{base}")
                 }
                 None => "base unavailable".to_owned(),
             },

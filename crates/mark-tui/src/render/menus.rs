@@ -7,11 +7,13 @@ mod refs;
 pub(crate) use annotation_menu::{
     annotation_menu_area, annotation_menu_list_visible_rows, draw_annotation_menu,
 };
+#[cfg(test)]
+pub(crate) use diff::diff_comparison_label;
 pub(crate) use diff::{
-    diff_comparison_label, diff_menu_area, diff_menu_block, diff_selector_text,
+    diff_comparison_label_for_theme, diff_menu_area, diff_menu_block, diff_selector_text,
     diff_selector_width, draw_diff_menu, draw_review_input, review_input_area,
 };
-pub(crate) use help::{draw_help_menu, help_menu_list_visible_rows};
+pub(crate) use help::{draw_help_menu, help_menu_key_label_for_theme, help_menu_list_visible_rows};
 #[cfg(test)]
 pub(crate) use help::{
     help_menu_bg, help_menu_content_rows, help_menu_lines, help_menu_row_line, help_menu_row_spans,

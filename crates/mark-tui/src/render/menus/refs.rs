@@ -6,6 +6,7 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthStr;
 
+use super::options::{color_scheme_picker_area, color_scheme_picker_block};
 use crate::{
     app::DiffApp,
     controls::{BranchMenu, GitCommit, commit_short_sha},
@@ -16,8 +17,7 @@ use crate::{
             floating_menu_max_width, render_scrollable_selector_menu, selector_border_color,
             selector_disabled_line, selector_entry_line, selector_highlight_color,
             selector_menu_lines, selector_menu_list_rows, selector_menu_outer_height,
-            selector_menu_rendered_list_rows, selector_scrollbar_needed, selector_title_color,
-            selector_width_with_scrollbar,
+            selector_scrollbar_needed, selector_title_color, selector_width_with_scrollbar,
         },
         style::{base_bg, header_bg},
         text::{fit_padded, fit_with_ellipsis},
@@ -32,8 +32,10 @@ pub(crate) fn branch_menu_list_visible_rows(app: &DiffApp, area: Rect) -> Option
         return None;
     }
 
+    let menu_area = branch_menu_area(app, area)?;
+    let inner = branch_menu_block(app.config.theme, menu).inner(menu_area);
     let pinned_rows = u16::from(app.selected_branch_menu_choice(menu).is_some());
-    selector_menu_rendered_list_rows(area, app.filtered_branches().len(), pinned_rows)
+    Some(selector_menu_list_rows(inner.height, pinned_rows))
 }
 
 pub(crate) fn commit_menu_list_visible_rows(app: &DiffApp, area: Rect) -> Option<usize> {
@@ -41,8 +43,10 @@ pub(crate) fn commit_menu_list_visible_rows(app: &DiffApp, area: Rect) -> Option
         return None;
     }
 
+    let menu_area = commit_menu_area(app, area)?;
+    let inner = commit_menu_block(app.config.theme).inner(menu_area);
     let pinned_rows = u16::from(app.selected_commit_menu_choice().is_some());
-    selector_menu_rendered_list_rows(area, app.filtered_commits().len(), pinned_rows)
+    Some(selector_menu_list_rows(inner.height, pinned_rows))
 }
 
 pub(crate) fn color_scheme_picker_list_visible_rows(app: &DiffApp, area: Rect) -> Option<usize> {
@@ -50,7 +54,9 @@ pub(crate) fn color_scheme_picker_list_visible_rows(app: &DiffApp, area: Rect) -
         return None;
     }
 
-    selector_menu_rendered_list_rows(area, app.filtered_color_schemes().len(), 1)
+    let picker_area = color_scheme_picker_area(app, area)?;
+    let inner = color_scheme_picker_block(app.config.theme).inner(picker_area);
+    Some(selector_menu_list_rows(inner.height, 1))
 }
 
 pub(crate) fn draw_branch_menu(frame: &mut Frame<'_>, app: &DiffApp, area: Rect) {
@@ -135,6 +141,11 @@ pub(crate) fn branch_menu_block(theme: DiffTheme, menu: BranchMenu) -> Block<'st
         BranchMenu::Head => " head branch ",
         BranchMenu::Base => " base branch ",
     };
+    if !theme.decorations.show_borders() {
+        return Block::default()
+            .style(Style::default().bg(bg))
+            .padding(Padding::horizontal(1));
+    }
     Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(selector_border_color(theme)).bg(bg))
@@ -152,6 +163,11 @@ pub(crate) fn branch_menu_block(theme: DiffTheme, menu: BranchMenu) -> Block<'st
 
 pub(crate) fn commit_menu_block(theme: DiffTheme) -> Block<'static> {
     let bg = base_bg(theme);
+    if !theme.decorations.show_borders() {
+        return Block::default()
+            .style(Style::default().bg(bg))
+            .padding(Padding::horizontal(1));
+    }
     Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(selector_border_color(theme)).bg(bg))

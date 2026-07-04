@@ -24,6 +24,8 @@ fn has_diff_args(args: &args::DiffArgs) -> bool {
         || args.no_untracked
         || args.watch.no_watch
         || args.display.no_syntax
+        || args.display.decorations.override_value().is_some()
+        || args.display.empty_diff_fill.override_value().is_some()
         || args.display.stat
 }
 

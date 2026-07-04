@@ -10,11 +10,11 @@ use crate::{
     app::DiffApp,
     controls::BranchMenu,
     render::{
-        menus::{diff_comparison_label, diff_selector_text},
+        menus::{diff_comparison_label_for_theme, diff_selector_text},
         style::statusline_bg,
         text::{fit, fit_with_ellipsis, format_count, progress_label},
     },
-    theme::{BRANCH_COMPARISON_SEPARATOR, STATUSLINE_SELECTOR_GAP},
+    theme::STATUSLINE_SELECTOR_GAP,
 };
 
 pub(crate) fn draw_header(frame: &mut Frame<'_>, app: &DiffApp, area: Rect) {
@@ -107,7 +107,7 @@ pub(crate) fn push_statusline_left_spans(
         );
         push_fitted_statusline_span(
             spans,
-            BRANCH_COMPARISON_SEPARATOR,
+            app.config.theme.decorations.comparison_separator(),
             Style::default()
                 .fg(app.config.theme.muted)
                 .bg(statusline_bg(app.config.theme)),
@@ -125,7 +125,7 @@ pub(crate) fn push_statusline_left_spans(
     } else {
         push_fitted_statusline_span(
             spans,
-            diff_comparison_label(&app.document.options),
+            diff_comparison_label_for_theme(&app.document.options, app.config.theme),
             Style::default()
                 .fg(app.config.theme.muted)
                 .bg(statusline_bg(app.config.theme)),

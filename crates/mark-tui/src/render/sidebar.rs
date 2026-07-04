@@ -327,5 +327,10 @@ pub(crate) fn file_sidebar_line(
 }
 
 pub(crate) fn file_sidebar_separator(theme: DiffTheme) -> Span<'static> {
-    Span::styled("│", Style::default().fg(theme.muted).bg(base_bg(theme)))
+    let text = if theme.decorations.is_fancy() {
+        "│"
+    } else {
+        " "
+    };
+    Span::styled(text, Style::default().fg(theme.muted).bg(base_bg(theme)))
 }

@@ -112,6 +112,11 @@ pub(crate) fn diff_menu_area(app: &DiffApp, area: Rect, choices: &[DiffChoice]) 
 
 pub(crate) fn diff_menu_block(theme: DiffTheme) -> Block<'static> {
     let bg = base_bg(theme);
+    if !theme.decorations.show_borders() {
+        return Block::default()
+            .style(Style::default().bg(bg))
+            .padding(Padding::horizontal(1));
+    }
     Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(selector_border_color(theme)).bg(bg))
@@ -146,6 +151,7 @@ pub(crate) fn draw_review_input(frame: &mut Frame<'_>, app: &DiffApp, area: Rect
             &prompt,
             prompt_style,
             input_cursor_style(app.config.theme, bg),
+            app.config.theme.decorations.input_cursor(),
         )),
         Line::from(Span::styled(
             hint,
@@ -185,6 +191,11 @@ pub(crate) fn review_input_area(app: &DiffApp, area: Rect) -> Option<Rect> {
 
 pub(crate) fn review_input_block(theme: DiffTheme) -> Block<'static> {
     let bg = base_bg(theme);
+    if !theme.decorations.show_borders() {
+        return Block::default()
+            .style(Style::default().bg(bg))
+            .padding(Padding::horizontal(1));
+    }
     Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(selector_border_color(theme)).bg(bg))
@@ -249,13 +260,22 @@ pub(crate) fn diff_choice_from_options(options: &DiffOptions) -> Option<DiffChoi
     }
 }
 
+#[cfg(test)]
 pub(crate) fn diff_comparison_label(options: &DiffOptions) -> String {
+    diff_comparison_label_with_separator(options, " → ")
+}
+
+pub(crate) fn diff_comparison_label_for_theme(options: &DiffOptions, theme: DiffTheme) -> String {
+    diff_comparison_label_with_separator(options, theme.decorations.comparison_separator())
+}
+
+fn diff_comparison_label_with_separator(options: &DiffOptions, separator: &str) -> String {
     match &options.source {
-        DiffSource::Worktree => "HEAD → working tree".to_owned(),
+        DiffSource::Worktree => format!("HEAD{separator}working tree"),
         DiffSource::Show(rev) => format!("show {rev}"),
-        DiffSource::Base(base) => format!("HEAD → {base}"),
-        DiffSource::Branch { base, head } => format!("{head} → {base}"),
-        DiffSource::Range { left, right } => format!("{left} → {right}"),
+        DiffSource::Base(base) => format!("HEAD{separator}{base}"),
+        DiffSource::Branch { base, head } => format!("{head}{separator}{base}"),
+        DiffSource::Range { left, right } => format!("{left}{separator}{right}"),
         DiffSource::Difftool { right, path, .. } => {
             format!(
                 "git difftool {}",

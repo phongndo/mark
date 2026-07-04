@@ -10,7 +10,7 @@ use crate::{
     controls::INPUT_CURSOR,
     render::{
         style::{base_bg, header_bg, input_cursor_style, spans_with_input_cursor},
-        text::fit_padded,
+        text::{fit_padded, spaces},
     },
     theme::{DiffTheme, FLOATING_MENU_MIN_HEIGHT, FLOATING_MENU_MIN_WIDTH},
 };
@@ -21,9 +21,6 @@ const FLOATING_MENU_HORIZONTAL_MARGIN: u16 = 2;
 const FLOATING_MENU_MAX_HEIGHT: u16 = 36;
 const FLOATING_MENU_MAX_HEIGHT_PERCENT: u16 = 70;
 const FLOATING_MENU_SMALL_HEIGHT: u16 = 12;
-const SELECTOR_SCROLLBAR_TRACK: &str = "│";
-const SELECTOR_SCROLLBAR_THUMB: &str = "┃";
-
 pub(crate) struct SelectorMenuInput<'a> {
     pub(crate) input: &'a str,
     pub(crate) input_cursor: usize,
@@ -133,27 +130,6 @@ pub(crate) fn selector_menu_outer_height(area: Rect, list_rows: usize, pinned_ro
 
 pub(crate) fn selector_menu_outer_width(content_width: usize) -> u16 {
     content_width.saturating_add(4).min(usize::from(u16::MAX)) as u16
-}
-
-pub(crate) fn selector_menu_rendered_list_rows(
-    area: Rect,
-    item_count: usize,
-    pinned_rows: u16,
-) -> Option<usize> {
-    if !floating_menu_fits_terminal(area) {
-        return None;
-    }
-
-    let list_cap = selector_menu_list_rows(floating_menu_max_inner_height(area), pinned_rows);
-    let list_rows = item_count.max(1).min(list_cap);
-    let outer_height = selector_menu_outer_height(area, list_rows, pinned_rows);
-    if outer_height == 0 {
-        return None;
-    }
-
-    let inner_height = outer_height.saturating_sub(2);
-    let fixed_rows = SELECTOR_MENU_FIXED_INNER_ROWS.saturating_add(pinned_rows);
-    Some(inner_height.saturating_sub(fixed_rows) as usize)
 }
 
 pub(crate) fn selector_width_with_scrollbar(width: u16, has_scrollbar: bool) -> u16 {
@@ -269,12 +245,15 @@ fn render_selector_scrollbar(
     };
     let bg = base_bg(theme);
     let max_scroll = item_count.saturating_sub(visible_rows.max(1));
+    let Some(track) = theme.decorations.scrollbar_track() else {
+        return;
+    };
     let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
         .begin_symbol(None)
         .end_symbol(None)
-        .track_symbol(Some(SELECTOR_SCROLLBAR_TRACK))
+        .track_symbol(Some(track))
         .track_style(Style::default().fg(selector_count_color(theme)).bg(bg))
-        .thumb_symbol(SELECTOR_SCROLLBAR_THUMB)
+        .thumb_symbol(theme.decorations.scrollbar_thumb())
         .thumb_style(Style::default().fg(selector_title_color(theme)).bg(bg));
     // `scroll` is the top visible row, so the scrollbar range is the number of
     // possible top-row positions rather than the number of rows in the list.
@@ -307,7 +286,12 @@ pub(crate) fn selector_input_line(
     let left = fit_padded(&left, left_width);
     let text_style = Style::default().fg(selector_prompt_color(theme)).bg(bg);
     let cursor_style = input_cursor_style(theme, bg);
-    let mut spans = spans_with_input_cursor(&left, text_style, cursor_style);
+    let mut spans = spans_with_input_cursor(
+        &left,
+        text_style,
+        cursor_style,
+        theme.decorations.input_cursor(),
+    );
     spans.push(Span::styled(" ", Style::default().bg(bg)));
     spans.push(Span::styled(
         fit_padded(&right, right_width.min(width)),
@@ -326,8 +310,13 @@ pub(crate) fn text_with_cursor(input: &str, cursor: usize) -> String {
 }
 
 pub(crate) fn selector_separator_line(width: usize, theme: DiffTheme) -> Line<'static> {
+    let text = if theme.decorations.is_fancy() {
+        theme.decorations.horizontal_rule().repeat(width)
+    } else {
+        spaces(width).into_owned()
+    };
     Line::from(Span::styled(
-        "─".repeat(width),
+        text,
         Style::default()
             .fg(selector_border_color(theme))
             .bg(base_bg(theme)),

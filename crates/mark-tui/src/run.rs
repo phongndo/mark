@@ -23,7 +23,7 @@ use crate::{
     render::diff::render_row,
     runtime,
     syntax::SyntaxRuntime,
-    theme::{DiffBenchmarkOptions, DiffBenchmarkReport},
+    theme::{DecorationPreference, DiffBenchmarkOptions, DiffBenchmarkReport},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,6 +31,7 @@ pub struct DiffRunOptions {
     pub live_updates: bool,
     pub syntax_enabled: bool,
     pub empty_diff_fill: Option<bool>,
+    pub decorations: Option<DecorationPreference>,
 }
 
 impl Default for DiffRunOptions {
@@ -39,6 +40,7 @@ impl Default for DiffRunOptions {
             live_updates: true,
             syntax_enabled: true,
             empty_diff_fill: None,
+            decorations: None,
         }
     }
 }
@@ -101,7 +103,10 @@ async fn run_diff_with_options_async(
     };
     let mut app = DiffApp::new_with_syntax(options, changeset, layout, syntax_mode);
     if let Some(empty_diff_fill) = run_options.empty_diff_fill {
-        app.config.theme.diff.empty_fill = empty_diff_fill;
+        app.config.theme.decorations.empty_fill = empty_diff_fill;
+    }
+    if let Some(decorations) = run_options.decorations {
+        app.set_decoration_preference(decorations);
     }
     app.jobs.live_updates = LiveUpdatesState::from_allowed_and_enabled(
         run_options.live_updates,

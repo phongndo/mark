@@ -73,7 +73,7 @@ fn annotation_top_border_line(
 ) -> Line<'static> {
     if width < ANNOTATION_CLOSE_BUTTON_WIDTH {
         return Line::from(Span::styled(
-            fit("─", width),
+            fit(theme.decorations.horizontal_rule(), width),
             annotation_border_style(theme),
         ));
     }
@@ -93,13 +93,13 @@ fn annotation_top_border_line(
         let fill_width = rule_width.saturating_sub(label_width);
         if fill_width > 0 {
             spans.push(Span::styled(
-                "─".repeat(fill_width),
+                annotation_rule(fill_width, theme),
                 annotation_border_style(theme),
             ));
         }
     } else if rule_width > 0 {
         spans.push(Span::styled(
-            "─".repeat(rule_width),
+            annotation_rule(rule_width, theme),
             annotation_border_style(theme),
         ));
     }
@@ -127,13 +127,13 @@ fn annotation_bottom_border_line(
 ) -> Line<'static> {
     let style = annotation_border_style(theme);
     if button == AnnotationFooterButton::None {
-        return Line::from(Span::styled("─".repeat(width), style));
+        return Line::from(Span::styled(annotation_rule(width, theme), style));
     }
     if width == 0 {
         return Line::default();
     }
 
-    let label = annotation_footer_button_label(width, button);
+    let label = annotation_footer_button_label(width, button, theme);
     let label_width = label.width();
     let left = width.saturating_sub(label_width);
     let button_fg = match button {
@@ -142,7 +142,7 @@ fn annotation_bottom_border_line(
         AnnotationFooterButton::Submit => theme.addition_fg,
     };
     Line::from(vec![
-        Span::styled("─".repeat(left), style),
+        Span::styled(annotation_rule(left, theme), style),
         Span::styled(
             label,
             Style::default()
@@ -153,18 +153,30 @@ fn annotation_bottom_border_line(
     ])
 }
 
-fn annotation_footer_button_label(width: usize, button: AnnotationFooterButton) -> String {
+fn annotation_rule(width: usize, theme: DiffTheme) -> String {
+    if theme.decorations.is_fancy() {
+        theme.decorations.horizontal_rule().repeat(width)
+    } else {
+        spaces(width).into_owned()
+    }
+}
+
+fn annotation_footer_button_label(
+    width: usize,
+    button: AnnotationFooterButton,
+    theme: DiffTheme,
+) -> String {
     match button {
         AnnotationFooterButton::None => String::new(),
         AnnotationFooterButton::Edit => {
-            if width >= ANNOTATION_EDIT_BUTTON_WIDTH {
+            if width >= ANNOTATION_EDIT_BUTTON_WIDTH && theme.decorations.is_fancy() {
                 ANNOTATION_EDIT_BUTTON.to_owned()
             } else {
                 fit(ANNOTATION_EDIT_BUTTON_ASCII, width)
             }
         }
         AnnotationFooterButton::Submit => {
-            if width >= ANNOTATION_SUBMIT_BUTTON_WIDTH {
+            if width >= ANNOTATION_SUBMIT_BUTTON_WIDTH && theme.decorations.is_fancy() {
                 ANNOTATION_SUBMIT_BUTTON.to_owned()
             } else {
                 fit(ANNOTATION_SUBMIT_BUTTON_ASCII, width)
@@ -187,6 +199,7 @@ fn annotation_body_line(text: &str, width: usize, theme: DiffTheme, fg: Color) -
             &display,
             text_style,
             input_cursor_style(theme, bg),
+            theme.decorations.input_cursor(),
         ));
     }
     Line::from(Span::styled(display, Style::default().fg(fg).bg(bg)))

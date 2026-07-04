@@ -119,6 +119,11 @@ fn annotation_menu_visible_items(inner_height: u16) -> usize {
 
 pub(crate) fn annotation_menu_block(theme: DiffTheme) -> Block<'static> {
     let bg = base_bg(theme);
+    if !theme.decorations.show_borders() {
+        return Block::default()
+            .style(Style::default().bg(bg))
+            .padding(Padding::horizontal(1));
+    }
     Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(selector_border_color(theme)).bg(bg))

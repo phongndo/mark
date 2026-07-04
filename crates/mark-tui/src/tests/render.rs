@@ -1426,7 +1426,7 @@ fn content_spans_preserve_width_when_syntax_splits_graphemes() {
 }
 
 #[test]
-fn split_empty_cells_use_default_gutter_and_blank_fill() {
+fn split_empty_cells_use_default_gutter_and_hatched_fill() {
     let spans = split_cell_spans_at_scroll(
         None,
         None,
@@ -1440,7 +1440,7 @@ fn split_empty_cells_use_default_gutter_and_blank_fill() {
         0,
     );
 
-    assert_eq!(span_text(&spans), "▌           ");
+    assert_eq!(span_text(&spans), "▌        ╱  ");
     assert_eq!(spans[0].content.as_ref(), DIFF_INDICATOR);
     assert_eq!(spans[0].style.fg, Some(DiffTheme::default().muted));
     assert_eq!(spans[0].style.bg, Some(DiffTheme::default().gutter_bg));
@@ -1450,9 +1450,9 @@ fn split_empty_cells_use_default_gutter_and_blank_fill() {
 }
 
 #[test]
-fn split_empty_cells_can_use_hatched_fill() {
+fn split_empty_cells_can_disable_hatched_fill() {
     let mut theme = DiffTheme::default();
-    theme.diff.empty_fill = true;
+    theme.decorations.empty_fill = false;
     let spans = split_cell_spans_at_scroll(
         None,
         None,
@@ -1466,7 +1466,46 @@ fn split_empty_cells_can_use_hatched_fill() {
         0,
     );
 
-    assert_eq!(span_text(&spans), "▌        ╱  ");
+    assert_eq!(span_text(&spans), "▌           ");
+}
+
+#[test]
+fn minimal_decorations_use_plain_diff_chrome() {
+    let mut theme = DiffTheme::default();
+    theme.decorations.mode = DecorationMode::Minimal;
+    theme.decorations.empty_fill = true;
+
+    let spans = split_cell_spans_at_scroll(
+        None,
+        None,
+        &[],
+        SplitCellRender {
+            side: SplitSide::Old,
+            row_index: 0,
+            width: 12,
+            theme,
+        },
+        0,
+    );
+    assert_eq!(span_text(&spans), "            ");
+
+    let separator = file_separator_line(DiffLayoutMode::Split, 12, theme);
+    assert_eq!(line_text(&separator), "            ");
+
+    let context = context_show_line(20, true, "", 32, theme);
+    let context = line_text(&context);
+    assert!(context.contains("show 20 more unchanged lines"));
+    assert!(!context.contains('▾'));
+
+    let help = help_menu_row_line(
+        HelpMenuRow::Binding(HelpMenuKey::Static("↑/↓"), "move"),
+        32,
+        theme,
+        &Keymap::default(),
+    );
+    let help = line_text(&help);
+    assert!(help.contains("up/down"));
+    assert!(!help.contains('↑'));
 }
 
 #[test]
@@ -1496,7 +1535,7 @@ fn split_wrapped_empty_cells_follow_visual_rows() {
         raw_patch: Vec::new(),
     };
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Split);
-    app.config.theme.diff.empty_fill = true;
+    app.config.theme.decorations.empty_fill = true;
     app.viewport.line_wrapping = true;
     app.set_viewport_width(24);
 

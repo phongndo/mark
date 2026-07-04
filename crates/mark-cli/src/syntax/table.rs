@@ -1,4 +1,4 @@
-use std::env;
+use std::{env, ffi::OsStr};
 
 use crossterm::terminal as crossterm_terminal;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
@@ -180,6 +180,46 @@ pub(crate) fn list_glyphs(unicode: bool) -> ListGlyphs {
 
 pub(crate) fn ascii_output_requested() -> bool {
     env::var_os("MARK_ASCII").is_some()
+        || env_value_eq("TERM", "dumb")
+        || !locale_is_utf8()
+        || env::var_os("MARK_DECORATIONS").is_some_and(|value| {
+            matches!(
+                value.to_string_lossy().trim().to_ascii_lowercase().as_str(),
+                "minimal" | "plain" | "ascii"
+            )
+        })
+}
+
+fn env_value_eq(name: &str, expected: &str) -> bool {
+    env::var_os(name).is_some_and(|value| value.to_string_lossy().eq_ignore_ascii_case(expected))
+}
+
+fn locale_is_utf8() -> bool {
+    let locale = ["LC_ALL", "LC_CTYPE", "LANG"]
+        .into_iter()
+        .find_map(|name| env::var_os(name).filter(|value| !value.is_empty()));
+    locale_env_is_utf8(locale.as_deref())
+}
+
+fn locale_env_is_utf8(value: Option<&OsStr>) -> bool {
+    value.is_some_and(|value| {
+        let value = value.to_string_lossy().to_ascii_lowercase();
+        value.contains("utf-8") || value.contains("utf8")
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::locale_env_is_utf8;
+    use std::ffi::OsStr;
+
+    #[test]
+    fn locale_env_requires_present_utf8_locale() {
+        assert!(!locale_env_is_utf8(None));
+        assert!(!locale_env_is_utf8(Some(OsStr::new("C"))));
+        assert!(locale_env_is_utf8(Some(OsStr::new("en_US.UTF-8"))));
+        assert!(locale_env_is_utf8(Some(OsStr::new("C.UTF8"))));
+    }
 }
 
 pub(crate) fn terminal_width() -> Option<usize> {

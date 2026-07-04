@@ -34,13 +34,14 @@ pub(crate) fn context_show_line(
     }
 
     let suffix = if lines == 1 { "line" } else { "lines" };
+    let prefix = context_marker_prefix(marker);
     let label = if more {
         format!(
-            " {marker} show {} more unchanged {suffix}",
+            "{prefix}show {} more unchanged {suffix}",
             format_count(lines)
         )
     } else {
-        format!(" {marker} show {} unchanged {suffix}", format_count(lines))
+        format!("{prefix}show {} unchanged {suffix}", format_count(lines))
     };
     context_action_line(&label, width, theme, theme.muted)
 }
@@ -53,11 +54,23 @@ pub(crate) fn context_hide_line(
 ) -> Line<'static> {
     let suffix = if lines == 1 { "line" } else { "lines" };
     context_action_line(
-        &format!(" {marker} hide {} unchanged {suffix}", format_count(lines)),
+        &format!(
+            "{}hide {} unchanged {suffix}",
+            context_marker_prefix(marker),
+            format_count(lines)
+        ),
         width,
         theme,
         theme.muted,
     )
+}
+
+fn context_marker_prefix(marker: &str) -> String {
+    if marker.is_empty() {
+        " ".to_owned()
+    } else {
+        format!(" {marker} ")
+    }
 }
 
 pub(crate) fn context_expand_marker(hunk: usize) -> &'static str {
@@ -66,6 +79,22 @@ pub(crate) fn context_expand_marker(hunk: usize) -> &'static str {
 
 pub(crate) fn context_hide_marker(hunk: usize) -> &'static str {
     if hunk == 0 { "▾" } else { "▴" }
+}
+
+pub(crate) fn context_expand_marker_for_theme(hunk: usize, theme: DiffTheme) -> &'static str {
+    if theme.decorations.is_fancy() {
+        context_expand_marker(hunk)
+    } else {
+        ""
+    }
+}
+
+pub(crate) fn context_hide_marker_for_theme(hunk: usize, theme: DiffTheme) -> &'static str {
+    if theme.decorations.is_fancy() {
+        context_hide_marker(hunk)
+    } else {
+        ""
+    }
 }
 
 pub(crate) fn context_action_line(

@@ -117,6 +117,11 @@ pub(crate) fn draw_help_menu(frame: &mut Frame<'_>, app: &DiffApp, area: Rect) {
 
 pub(crate) fn help_menu_block(theme: DiffTheme) -> Block<'static> {
     let bg = help_menu_bg(theme);
+    if !theme.decorations.show_borders() {
+        return Block::default()
+            .style(Style::default().bg(bg))
+            .padding(Padding::horizontal(1));
+    }
     Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(selector_border_color(theme)).bg(bg))
@@ -157,17 +162,17 @@ fn help_menu_width(app: &DiffApp, rows: &[HelpMenuRow]) -> u16 {
     let input = app.overlays.help_menu_input.width().saturating_add(12);
     let rows = rows
         .iter()
-        .map(|row| help_menu_row_width(*row, &app.config.keymap))
+        .map(|row| help_menu_row_width(*row, app.config.theme, &app.config.keymap))
         .max()
         .unwrap_or_else(|| " no matching keybindings ".width());
     selector_menu_outer_width(rows.max(input).max(42))
 }
 
-fn help_menu_row_width(row: HelpMenuRow, keymap: &Keymap) -> usize {
+fn help_menu_row_width(row: HelpMenuRow, theme: DiffTheme, keymap: &Keymap) -> usize {
     match row {
         HelpMenuRow::Section(section) => format!(" {section}").width(),
         HelpMenuRow::Binding(keys, description) => {
-            let key_label = help_menu_key_label(keys, keymap);
+            let key_label = help_menu_key_label_for_theme(keys, theme, keymap);
             HELP_KEY_COLUMN_WIDTH
                 .max(key_label.width().saturating_add(3))
                 .saturating_add(description.width())
@@ -212,7 +217,7 @@ pub(crate) fn help_menu_row_spans(
                 .add_modifier(Modifier::BOLD),
         )],
         HelpMenuRow::Binding(keys, description) => {
-            let key_label = help_menu_key_label(keys, keymap);
+            let key_label = help_menu_key_label_for_theme(keys, theme, keymap);
             let (key_width, description_width) =
                 help_menu_binding_widths(&key_label, description, width);
             vec![
@@ -249,7 +254,7 @@ pub(crate) fn help_menu_row_line(
                 .add_modifier(Modifier::BOLD),
         )),
         HelpMenuRow::Binding(keys, description) => {
-            let key_label = help_menu_key_label(keys, keymap);
+            let key_label = help_menu_key_label_for_theme(keys, theme, keymap);
             let (key_width, description_width) =
                 help_menu_binding_widths(&key_label, description, width);
             Line::from(vec![
@@ -309,5 +314,22 @@ pub(crate) fn help_menu_key_label(key: HelpMenuKey, keymap: &Keymap) -> String {
             keymap.global_action_label(first),
             keymap.global_action_label(second)
         ),
+    }
+}
+
+pub(crate) fn help_menu_key_label_for_theme(
+    key: HelpMenuKey,
+    theme: DiffTheme,
+    keymap: &Keymap,
+) -> String {
+    let label = help_menu_key_label(key, keymap);
+    if theme.decorations.is_fancy() {
+        label
+    } else {
+        label
+            .replace('↑', "up")
+            .replace('↓', "down")
+            .replace('←', "left")
+            .replace('→', "right")
     }
 }

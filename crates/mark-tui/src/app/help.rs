@@ -1,7 +1,7 @@
 use super::DiffApp;
 use crate::controls::branch_match_score;
 use crate::keymap::MenuAction;
-use crate::render::menus::help_menu_list_visible_rows;
+use crate::render::menus::{help_menu_key_label_for_theme, help_menu_list_visible_rows};
 use crate::text_input::{TextInputKeyResult, handle_text_input_key};
 use crate::theme::{HELP_MENU_ROWS, HelpMenuKey, HelpMenuRow};
 use crossterm::event::{KeyCode, KeyEvent};
@@ -157,15 +157,7 @@ impl DiffApp {
     }
 
     fn help_menu_key_label(&self, key: HelpMenuKey) -> String {
-        match key {
-            HelpMenuKey::Static(label) => label.to_owned(),
-            HelpMenuKey::Global(action) => self.config.keymap.global_action_label(action),
-            HelpMenuKey::GlobalPair(first, second) => format!(
-                "{}/{}",
-                self.config.keymap.global_action_label(first),
-                self.config.keymap.global_action_label(second)
-            ),
-        }
+        help_menu_key_label_for_theme(key, self.config.theme, &self.config.keymap)
     }
 
     pub(crate) fn scroll_help_menu(&mut self, delta: isize) {

@@ -10,7 +10,6 @@ use unicode_width::UnicodeWidthStr;
 use crate::{
     app::DiffApp,
     render::{style::statusline_bg, text::fit},
-    theme::DIFF_INDICATOR,
     toast::{Toast, ToastLevel},
 };
 
@@ -97,11 +96,12 @@ fn toast_blank_line(app: &DiffApp, level: ToastLevel, width: usize) -> Line<'sta
 
     let bg = statusline_bg(app.config.theme);
     let accent = toast_accent_color(app, level);
-    let padding = width.saturating_sub(DIFF_INDICATOR.width());
+    let indicator = app.config.theme.decorations.diff_indicator();
+    let padding = width.saturating_sub(indicator.width());
 
     Line::from(vec![
         Span::styled(
-            DIFF_INDICATOR,
+            indicator,
             Style::default()
                 .fg(accent)
                 .bg(bg)
@@ -118,11 +118,10 @@ fn toast_content_line(app: &DiffApp, toast: &Toast, width: usize) -> Line<'stati
 
     let bg = statusline_bg(app.config.theme);
     let accent = toast_accent_color(app, toast.level);
-    let message_width = width
-        .saturating_sub(DIFF_INDICATOR.width())
-        .saturating_sub(3);
+    let indicator = app.config.theme.decorations.diff_indicator();
+    let message_width = width.saturating_sub(indicator.width()).saturating_sub(3);
     let message = fit(&toast.text, message_width);
-    let used = DIFF_INDICATOR
+    let used = indicator
         .width()
         .saturating_add(2)
         .saturating_add(message.width());
@@ -130,7 +129,7 @@ fn toast_content_line(app: &DiffApp, toast: &Toast, width: usize) -> Line<'stati
 
     Line::from(vec![
         Span::styled(
-            DIFF_INDICATOR,
+            indicator,
             Style::default()
                 .fg(accent)
                 .bg(bg)

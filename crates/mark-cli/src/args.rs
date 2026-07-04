@@ -32,6 +32,7 @@ examples:
   git diff | mark pager
   mark diff --no-watch
   mark diff --no-syntax
+  mark diff --minimal
   mark diff --stat
   mark config
   mark syntax add ruby elixir";
@@ -209,9 +210,41 @@ pub(crate) struct DisplayArgs {
     #[arg(long = "no-syntax")]
     pub(crate) no_syntax: bool,
     #[command(flatten)]
+    pub(crate) decorations: DecorationArgs,
+    #[command(flatten)]
     pub(crate) empty_diff_fill: EmptyDiffFillArgs,
     #[arg(short = 's', long)]
     pub(crate) stat: bool,
+}
+
+#[derive(Debug, Args, Default)]
+pub(crate) struct DecorationArgs {
+    /// Use minimal UI decorations for broad terminal compatibility.
+    #[arg(long, conflicts_with_all = ["fancy", "decorations"])]
+    pub(crate) minimal: bool,
+    /// Use fancy UI decorations.
+    #[arg(long, conflicts_with_all = ["minimal", "decorations"])]
+    pub(crate) fancy: bool,
+    /// UI decoration mode.
+    #[arg(long, value_enum, conflicts_with_all = ["minimal", "fancy"])]
+    pub(crate) decorations: Option<DecorationArg>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum DecorationArg {
+    Auto,
+    Fancy,
+    Minimal,
+}
+
+impl From<DecorationArg> for mark_tui::DecorationPreference {
+    fn from(value: DecorationArg) -> Self {
+        match value {
+            DecorationArg::Auto => Self::Auto,
+            DecorationArg::Fancy => Self::Fancy,
+            DecorationArg::Minimal => Self::Minimal,
+        }
+    }
 }
 
 #[derive(Debug, Args, Default)]
@@ -245,6 +278,22 @@ impl DisplayArgs {
 
     pub(crate) fn empty_diff_fill_override(&self) -> Option<bool> {
         self.empty_diff_fill.override_value()
+    }
+
+    pub(crate) fn decoration_override(&self) -> Option<mark_tui::DecorationPreference> {
+        self.decorations.override_value()
+    }
+}
+
+impl DecorationArgs {
+    pub(crate) fn override_value(&self) -> Option<mark_tui::DecorationPreference> {
+        if self.minimal {
+            Some(mark_tui::DecorationPreference::Minimal)
+        } else if self.fancy {
+            Some(mark_tui::DecorationPreference::Fancy)
+        } else {
+            self.decorations.map(Into::into)
+        }
     }
 }
 
@@ -281,6 +330,8 @@ pub(crate) struct PagerArgs {
     /// Disable syntax highlighting in diff pager output.
     #[arg(long = "no-syntax")]
     pub(crate) no_syntax: bool,
+    #[command(flatten)]
+    pub(crate) decorations: DecorationArgs,
     #[command(flatten)]
     pub(crate) empty_diff_fill: EmptyDiffFillArgs,
     /// Layout for static diff output.
@@ -385,6 +436,12 @@ mod tests {
         let cli = parse(&["mark", "--empty-diff-fill"]);
         assert_eq!(cli.diff.display.empty_diff_fill_override(), Some(true));
 
+        let cli = parse(&["mark", "--minimal"]);
+        assert_eq!(
+            cli.diff.display.decoration_override(),
+            Some(mark_tui::DecorationPreference::Minimal)
+        );
+
         let cli = parse(&["mark", "main", "feature"]);
         assert!(cli.command.is_none());
         assert_eq!(cli.diff.revs, ["main", "feature"]);
@@ -403,6 +460,22 @@ mod tests {
         );
 
         parse_err(&["mark", "--empty-diff-fill", "--no-empty-diff-fill"]);
+    }
+
+    #[test]
+    fn parses_decoration_flags() {
+        let cli = parse(&["mark", "diff", "--decorations", "fancy"]);
+        assert!(
+            matches!(cli.command, Some(Command::Diff(args)) if args.display.decoration_override() == Some(mark_tui::DecorationPreference::Fancy))
+        );
+
+        let cli = parse(&["mark", "pager", "--minimal"]);
+        assert!(
+            matches!(cli.command, Some(Command::Pager(args)) if args.decorations.override_value() == Some(mark_tui::DecorationPreference::Minimal))
+        );
+
+        parse_err(&["mark", "--minimal", "--fancy"]);
+        parse_err(&["mark", "--minimal", "--decorations", "auto"]);
     }
 
     #[test]

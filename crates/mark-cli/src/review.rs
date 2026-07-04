@@ -9,6 +9,7 @@ pub(crate) struct ReviewRequest {
     pub(crate) live_updates: bool,
     pub(crate) syntax_enabled: bool,
     pub(crate) empty_diff_fill: Option<bool>,
+    pub(crate) decorations: Option<mark_tui::DecorationPreference>,
 }
 
 pub(crate) fn run_review(request: ReviewRequest) -> CliResult<()> {
@@ -19,6 +20,7 @@ pub(crate) fn run_review(request: ReviewRequest) -> CliResult<()> {
                 live_updates: request.live_updates,
                 syntax_enabled: request.syntax_enabled,
                 empty_diff_fill: request.empty_diff_fill,
+                decorations: request.decorations,
             },
         )?;
         Ok(())

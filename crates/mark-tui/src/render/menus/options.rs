@@ -104,6 +104,11 @@ pub(crate) fn options_menu_area(
 
 pub(crate) fn options_menu_block(theme: DiffTheme) -> Block<'static> {
     let bg = base_bg(theme);
+    if !theme.decorations.show_borders() {
+        return Block::default()
+            .style(Style::default().bg(bg))
+            .padding(Padding::horizontal(1));
+    }
     Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(selector_border_color(theme)).bg(bg))
@@ -123,7 +128,20 @@ fn options_menu_width(app: &DiffApp, items: &[OptionsMenuItem]) -> u16 {
     let input = app.overlays.options_menu.input.width().saturating_add(12);
     let rows = items
         .iter()
-        .map(|item| format!(" › {}  {} ", option_label(*item), app.option_value(*item)).width())
+        .map(|item| {
+            let indicator = app.config.theme.decorations.submenu_indicator();
+            let prefix = if indicator.is_empty() {
+                String::new()
+            } else {
+                format!("{indicator} ")
+            };
+            format!(
+                " {prefix}{}  {} ",
+                option_label(*item),
+                app.option_value(*item)
+            )
+            .width()
+        })
         .max()
         .unwrap_or_else(|| " no matching settings ".width());
     selector_menu_outer_width(rows.max(input).max(42))
@@ -136,7 +154,12 @@ fn selector_setting_line(
     theme: DiffTheme,
     highlighted: bool,
 ) -> Line<'static> {
-    let left = format!(" {label}");
+    let prefix = theme.decorations.submenu_indicator();
+    let left = if prefix.is_empty() {
+        format!(" {label}")
+    } else {
+        format!(" {prefix} {label}")
+    };
     let value_width = value.width();
     let text = if value_width == 0 || width <= value_width.saturating_add(2) {
         format!("{left}  {value}")
@@ -229,6 +252,11 @@ pub(crate) fn color_scheme_picker_area(app: &DiffApp, area: Rect) -> Option<Rect
 
 pub(crate) fn color_scheme_picker_block(theme: DiffTheme) -> Block<'static> {
     let bg = base_bg(theme);
+    if !theme.decorations.show_borders() {
+        return Block::default()
+            .style(Style::default().bg(bg))
+            .padding(Padding::horizontal(1));
+    }
     Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(selector_border_color(theme)).bg(bg))

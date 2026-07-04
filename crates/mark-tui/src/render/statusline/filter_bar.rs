@@ -8,7 +8,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::{
     app::DiffApp,
-    controls::{DiffFilterKind, INPUT_CURSOR},
+    controls::DiffFilterKind,
     render::{
         style::statusline_bg,
         text::{fit, format_count},
@@ -85,7 +85,7 @@ pub(crate) fn blank_filter_bar_line(app: &DiffApp, width: usize) -> Line<'static
 
 pub(crate) fn filter_status_right_label(app: &DiffApp) -> Option<String> {
     if app.filter_busy() {
-        return Some("…".to_owned());
+        return Some(app.config.theme.decorations.ellipsis().to_owned());
     }
 
     if !app.filters.grep_filter.is_empty() {
@@ -228,7 +228,7 @@ pub(crate) fn push_filter_bar_cursor_span(
 ) {
     push_filter_bar_span(
         spans,
-        INPUT_CURSOR,
+        app.config.theme.decorations.input_cursor(),
         crate::render::style::input_cursor_style(app.config.theme, statusline_bg(app.config.theme)),
         remaining,
     );

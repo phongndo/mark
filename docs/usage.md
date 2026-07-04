@@ -38,9 +38,19 @@ mark diff --no-watch
 mark diff --no-syntax
 ```
 
-Empty split diff cells are blank by default. Use `--empty-diff-fill` to draw
-the old diagonal fill pattern for one run, or `--no-empty-diff-fill` to override
-a config that enables it.
+Mark chooses between fancy and minimal UI decorations automatically. Use minimal
+decorations for constrained terminals, or force fancy decorations when auto
+detection is too conservative:
+
+```sh
+mark diff --minimal
+mark diff --fancy
+mark diff --decorations minimal
+```
+
+Fancy mode draws the diagonal empty split-cell fill by default; minimal mode
+suppresses it. Use `--no-empty-diff-fill` or `--empty-diff-fill` to override it
+for one run.
 
 Use `--stat` to print summary statistics instead of opening the interactive UI:
 
@@ -99,6 +109,7 @@ layout. Override the static layout when needed:
 mark pager --layout split
 mark pager --layout unified
 mark pager --no-syntax
+mark pager --minimal
 mark pager --empty-diff-fill
 ```
 

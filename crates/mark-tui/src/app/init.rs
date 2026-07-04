@@ -16,7 +16,10 @@ use crate::render::snapshot::HitMap;
 use crate::search::DiffSearchIndex;
 use crate::selector::SelectorState;
 use crate::syntax::{LruCache, SyntaxRuntime};
-use crate::theme::{DiffTheme, MAX_INLINE_DIFF_CACHE_ENTRIES, diff_theme_from_config};
+use crate::theme::{
+    DecorationPreference, DiffTheme, MAX_INLINE_DIFF_CACHE_ENTRIES, decoration_preference_from_env,
+    diff_theme_from_config, resolve_decoration_style,
+};
 use crate::toast::Toasts;
 use mark_core::MarkResult;
 use mark_diff::{Changeset, DiffOptions};
@@ -307,12 +310,23 @@ impl DiffApp {
             push_startup_error_log(&mut startup_error_log, message);
         }
         let mut color_scheme = color_scheme_from_config(&settings.theme);
+        let decoration_preference = decoration_preference_from_env()
+            .unwrap_or_else(|| DecorationPreference::from(settings.decorations));
+        let mut decoration_settings = settings.decorations;
+        decoration_settings.mode = match decoration_preference {
+            DecorationPreference::Auto => mark_syntax::DecorationSetting::Auto,
+            DecorationPreference::Fancy => mark_syntax::DecorationSetting::Fancy,
+            DecorationPreference::Minimal => mark_syntax::DecorationSetting::Minimal,
+        };
+        let decorations = resolve_decoration_style(decoration_settings);
         let theme = match diff_theme_from_config(&settings.theme).and_then(|theme| {
             theme
                 .with_color_overrides(&settings.colors)
                 .map(|theme| theme.with_transparent_background(settings.transparent_background))
         }) {
-            Ok(theme) => theme.with_diff_settings(settings.diff),
+            Ok(theme) => theme
+                .with_diff_settings(settings.diff)
+                .with_decorations(decorations),
             Err(error) => {
                 push_startup_error_log(
                     &mut startup_error_log,
@@ -324,6 +338,7 @@ impl DiffApp {
                     .unwrap_or_else(|_| DiffTheme::default())
                     .with_transparent_background(settings.transparent_background)
                     .with_diff_settings(settings.diff)
+                    .with_decorations(decorations)
             }
         };
         let syntax_limits = settings.limits;
@@ -399,6 +414,7 @@ impl DiffApp {
                     context_expansion,
                     syntax_enabled: syntax.is_some(),
                     line_wrapping: settings.line_wrapping,
+                    decorations: decoration_preference,
                     color_scheme,
                     notification_mode: settings.notifications.mode(),
                     toast_corner: settings.notifications.corner(),
@@ -471,6 +487,7 @@ impl DiffApp {
             config: AppConfigState {
                 keymap,
                 theme,
+                decoration_preference,
                 color_scheme,
                 theme_color_overrides,
                 theme_transparent_background,

@@ -16,7 +16,7 @@ use crate::search::{DiffSearchIndex, SearchMatchIndex};
 use crate::selector::SelectorState;
 use crate::syntax::{InlineHunkEmphasisCache, InlineHunkKey, LruCache, SyntaxRuntime};
 use crate::text_input::{TextInputKeyResult, handle_text_input_key};
-use crate::theme::{DiffTheme, EVENT_POLL};
+use crate::theme::{DecorationPreference, DiffTheme, EVENT_POLL};
 use crate::toast::{ToastLevel, Toasts};
 use crossterm::event::KeyEvent;
 use mark_diff::{BranchName, Changeset, DiffOptions, DiffStats};
@@ -688,6 +688,7 @@ impl InputState {
 pub(crate) struct AppConfigState {
     pub(crate) keymap: Keymap,
     pub(crate) theme: DiffTheme,
+    pub(crate) decoration_preference: DecorationPreference,
     pub(crate) color_scheme: ColorSchemeChoice,
     pub(crate) theme_color_overrides: ColorOverrides,
     pub(crate) theme_transparent_background: bool,

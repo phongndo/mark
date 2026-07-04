@@ -466,6 +466,7 @@ fn default_options_draft() -> OptionsDraft {
         context_expansion: DiffContextExpansion::Lines(20),
         syntax_enabled: true,
         line_wrapping: false,
+        decorations: DecorationPreference::Auto,
         color_scheme: ColorSchemeChoice::System,
         notification_mode: NotificationMode::Default,
         toast_corner: ToastCorner::TopRight,

@@ -14,6 +14,7 @@ and GitHub pull requests.
 - Interactive terminal UI for large unified diffs.
 - Local worktree watching with explicit reload controls.
 - Split and unified diff layouts with syntax highlighting.
+- Fancy or minimal UI decorations with automatic terminal-aware selection.
 - Git pager and Git difftool integrations.
 - Patch-file and stdin diff review for generated changes.
 - GitHub pull request review by number or URL.

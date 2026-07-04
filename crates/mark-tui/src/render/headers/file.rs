@@ -5,7 +5,7 @@ use crate::{
     render::{
         headers::{HeaderStyles, file_delta_parts, header_spans},
         style::{diff_base_bg, file_sidebar_style},
-        text::status_code,
+        text::{spaces, status_code},
     },
     theme::DiffTheme,
 };
@@ -19,8 +19,13 @@ pub(crate) fn file_separator_line(
         return Line::default();
     }
 
+    let text = if theme.decorations.is_fancy() {
+        "─".repeat(width)
+    } else {
+        spaces(width).into_owned()
+    };
     Line::from(Span::styled(
-        "─".repeat(width),
+        text,
         Style::default()
             .fg(theme.empty_diff)
             .bg(diff_base_bg(theme)),

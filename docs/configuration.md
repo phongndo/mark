@@ -33,6 +33,11 @@ live_reload = true
 syntax_highlighting = true
 line_wrapping = false
 
+[decorations]
+mode = "auto"
+empty_fill = true
+no_borders = false
+
 [notifications]
 mode = "default"
 corner = "top-right"
@@ -44,7 +49,6 @@ line_background = "subtle"
 gutter_background = "delta"
 inline_background = "strong"
 sign_style = "bold"
-empty_fill = false
 
 [limits]
 max_source_kib = 1024
@@ -187,12 +191,26 @@ layout = "dynamic"           # dynamic, unified, split
 live_reload = true
 syntax_highlighting = true
 line_wrapping = false
+
+[decorations]
+mode = "auto"                 # auto, fancy, minimal
+empty_fill = true              # fancy mode draws the diagonal empty-cell fill
+no_borders = false             # true removes pane borders even in fancy mode
 ```
 
 `layout = "dynamic"` uses split when the terminal is wide enough and unified
 when it is narrow.
-Changing these values in the settings menu only affects the current session;
-only Colorscheme changes are written back to config.
+`[decorations] mode = "auto"` uses Mark's fancy UI on capable UTF-8 terminals and a
+minimal low-chrome UI on constrained terminals such as `TERM=dumb` or non-UTF-8
+locales. Set `mode = "fancy"` or `mode = "minimal"` to force a mode. Minimal
+mode avoids decorative glyphs and borders; it uses spacing, labels, and
+background panes instead of ASCII-art replacements. `empty_fill` is enabled by
+default for fancy mode and suppressed by minimal mode.
+`MARK_DECORATIONS=minimal` and `MARK_ASCII=1` also request minimal decorations
+for one process.
+The settings menu can change the decoration mode for the current session;
+`empty_fill` is config/CLI-controlled, and `no_borders` is config-only.
+Only Colorscheme changes are written back to config.
 
 ## Notifications
 
@@ -225,12 +243,11 @@ line_background = "subtle"   # none, subtle, strong
 gutter_background = "delta"  # base, delta
 inline_background = "strong" # none, subtle, strong
 sign_style = "bold"          # normal, bold
-empty_fill = false            # false leaves empty split cells blank; true uses diagonal fill
 ```
 
 `word_background` and `word_diff_background` are accepted aliases for
-`inline_background`. `empty_diff_fill` is accepted as an alias for
-`empty_fill`. Collapsed unchanged context expands fully when clicked.
+`inline_background`. Legacy `[diff] empty_fill` and `empty_diff_fill` are
+accepted as aliases for `[decorations] empty_fill`. Collapsed unchanged context expands fully when clicked.
 Legacy `context_lines`, `context_expand`, and `expand_context` settings are
 accepted for compatibility but no longer limit interactive context expansion.
 

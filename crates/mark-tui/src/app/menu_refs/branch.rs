@@ -4,10 +4,7 @@ use crate::render::menus::{
     branch_menu_block, branch_menu_list_visible_rows, branch_menu_width, diff_selector_width,
 };
 use crate::selector::{SelectorController, SelectorMovement};
-use crate::theme::{
-    BASE_BRANCH_MARKER, BRANCH_COMPARISON_SEPARATOR, CURRENT_BRANCH_MARKER, MAX_BRANCH_MENU_ROWS,
-    STATUSLINE_SELECTOR_GAP,
-};
+use crate::theme::{MAX_BRANCH_MENU_ROWS, STATUSLINE_SELECTOR_GAP};
 use crossterm::event::KeyEvent;
 use mark_diff::DiffSource;
 use unicode_width::UnicodeWidthStr;
@@ -324,7 +321,12 @@ impl DiffApp {
     pub(crate) fn branch_selector_text(&self, menu: BranchMenu) -> Option<String> {
         let branch = self.branch_ref(menu)?;
         let label = self.branch_label(menu, branch);
-        Some(format!("{label} ▾"))
+        let indicator = self.config.theme.decorations.dropdown_indicator();
+        if indicator.is_empty() {
+            Some(label)
+        } else {
+            Some(format!("{label} {indicator}"))
+        }
     }
 
     pub(crate) fn branch_label(&self, menu: BranchMenu, branch: &str) -> String {
@@ -340,18 +342,18 @@ impl DiffApp {
         match menu {
             BranchMenu::Head => {
                 if current == Some(branch) {
-                    Some(CURRENT_BRANCH_MARKER)
+                    Some(self.config.theme.decorations.current_branch_marker())
                 } else if base == Some(branch) {
-                    Some(BASE_BRANCH_MARKER)
+                    Some(self.config.theme.decorations.base_branch_marker())
                 } else {
                     None
                 }
             }
             BranchMenu::Base => {
                 if base == Some(branch) {
-                    Some(BASE_BRANCH_MARKER)
+                    Some(self.config.theme.decorations.base_branch_marker())
                 } else if current == Some(branch) {
-                    Some(CURRENT_BRANCH_MARKER)
+                    Some(self.config.theme.decorations.current_branch_marker())
                 } else {
                     None
                 }
@@ -380,11 +382,9 @@ impl DiffApp {
         let head_start = diff_selector_width(&self.document.options).saturating_add(selector_gap);
         match menu {
             BranchMenu::Head => Some(head_start),
-            BranchMenu::Base => Some(
-                head_start
-                    .saturating_add(head_width)
-                    .saturating_add(BRANCH_COMPARISON_SEPARATOR.width() as u16),
-            ),
+            BranchMenu::Base => Some(head_start.saturating_add(head_width).saturating_add(
+                self.config.theme.decorations.comparison_separator().width() as u16,
+            )),
         }
     }
 }

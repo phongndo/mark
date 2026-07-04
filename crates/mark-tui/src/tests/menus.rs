@@ -566,6 +566,28 @@ fn help_menu_filter_matches_section_headers() {
 }
 
 #[test]
+fn help_menu_filter_matches_minimal_arrow_labels() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.config.theme.decorations.mode = DecorationMode::Minimal;
+    app.toggle_help_menu();
+    for character in "up".chars() {
+        app.handle_key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE))
+            .expect("typing should filter help");
+    }
+
+    let rows = app.filtered_help_menu_rows();
+    assert!(rows.contains(&HelpMenuRow::Binding(
+        HelpMenuKey::Static("j/k, ↑/↓"),
+        "scroll"
+    )));
+    assert!(rows.contains(&HelpMenuRow::Binding(
+        HelpMenuKey::Static("↑/↓"),
+        "scroll list"
+    )));
+}
+
+#[test]
 fn help_menu_uses_diff_theme_colors() {
     let default_theme = DiffTheme::default();
     let section_color = Color::Rgb(10, 11, 12);
@@ -1255,6 +1277,7 @@ context_expand = 7
             context_expansion: DiffContextExpansion::Full,
             syntax_enabled: false,
             line_wrapping: true,
+            decorations: DecorationPreference::Minimal,
             color_scheme: ColorSchemeChoice::Tokyonight,
             notification_mode: NotificationMode::Debug,
             toast_corner: ToastCorner::BottomLeft,
@@ -1339,6 +1362,7 @@ max_visible = 3
         context_expansion: DiffContextExpansion::Full,
         syntax_enabled: false,
         line_wrapping: true,
+        decorations: DecorationPreference::Minimal,
         color_scheme: ColorSchemeChoice::Tokyonight,
         notification_mode: NotificationMode::Debug,
         toast_corner: ToastCorner::BottomLeft,
@@ -1348,10 +1372,11 @@ max_visible = 3
 
     for changed_item in [
         OptionsMenuItem::Layout,
-        OptionsMenuItem::LiveReload,
         OptionsMenuItem::ContextExpansion,
-        OptionsMenuItem::SyntaxHighlighting,
         OptionsMenuItem::LineWrapping,
+        OptionsMenuItem::SyntaxHighlighting,
+        OptionsMenuItem::Decorations,
+        OptionsMenuItem::LiveReload,
         OptionsMenuItem::NotificationMode,
         OptionsMenuItem::ToastCorner,
         OptionsMenuItem::ToastTimeout,
@@ -1483,7 +1508,7 @@ fn options_menu_toggles_line_wrapping_and_clamps_horizontal_scroll() {
     assert_eq!(app.viewport.horizontal_scroll, HORIZONTAL_SCROLL_STEP);
 
     app.open_options_menu();
-    app.move_options_menu_selection(3);
+    app.move_options_menu_selection(1);
     assert_eq!(
         app.highlighted_option(),
         Some(OptionsMenuItem::LineWrapping)
@@ -1500,12 +1525,42 @@ fn options_menu_toggles_line_wrapping_and_clamps_horizontal_scroll() {
 }
 
 #[test]
+fn options_menu_cycles_decorations_session_only() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+
+    app.open_options_menu();
+    app.set_options_menu_selection(3);
+    assert_eq!(app.highlighted_option(), Some(OptionsMenuItem::Decorations));
+    assert_eq!(app.option_value(OptionsMenuItem::Decorations), "[auto]");
+
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("enter should cycle decorations");
+    assert_eq!(
+        app.config.decoration_preference,
+        DecorationPreference::Fancy
+    );
+    assert_eq!(app.config.theme.decorations.mode, DecorationMode::Fancy);
+    assert_eq!(app.option_value(OptionsMenuItem::Decorations), "[fancy]");
+
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("enter should cycle decorations again");
+    assert_eq!(
+        app.config.decoration_preference,
+        DecorationPreference::Minimal
+    );
+    assert_eq!(app.config.theme.decorations.mode, DecorationMode::Minimal);
+    assert_eq!(app.option_value(OptionsMenuItem::Decorations), "[minimal]");
+    assert_eq!(app.config.last_persisted_options_menu_draft, None);
+}
+
+#[test]
 fn options_menu_cycles_notification_settings() {
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
 
     app.open_options_menu();
-    app.set_options_menu_selection(5);
+    app.set_options_menu_selection(6);
     assert_eq!(
         app.highlighted_option(),
         Some(OptionsMenuItem::NotificationMode)
@@ -1518,7 +1573,7 @@ fn options_menu_cycles_notification_settings() {
     );
     assert!(app.notifications.toasts.debug_enabled());
 
-    app.set_options_menu_selection(6);
+    app.set_options_menu_selection(7);
     assert_eq!(app.highlighted_option(), Some(OptionsMenuItem::ToastCorner));
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .expect("enter should cycle toast corner");
@@ -1528,7 +1583,7 @@ fn options_menu_cycles_notification_settings() {
     );
     assert_eq!(app.notifications.toasts.corner(), ToastCorner::BottomRight);
 
-    app.set_options_menu_selection(7);
+    app.set_options_menu_selection(8);
     assert_eq!(
         app.highlighted_option(),
         Some(OptionsMenuItem::ToastTimeout)
@@ -1537,7 +1592,7 @@ fn options_menu_cycles_notification_settings() {
         .expect("right should cycle toast timeout");
     assert_eq!(app.config.syntax_settings.notifications.timeout_ms(), 2_500);
 
-    app.set_options_menu_selection(8);
+    app.set_options_menu_selection(9);
     assert_eq!(
         app.highlighted_option(),
         Some(OptionsMenuItem::ToastMaxVisible)
@@ -1559,7 +1614,7 @@ fn options_menu_cycles_custom_notification_values_to_nearest_choices_session_onl
     );
 
     app.open_options_menu();
-    app.set_options_menu_selection(7);
+    app.set_options_menu_selection(8);
     assert_eq!(
         app.highlighted_option(),
         Some(OptionsMenuItem::ToastTimeout)
@@ -1569,7 +1624,7 @@ fn options_menu_cycles_custom_notification_values_to_nearest_choices_session_onl
     assert_eq!(app.config.syntax_settings.notifications.timeout_ms(), 2_500);
     assert_eq!(app.config.last_persisted_options_menu_draft, None);
 
-    app.set_options_menu_selection(8);
+    app.set_options_menu_selection(9);
     assert_eq!(
         app.highlighted_option(),
         Some(OptionsMenuItem::ToastMaxVisible)
@@ -1602,11 +1657,11 @@ fn options_menu_clamps_selection_after_toggle_leaves_filter() {
     assert_eq!(
         app.filtered_options_menu_items(),
         vec![
-            OptionsMenuItem::LiveReload,
             OptionsMenuItem::SyntaxHighlighting,
+            OptionsMenuItem::LiveReload,
         ]
     );
-    app.set_options_menu_selection(1);
+    app.set_options_menu_selection(0);
     assert_eq!(
         app.highlighted_option(),
         Some(OptionsMenuItem::SyntaxHighlighting)
@@ -1773,10 +1828,11 @@ fn options_menu_omits_branch_options_for_branch_diff() {
         app.options_menu_items(),
         [
             OptionsMenuItem::Layout,
-            OptionsMenuItem::LiveReload,
-            OptionsMenuItem::SyntaxHighlighting,
             OptionsMenuItem::LineWrapping,
+            OptionsMenuItem::SyntaxHighlighting,
+            OptionsMenuItem::Decorations,
             OptionsMenuItem::ColorScheme,
+            OptionsMenuItem::LiveReload,
             OptionsMenuItem::NotificationMode,
             OptionsMenuItem::ToastCorner,
             OptionsMenuItem::ToastTimeout,
@@ -1815,7 +1871,7 @@ fn options_menu_live_reload_toggles_without_reloading_diff() {
     assert!(app.jobs.live_updates.enabled());
 
     app.open_options_menu();
-    app.move_options_menu_selection(1);
+    app.move_options_menu_selection(5);
     assert_eq!(app.highlighted_option(), Some(OptionsMenuItem::LiveReload));
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .expect("enter should toggle live reload");
@@ -1831,7 +1887,7 @@ fn options_menu_reenabling_live_reload_reloads_diff() {
     app.jobs.live_updates = LiveUpdatesState::DisabledByUser;
 
     app.open_options_menu();
-    app.move_options_menu_selection(1);
+    app.move_options_menu_selection(5);
     assert_eq!(app.highlighted_option(), Some(OptionsMenuItem::LiveReload));
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .expect("enter should toggle live reload");
@@ -1852,7 +1908,7 @@ fn options_menu_does_not_enable_live_reload_when_watch_is_disabled() {
     app.jobs.live_updates = LiveUpdatesState::DisabledByCli;
 
     app.open_options_menu();
-    app.move_options_menu_selection(1);
+    app.move_options_menu_selection(5);
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .expect("enter should be handled");
 
@@ -2557,6 +2613,49 @@ fn branch_menu_scrolls_to_rendered_rows_in_short_terminal() {
             .iter()
             .any(|row| row.contains("branch-02") && row.contains("│"))
     );
+}
+
+#[test]
+fn branch_menu_scrolls_to_borderless_rendered_rows_in_short_terminal() {
+    let options = DiffOptions {
+        source: DiffSource::Base("branch-00".into()),
+        ..DiffOptions::default()
+    };
+    let mut app = DiffApp::new(
+        options,
+        changeset_with_context_lines(1),
+        DiffLayoutMode::Unified,
+    );
+    app.config.theme.decorations.mode = DecorationMode::Minimal;
+    app.set_terminal_area(Rect {
+        x: 0,
+        y: 0,
+        width: 80,
+        height: 8,
+    });
+    app.refs.branch_base = Some("branch-00".to_owned());
+    app.refs.branch_head = Some("branch-01".to_owned());
+    app.refs.current_head = Some("branch-01".to_owned());
+    app.refs.comparison_branches = (0..12)
+        .map(|index| format!("branch-{index:02}").into())
+        .collect();
+    app.toggle_branch_menu(BranchMenu::Base);
+
+    app.move_branch_selection(99);
+
+    assert_eq!(app.refs.branch_menu.selected, 10);
+    assert_eq!(app.branch_menu_rows(), 5);
+    assert_eq!(app.refs.branch_menu.scroll, 6);
+
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 8))
+        .expect("test terminal should be created");
+    terminal
+        .draw(|frame| crate::render::draw(frame, &mut app))
+        .expect("branch menu draw should succeed");
+
+    let rows = buffer_rows(terminal.backend().buffer());
+    assert!(rows.iter().any(|row| row.contains("branch-07")));
+    assert!(rows.iter().any(|row| row.contains("branch-11")));
 }
 
 #[test]

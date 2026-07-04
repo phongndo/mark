@@ -3,10 +3,11 @@ mod color_scheme;
 use super::{
     AppEffect, COLOR_SCHEME_CHOICES, COMMON_OPTIONS_MENU_ITEMS, DiffApp, OptionsDraft,
     OptionsMenuItem, SyntaxStartupMode, checkbox, color_scheme_label, context_expansion_label,
-    layout_setting_from_override, layout_setting_label, next_context_expansion,
-    next_layout_setting, next_notification_mode, next_toast_corner, next_toast_max_visible,
-    next_toast_timeout_ms, notification_mode_label, on_off_search, option_label,
-    previous_context_expansion, toast_corner_label, toast_timeout_label,
+    decoration_preference_label, layout_setting_from_override, layout_setting_label,
+    next_context_expansion, next_decoration_preference, next_layout_setting,
+    next_notification_mode, next_toast_corner, next_toast_max_visible, next_toast_timeout_ms,
+    notification_mode_label, on_off_search, option_label, previous_context_expansion,
+    toast_corner_label, toast_timeout_label,
 };
 use crate::controls::branch_match_score;
 use crate::selector::{SelectorController, SelectorMovement};
@@ -24,6 +25,7 @@ impl DiffApp {
             context_expansion: self.config.theme.diff.context_expansion,
             syntax_enabled: self.config.syntax.is_some(),
             line_wrapping: self.viewport.line_wrapping,
+            decorations: self.config.decoration_preference,
             color_scheme: self.config.color_scheme,
             notification_mode: self.config.syntax_settings.notifications.mode(),
             toast_corner: self.config.syntax_settings.notifications.corner(),
@@ -152,6 +154,9 @@ impl DiffApp {
             OptionsMenuItem::LineWrapping => {
                 on_off_search(self.overlays.options_menu_draft.line_wrapping)
             }
+            OptionsMenuItem::Decorations => {
+                decoration_preference_label(self.overlays.options_menu_draft.decorations).to_owned()
+            }
             OptionsMenuItem::ColorScheme => {
                 color_scheme_label(self.overlays.options_menu_draft.color_scheme).to_owned()
             }
@@ -198,6 +203,12 @@ impl DiffApp {
             }
             OptionsMenuItem::LineWrapping => {
                 checkbox(self.overlays.options_menu_draft.line_wrapping)
+            }
+            OptionsMenuItem::Decorations => {
+                format!(
+                    "[{}]",
+                    decoration_preference_label(self.overlays.options_menu_draft.decorations)
+                )
             }
             OptionsMenuItem::ColorScheme => {
                 format!(
@@ -280,6 +291,10 @@ impl DiffApp {
                 self.overlays.options_menu_draft.line_wrapping =
                     !self.overlays.options_menu_draft.line_wrapping;
             }
+            OptionsMenuItem::Decorations => {
+                self.overlays.options_menu_draft.decorations =
+                    next_decoration_preference(self.overlays.options_menu_draft.decorations, delta);
+            }
             OptionsMenuItem::ColorScheme => {
                 let choices = COLOR_SCHEME_CHOICES;
                 let current = choices
@@ -339,6 +354,9 @@ impl DiffApp {
         if draft.color_scheme != self.config.color_scheme {
             self.apply_color_scheme(draft.color_scheme);
         }
+        if draft.decorations != self.config.decoration_preference {
+            self.set_decoration_preference(draft.decorations);
+        }
         if draft.syntax_enabled != self.config.syntax.is_some() {
             self.set_syntax_enabled(draft.syntax_enabled);
         }
@@ -380,6 +398,20 @@ impl DiffApp {
             draft: self.overlays.options_menu_draft,
             changed_item,
         });
+    }
+
+    pub(crate) fn set_decoration_preference(
+        &mut self,
+        preference: crate::theme::DecorationPreference,
+    ) {
+        self.config.decoration_preference = preference;
+        self.config.theme.decorations = self
+            .config
+            .theme
+            .decorations
+            .with_mode(crate::theme::resolve_decoration_mode(preference));
+        self.overlays.options_menu_draft.decorations = preference;
+        self.runtime.dirty = true;
     }
 
     pub(crate) fn set_syntax_enabled(&mut self, enabled: bool) {

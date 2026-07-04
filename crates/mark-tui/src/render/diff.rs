@@ -39,9 +39,11 @@ pub(crate) use content::{inline_bg, syntax_fg};
 use content::{split_gutter_text, unified_gutter_text};
 #[cfg(test)]
 pub(crate) use context::render_split_context_line_wrapped;
+#[cfg(test)]
+pub(crate) use context::{context_expand_marker, context_hide_marker};
 pub(crate) use context::{
-    context_expand_marker, context_hide_line, context_hide_marker, context_show_line,
-    render_context_line, render_context_line_wrapped,
+    context_expand_marker_for_theme, context_hide_line, context_hide_marker_for_theme,
+    context_show_line, render_context_line, render_context_line_wrapped,
 };
 #[cfg(test)]
 pub(crate) use split::{SplitCellRender, SplitSide, split_cell_spans_at_scroll};
@@ -379,7 +381,7 @@ pub(crate) fn render_row_with_focus(
         } => context_show_line(
             lines,
             expanded > 0,
-            context_expand_marker(hunk.get()),
+            context_expand_marker_for_theme(hunk.get(), theme),
             width,
             theme,
         ),
@@ -388,9 +390,12 @@ pub(crate) fn render_row_with_focus(
             old_line,
             new_line,
         } => render_context_line(app, file.get(), old_line, new_line, row_index, width),
-        UiRow::ContextHide { hunk, lines, .. } => {
-            context_hide_line(lines, context_hide_marker(hunk.get()), width, theme)
-        }
+        UiRow::ContextHide { hunk, lines, .. } => context_hide_line(
+            lines,
+            context_hide_marker_for_theme(hunk.get(), theme),
+            width,
+            theme,
+        ),
         UiRow::HunkHeader { file, hunk } => {
             let hunk = &app.document.changeset.files[file].hunks()[hunk];
             if hunk_focused {

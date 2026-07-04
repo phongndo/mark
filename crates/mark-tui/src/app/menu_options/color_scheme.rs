@@ -160,6 +160,7 @@ impl DiffApp {
             return;
         };
         let diff = self.config.theme.diff;
+        let decorations = self.config.theme.decorations;
         match diff_theme_from_config(&config).and_then(|theme| {
             theme
                 .with_color_overrides(&self.config.theme_color_overrides)
@@ -168,7 +169,7 @@ impl DiffApp {
                 })
         }) {
             Ok(theme) => {
-                self.config.theme = theme.with_diff_settings(diff);
+                self.config.theme = theme.with_diff_settings(diff).with_decorations(decorations);
                 self.config.color_scheme = color_scheme;
                 self.runtime.dirty = true;
             }

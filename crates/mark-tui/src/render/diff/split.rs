@@ -331,7 +331,7 @@ pub(super) fn split_cell_spans_at_scroll_with_focus_and_continuation(
                     content_width,
                     row_index,
                     indicator_width + gutter_width + horizontal_scroll,
-                    theme.diff.empty_fill,
+                    theme.decorations.show_empty_fill(),
                 ),
                 Style::default()
                     .fg(theme.empty_diff)

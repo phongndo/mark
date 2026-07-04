@@ -250,11 +250,20 @@ impl DiffApp {
                 if commit.subject.is_empty() {
                     short.to_owned()
                 } else {
-                    format!("{short} · {}", commit.subject)
+                    format!(
+                        "{short}{}{}",
+                        self.config.theme.decorations.commit_subject_separator(),
+                        commit.subject
+                    )
                 }
             })
             .unwrap_or_else(|| rev.to_owned());
-        Some(format!("{label} ▾"))
+        let indicator = self.config.theme.decorations.dropdown_indicator();
+        if indicator.is_empty() {
+            Some(label)
+        } else {
+            Some(format!("{label} {indicator}"))
+        }
     }
 
     pub(crate) fn commit_selector_width(&self) -> Option<u16> {

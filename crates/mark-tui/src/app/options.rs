@@ -1,4 +1,5 @@
 use crate::controls::DiffLayoutMode;
+use crate::theme::DecorationPreference;
 use mark_core::{MarkError, MarkResult};
 use mark_syntax::{
     DiffContextExpansion, LayoutSetting, NotificationMode, SyntaxThemeConfig, ToastCorner,
@@ -208,6 +209,26 @@ pub(crate) fn next_layout_setting(setting: LayoutSetting, delta: isize) -> Layou
     settings[next]
 }
 
+pub(crate) fn decoration_preference_label(preference: DecorationPreference) -> &'static str {
+    match preference {
+        DecorationPreference::Auto => "auto",
+        DecorationPreference::Fancy => "fancy",
+        DecorationPreference::Minimal => "minimal",
+    }
+}
+
+pub(crate) fn next_decoration_preference(
+    preference: DecorationPreference,
+    delta: isize,
+) -> DecorationPreference {
+    let choices = [
+        DecorationPreference::Auto,
+        DecorationPreference::Fancy,
+        DecorationPreference::Minimal,
+    ];
+    cycle_choice(&choices, preference, delta)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum OptionsMenuItem {
     Layout,
@@ -215,6 +236,7 @@ pub(crate) enum OptionsMenuItem {
     ContextExpansion,
     SyntaxHighlighting,
     LineWrapping,
+    Decorations,
     ColorScheme,
     NotificationMode,
     ToastCorner,
@@ -227,11 +249,16 @@ pub(crate) enum OptionsMenuItem {
 const _: OptionsMenuItem = OptionsMenuItem::ContextExpansion;
 
 pub(crate) const COMMON_OPTIONS_MENU_ITEMS: &[OptionsMenuItem] = &[
+    // Review-view controls: most likely to vary per session.
     OptionsMenuItem::Layout,
-    OptionsMenuItem::LiveReload,
-    OptionsMenuItem::SyntaxHighlighting,
     OptionsMenuItem::LineWrapping,
+    OptionsMenuItem::SyntaxHighlighting,
+    // Presentation controls: visual preferences and terminal fit.
+    OptionsMenuItem::Decorations,
     OptionsMenuItem::ColorScheme,
+    // Review workflow controls.
+    OptionsMenuItem::LiveReload,
+    // Feedback controls: least commonly changed during review.
     OptionsMenuItem::NotificationMode,
     OptionsMenuItem::ToastCorner,
     OptionsMenuItem::ToastTimeout,
@@ -245,6 +272,7 @@ pub(crate) fn option_label(item: OptionsMenuItem) -> &'static str {
         OptionsMenuItem::ContextExpansion => "Context expand",
         OptionsMenuItem::SyntaxHighlighting => "Syntax highlighting",
         OptionsMenuItem::LineWrapping => "Line wrapping",
+        OptionsMenuItem::Decorations => "Decorations",
         OptionsMenuItem::ColorScheme => "Colorscheme",
         OptionsMenuItem::NotificationMode => "Notification mode",
         OptionsMenuItem::ToastCorner => "Toast corner",
@@ -292,6 +320,7 @@ pub(crate) struct OptionsDraft {
     pub(crate) context_expansion: DiffContextExpansion,
     pub(crate) syntax_enabled: bool,
     pub(crate) line_wrapping: bool,
+    pub(crate) decorations: DecorationPreference,
     pub(crate) color_scheme: ColorSchemeChoice,
     pub(crate) notification_mode: NotificationMode,
     pub(crate) toast_corner: ToastCorner,

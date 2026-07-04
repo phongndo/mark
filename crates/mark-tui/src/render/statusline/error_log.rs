@@ -10,6 +10,7 @@ use crate::{
     app::DiffApp,
     keymap::GlobalAction,
     render::{style::base_bg, text::fit},
+    theme::DiffTheme,
 };
 
 pub(crate) fn draw_error_log(frame: &mut Frame<'_>, app: &DiffApp, area: Rect) {
@@ -24,20 +25,15 @@ pub(crate) fn draw_error_log(frame: &mut Frame<'_>, app: &DiffApp, area: Rect) {
     frame.render_widget(
         Paragraph::new(error_log_header_line(app, area.width as usize))
             .style(Style::default().bg(bg)),
-        Rect {
-            x: area.x,
-            y: area.y,
-            width: area.width,
-            height: 1,
-        },
+        Rect::new(area.x, area.y, area.width, 1),
     );
 
-    let body_area = Rect {
-        x: area.x,
-        y: area.y.saturating_add(1),
-        width: area.width,
-        height: area.height.saturating_sub(1),
-    };
+    let body_area = Rect::new(
+        area.x,
+        area.y.saturating_add(1),
+        area.width,
+        area.height.saturating_sub(1),
+    );
     if body_area.height == 0 {
         return;
     }
@@ -69,20 +65,17 @@ pub(crate) fn error_log_header_line(app: &DiffApp, width: usize) -> Line<'static
     let copy_label = error_log_copy_label(app);
     let copy_width = copy_label.width();
     if copy_width == 0 || title_width.saturating_add(copy_width) >= width {
-        return Line::from(Span::styled(error_log_separator(width), rule_style));
+        return Line::from(Span::styled(
+            error_log_separator_for_theme(width, app.config.theme),
+            rule_style,
+        ));
     }
 
     let rule_width = width.saturating_sub(title_width).saturating_sub(copy_width);
     Line::from(vec![
         Span::styled(title.to_owned(), rule_style),
-        Span::styled("─".repeat(rule_width), rule_style),
-        Span::styled(
-            copy_label,
-            Style::default()
-                .fg(app.config.theme.deletion_fg)
-                .bg(bg)
-                .add_modifier(Modifier::BOLD),
-        ),
+        Span::styled(error_log_rule(rule_width, app.config.theme), rule_style),
+        Span::styled(copy_label, rule_style),
     ])
 }
 
@@ -98,7 +91,16 @@ fn error_log_copy_label(app: &DiffApp) -> String {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn error_log_separator(width: usize) -> String {
+    error_log_separator_with_rule(width, "─")
+}
+
+pub(crate) fn error_log_separator_for_theme(width: usize, theme: DiffTheme) -> String {
+    error_log_separator_with_rule(width, theme.decorations.horizontal_rule())
+}
+
+fn error_log_separator_with_rule(width: usize, rule: &str) -> String {
     let title = "error ";
     if width == 0 {
         return String::new();
@@ -107,7 +109,11 @@ pub(crate) fn error_log_separator(width: usize) -> String {
         return fit(title, width);
     }
     let right = width.saturating_sub(title.width());
-    format!("{title}{}", "─".repeat(right))
+    format!("{title}{}", rule.repeat(right))
+}
+
+fn error_log_rule(width: usize, theme: DiffTheme) -> String {
+    theme.decorations.horizontal_rule().repeat(width)
 }
 
 #[cfg(test)]

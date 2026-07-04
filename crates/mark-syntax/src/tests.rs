@@ -697,6 +697,7 @@ fn syntax_settings_default_to_builtin_system_colorscheme() {
     assert_eq!(settings.mode, SyntaxMode::Builtin);
     assert_eq!(settings.theme.source(), SyntaxThemeSource::Builtin);
     assert_eq!(settings.theme.name(), Some("system"));
+    assert_eq!(settings.decorations, DecorationSettings::default());
     assert_eq!(settings.layout, None);
     assert!(settings.live_reload);
     assert!(settings.syntax_highlighting);
@@ -732,6 +733,11 @@ live_reload = false
 syntax_highlighting = false
 line_wrapping = true
 
+[decorations]
+mode = "minimal"
+empty_fill = false
+no_borders = true
+
 [notifications]
 mode = "debug"
 corner = "bottom-left"
@@ -745,6 +751,9 @@ max_visible = 5
     assert!(!settings.live_reload);
     assert!(!settings.syntax_highlighting);
     assert!(settings.line_wrapping);
+    assert_eq!(settings.decorations.mode, DecorationSetting::Minimal);
+    assert!(!settings.decorations.empty_fill);
+    assert!(settings.decorations.no_borders);
     assert_eq!(settings.notifications.mode(), NotificationMode::Debug);
     assert_eq!(settings.notifications.corner(), ToastCorner::BottomLeft);
     assert_eq!(settings.notifications.timeout_ms(), 2_500);
@@ -752,6 +761,38 @@ max_visible = 5
 
     let settings = parse_settings("layout = \"dynamic\"\n").expect("settings should parse");
     assert_eq!(settings.layout, Some(LayoutSetting::Dynamic));
+}
+
+#[test]
+fn syntax_settings_applies_legacy_empty_fill_only_as_decorations_fallback() {
+    let settings = parse_settings("[diff]\nempty_fill = false\n").expect("settings should parse");
+    assert!(!settings.decorations.empty_fill);
+
+    let settings = parse_settings(
+        r#"
+[decorations]
+empty_fill = false
+
+[diff]
+empty_fill = true
+"#,
+    )
+    .expect("settings should parse");
+    assert!(!settings.decorations.empty_fill);
+    assert!(settings.diff.empty_fill);
+
+    let settings = parse_settings(
+        r#"
+[decorations]
+empty_fill = true
+
+[diff]
+empty_diff_fill = false
+"#,
+    )
+    .expect("settings should parse");
+    assert!(settings.decorations.empty_fill);
+    assert!(!settings.diff.empty_fill);
 }
 
 #[test]
@@ -807,6 +848,7 @@ context_expand = 42
     assert_eq!(settings.diff.inline_background, DiffBackground::Strong);
     assert_eq!(settings.diff.sign_style, DiffSignStyle::Bold);
     assert!(settings.diff.empty_fill);
+    assert!(settings.decorations.empty_fill);
     assert_eq!(
         settings.diff.context_expansion,
         DiffContextExpansion::Lines(42)
@@ -828,6 +870,7 @@ fn syntax_settings_accepts_empty_diff_fill_alias() {
         parse_settings("[diff]\nempty_diff_fill = true\n").expect("settings should parse");
 
     assert!(settings.diff.empty_fill);
+    assert!(settings.decorations.empty_fill);
 }
 
 #[test]

@@ -9,6 +9,7 @@ use crate::{
     controls::{DiffLayoutMode, default_layout_for_width},
     render::diff::render_row,
     syntax::SyntaxRuntime,
+    theme::DecorationPreference,
 };
 
 const DEFAULT_STATIC_WIDTH: usize = 120;
@@ -29,6 +30,7 @@ pub struct StaticPagerOptions {
     pub color: bool,
     pub syntax: bool,
     pub empty_diff_fill: Option<bool>,
+    pub decorations: Option<DecorationPreference>,
     pub syntax_timeout: Duration,
 }
 
@@ -40,6 +42,7 @@ impl Default for StaticPagerOptions {
             color: true,
             syntax: true,
             empty_diff_fill: None,
+            decorations: None,
             syntax_timeout: STATIC_SYNTAX_SETTLE_TIMEOUT,
         }
     }
@@ -136,7 +139,10 @@ fn static_app(
         apply_static_auto_layout(&mut app, width);
     }
     if let Some(empty_diff_fill) = pager_options.empty_diff_fill {
-        app.config.theme.diff.empty_fill = empty_diff_fill;
+        app.config.theme.decorations.empty_fill = empty_diff_fill;
+    }
+    if let Some(decorations) = pager_options.decorations {
+        app.set_decoration_preference(decorations);
     }
     configure_static_app(&mut app, width);
     settle_static_syntax(&mut app, pager_options.syntax_timeout);
@@ -338,7 +344,7 @@ mod tests {
     use super::*;
     use crate::{
         syntax::{LruCache, SyntaxRuntime, SyntaxWorkerQueue},
-        theme::{MIN_SPLIT_WIDTH, SyntaxBenchmarkReport},
+        theme::{DecorationPreference, MIN_SPLIT_WIDTH, SyntaxBenchmarkReport},
     };
 
     #[test]
@@ -389,6 +395,30 @@ mod tests {
         assert_ne!(unified, split);
         assert!(split.contains("old"));
         assert!(split.contains("new"));
+    }
+
+    #[test]
+    fn static_pager_minimal_decorations_omit_decorative_glyphs() {
+        let output = render_static_changeset(
+            DiffOptions::default(),
+            fixture_changeset(),
+            StaticPagerOptions {
+                width: 80,
+                layout: StaticPagerLayout::Split,
+                color: false,
+                syntax: false,
+                empty_diff_fill: Some(true),
+                decorations: Some(DecorationPreference::Minimal),
+                ..StaticPagerOptions::default()
+            },
+        );
+
+        for glyph in ['▌', '╱', '─', '│', '┃'] {
+            assert!(
+                !output.contains(glyph),
+                "unexpected decorative glyph {glyph}"
+            );
+        }
     }
 
     #[test]

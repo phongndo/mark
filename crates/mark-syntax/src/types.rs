@@ -121,6 +121,7 @@ pub(crate) struct StoredSyntaxSettings {
     pub(crate) mode: Option<SyntaxMode>,
     pub(crate) colorscheme: Option<StoredSyntaxThemeConfig>,
     pub(crate) theme: Option<StoredSyntaxThemeConfig>,
+    pub(crate) decorations: Option<StoredDecorationSettings>,
     pub(crate) layout: Option<LayoutSetting>,
     pub(crate) live_reload: Option<bool>,
     pub(crate) syntax_highlighting: Option<bool>,
@@ -146,6 +147,38 @@ pub(crate) struct StoredNotificationSettings {
     pub(crate) corner: Option<ToastCorner>,
     pub(crate) timeout_ms: Option<u64>,
     pub(crate) max_visible: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(untagged)]
+pub(crate) enum StoredDecorationSettings {
+    Mode(DecorationSetting),
+    Table(StoredDecorationSettingsTable),
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+pub(crate) struct StoredDecorationSettingsTable {
+    pub(crate) mode: Option<DecorationSetting>,
+    pub(crate) empty_fill: Option<bool>,
+    #[serde(default)]
+    pub(crate) no_borders: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DecorationSettings {
+    pub mode: DecorationSetting,
+    pub empty_fill: bool,
+    pub no_borders: bool,
+}
+
+impl Default for DecorationSettings {
+    fn default() -> Self {
+        Self {
+            mode: DecorationSetting::Auto,
+            empty_fill: true,
+            no_borders: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
@@ -224,6 +257,7 @@ pub(crate) struct StoredSyntaxLimits {
 pub struct SyntaxSettings {
     pub mode: SyntaxMode,
     pub theme: SyntaxThemeConfig,
+    pub decorations: DecorationSettings,
     pub layout: Option<LayoutSetting>,
     pub live_reload: bool,
     pub syntax_highlighting: bool,
@@ -240,6 +274,7 @@ impl Default for SyntaxSettings {
         Self {
             mode: SyntaxMode::Builtin,
             theme: SyntaxThemeConfig::default(),
+            decorations: DecorationSettings::default(),
             layout: None,
             live_reload: true,
             syntax_highlighting: true,
@@ -251,6 +286,15 @@ impl Default for SyntaxSettings {
             limits: SyntaxLimits::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DecorationSetting {
+    #[default]
+    Auto,
+    Fancy,
+    Minimal,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -4,7 +4,7 @@ use ratatui::prelude::{Color, Modifier, Span, Style};
 
 use crate::{
     controls::INPUT_CURSOR,
-    theme::{DIFF_INDICATOR, DiffTheme, line_gutter_bg},
+    theme::{DiffTheme, line_gutter_bg},
 };
 
 pub(crate) fn file_sidebar_style(status: FileStatus, theme: DiffTheme) -> Style {
@@ -30,11 +30,17 @@ pub(crate) fn diff_sign_style(kind: DiffLineKind, theme: DiffTheme) -> Style {
 }
 
 pub(crate) fn diff_indicator_span(kind: DiffLineKind, theme: DiffTheme) -> Span<'static> {
-    Span::styled(DIFF_INDICATOR, diff_indicator_style(kind, theme))
+    Span::styled(
+        theme.decorations.diff_indicator(),
+        diff_indicator_style(kind, theme),
+    )
 }
 
 pub(crate) fn focused_diff_indicator_span(kind: DiffLineKind, theme: DiffTheme) -> Span<'static> {
-    Span::styled(DIFF_INDICATOR, focused_diff_indicator_style(kind, theme))
+    Span::styled(
+        theme.decorations.diff_indicator(),
+        focused_diff_indicator_style(kind, theme),
+    )
 }
 
 pub(crate) fn diff_indicator_style(kind: DiffLineKind, theme: DiffTheme) -> Style {
@@ -89,6 +95,7 @@ pub(crate) fn spans_with_input_cursor(
     text: &str,
     text_style: Style,
     cursor_style: Style,
+    cursor_symbol: &'static str,
 ) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
     let mut rest = text;
@@ -96,7 +103,7 @@ pub(crate) fn spans_with_input_cursor(
         if index > 0 {
             spans.push(Span::styled(rest[..index].to_owned(), text_style));
         }
-        spans.push(Span::styled(INPUT_CURSOR.to_owned(), cursor_style));
+        spans.push(Span::styled(cursor_symbol, cursor_style));
         rest = &rest[index + INPUT_CURSOR.len()..];
     }
     if !rest.is_empty() {

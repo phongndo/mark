@@ -1,7 +1,7 @@
 use mark_syntax::{DiffSettings, SyntaxClass};
 use ratatui::prelude::Color;
 
-use super::{Base16Scheme, DiffTheme, RgbColor};
+use super::{Base16Scheme, DecorationStyle, DiffTheme, RgbColor};
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -584,6 +584,7 @@ impl DiffTheme {
             deletion_bg: palette.base.blend(palette.red, 0.045).color(),
             deletion_inline_bg: palette.base.blend(palette.red, 0.14).color(),
             transparent_background: false,
+            decorations: DecorationStyle::default(),
             diff: DiffSettings::default(),
             syntax: SyntaxPalette::catppuccin(palette),
         }
@@ -629,6 +630,7 @@ impl DiffTheme {
             deletion_bg: palette.bg0.blend(deletion, 0.045).color(),
             deletion_inline_bg: palette.bg0.blend(deletion, 0.14).color(),
             transparent_background: false,
+            decorations: DecorationStyle::default(),
             diff: DiffSettings::default(),
             syntax: SyntaxPalette::gruvbox(palette),
         }
@@ -701,6 +703,7 @@ impl DiffTheme {
                 .blend(palette.danger_fg, 0.16)
                 .color(),
             transparent_background: false,
+            decorations: DecorationStyle::default(),
             diff: DiffSettings::default(),
             syntax: SyntaxPalette::github(palette),
         }

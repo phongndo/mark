@@ -1,7 +1,9 @@
+use crate::controls::INPUT_CURSOR;
 use mark_core::MarkResult;
 use mark_diff::DiffLineKind;
-use mark_syntax::{ColorOverrides, DiffGutterBackground, DiffSettings};
+use mark_syntax::{ColorOverrides, DecorationSettings, DiffGutterBackground, DiffSettings};
 use ratatui::prelude::Color;
+use std::{env, ffi::OsStr};
 
 mod benchmark;
 mod colorscheme;
@@ -30,6 +32,195 @@ pub(crate) fn line_gutter_bg(kind: DiffLineKind, theme: DiffTheme) -> Color {
         (DiffGutterBackground::Delta, DiffLineKind::Addition) => theme.addition_gutter_bg,
         (DiffGutterBackground::Delta, DiffLineKind::Deletion) => theme.deletion_gutter_bg,
         _ => theme.gutter_bg,
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum DecorationPreference {
+    #[default]
+    Auto,
+    Fancy,
+    Minimal,
+}
+
+impl From<mark_syntax::DecorationSetting> for DecorationPreference {
+    fn from(setting: mark_syntax::DecorationSetting) -> Self {
+        match setting {
+            mark_syntax::DecorationSetting::Auto => Self::Auto,
+            mark_syntax::DecorationSetting::Fancy => Self::Fancy,
+            mark_syntax::DecorationSetting::Minimal => Self::Minimal,
+        }
+    }
+}
+
+impl From<DecorationSettings> for DecorationPreference {
+    fn from(settings: DecorationSettings) -> Self {
+        Self::from(settings.mode)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum DecorationMode {
+    #[default]
+    Fancy,
+    Minimal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DecorationStyle {
+    pub(crate) mode: DecorationMode,
+    pub(crate) empty_fill: bool,
+    pub(crate) no_borders: bool,
+}
+
+impl Default for DecorationStyle {
+    fn default() -> Self {
+        Self {
+            mode: DecorationMode::Fancy,
+            empty_fill: DecorationSettings::default().empty_fill,
+            no_borders: DecorationSettings::default().no_borders,
+        }
+    }
+}
+
+impl DecorationStyle {
+    pub(crate) fn is_fancy(self) -> bool {
+        self.mode == DecorationMode::Fancy
+    }
+
+    pub(crate) fn show_borders(self) -> bool {
+        self.is_fancy() && !self.no_borders
+    }
+
+    pub(crate) fn show_empty_fill(self) -> bool {
+        self.is_fancy() && self.empty_fill
+    }
+
+    pub(crate) fn with_mode(mut self, mode: DecorationMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    pub(crate) fn diff_indicator(self) -> &'static str {
+        if self.is_fancy() { DIFF_INDICATOR } else { " " }
+    }
+
+    pub(crate) fn horizontal_rule(self) -> &'static str {
+        if self.is_fancy() { "─" } else { " " }
+    }
+
+    pub(crate) fn scrollbar_track(self) -> Option<&'static str> {
+        self.is_fancy().then_some("│")
+    }
+
+    pub(crate) fn scrollbar_thumb(self) -> &'static str {
+        if self.is_fancy() { "┃" } else { " " }
+    }
+
+    pub(crate) fn submenu_indicator(self) -> &'static str {
+        if self.is_fancy() { "›" } else { "" }
+    }
+
+    pub(crate) fn dropdown_indicator(self) -> &'static str {
+        if self.is_fancy() { "▾" } else { "" }
+    }
+
+    pub(crate) fn comparison_separator(self) -> &'static str {
+        if self.is_fancy() { " → " } else { " to " }
+    }
+
+    pub(crate) fn current_branch_marker(self) -> &'static str {
+        if self.is_fancy() { "●" } else { "*" }
+    }
+
+    pub(crate) fn base_branch_marker(self) -> &'static str {
+        if self.is_fancy() { "⌂" } else { "base" }
+    }
+
+    pub(crate) fn commit_subject_separator(self) -> &'static str {
+        if self.is_fancy() { " · " } else { " - " }
+    }
+
+    pub(crate) fn ellipsis(self) -> &'static str {
+        if self.is_fancy() { "…" } else { "..." }
+    }
+
+    pub(crate) fn input_cursor(self) -> &'static str {
+        if self.is_fancy() { INPUT_CURSOR } else { "_" }
+    }
+}
+
+pub(crate) fn decoration_preference_from_env() -> Option<DecorationPreference> {
+    if env::var_os("MARK_ASCII").is_some() {
+        return Some(DecorationPreference::Minimal);
+    }
+
+    let value = env::var_os("MARK_DECORATIONS")?;
+    let value = value.to_string_lossy().trim().to_ascii_lowercase();
+    match value.as_str() {
+        "auto" | "" => Some(DecorationPreference::Auto),
+        "fancy" | "rich" => Some(DecorationPreference::Fancy),
+        "minimal" | "plain" | "ascii" => Some(DecorationPreference::Minimal),
+        _ => None,
+    }
+}
+
+pub(crate) fn resolve_decoration_mode(preference: DecorationPreference) -> DecorationMode {
+    match preference {
+        DecorationPreference::Fancy => DecorationMode::Fancy,
+        DecorationPreference::Minimal => DecorationMode::Minimal,
+        DecorationPreference::Auto => auto_decoration_mode(),
+    }
+}
+
+pub(crate) fn resolve_decoration_style(settings: DecorationSettings) -> DecorationStyle {
+    DecorationStyle {
+        mode: resolve_decoration_mode(DecorationPreference::from(settings.mode)),
+        empty_fill: settings.empty_fill,
+        no_borders: settings.no_borders,
+    }
+}
+
+fn auto_decoration_mode() -> DecorationMode {
+    if cfg!(test) {
+        return DecorationMode::Fancy;
+    }
+    if env_value_eq("TERM", "dumb") || !locale_is_utf8() {
+        DecorationMode::Minimal
+    } else {
+        DecorationMode::Fancy
+    }
+}
+
+fn env_value_eq(name: &str, expected: &str) -> bool {
+    env::var_os(name).is_some_and(|value| value.to_string_lossy().eq_ignore_ascii_case(expected))
+}
+
+fn locale_is_utf8() -> bool {
+    let locale = ["LC_ALL", "LC_CTYPE", "LANG"]
+        .into_iter()
+        .find_map(|name| env::var_os(name).filter(|value| !value.is_empty()));
+    locale_env_is_utf8(locale.as_deref())
+}
+
+fn locale_env_is_utf8(value: Option<&OsStr>) -> bool {
+    value.is_some_and(|value| {
+        let value = value.to_string_lossy().to_ascii_lowercase();
+        value.contains("utf-8") || value.contains("utf8")
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::locale_env_is_utf8;
+    use std::ffi::OsStr;
+
+    #[test]
+    fn locale_env_requires_present_utf8_locale() {
+        assert!(!locale_env_is_utf8(None));
+        assert!(!locale_env_is_utf8(Some(OsStr::new("C"))));
+        assert!(locale_env_is_utf8(Some(OsStr::new("en_US.UTF-8"))));
+        assert!(locale_env_is_utf8(Some(OsStr::new("C.UTF8"))));
     }
 }
 
@@ -63,6 +254,7 @@ pub(crate) struct DiffTheme {
     pub(crate) deletion_bg: Color,
     pub(crate) deletion_inline_bg: Color,
     pub(crate) transparent_background: bool,
+    pub(crate) decorations: DecorationStyle,
     pub(crate) diff: DiffSettings,
     pub(crate) syntax: SyntaxPalette,
 }
@@ -107,6 +299,7 @@ impl DiffTheme {
             deletion_bg: Color::Rgb(0x37, 0x25, 0x26),
             deletion_inline_bg: base.blend(red, 0.28).color(),
             transparent_background: false,
+            decorations: DecorationStyle::default(),
             diff: DiffSettings::default(),
             syntax: SyntaxPalette::ansi(),
         }
@@ -142,6 +335,7 @@ impl DiffTheme {
             deletion_bg: Color::Reset,
             deletion_inline_bg: Color::Indexed(52),
             transparent_background: false,
+            decorations: DecorationStyle::default(),
             diff: DiffSettings::default(),
             syntax: SyntaxPalette::ansi(),
         }
@@ -180,6 +374,7 @@ impl DiffTheme {
             deletion_bg: base.blend(red, 0.045).color(),
             deletion_inline_bg: base.blend(red, 0.14).color(),
             transparent_background: false,
+            decorations: DecorationStyle::default(),
             diff: DiffSettings::default(),
             syntax: SyntaxPalette::tokyonight(),
         }
@@ -215,6 +410,7 @@ impl DiffTheme {
             deletion_bg: scheme.base00.blend(scheme.base08, 0.045).color(),
             deletion_inline_bg: scheme.base00.blend(scheme.base08, 0.14).color(),
             transparent_background: false,
+            decorations: DecorationStyle::default(),
             diff: DiffSettings::default(),
             syntax: SyntaxPalette::base16(scheme),
         }
@@ -227,6 +423,11 @@ impl DiffTheme {
 
     pub(crate) fn with_diff_settings(mut self, diff: DiffSettings) -> Self {
         self.diff = diff;
+        self
+    }
+
+    pub(crate) fn with_decorations(mut self, decorations: DecorationStyle) -> Self {
+        self.decorations = decorations;
         self
     }
 
