@@ -9,6 +9,7 @@ make the smallest safe diff, and document user-visible behavior changes.
 - Rust toolchain from [`rust-toolchain.toml`](../rust-toolchain.toml)
 - `curl`, `tar`, and `install` for installer smoke tests
 - `just` for repository recipes
+- `mise` for hk hook/tool provisioning
 - Node.js 24 and pnpm 11 for `pi-mark`
 - Nix, optional but preferred for a complete local shell
 
@@ -31,18 +32,23 @@ cargo fetch --locked
 cargo build -p mark-cli --locked
 ```
 
-Install the optional Git hook:
+Install global hk Git hooks:
 
 ```sh
-git config core.hooksPath .githooks
+just hooks
 ```
 
-The hook runs `just check` before commits.
+hk's global hooks require Git 2.54 or newer. The Nix development shell provides
+a new enough Git. The hook command is a no-op in repositories without `hk.pkl`.
+This repository's pre-commit hook runs fast staged-file checks and safe fixers;
+pre-push enables the slower `full` and `pi` profiles for affected files.
 
 ## Common commands
 
 ```sh
 just check
+just ci-check
+mise x -- hk check --all --plan
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo test --workspace --all-targets --all-features --locked

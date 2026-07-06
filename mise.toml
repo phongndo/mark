@@ -1,0 +1,13 @@
+[tools]
+actionlint = "1.7.12"
+hk = "1.49.0"
+just = "1.51.0"
+node = "24"
+pnpm = "11.7.0"
+ripgrep = "15.1.0"
+rust = "1.88.0"
+rust-analyzer = "2026-06-29"
+taplo = "0.10.0"
+
+[env]
+RUSTUP_INIT_SKIP_PATH_CHECK = "yes"

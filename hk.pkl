@@ -1,0 +1,150 @@
+amends "package://github.com/jdx/hk/releases/download/v1.49.0/hk@1.49.0#/Config.pkl"
+import "package://github.com/jdx/hk/releases/download/v1.49.0/hk@1.49.0#/Builtins.pkl"
+
+exclude = List(
+  "target",
+  "dist",
+  "pi-mark/node_modules",
+)
+
+local architectureGlobs = List(
+  "scripts/check-architecture",
+  "crates/mark-tui/src/**",
+  "crates/mark-diff/src/**",
+  "crates/mark-cli/src/**",
+)
+
+local rustImpactGlobs = List(
+  "**/*.rs",
+  "Cargo.toml",
+  "Cargo.lock",
+  "crates/*/Cargo.toml",
+  "rust-toolchain.toml",
+)
+
+local piImpactGlobs = List(
+  "pi-mark/extensions/**/*.ts",
+  "pi-mark/tests/**/*.mjs",
+  "pi-mark/package.json",
+  "pi-mark/tsconfig.json",
+  "pi-mark/.oxlintrc.json",
+  "pi-mark/.oxfmtrc.json",
+  "pi-mark/pnpm-lock.yaml",
+)
+
+local hygiene = new Mapping<String, Step | Group> {
+  ["merge-conflict"] = Builtins.check_merge_conflict
+  ["private-key"] = Builtins.detect_private_key
+  ["large-file"] = Builtins.check_added_large_files
+  ["case-conflict"] = Builtins.check_case_conflict
+  ["executable-shebang"] = Builtins.check_executables_have_shebangs
+  ["symlinks"] = Builtins.check_symlinks
+  ["bom"] = Builtins.byte_order_marker
+  ["line-endings"] = Builtins.mixed_line_ending
+  ["newlines"] = Builtins.newlines
+  ["trailing-whitespace"] = Builtins.trailing_whitespace
+}
+
+local fast = new Mapping<String, Step | Group> {
+  ...hygiene
+
+  ["rustfmt"] {
+    glob = "**/*.rs"
+    check = "mise x -- rustfmt --check --edition 2024 {{files}}"
+    check_list_files = "mise x -- rustfmt --check --edition 2024 --files-with-diff {{files}}"
+    fix = "mise x -- rustfmt --edition 2024 {{files}}"
+  }
+
+  ["architecture"] {
+    glob = architectureGlobs
+    check = "mise x -- scripts/check-architecture"
+  }
+
+  ["actionlint"] = (Builtins.actionlint) {
+    check = "mise x -- actionlint {{files}}"
+  }
+
+  ["taplo-lint"] {
+    glob = "**/*.toml"
+    env { ["RUST_LOG"] = "warn" }
+    check = "mise x -- taplo lint {{files}}"
+  }
+
+  ["just-format"] {
+    glob = "justfile"
+    check = "mise x -- just --fmt --check --unstable --justfile justfile"
+    fix = "mise x -- just --fmt --unstable --justfile justfile"
+  }
+}
+
+local full = new Mapping<String, Step | Group> {
+  ["rust-analyzer"] {
+    profiles = List("full")
+    glob = rustImpactGlobs
+    check = "mise x -- rust-analyzer diagnostics ."
+    exclusive = true
+  }
+
+  ["cargo-clippy"] {
+    profiles = List("full")
+    glob = rustImpactGlobs
+    check = "mise x -- cargo clippy --workspace --all-targets --all-features --locked -- -D warnings"
+    exclusive = true
+  }
+
+  ["pi-check"] {
+    profiles = List("pi")
+    glob = piImpactGlobs
+    check = "mise x -- sh -lc 'cd pi-mark && pnpm run check'"
+  }
+}
+
+local ci = new Mapping<String, Step | Group> {
+  ["cargo-check"] {
+    profiles = List("ci")
+    glob = rustImpactGlobs
+    check = "mise x -- cargo check --workspace --all-targets --all-features --locked"
+    exclusive = true
+  }
+
+  ["cargo-test"] {
+    profiles = List("ci")
+    glob = rustImpactGlobs
+    check = "mise x -- cargo test --workspace --all-targets --all-features --locked"
+    exclusive = true
+  }
+
+  ["cargo-build"] {
+    profiles = List("ci")
+    glob = rustImpactGlobs
+    check = "mise x -- cargo build --workspace --all-targets --all-features --locked"
+    exclusive = true
+  }
+}
+
+local all = new Mapping<String, Step | Group> {
+  ...fast
+  ...full
+  ...ci
+}
+
+hooks {
+  ["pre-commit"] {
+    fix = true
+    stash = "git"
+    steps = fast
+  }
+
+  ["pre-push"] {
+    env { ["HK_PROFILE"] = "full,pi" }
+    steps = all
+  }
+
+  ["check"] { steps = all }
+
+  ["fix"] {
+    fix = true
+    stash = "git"
+    steps = fast
+  }
+}
