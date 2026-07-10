@@ -1,0 +1,21 @@
+# YAML stress fixture with bare keys, comments, numbers, strings, and λ🚀.
+bare_key: plain value
+number_value: 42
+float_value: -12.5e+3
+quoted_string: "café λ 🚀"
+single_quoted: 'literal # not a comment'
+nested:
+  child-key: yes
+  regex: "/api/v1/.*"
+  list:
+    - name: α
+      enabled: true
+    - name: β
+      count: 1_000
+multiline_literal: |
+  First literal line.
+  Second literal line with # not a YAML comment.
+folded_text: >
+  folded text starts here
+  and continues with emoji 🚀.
+# trailing comment for comment-scope checks

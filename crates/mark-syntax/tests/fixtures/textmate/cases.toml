@@ -1,0 +1,283 @@
+# TextMate golden corpus for the core-30 native engine.
+# language ids match Mark's core-30 catalog (bash uses the shellscript grammar asset).
+# Regenerate with: node tools/generate-goldens.mjs
+
+[[case]]
+language = "json"
+scope = "source.json"
+grammar = "assets/tm-grammars/languages/json.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/json/basic.json"
+golden = "crates/mark-syntax/tests/fixtures/textmate/json/basic.golden.jsonl"
+
+[[case]]
+language = "rust"
+scope = "source.rust"
+grammar = "assets/tm-grammars/languages/rust.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/rust/basic.rs"
+golden = "crates/mark-syntax/tests/fixtures/textmate/rust/basic.golden.jsonl"
+
+[[case]]
+language = "yaml"
+scope = "source.yaml"
+grammar = "assets/tm-grammars/languages/yaml.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/yaml/basic.yaml"
+golden = "crates/mark-syntax/tests/fixtures/textmate/yaml/basic.golden.jsonl"
+
+[[case]]
+language = "python"
+scope = "source.python"
+grammar = "assets/tm-grammars/languages/python.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/python/basic.py"
+golden = "crates/mark-syntax/tests/fixtures/textmate/python/basic.golden.jsonl"
+
+[[case]]
+language = "rust"
+scope = "source.rust"
+grammar = "assets/tm-grammars/languages/rust.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/rust/stress.rs"
+golden = "crates/mark-syntax/tests/fixtures/textmate/rust/stress.golden.jsonl"
+
+[[case]]
+language = "typescript"
+scope = "source.ts"
+grammar = "assets/tm-grammars/languages/typescript.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/typescript/stress.ts"
+golden = "crates/mark-syntax/tests/fixtures/textmate/typescript/stress.golden.jsonl"
+
+[[case]]
+language = "tsx"
+scope = "source.tsx"
+grammar = "assets/tm-grammars/languages/tsx.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/tsx/stress.tsx"
+golden = "crates/mark-syntax/tests/fixtures/textmate/tsx/stress.golden.jsonl"
+
+[[case]]
+language = "javascript"
+scope = "source.js"
+grammar = "assets/tm-grammars/languages/javascript.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/javascript/stress.js"
+golden = "crates/mark-syntax/tests/fixtures/textmate/javascript/stress.golden.jsonl"
+
+[[case]]
+language = "json"
+scope = "source.json"
+grammar = "assets/tm-grammars/languages/json.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/json/stress.json"
+golden = "crates/mark-syntax/tests/fixtures/textmate/json/stress.golden.jsonl"
+
+[[case]]
+language = "yaml"
+scope = "source.yaml"
+grammar = "assets/tm-grammars/languages/yaml.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/yaml/stress.yaml"
+golden = "crates/mark-syntax/tests/fixtures/textmate/yaml/stress.golden.jsonl"
+
+[[case]]
+language = "toml"
+scope = "source.toml"
+grammar = "assets/tm-grammars/languages/toml.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/toml/stress.toml"
+golden = "crates/mark-syntax/tests/fixtures/textmate/toml/stress.golden.jsonl"
+
+[[case]]
+language = "markdown"
+scope = "text.html.markdown"
+grammar = "assets/tm-grammars/languages/markdown.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/markdown/stress.md"
+golden = "crates/mark-syntax/tests/fixtures/textmate/markdown/stress.golden.jsonl"
+
+[[case.embedded]]
+scope = "source.rust"
+grammar = "assets/tm-grammars/languages/rust.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.js"
+grammar = "assets/tm-grammars/languages/javascript.tmLanguage.json"
+
+[[case]]
+language = "html"
+scope = "text.html.basic"
+grammar = "assets/tm-grammars/languages/html.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/html/stress.html"
+golden = "crates/mark-syntax/tests/fixtures/textmate/html/stress.golden.jsonl"
+
+[[case.embedded]]
+scope = "source.js"
+grammar = "assets/tm-grammars/languages/javascript.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.css"
+grammar = "assets/tm-grammars/languages/css.tmLanguage.json"
+
+[[case]]
+language = "css"
+scope = "source.css"
+grammar = "assets/tm-grammars/languages/css.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/css/stress.css"
+golden = "crates/mark-syntax/tests/fixtures/textmate/css/stress.golden.jsonl"
+
+[[case]]
+language = "python"
+scope = "source.python"
+grammar = "assets/tm-grammars/languages/python.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/python/stress.py"
+golden = "crates/mark-syntax/tests/fixtures/textmate/python/stress.golden.jsonl"
+
+[[case]]
+language = "go"
+scope = "source.go"
+grammar = "assets/tm-grammars/languages/go.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/go/stress.go"
+golden = "crates/mark-syntax/tests/fixtures/textmate/go/stress.golden.jsonl"
+
+[[case]]
+language = "c"
+scope = "source.c"
+grammar = "assets/tm-grammars/languages/c.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/c/stress.c"
+golden = "crates/mark-syntax/tests/fixtures/textmate/c/stress.golden.jsonl"
+
+[[case]]
+language = "cpp"
+scope = "source.cpp"
+grammar = "assets/tm-grammars/languages/cpp.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/cpp/stress.cpp"
+golden = "crates/mark-syntax/tests/fixtures/textmate/cpp/stress.golden.jsonl"
+
+[[case.embedded]]
+scope = "source.cpp.embedded.macro"
+grammar = "assets/tm-grammars/languages/cpp-macro.tmLanguage.json"
+
+[[case]]
+language = "bash"
+scope = "source.shell"
+grammar = "assets/tm-grammars/languages/shellscript.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/bash/stress.sh"
+golden = "crates/mark-syntax/tests/fixtures/textmate/bash/stress.golden.jsonl"
+
+# --- core-30 smoke cases (small fixtures for languages not covered by stress) ---
+
+[[case]]
+language = "java"
+scope = "source.java"
+grammar = "assets/tm-grammars/languages/java.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/java/smoke.java"
+golden = "crates/mark-syntax/tests/fixtures/textmate/java/smoke.golden.jsonl"
+
+[[case]]
+language = "lua"
+scope = "source.lua"
+grammar = "assets/tm-grammars/languages/lua.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/lua/smoke.lua"
+golden = "crates/mark-syntax/tests/fixtures/textmate/lua/smoke.golden.jsonl"
+
+[[case]]
+language = "sql"
+scope = "source.sql"
+grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/sql/smoke.sql"
+golden = "crates/mark-syntax/tests/fixtures/textmate/sql/smoke.golden.jsonl"
+
+[[case]]
+language = "docker"
+scope = "source.dockerfile"
+grammar = "assets/tm-grammars/languages/docker.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/docker/smoke.Dockerfile"
+golden = "crates/mark-syntax/tests/fixtures/textmate/docker/smoke.golden.jsonl"
+
+[[case]]
+language = "make"
+scope = "source.makefile"
+grammar = "assets/tm-grammars/languages/make.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/make/smoke.mk"
+golden = "crates/mark-syntax/tests/fixtures/textmate/make/smoke.golden.jsonl"
+
+[[case]]
+language = "nix"
+scope = "source.nix"
+grammar = "assets/tm-grammars/languages/nix.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/nix/smoke.nix"
+golden = "crates/mark-syntax/tests/fixtures/textmate/nix/smoke.golden.jsonl"
+
+[[case]]
+language = "jsx"
+scope = "source.js.jsx"
+grammar = "assets/tm-grammars/languages/jsx.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/jsx/smoke.jsx"
+golden = "crates/mark-syntax/tests/fixtures/textmate/jsx/smoke.golden.jsonl"
+
+[[case]]
+language = "ruby"
+scope = "source.ruby"
+grammar = "assets/tm-grammars/languages/ruby.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/ruby/smoke.rb"
+golden = "crates/mark-syntax/tests/fixtures/textmate/ruby/smoke.golden.jsonl"
+
+[[case]]
+language = "scss"
+scope = "source.css.scss"
+grammar = "assets/tm-grammars/languages/scss.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/scss/smoke.scss"
+golden = "crates/mark-syntax/tests/fixtures/textmate/scss/smoke.golden.jsonl"
+
+[[case.embedded]]
+scope = "source.css"
+grammar = "assets/tm-grammars/languages/css.tmLanguage.json"
+
+[[case]]
+language = "csharp"
+scope = "source.cs"
+grammar = "assets/tm-grammars/languages/csharp.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/csharp/smoke.cs"
+golden = "crates/mark-syntax/tests/fixtures/textmate/csharp/smoke.golden.jsonl"
+
+[[case]]
+language = "kotlin"
+scope = "source.kotlin"
+grammar = "assets/tm-grammars/languages/kotlin.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/kotlin/smoke.kt"
+golden = "crates/mark-syntax/tests/fixtures/textmate/kotlin/smoke.golden.jsonl"
+
+[[case]]
+language = "powershell"
+scope = "source.powershell"
+grammar = "assets/tm-grammars/languages/powershell.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/powershell/smoke.ps1"
+golden = "crates/mark-syntax/tests/fixtures/textmate/powershell/smoke.golden.jsonl"
+
+[[case]]
+language = "swift"
+scope = "source.swift"
+grammar = "assets/tm-grammars/languages/swift.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/swift/smoke.swift"
+golden = "crates/mark-syntax/tests/fixtures/textmate/swift/smoke.golden.jsonl"
+
+[[case]]
+language = "terraform"
+scope = "source.hcl.terraform"
+grammar = "assets/tm-grammars/languages/terraform.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/terraform/smoke.tf"
+golden = "crates/mark-syntax/tests/fixtures/textmate/terraform/smoke.golden.jsonl"
+
+[[case]]
+language = "php"
+scope = "source.php"
+grammar = "assets/tm-grammars/languages/php.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/php/smoke.php"
+golden = "crates/mark-syntax/tests/fixtures/textmate/php/smoke.golden.jsonl"
+
+[[case.embedded]]
+scope = "text.html.basic"
+grammar = "assets/tm-grammars/languages/html.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.js"
+grammar = "assets/tm-grammars/languages/javascript.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.css"
+grammar = "assets/tm-grammars/languages/css.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.sql"
+grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"

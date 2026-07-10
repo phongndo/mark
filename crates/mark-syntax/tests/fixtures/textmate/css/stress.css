@@ -1,0 +1,28 @@
+/* CSS stress fixture.
+ * Multi-line comment with non-ASCII text: café λ🚀.
+ */
+
+:root {
+  --gap: clamp(1rem, 2vw, 3rem);
+  --label: "café";
+}
+
+@supports (display: grid) {
+  .grid > .item[data-kind="π"]::before {
+    content: "λ🚀";
+    color: hsl(210deg 60% 45% / 0.85);
+  }
+}
+
+@media screen and (min-width: 48rem) {
+  .card {
+    background: linear-gradient(135deg, #fff, rgba(0, 0, 0, 0.1));
+    transform: translate3d(0, calc(var(--gap) / 2), 0);
+  }
+}
+
+@keyframes pulse {
+  from { opacity: 0.4; }
+  50% { opacity: 1; }
+  to { opacity: 0.4; }
+}

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>TextMate stress – café λ🚀</title>
+  <style>
+    :root { --accent: #c0ffee; --label: "café"; }
+    .card[data-state="✓"]::before { content: "λ🚀"; }
+    @media (min-width: 40rem) {
+      body { font-family: system-ui, sans-serif; }
+    }
+  </style>
+  <script type="module">
+    const route = /^\/api\/(?<name>[\p{Letter}-]+)$/u;
+    const ratio = 10 / 2 / 5;
+    console.log(`route=${route.test("/api/café")}`, ratio);
+  </script>
+</head>
+<body>
+  <!-- Multi-line HTML comment
+       with non-ASCII text λ🚀. -->
+  <main class="card" data-state="✓">
+    <h1>Hello <span data-name="λ">world</span></h1>
+  </main>
+</body>
+</html>

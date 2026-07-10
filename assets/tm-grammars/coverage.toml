@@ -1,0 +1,54 @@
+# Phase 4 core-30 public grammar packaging from recovered assets only.
+# Public catalog languages: 30. Grammar blobs: 31 (includes private cpp-macro).
+public_language_count = 30
+asset_grammar_count = 31
+private_dependency_count = 1
+kept_count = 28
+remapped_count = 2
+
+# Private dependency grammar blobs are present under languages/ and embedded in
+# the bundle, but are not public catalog languages.
+private_assets = [
+  "cpp-macro",
+]
+
+# Languages whose public id matches the asset filename stem.
+kept = [
+  "c",
+  "cpp",
+  "csharp",
+  "css",
+  "go",
+  "html",
+  "java",
+  "javascript",
+  "json",
+  "jsx",
+  "kotlin",
+  "lua",
+  "make",
+  "markdown",
+  "nix",
+  "php",
+  "powershell",
+  "python",
+  "ruby",
+  "rust",
+  "scss",
+  "sql",
+  "swift",
+  "terraform",
+  "toml",
+  "tsx",
+  "typescript",
+  "yaml",
+]
+
+# Public language id differs from the recovered asset filename stem.
+[[remapped]]
+language = "bash"
+asset = "shellscript"
+
+[[remapped]]
+language = "dockerfile"
+asset = "docker"

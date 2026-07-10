@@ -1,0 +1,23 @@
+# TOML stress fixture with bare keys, numbers, strings, comments, and λ🚀.
+title = "Mark fixture – café λ🚀"
+bare_key = 42
+underscored_number = 1_000_000
+float_value = -12.5e+3
+active = true
+date_time = 2026-07-07T12:34:56Z
+
+dotted.key.answer = 3.1415
+
+multiline_basic = """
+line one with "quotes"
+line two with emoji 🚀
+"""
+
+multiline_literal = '''
+C:\Users\mark\fixtures
+# not a comment inside a literal string
+'''
+
+[servers.alpha]
+host = "example.test"
+ports = [8000, 8001, 8002]

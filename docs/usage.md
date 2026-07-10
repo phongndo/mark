@@ -177,9 +177,9 @@ Keybindings can be customized in the user config file. See
 
 ## Syntax languages
 
-The current build intentionally ships without a syntax highlighting backend.
-Diff review continues with plain text, and the syntax commands remain in place
-as the stable management surface for the replacement engine:
+Mark includes a Rust-native TextMate engine with 30 bundled languages. The
+engine uses the same grammar model as VS Code while emitting Mark's compact
+terminal syntax classes:
 
 ```sh
 mark syntax add ruby elixir
@@ -192,10 +192,8 @@ mark syntax clean
 mark syntax path
 ```
 
-`mark syntax available --installed` currently reports no languages, and
-`mark syntax doctor` reports that the backend is unavailable. `mark syntax clean`
-refuses to run in this state so an absent backend cannot erase saved language
-mappings.
+`mark syntax available --installed` prints the bundled catalog and
+`mark syntax doctor` validates grammar readiness and custom mappings.
 
 ## Pi package
 

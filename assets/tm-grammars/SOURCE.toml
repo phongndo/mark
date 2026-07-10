@@ -1,0 +1,25 @@
+schema_version = 1
+asset_mode = "vendored-tm-grammars"
+
+[source]
+name = "Shiki tm-grammars"
+package = "@shikijs/langs"
+repository = "https://github.com/shikijs/shiki"
+license = "MIT"
+package_version = "3.23.0"
+source_revision = "package:@shikijs/langs@3.23.0"
+
+[import]
+source_path = "../tau/node_modules/.pnpm/@shikijs+langs@3.23.0/node_modules/@shikijs/langs"
+generated_by = "node dynamic import of @shikijs/langs/dist/*.mjs"
+notes = "All default-exported TextMate grammar objects from the pinned package are committed as text JSON."
+
+[paths]
+languages = "assets/tm-grammars/languages"
+licenses = "assets/tm-grammars/licenses.json"
+coverage = "assets/tm-grammars/coverage.toml"
+
+[policy]
+grammar_sources_committed_as_text = true
+bundle_bin_committed = false
+release_build_requires_node = false

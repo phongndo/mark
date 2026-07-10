@@ -1,0 +1,353 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "package": "@shikijs/langs",
+    "version": "3.23.0",
+    "repository": "git+https://github.com/shikijs/shiki.git",
+    "license": "MIT",
+    "sourcePath": "../tau/node_modules/.pnpm/@shikijs+langs@3.23.0/node_modules/@shikijs/langs"
+  },
+  "assets": [
+    {
+      "language": "c",
+      "grammarName": "c",
+      "scopeName": "source.c",
+      "module": "c.mjs",
+      "path": "assets/tm-grammars/languages/c.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT"
+    },
+    {
+      "language": "cpp",
+      "grammarName": "cpp",
+      "scopeName": "source.cpp",
+      "module": "cpp.mjs",
+      "path": "assets/tm-grammars/languages/cpp.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT"
+    },
+    {
+      "language": "cpp-macro",
+      "grammarName": "cpp-macro",
+      "scopeName": "source.cpp.embedded.macro",
+      "module": "cpp-macro.mjs",
+      "path": "assets/tm-grammars/languages/cpp-macro.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT"
+    },
+    {
+      "language": "csharp",
+      "grammarName": "csharp",
+      "scopeName": "source.cs",
+      "module": "cs.mjs",
+      "path": "assets/tm-grammars/languages/csharp.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT"
+    },
+    {
+      "language": "css",
+      "grammarName": "css",
+      "scopeName": "source.css",
+      "module": "angular-html.mjs",
+      "path": "assets/tm-grammars/languages/css.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT"
+    },
+    {
+      "language": "docker",
+      "grammarName": "docker",
+      "scopeName": "source.dockerfile",
+      "module": "docker.mjs",
+      "path": "assets/tm-grammars/languages/docker.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT"
+    },
+    {
+      "language": "go",
+      "grammarName": "go",
+      "scopeName": "source.go",
+      "module": "go.mjs",
+      "path": "assets/tm-grammars/languages/go.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT"
+    },
+    {
+      "language": "html",
+      "grammarName": "html",
+      "scopeName": "text.html.basic",
+      "module": "angular-html.mjs",
+      "path": "assets/tm-grammars/languages/html.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT"
+    },
+    {
+      "language": "java",
+      "grammarName": "java",
+      "scopeName": "source.java",
+      "module": "apl.mjs",
+      "path": "assets/tm-grammars/languages/java.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT"
+    },
+    {
+      "language": "javascript",
+      "grammarName": "javascript",
+      "scopeName": "source.js",
+      "module": "angular-html.mjs",
+      "path": "assets/tm-grammars/languages/javascript.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT"
+    },
+    {
+      "language": "json",
+      "grammarName": "json",
+      "scopeName": "source.json",
+      "module": "apl.mjs",
+      "path": "assets/tm-grammars/languages/json.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT"
+    },
+    {
+      "language": "jsx",
+      "grammarName": "jsx",
+      "scopeName": "source.js.jsx",
+      "module": "erb.mjs",
+      "path": "assets/tm-grammars/languages/jsx.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT"
+    },
+    {
+      "language": "kotlin",
+      "grammarName": "kotlin",
+      "scopeName": "source.kotlin",
+      "module": "kotlin.mjs",
+      "path": "assets/tm-grammars/languages/kotlin.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT"
+    },
+    {
+      "language": "lua",
+      "grammarName": "lua",
+      "scopeName": "source.lua",
+      "module": "erb.mjs",
+      "path": "assets/tm-grammars/languages/lua.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT"
+    },
+    {
+      "language": "make",
+      "grammarName": "make",
+      "scopeName": "source.makefile",
+      "module": "make.mjs",
+      "path": "assets/tm-grammars/languages/make.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT"
+    },
+    {
+      "language": "markdown",
+      "grammarName": "markdown",
+      "scopeName": "text.html.markdown",
+      "module": "erl.mjs",
+      "path": "assets/tm-grammars/languages/markdown.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT"
+    },
+    {
+      "language": "nix",
+      "grammarName": "nix",
+      "scopeName": "source.nix",
+      "module": "nix.mjs",
+      "path": "assets/tm-grammars/languages/nix.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT"
+    },
+    {
+      "language": "php",
+      "grammarName": "php",
+      "scopeName": "source.php",
+      "module": "php.mjs",
+      "path": "assets/tm-grammars/languages/php.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT"
+    },
+    {
+      "language": "powershell",
+      "grammarName": "powershell",
+      "scopeName": "source.powershell",
+      "module": "powershell.mjs",
+      "path": "assets/tm-grammars/languages/powershell.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT"
+    },
+    {
+      "language": "python",
+      "grammarName": "python",
+      "scopeName": "source.python",
+      "module": "cairo.mjs",
+      "path": "assets/tm-grammars/languages/python.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT"
+    },
+    {
+      "language": "ruby",
+      "grammarName": "ruby",
+      "scopeName": "source.ruby",
+      "module": "erb.mjs",
+      "path": "assets/tm-grammars/languages/ruby.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT"
+    },
+    {
+      "language": "rust",
+      "grammarName": "rust",
+      "scopeName": "source.rust",
+      "module": "rs.mjs",
+      "path": "assets/tm-grammars/languages/rust.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT"
+    },
+    {
+      "language": "scss",
+      "grammarName": "scss",
+      "scopeName": "source.css.scss",
+      "module": "angular-inline-style.mjs",
+      "path": "assets/tm-grammars/languages/scss.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT"
+    },
+    {
+      "language": "shellscript",
+      "grammarName": "shellscript",
+      "scopeName": "source.shell",
+      "module": "bash.mjs",
+      "path": "assets/tm-grammars/languages/shellscript.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT"
+    },
+    {
+      "language": "sql",
+      "grammarName": "sql",
+      "scopeName": "source.sql",
+      "module": "blade.mjs",
+      "path": "assets/tm-grammars/languages/sql.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT"
+    },
+    {
+      "language": "swift",
+      "grammarName": "swift",
+      "scopeName": "source.swift",
+      "module": "swift.mjs",
+      "path": "assets/tm-grammars/languages/swift.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT"
+    },
+    {
+      "language": "terraform",
+      "grammarName": "terraform",
+      "scopeName": "source.hcl.terraform",
+      "module": "terraform.mjs",
+      "path": "assets/tm-grammars/languages/terraform.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT"
+    },
+    {
+      "language": "toml",
+      "grammarName": "toml",
+      "scopeName": "source.toml",
+      "module": "toml.mjs",
+      "path": "assets/tm-grammars/languages/toml.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT"
+    },
+    {
+      "language": "tsx",
+      "grammarName": "tsx",
+      "scopeName": "source.tsx",
+      "module": "astro.mjs",
+      "path": "assets/tm-grammars/languages/tsx.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT"
+    },
+    {
+      "language": "typescript",
+      "grammarName": "typescript",
+      "scopeName": "source.ts",
+      "module": "astro.mjs",
+      "path": "assets/tm-grammars/languages/typescript.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT"
+    },
+    {
+      "language": "yaml",
+      "grammarName": "yaml",
+      "scopeName": "source.yaml",
+      "module": "erb.mjs",
+      "path": "assets/tm-grammars/languages/yaml.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT"
+    }
+  ]
+}

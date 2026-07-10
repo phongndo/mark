@@ -73,7 +73,7 @@ impl HighlightedLine {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LineTextFingerprint {
     byte_len: usize,
     hash: u64,
@@ -125,6 +125,10 @@ pub(crate) const SETTINGS_FILE: &str = "config.toml";
 pub(crate) const LEGACY_SETTINGS_FILE: &str = "syntax.toml";
 pub(crate) const COLORSCHEME_DIR: &str = "colorscheme";
 pub(crate) const BUNDLED_GRAMMAR_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub(crate) const TEXTMATE_BUNDLE_VERSION: &str = match option_env!("MARK_SYNTAX_BUNDLE_VERSION") {
+    Some(version) => version,
+    None => BUNDLED_GRAMMAR_VERSION,
+};
 
 pub const DEFAULT_MAX_HIGHLIGHT_SOURCE_BYTES: usize = 1024 * 1024;
 pub const DEFAULT_MAX_HIGHLIGHT_LINE_BYTES: usize = 8 * 1024;
@@ -747,6 +751,15 @@ impl Default for SyntaxLimits {
     }
 }
 
+impl SyntaxLimits {
+    pub(crate) fn engine_line_cache_entries(self) -> usize {
+        // The outer TUI cache is file/hunk sized. A single outer entry can
+        // contain many source lines, so give the tokenizer a proportional
+        // line cache rather than limiting it to only a few hundred lines.
+        self.cache_entries.saturating_mul(64).max(1)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyntaxGrammarSource {
     Bundled,
@@ -1065,18 +1078,10 @@ impl SyntaxLanguageSet {
     }
 }
 
+#[derive(Default)]
 pub struct SyntaxHighlighter {
     pub(crate) engine: crate::engine::SyntaxEngine,
     pub(crate) loaded_languages: BTreeSet<String>,
-}
-
-impl Default for SyntaxHighlighter {
-    fn default() -> Self {
-        Self {
-            engine: crate::engine::SyntaxEngine,
-            loaded_languages: BTreeSet::new(),
-        }
-    }
 }
 
 impl SyntaxHighlighter {
@@ -1089,5 +1094,15 @@ impl SyntaxHighlighter {
         let highlighted = self.engine.highlight(&language, source)?;
         self.loaded_languages.insert(language);
         Ok(highlighted)
+    }
+
+    /// Enables low-overhead native-engine counters for diagnostics and
+    /// benchmarks. Highlight output is unaffected.
+    pub fn set_engine_counters_enabled(&mut self, enabled: bool) {
+        self.engine.set_counters_enabled(enabled);
+    }
+
+    pub fn take_engine_counters(&mut self) -> crate::engine::counters::EngineCounters {
+        self.engine.take_counters()
     }
 }

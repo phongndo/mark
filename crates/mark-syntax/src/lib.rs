@@ -1,4 +1,7 @@
-mod engine;
+#[doc(hidden)]
+pub mod engine;
+#[doc(hidden)]
+pub mod grammars;
 mod highlight;
 mod language;
 mod paths;
@@ -25,3 +28,15 @@ pub(crate) use language::*;
 #[cfg(test)]
 pub(crate) use paths::*;
 pub(crate) use storage::*;
+
+pub fn canonical_language(language: &str) -> Option<String> {
+    grammars::canonical_language(language)
+}
+
+pub fn has_language(language: &str) -> bool {
+    grammars::has_language(language)
+}
+
+pub fn classify_scope_name(scope: &str) -> Option<SyntaxClass> {
+    engine::scopes::classify_scope_name(scope)
+}

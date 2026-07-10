@@ -14,8 +14,8 @@ On XDG systems this is usually `~/.config/mark/config.toml`. `XDG_CONFIG_HOME` i
 honored. Windows uses `APPDATA` when `XDG_CONFIG_HOME` is unset.
 
 Syntax language state is stored separately as `syntax.json` under the same
-`mark` config directory. The current build intentionally has no bundled syntax
-backend, so diffs render as plain text while the replacement engine is built.
+`mark` config directory. Mark includes a Rust-native TextMate backend and a
+curated core grammar pack.
 Inspect syntax mappings, config, and colorscheme paths with:
 
 ```sh
@@ -116,7 +116,8 @@ Supported values:
 - `enabled` - languages explicitly selected with `mark syntax add`, plus installed core languages.
 - `all` - currently equivalent to `builtin`; kept for config compatibility.
 
-The current no-backend build has no highlight-ready languages in any mode.
+The bundled pack currently provides 30 highlight-ready languages. See
+`mark syntax available --installed` for the exact catalog.
 
 Use `mark --no-syntax`, `mark diff --no-syntax`, `mark show --no-syntax`, or
 `mark patch --no-syntax changes.diff` to disable syntax highlighting for one run.

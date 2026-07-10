@@ -233,6 +233,7 @@ pub(crate) fn next_decoration_preference(
 pub(crate) enum OptionsMenuItem {
     Layout,
     LiveReload,
+    #[allow(dead_code)]
     ContextExpansion,
     SyntaxHighlighting,
     LineWrapping,
