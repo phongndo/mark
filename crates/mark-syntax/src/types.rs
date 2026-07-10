@@ -6,10 +6,117 @@ use crate::{
     normalize_language_name,
 };
 use mark_core::{MarkError, MarkResult};
-pub use mark_textmate::{
-    HighlightedLine, HighlightedText, LineTextFingerprint, SyntaxClass, SyntaxSegment,
-};
 use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SyntaxClass {
+    Attribute,
+    Comment,
+    Constant,
+    Constructor,
+    Function,
+    Keyword,
+    Label,
+    Module,
+    Number,
+    Operator,
+    Property,
+    Punctuation,
+    String,
+    Tag,
+    Type,
+    Variable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyntaxSegment {
+    pub byte_start: usize,
+    pub byte_end: usize,
+    pub class: Option<SyntaxClass>,
+}
+
+impl SyntaxSegment {
+    pub fn new(byte_start: usize, byte_end: usize, class: Option<SyntaxClass>) -> Self {
+        debug_assert!(byte_start <= byte_end);
+        Self {
+            byte_start,
+            byte_end,
+            class,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.byte_end.saturating_sub(self.byte_start)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.byte_start >= self.byte_end
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HighlightedLine {
+    pub fingerprint: LineTextFingerprint,
+    pub segments: Vec<SyntaxSegment>,
+}
+
+impl HighlightedLine {
+    pub fn new(text: &str) -> Self {
+        Self {
+            fingerprint: LineTextFingerprint::from_text(text),
+            segments: Vec::new(),
+        }
+    }
+
+    pub fn matches_text(&self, text: &str) -> bool {
+        self.fingerprint.matches(text)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LineTextFingerprint {
+    byte_len: usize,
+    hash: u64,
+}
+
+impl Default for LineTextFingerprint {
+    fn default() -> Self {
+        Self::from_text("")
+    }
+}
+
+impl LineTextFingerprint {
+    pub fn from_text(text: &str) -> Self {
+        Self {
+            byte_len: text.len(),
+            hash: stable_text_hash(text.as_bytes()),
+        }
+    }
+
+    pub fn byte_len(self) -> usize {
+        self.byte_len
+    }
+
+    pub fn matches(self, text: &str) -> bool {
+        self.byte_len == text.len() && self.hash == stable_text_hash(text.as_bytes())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HighlightedText {
+    pub lines: Vec<HighlightedLine>,
+}
+
+fn stable_text_hash(bytes: &[u8]) -> u64 {
+    const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+    let mut hash = OFFSET;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(PRIME);
+    }
+    hash
+}
 
 pub(crate) const CONFIG_DIR: &str = "mark";
 pub(crate) const CONFIG_FILE: &str = "syntax.json";
@@ -17,7 +124,7 @@ pub(crate) const LEGACY_CONFIG_FILE: &str = "tree-sitter.json";
 pub(crate) const SETTINGS_FILE: &str = "config.toml";
 pub(crate) const LEGACY_SETTINGS_FILE: &str = "syntax.toml";
 pub(crate) const COLORSCHEME_DIR: &str = "colorscheme";
-pub(crate) const TEXTMATE_BUNDLE_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub(crate) const BUNDLED_GRAMMAR_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub const DEFAULT_MAX_HIGHLIGHT_SOURCE_BYTES: usize = 1024 * 1024;
 pub const DEFAULT_MAX_HIGHLIGHT_LINE_BYTES: usize = 8 * 1024;
@@ -959,14 +1066,14 @@ impl SyntaxLanguageSet {
 }
 
 pub struct SyntaxHighlighter {
-    pub(crate) highlighter: mark_textmate::TextMateHighlighter,
+    pub(crate) engine: crate::engine::SyntaxEngine,
     pub(crate) loaded_languages: BTreeSet<String>,
 }
 
 impl Default for SyntaxHighlighter {
     fn default() -> Self {
         Self {
-            highlighter: mark_textmate::TextMateHighlighter::new(),
+            engine: crate::engine::SyntaxEngine,
             loaded_languages: BTreeSet::new(),
         }
     }
@@ -979,10 +1086,7 @@ impl SyntaxHighlighter {
 
     pub fn highlight(&mut self, language: &str, source: &str) -> MarkResult<HighlightedText> {
         let language = normalize_language_name(language.to_owned());
-        let highlighted = self
-            .highlighter
-            .highlight(&language, source)
-            .map_err(|error| MarkError::Usage(error.to_string()))?;
+        let highlighted = self.engine.highlight(&language, source)?;
         self.loaded_languages.insert(language);
         Ok(highlighted)
     }

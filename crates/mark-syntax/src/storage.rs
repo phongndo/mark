@@ -285,18 +285,28 @@ pub(crate) fn enabled_language_set_from_config(config: &StoredSyntaxConfig) -> B
 }
 
 pub(crate) fn bundled_highlight_language_set() -> BTreeSet<String> {
-    mark_textmate::available_languages().into_iter().collect()
+    crate::engine::SyntaxEngine::available_languages()
+        .into_iter()
+        .collect()
 }
 
 pub(crate) fn core_enabled_language_set() -> BTreeSet<String> {
+    let installed = installed_language_set();
+    core_language_set()
+        .intersection(&installed)
+        .cloned()
+        .collect()
+}
+
+pub(crate) fn core_language_set() -> BTreeSet<String> {
     CORE_LANGUAGES
         .iter()
-        .filter_map(|language| mark_textmate::canonical_language(language))
+        .map(|language| (*language).to_owned())
         .collect()
 }
 
 pub(crate) fn reject_core_language_removal(requested: &BTreeSet<String>) -> MarkResult<()> {
-    let core = core_enabled_language_set();
+    let core = core_language_set();
     let blocked = requested
         .intersection(&core)
         .cloned()
@@ -347,15 +357,15 @@ pub(crate) fn normalize_language_name(language: String) -> String {
 
 fn canonical_language_name(language: &str) -> String {
     let language = language_alias(language).unwrap_or(language);
-    mark_textmate::canonical_language(language)
-        .or_else(|| mark_textmate::detect_language_from_path(language))
+    crate::engine::SyntaxEngine::canonical_language(language)
+        .or_else(|| crate::engine::SyntaxEngine::detect_language_from_path(language))
         .unwrap_or_else(|| language.to_owned())
 }
 
 pub(crate) fn detect_language_name(path: &str) -> Option<String> {
     detect_language_from_basename(path)
         .map(str::to_owned)
-        .or_else(|| mark_textmate::detect_language_from_path(path))
+        .or_else(|| crate::engine::SyntaxEngine::detect_language_from_path(path))
 }
 
 pub(crate) fn language_alias(language: &str) -> Option<&'static str> {
@@ -406,7 +416,7 @@ fn extension_mapping_match_len(filename: &str, extension: &str) -> Option<usize>
 }
 
 pub(crate) fn has_highlights(language: &str) -> bool {
-    mark_textmate::has_language(language)
+    crate::engine::SyntaxEngine::has_language(language)
 }
 
 #[cfg(test)]

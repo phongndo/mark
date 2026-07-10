@@ -13,7 +13,7 @@ and GitHub pull requests.
 
 - Interactive terminal UI for large unified diffs.
 - Local worktree watching with explicit reload controls.
-- Split and unified diff layouts with syntax highlighting.
+- Split and unified diff layouts with configurable colors.
 - Fancy or minimal UI decorations with automatic terminal-aware selection.
 - Git pager and Git difftool integrations.
 - Patch-file and stdin diff review for generated changes.
@@ -151,8 +151,7 @@ crates/mark-command   command facade shared by CLI and future integrations
 crates/mark-core      shared errors and path helpers
 crates/mark-git       low-level Git process boundary
 crates/mark-diff      diff loading, parsing, and plain rendering
-crates/mark-textmate  bundled TextMate grammar engine
-crates/mark-syntax    syntax config, language selection, and highlighting facade
+crates/mark-syntax    syntax config, language selection, and highlighting boundary
 crates/mark-tui       ratatui/crossterm diff review UI
 crates/mark-bench     local benchmark fixture generation
 pi-mark               Pi extension package published to npm

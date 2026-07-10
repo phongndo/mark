@@ -120,7 +120,10 @@ examples:
   cat changes.diff | mark patch -"
     )]
     Patch(PatchArgs),
-    #[command(alias = "ts", about = "Manage syntax highlighting languages")]
+    #[command(
+        alias = "ts",
+        about = "Inspect syntax configuration and backend status"
+    )]
     Syntax {
         #[command(subcommand)]
         command: SyntaxCommand,
@@ -140,27 +143,27 @@ examples:
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum SyntaxCommand {
-    #[command(about = "Enable bundled syntax highlighting languages and mappings")]
+    #[command(about = "Configure syntax languages and mappings")]
     Add(SyntaxAddArgs),
-    #[command(about = "Report bundled syntax highlighting grammar status")]
+    #[command(about = "Report syntax grammar status")]
     Update(SyntaxUpdateArgs),
     #[command(
         alias = "remove",
-        about = "Remove syntax highlighting languages and custom mappings"
+        about = "Remove configured syntax languages and custom mappings"
     )]
     Rm(SyntaxLanguagesArgs),
     #[command(
         visible_alias = "ls",
-        about = "List installed and enabled syntax highlighting languages"
+        about = "List installed and enabled syntax languages"
     )]
     List,
-    #[command(about = "List syntax highlighting languages")]
+    #[command(about = "List languages exposed by the syntax backend")]
     Available(SyntaxAvailableArgs),
-    #[command(about = "Remove stale syntax language config entries")]
+    #[command(about = "Remove stale syntax config when a backend is available")]
     Clean,
     #[command(about = "Print syntax config and colorscheme paths")]
     Path,
-    #[command(about = "Validate enabled syntax highlighting languages")]
+    #[command(about = "Validate the syntax backend and configured languages")]
     Doctor,
 }
 

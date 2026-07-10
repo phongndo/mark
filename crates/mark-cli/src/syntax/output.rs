@@ -46,7 +46,9 @@ pub(crate) fn print_syntax_remove_result(
         write_stdout(format_args!("- disabled {language} in config\n"))?;
     }
     for language in &result.kept_core {
-        write_stdout(format_args!("= core language remains enabled {language}\n"))?;
+        write_stdout(format_args!(
+            "= core language identity preserved {language}\n"
+        ))?;
     }
     for language in &result.missing {
         write_stdout(format_args!("= not enabled in config {language}\n"))?;

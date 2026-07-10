@@ -2523,10 +2523,9 @@ fn packaged_builtin_themes_are_available() {
 }
 
 #[test]
-fn builtin_syntax_palettes_match_upstream_theme_scopes() {
-    // These expectations mirror the upstream TextMate scopes used by the
-    // Catppuccin, Gruvbox, and GitHub VS Code/Shiki themes for the closest
-    // matching Mark syntax classes.
+fn builtin_syntax_palettes_match_upstream_theme_colors() {
+    // These expectations mirror the upstream Catppuccin, Gruvbox, and GitHub
+    // theme colors for the closest matching Mark syntax classes.
     for (theme, comment, operator, tag, attribute) in [
         (
             DiffTheme::catppuccin_latte(),

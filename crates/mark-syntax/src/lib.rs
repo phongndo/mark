@@ -1,3 +1,4 @@
+mod engine;
 mod highlight;
 mod language;
 mod paths;

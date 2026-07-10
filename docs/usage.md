@@ -102,8 +102,9 @@ git diff | mark pager
 and falls back to static ANSI output in captured pager hosts such as lazygit.
 Non-diff input is passed through the user's text pager.
 
-Static diff output reuses mark's renderer, colorscheme, syntax highlighting, and
-layout. Override the static layout when needed:
+Static diff output reuses mark's renderer, colorscheme, and layout. It falls
+back to plain diff text while no syntax backend is bundled. Override the static
+layout when needed:
 
 ```sh
 mark pager --layout split
@@ -176,8 +177,9 @@ Keybindings can be customized in the user config file. See
 
 ## Syntax languages
 
-Bundled TextMate grammars are enabled by default. If you set `mode = "enabled"`
-for an explicit allow-list, languages can be managed with:
+The current build intentionally ships without a syntax highlighting backend.
+Diff review continues with plain text, and the syntax commands remain in place
+as the stable management surface for the replacement engine:
 
 ```sh
 mark syntax add ruby elixir
@@ -190,24 +192,10 @@ mark syntax clean
 mark syntax path
 ```
 
-Custom extension and filename mappings can point additional paths at an
-existing bundled, highlight-ready language without rebuilding `mark`. They do
-not install new grammars; choose a target reported by
-`mark syntax available --installed`:
-
-```sh
-mark syntax add rust \
-  --ext rs.in \
-  --filename Rustfile
-```
-
-Remove those custom mappings by removing the target language's user syntax
-config. Core languages stay bundled and enabled; `rm` only clears their custom
-config:
-
-```sh
-mark syntax rm rust
-```
+`mark syntax available --installed` currently reports no languages, and
+`mark syntax doctor` reports that the backend is unavailable. `mark syntax clean`
+refuses to run in this state so an absent backend cannot erase saved language
+mappings.
 
 ## Pi package
 

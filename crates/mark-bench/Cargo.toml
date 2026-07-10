@@ -9,7 +9,7 @@ repository.workspace = true
 [dependencies]
 clap.workspace = true
 mark-diff.workspace = true
-mark-textmate.workspace = true
+mark-syntax.workspace = true
 mark-tui.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -14,8 +14,8 @@ On XDG systems this is usually `~/.config/mark/config.toml`. `XDG_CONFIG_HOME` i
 honored. Windows uses `APPDATA` when `XDG_CONFIG_HOME` is unset.
 
 Syntax language state is stored separately as `syntax.json` under the same
-`mark` config directory. Bundled TextMate grammars ship with `mark` and do not
-need runtime downloads.
+`mark` config directory. The current build intentionally has no bundled syntax
+backend, so diffs render as plain text while the replacement engine is built.
 Inspect syntax mappings, config, and colorscheme paths with:
 
 ```sh
@@ -112,9 +112,11 @@ mode = "builtin"
 
 Supported values:
 
-- `builtin` - all bundled languages with TextMate grammar support. This is the default.
-- `enabled` - core languages plus languages enabled with `mark syntax add`, for users who want a smaller explicit allow-list.
+- `builtin` - all languages bundled by the active syntax backend. This is the default.
+- `enabled` - languages explicitly selected with `mark syntax add`, plus installed core languages.
 - `all` - currently equivalent to `builtin`; kept for config compatibility.
+
+The current no-backend build has no highlight-ready languages in any mode.
 
 Use `mark --no-syntax`, `mark diff --no-syntax`, `mark show --no-syntax`, or
 `mark patch --no-syntax changes.diff` to disable syntax highlighting for one run.

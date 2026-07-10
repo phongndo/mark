@@ -442,7 +442,7 @@ mod tests {
     }
 
     #[test]
-    fn static_pager_syntax_settle_ignores_interactive_line_wrapping() {
+    fn static_pager_syntax_settle_skips_an_unavailable_backend() {
         let queue = SyntaxWorkerQueue::new(8, 0);
         let mut app = DiffApp::new_with_syntax(
             DiffOptions::default(),
@@ -464,7 +464,7 @@ mod tests {
         files.dedup();
 
         assert!(!app.viewport.line_wrapping);
-        assert_eq!(files, vec![0, 1]);
+        assert!(files.is_empty());
     }
 
     #[test]

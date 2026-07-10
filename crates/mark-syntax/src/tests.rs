@@ -9,8 +9,7 @@ use std::{
 };
 
 #[test]
-fn maps_extensions_to_language_names() {
-    assert_eq!(normalize_language_name("rs".to_owned()), "rust");
+fn normalizes_language_aliases_without_a_backend_catalog() {
     assert_eq!(normalize_language_name("rust".to_owned()), "rust");
     assert_eq!(normalize_language_name("shell".to_owned()), "bash");
     assert_eq!(normalize_language_name("c++".to_owned()), "cpp");
@@ -20,7 +19,10 @@ fn maps_extensions_to_language_names() {
     assert_eq!(normalize_language_name("jsx".to_owned()), "jsx");
     assert_eq!(normalize_language_name("ts".to_owned()), "typescript");
     assert_eq!(normalize_language_name("tsx".to_owned()), "tsx");
-    assert_eq!(normalize_language_name("src/lib.rs".to_owned()), "rust");
+    assert_eq!(
+        normalize_language_name("src/lib.rs".to_owned()),
+        "src/lib.rs"
+    );
 }
 
 #[test]
@@ -66,21 +68,8 @@ fn splits_highlighted_segments_by_line() {
 }
 
 #[test]
-fn maps_scope_names_to_coarse_classes() {
-    assert_eq!(syntax_class("keyword.function"), Some(SyntaxClass::Keyword));
-    assert_eq!(
-        syntax_class("entity.name.function"),
-        Some(SyntaxClass::Function)
-    );
-    assert_eq!(syntax_class("typewriter"), None);
-}
-
-#[test]
-fn detects_languages_by_path() {
-    assert_eq!(
-        detect_language_from_path("src/lib.rs").as_deref(),
-        Some("rust")
-    );
+fn detects_only_backend_independent_basenames() {
+    assert_eq!(detect_language_from_path("src/lib.rs"), None);
     assert_eq!(
         detect_language_from_path("Makefile").as_deref(),
         Some("make")
@@ -97,68 +86,15 @@ fn detects_languages_by_path() {
         detect_language_from_path("WORKSPACE").as_deref(),
         Some("starlark")
     );
-    assert_eq!(
-        detect_language_from_path("src/module.mjs").as_deref(),
-        Some("javascript")
-    );
-    assert_eq!(
-        detect_language_from_path("src/module.cjs").as_deref(),
-        Some("javascript")
-    );
-    assert_eq!(
-        detect_language_from_path("src/component.jsx").as_deref(),
-        Some("jsx")
-    );
-    assert_eq!(
-        detect_language_from_path("src/component.tsx").as_deref(),
-        Some("tsx")
-    );
-    assert_eq!(
-        detect_language_from_path("include/project.h").as_deref(),
-        Some("c")
-    );
-    assert_eq!(
-        detect_language_from_path("kernels/add.cu").as_deref(),
-        Some("cuda")
-    );
-    assert_eq!(
-        detect_language_from_path("kernels/add.cuh").as_deref(),
-        Some("cuda")
-    );
-    assert_eq!(
-        detect_language_from_path("rtl/counter.v").as_deref(),
-        Some("verilog")
-    );
+    assert_eq!(detect_language_from_path("src/module.mjs"), None);
+    assert_eq!(detect_language_from_path("include/project.h"), None);
 }
 
 #[test]
-fn enabled_core_language_set_detects_core_extension_aliases() {
-    let languages = SyntaxLanguageSet {
-        enabled: core_enabled_language_set(),
-        extensions: Vec::new(),
-        filenames: Vec::new(),
-    };
-
-    assert_eq!(
-        languages.language_for_path("src/module.mjs").as_deref(),
-        Some("javascript")
-    );
-    assert_eq!(
-        languages.language_for_path("src/module.cjs").as_deref(),
-        Some("javascript")
-    );
-    assert_eq!(
-        languages.language_for_path("src/component.jsx").as_deref(),
-        Some("jsx")
-    );
-    assert_eq!(
-        languages.language_for_path("src/component.tsx").as_deref(),
-        Some("tsx")
-    );
-    assert_eq!(
-        languages.language_for_path("include/project.h").as_deref(),
-        Some("c")
-    );
+fn backend_catalog_and_enabled_core_set_are_empty() {
+    assert!(installed_language_set().is_empty());
+    assert!(core_enabled_language_set().is_empty());
+    assert!(core_language_set().contains("rust"));
 }
 
 #[test]
@@ -321,8 +257,9 @@ fn syntax_add_skips_unavailable_languages_when_adding_mixed_selection() {
 }
 
 #[test]
-fn syntax_add_registers_custom_mappings_for_available_language() {
+fn syntax_add_rejects_custom_mappings_when_backend_is_unavailable() {
     let mut config = StoredSyntaxConfig::default();
+    let original_config = config.clone();
     let request = SyntaxAddRequest::LanguageWithMappings {
         language: "rust".to_owned(),
         options: SyntaxAddOptions {
@@ -331,31 +268,12 @@ fn syntax_add_registers_custom_mappings_for_available_language() {
         },
     };
 
-    let result =
-        add_languages_to_config(&mut config, request, &BTreeSet::from(["rust".to_owned()]))
-            .unwrap();
+    let error = add_languages_to_config(&mut config, request, &BTreeSet::from(["rust".to_owned()]))
+        .unwrap_err()
+        .to_string();
 
-    assert_eq!(result.added, vec!["rust".to_owned()]);
-    assert!(result.unavailable.is_empty());
-    assert_eq!(
-        result.custom_mappings,
-        vec!["*.rs.in -> rust".to_owned(), "Rustfile -> rust".to_owned()]
-    );
-    assert_eq!(config.languages, vec!["rust".to_owned()]);
-    assert_eq!(
-        config.extensions,
-        vec![StoredLanguageMapping {
-            pattern: "rs.in".to_owned(),
-            language: "rust".to_owned(),
-        }]
-    );
-    assert_eq!(
-        config.filenames,
-        vec![StoredLanguageMapping {
-            pattern: "Rustfile".to_owned(),
-            language: "rust".to_owned(),
-        }]
-    );
+    assert!(error.contains("highlighting failed to initialize"));
+    assert_eq!(config, original_config);
 }
 
 #[test]
@@ -391,30 +309,20 @@ fn syntax_update_selection_rejects_ambiguous_all_flag() {
 }
 
 #[test]
-fn textmate_highlights_rust() {
+fn direct_highlighting_reports_unavailable_backend() {
     let mut highlighter = SyntaxHighlighter::new();
 
-    let highlighted = highlighter
+    let error = highlighter
         .highlight("rust", "fn main() {\n    let value = 1;\n}")
-        .expect("rust should highlight");
+        .unwrap_err()
+        .to_string();
 
-    assert_eq!(highlighted.lines.len(), 3);
-    assert!(!highlighted.lines[0].segments.is_empty());
-    assert!(highlighter.loaded_languages.contains("rust"));
+    assert!(error.contains("syntax highlighting backend is unavailable"));
+    assert!(highlighter.loaded_languages.is_empty());
 }
 
 #[test]
-fn core_languages_are_bundled() {
-    for language in CORE_LANGUAGES {
-        assert!(
-            mark_textmate::has_language(language),
-            "core language should be bundled: {language}"
-        );
-    }
-}
-
-#[test]
-fn removing_core_languages_is_rejected() {
+fn core_language_identity_survives_without_a_backend() {
     let requested = BTreeSet::from(["rust".to_owned(), "ada".to_owned()]);
 
     let error = reject_core_language_removal(&requested)
@@ -423,18 +331,8 @@ fn removing_core_languages_is_rejected() {
 
     assert!(error.contains("cannot remove core syntax languages: rust"));
     assert!(!error.contains("ada"));
-}
-
-#[test]
-fn removing_core_language_without_user_config_is_rejected() {
     let config = StoredSyntaxConfig::default();
-    let requested = BTreeSet::from(["rust".to_owned()]);
-
-    let error = reject_unconfigured_core_language_removal(&config, &requested)
-        .unwrap_err()
-        .to_string();
-
-    assert!(error.contains("cannot remove core syntax languages: rust"));
+    assert!(reject_unconfigured_core_language_removal(&config, &requested).is_err());
 }
 
 #[test]
@@ -967,8 +865,8 @@ fn syntax_modes_choose_enabled_languages_without_downloads() {
     let builtin = enabled_language_set_for_mode(SyntaxMode::Builtin, &config, &available);
     let all = enabled_language_set_for_mode(SyntaxMode::All, &config, &available);
 
-    assert!(enabled.contains("rust"));
     assert!(enabled.contains("definitely_custom_language"));
+    assert!(!enabled.contains("rust"));
     assert!(!builtin.contains("definitely_custom_language"));
     assert!(builtin.contains("rust"));
     assert!(all.contains("rust"));
@@ -989,7 +887,7 @@ fn language_set_falls_back_when_grammar_is_missing() {
 }
 
 #[test]
-fn language_set_falls_back_to_builtin_when_custom_mapping_is_not_ready() {
+fn language_set_returns_none_when_custom_mapping_and_backend_are_not_ready() {
     let languages = SyntaxLanguageSet {
         enabled: core_enabled_language_set(),
         extensions: vec![StoredLanguageMapping {
@@ -1002,14 +900,8 @@ fn language_set_falls_back_to_builtin_when_custom_mapping_is_not_ready() {
         }],
     };
 
-    assert_eq!(
-        languages.language_for_path("src/lib.rs").as_deref(),
-        Some("rust")
-    );
-    assert_eq!(
-        languages.language_for_path("Cargo.toml").as_deref(),
-        Some("toml")
-    );
+    assert_eq!(languages.language_for_path("src/lib.rs"), None);
+    assert_eq!(languages.language_for_path("Cargo.toml"), None);
 }
 
 #[test]
@@ -1020,11 +912,61 @@ fn doctor_reports_stale_enabled_config() {
     }]);
 
     assert_eq!(issues.len(), 1);
-    assert!(issues[0].message.contains("no bundled TextMate grammar"));
+    assert!(issues[0].message.contains("no bundled syntax grammar"));
 }
 
 #[test]
-fn clean_cache_removes_stale_language_config_without_dropping_aliases() {
+fn doctor_reports_that_the_backend_is_unavailable() {
+    let dir = unique_temp_dir("doctor-without-backend");
+
+    with_xdg_config_home(&dir, || {
+        save_config(&StoredSyntaxConfig {
+            languages: vec!["ruby".to_owned()],
+            ..StoredSyntaxConfig::default()
+        })
+        .unwrap();
+        let settings = settings_path().unwrap();
+        fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        fs::write(settings, "mode = \"enabled\"\n").unwrap();
+
+        let report = doctor().unwrap();
+
+        assert_eq!(report.statuses.len(), 1);
+        assert_eq!(report.statuses[0].language, "ruby");
+        assert_eq!(report.issues.len(), 1);
+        assert_eq!(report.issues[0].language, "backend");
+        assert!(report.issues[0].message.contains("render plain diff text"));
+    });
+
+    remove_temp_dir(&dir);
+}
+
+#[test]
+fn clean_cache_refuses_to_treat_an_unavailable_backend_as_an_empty_catalog() {
+    let dir = unique_temp_dir("clean-without-backend");
+
+    with_xdg_config_home(&dir, || {
+        let config = StoredSyntaxConfig {
+            languages: vec!["rust".to_owned()],
+            extensions: vec![StoredLanguageMapping {
+                pattern: "rs.in".to_owned(),
+                language: "rust".to_owned(),
+            }],
+            ..StoredSyntaxConfig::default()
+        };
+        save_config(&config).unwrap();
+
+        let error = clean_cache().unwrap_err().to_string();
+
+        assert!(error.contains("no syntax highlighting backend is available"));
+        assert_eq!(load_config().unwrap(), config);
+    });
+
+    remove_temp_dir(&dir);
+}
+
+#[test]
+fn clean_config_preserves_core_aliases_and_the_supplied_catalog() {
     let mut config = StoredSyntaxConfig {
         languages: vec![
             "gitignore".to_owned(),
@@ -1183,18 +1125,22 @@ fn remove_languages_cleans_core_custom_mappings_without_disabling_core() {
 }
 
 #[test]
-fn syntax_rm_removes_core_custom_mappings_from_config_file() {
-    let dir = unique_temp_dir("syntax-rm-core-custom-mappings");
+fn syntax_rm_preserves_core_identity_while_removing_custom_mappings() {
+    let dir = unique_temp_dir("syntax-rm-without-backend");
 
     with_xdg_config_home(&dir, || {
-        let request = SyntaxAddRequest::LanguageWithMappings {
-            language: "rust".to_owned(),
-            options: SyntaxAddOptions {
-                extensions: vec!["rs.in".to_owned()],
-                filenames: vec!["Rustfile".to_owned()],
-            },
-        };
-        add_languages_with_options(request).unwrap();
+        save_config(&StoredSyntaxConfig {
+            languages: vec!["rust".to_owned()],
+            extensions: vec![StoredLanguageMapping {
+                pattern: "rs.in".to_owned(),
+                language: "rust".to_owned(),
+            }],
+            filenames: vec![StoredLanguageMapping {
+                pattern: "Rustfile".to_owned(),
+                language: "rust".to_owned(),
+            }],
+        })
+        .unwrap();
 
         let result = remove_languages(&["rust".to_owned()]).unwrap();
 
@@ -1212,7 +1158,7 @@ fn syntax_rm_removes_core_custom_mappings_from_config_file() {
 }
 
 #[test]
-fn clean_cache_removes_stale_custom_mappings_without_breaking_builtin_detection() {
+fn clean_config_preserves_custom_mappings_in_the_supplied_catalog() {
     let mut config = StoredSyntaxConfig {
         languages: vec!["definitely_missing".to_owned(), "rust".to_owned()],
         extensions: vec![
@@ -1236,23 +1182,7 @@ fn clean_cache_removes_stale_custom_mappings_without_breaking_builtin_detection(
             },
         ],
     };
-    let enabled = core_enabled_language_set();
-    let stale = SyntaxLanguageSet {
-        enabled: enabled.clone(),
-        extensions: config.extensions.clone(),
-        filenames: config.filenames.clone(),
-    };
-
-    assert_eq!(
-        stale.language_for_path("src/lib.rs").as_deref(),
-        Some("rust")
-    );
-    assert_eq!(
-        stale.language_for_path("Cargo.toml").as_deref(),
-        Some("toml")
-    );
-
-    let result = clean_language_config(&mut config, &BTreeSet::new());
+    let result = clean_language_config(&mut config, &BTreeSet::from(["rust".to_owned()]));
 
     assert_eq!(result.stale_records_removed, 3);
     assert_eq!(result.enabled_languages_kept, 1);
@@ -1270,20 +1200,6 @@ fn clean_cache_removes_stale_custom_mappings_without_breaking_builtin_detection(
             pattern: "Rustfile".to_owned(),
             language: "rust".to_owned(),
         }]
-    );
-
-    let cleaned = SyntaxLanguageSet {
-        enabled,
-        extensions: config.extensions,
-        filenames: config.filenames,
-    };
-    assert_eq!(
-        cleaned.language_for_path("src/lib.rs").as_deref(),
-        Some("rust")
-    );
-    assert_eq!(
-        cleaned.language_for_path("Cargo.toml").as_deref(),
-        Some("toml")
     );
 }
 

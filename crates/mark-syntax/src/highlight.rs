@@ -74,8 +74,3 @@ pub(crate) fn push_line_segment(
         });
     }
 }
-
-#[cfg(test)]
-pub(crate) fn syntax_class(name: &str) -> Option<SyntaxClass> {
-    mark_textmate::classify_scope_name(name)
-}

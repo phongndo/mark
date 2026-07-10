@@ -1,14 +1,15 @@
 use std::collections::BTreeSet;
 
 use crate::{
-    SyntaxAddOptions, SyntaxAddRequest, SyntaxAddResult, SyntaxAvailableFilter, SyntaxCleanResult,
-    SyntaxDoctorIssue, SyntaxDoctorReport, SyntaxGrammarInfo, SyntaxLanguageRuntimeState,
-    SyntaxLanguageSelection, SyntaxLanguageState, SyntaxLanguageStatus, SyntaxRemoveResult,
-    SyntaxUpdateResult, SyntaxUpdateSelection, TEXTMATE_BUNDLE_VERSION, core_enabled_language_set,
-    enabled_language_set, enabled_language_set_for_mode, has_highlights, installed_language_set,
-    language_vec_to_set, load_config, load_settings, normalize_custom_extension,
-    normalize_custom_filename, normalize_language_name, normalize_language_names,
-    reject_core_language_removal, save_config, upsert_extension_mappings, upsert_filename_mappings,
+    BUNDLED_GRAMMAR_VERSION, SyntaxAddOptions, SyntaxAddRequest, SyntaxAddResult,
+    SyntaxAvailableFilter, SyntaxCleanResult, SyntaxDoctorIssue, SyntaxDoctorReport,
+    SyntaxGrammarInfo, SyntaxLanguageRuntimeState, SyntaxLanguageSelection, SyntaxLanguageState,
+    SyntaxLanguageStatus, SyntaxRemoveResult, SyntaxUpdateResult, SyntaxUpdateSelection,
+    core_enabled_language_set, core_language_set, enabled_language_set,
+    enabled_language_set_for_mode, has_highlights, installed_language_set, language_vec_to_set,
+    load_config, load_settings, normalize_custom_extension, normalize_custom_filename,
+    normalize_language_name, normalize_language_names, reject_core_language_removal, save_config,
+    upsert_extension_mappings, upsert_filename_mappings,
 };
 use mark_core::{MarkError, MarkResult};
 
@@ -65,7 +66,7 @@ fn language_runtime_state(
         return SyntaxLanguageRuntimeState::MissingGrammar;
     }
 
-    let grammar = SyntaxGrammarInfo::bundled(TEXTMATE_BUNDLE_VERSION);
+    let grammar = SyntaxGrammarInfo::bundled(BUNDLED_GRAMMAR_VERSION);
     if has_highlights(language) {
         SyntaxLanguageRuntimeState::Ready(grammar)
     } else {
@@ -232,7 +233,7 @@ pub(crate) fn reject_unconfigured_core_language_removal(
     config: &crate::StoredSyntaxConfig,
     requested: &BTreeSet<String>,
 ) -> MarkResult<()> {
-    let core = core_enabled_language_set();
+    let core = core_language_set();
     let blocked = requested
         .intersection(&core)
         .filter(|language| !has_user_config_for_language(config, language))
@@ -258,7 +259,7 @@ pub(crate) fn remove_languages_from_config(
     config: &mut crate::StoredSyntaxConfig,
     requested: &BTreeSet<String>,
 ) -> SyntaxRemoveResult {
-    let core = core_enabled_language_set();
+    let core = core_language_set();
     let mut enabled = language_vec_to_set(&config.languages);
     let mut removed = Vec::new();
     let mut missing = Vec::new();
@@ -303,6 +304,13 @@ pub(crate) fn remove_languages_from_config(
 }
 
 pub fn clean_cache() -> MarkResult<SyntaxCleanResult> {
+    if !crate::engine::SyntaxEngine::is_available() {
+        return Err(MarkError::Usage(
+            "cannot clean syntax config while no syntax highlighting backend is available"
+                .to_owned(),
+        ));
+    }
+
     let mut config = load_config()?;
     let available = installed_language_set();
     let result = clean_language_config(&mut config, &available);
@@ -315,7 +323,7 @@ pub(crate) fn clean_language_config(
     config: &mut crate::StoredSyntaxConfig,
     available: &BTreeSet<String>,
 ) -> SyntaxCleanResult {
-    let core = core_enabled_language_set();
+    let core = core_language_set();
     let keep_language = |language: &str| available.contains(language) || core.contains(language);
     let stale_language_records_removed = config
         .languages
@@ -379,7 +387,16 @@ fn normalize_mapping_language(mapping: &mut crate::StoredLanguageMapping) {
 
 pub fn doctor() -> MarkResult<SyntaxDoctorReport> {
     let statuses = language_statuses()?;
-    let issues = doctor_issues(&statuses);
+    let issues = if crate::engine::SyntaxEngine::is_available() {
+        doctor_issues(&statuses)
+    } else {
+        vec![SyntaxDoctorIssue {
+            language: "backend".to_owned(),
+            message:
+                "no syntax highlighting backend is available; Mark will render plain diff text"
+                    .to_owned(),
+        }]
+    };
 
     Ok(SyntaxDoctorReport { statuses, issues })
 }
@@ -395,7 +412,7 @@ pub(crate) fn doctor_issues(statuses: &[SyntaxLanguageStatus]) -> Vec<SyntaxDoct
             SyntaxLanguageRuntimeState::Ready(_) => {}
             SyntaxLanguageRuntimeState::MissingGrammar => issues.push(SyntaxDoctorIssue {
                 language: status.language.clone(),
-                message: "enabled in config, but no bundled TextMate grammar is available; run `mark syntax rm`".to_owned(),
+                message: "enabled in config, but no bundled syntax grammar is available; run `mark syntax rm`".to_owned(),
             }),
             SyntaxLanguageRuntimeState::MissingHighlights(_) => issues.push(SyntaxDoctorIssue {
                 language: status.language.clone(),
