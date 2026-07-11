@@ -17,9 +17,11 @@ import { createRequire } from 'node:module'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 function usage() {
-  console.log(`usage: golden-dump.mjs --grammar <tmLanguage.json> --scope <scopeName> --file <source> [options]
+  console.log(`usage: golden-dump.mjs --scope <scopeName> --file <source> [options]
 
 Options:
+  --assets <directory>         Register every *.json grammar in a directory.
+  --grammar <tmLanguage.json>  Register the root grammar directly.
   --language <id>              Language id to write in each record (defaults to --scope).
   --out <jsonl>                Write JSONL to this file instead of stdout.
   --embedded <scope=grammar>   Register an embedded grammar; may be repeated.
@@ -44,7 +46,7 @@ function parseArgs(argv) {
     const equals = item.indexOf('=')
     const name = equals > 0 ? item.slice(0, equals) : item
     let value = equals > 0 ? item.slice(equals + 1) : undefined
-    if (['--grammar', '--scope', '--language', '--file', '--out', '--embedded', '--time-limit'].includes(name)) {
+    if (['--assets', '--grammar', '--scope', '--language', '--file', '--out', '--embedded', '--time-limit'].includes(name)) {
       if (value === undefined) {
         value = argv[++index]
       }
@@ -85,7 +87,7 @@ const language = args.language ?? scopeName
 const sourcePath = args.file
 const outPath = args.out
 const timeLimit = args.timeLimit
-if (!grammarPath || !scopeName || !sourcePath) {
+if ((!grammarPath && !args.assets) || !scopeName || !sourcePath) {
   usage()
   process.exit(2)
 }
@@ -142,11 +144,22 @@ try { await fs.access(wasmPath) } catch { wasmPath = path.join(path.dirname(onig
 const wasm = await fs.readFile(wasmPath)
 await onig.loadWASM(wasm.buffer.slice(wasm.byteOffset, wasm.byteOffset + wasm.byteLength))
 
-const grammarSpecs = [{ scope: scopeName, grammarPath }, ...embedded]
+const grammarSpecs = [...embedded]
+if (grammarPath) grammarSpecs.unshift({ scope: scopeName, grammarPath })
+if (args.assets) {
+  const names = (await fs.readdir(args.assets)).filter(name => name.endsWith('.json')).sort()
+  for (const name of names) {
+    const grammarPath = path.join(args.assets, name)
+    const parsed = JSON.parse(await fs.readFile(grammarPath, 'utf8'))
+    if (typeof parsed.scopeName === 'string') {
+      grammarSpecs.push({ scope: parsed.scopeName, grammarPath, parsed })
+    }
+  }
+}
 const grammars = new Map()
 for (const spec of grammarSpecs) {
   if (grammars.has(spec.scope)) throw new Error(`duplicate grammar scope ${spec.scope}`)
-  grammars.set(spec.scope, JSON.parse(await fs.readFile(spec.grammarPath, 'utf8')))
+  grammars.set(spec.scope, spec.parsed ?? JSON.parse(await fs.readFile(spec.grammarPath, 'utf8')))
 }
 const registry = new vsctm.Registry({
   onigLib: Promise.resolve({

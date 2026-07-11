@@ -14,6 +14,20 @@ source_path = "../tau/node_modules/.pnpm/@shikijs+langs@3.23.0/node_modules/@shi
 generated_by = "node dynamic import of @shikijs/langs/dist/*.mjs"
 notes = "All default-exported TextMate grammar objects from the pinned package are committed as text JSON."
 
+[[additional_sources]]
+name = "Visual Studio Code built-in grammars"
+repository = "https://github.com/microsoft/vscode"
+version = "1.128.0"
+license = "MIT"
+assets = ["ignore", "js-regexp"]
+
+[[additional_sources]]
+name = "YANG syntax highlighter"
+repository = "https://github.com/marko2276/yang-vscode-syntax"
+version = "0.1.3"
+license = "MIT"
+assets = ["yang"]
+
 [paths]
 languages = "assets/tm-grammars/languages"
 licenses = "assets/tm-grammars/licenses.json"

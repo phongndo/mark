@@ -45,7 +45,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut tokenizer = TextMateTokenizer::new(set, root);
     let mut state = TokenizerState::default();
     for (line_number, line) in split_lines_like_engine(&source).into_iter().enumerate() {
-        let tokenized = tokenizer.tokenize_line_scopes(line.parse_text, state);
+        let tokenized = tokenizer.tokenize_line_scopes_at_line(line.parse_text, state, line_number);
         state = tokenized.state.clone();
         if classes {
             println!(

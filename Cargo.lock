@@ -528,9 +528,11 @@ name = "mark-syntax"
 version = "0.8.0"
 dependencies = [
  "mark-core",
+ "memchr",
  "serde",
  "serde_json",
  "toml",
+ "unicode-segmentation",
 ]
 
 [[package]]

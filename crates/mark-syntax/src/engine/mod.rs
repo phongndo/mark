@@ -37,26 +37,42 @@ impl Runtime {
         let dependencies = grammar_dependencies(language);
         let mut root = None;
         let bundle = crate::grammars::embedded_bundle();
-        for requested in std::iter::once(language).chain(dependencies.iter().copied()) {
-            let blob = if requested == "cpp-macro" {
-                bundle.grammar_blob_for_scope("source.cpp.embedded.macro")
-            } else {
-                bundle.grammar_blob_for_language(requested)
-            }
-            .ok_or_else(|| {
-                MarkError::Usage(format!("bundled TextMate grammar `{requested}` is missing"))
-            })?;
+        let blobs = if language == "markdown" {
+            // Markdown can reference every private fenced-code dependency by
+            // scope. Keep those blobs private in the public language catalog,
+            // but register the complete graph when Markdown is requested.
+            bundle.grammar_blobs.iter().collect::<Vec<_>>()
+        } else {
+            std::iter::once(language)
+                .chain(dependencies.iter().copied())
+                .map(|requested| {
+                    let blob = if requested == "cpp-macro" {
+                        bundle.grammar_blob_for_scope("source.cpp.embedded.macro")
+                    } else {
+                        bundle.grammar_blob_for_language(requested)
+                    };
+                    blob.ok_or_else(|| {
+                        MarkError::Usage(format!(
+                            "bundled TextMate grammar `{requested}` is missing"
+                        ))
+                    })
+                })
+                .collect::<MarkResult<Vec<_>>>()?
+        };
+        for blob in blobs {
             let source = std::str::from_utf8(&blob.bytes).map_err(|_| {
                 MarkError::Usage(format!(
-                    "bundled TextMate grammar `{requested}` is not UTF-8"
+                    "bundled TextMate grammar `{}` is not UTF-8",
+                    blob.language
                 ))
             })?;
             let grammar_id = grammars.load_and_add(source).map_err(|error| {
                 MarkError::Usage(format!(
-                    "failed to load bundled TextMate grammar `{requested}`: {error}"
+                    "failed to load bundled TextMate grammar `{}`: {error}",
+                    blob.language
                 ))
             })?;
-            if requested == language {
+            if blob.language == language {
                 root = Some(grammar_id);
             }
         }
@@ -113,40 +129,6 @@ fn grammar_dependencies(language: &str) -> &'static [&'static str] {
         "php" => &["css", "html", "javascript"],
         "scss" => &["css"],
         "tsx" => &["javascript", "jsx", "typescript"],
-        // Markdown fences can embed any bundled language. Loading its pack is
-        // intentionally broader, while ordinary source files remain lazy.
-        "markdown" => &[
-            "bash",
-            "c",
-            "cpp",
-            "cpp-macro",
-            "csharp",
-            "css",
-            "dockerfile",
-            "go",
-            "html",
-            "java",
-            "javascript",
-            "json",
-            "jsx",
-            "kotlin",
-            "lua",
-            "make",
-            "nix",
-            "php",
-            "powershell",
-            "python",
-            "ruby",
-            "rust",
-            "scss",
-            "sql",
-            "swift",
-            "terraform",
-            "toml",
-            "tsx",
-            "typescript",
-            "yaml",
-        ],
         _ => &[],
     }
 }

@@ -57,7 +57,21 @@ const cases = [
   { name: 'dfa-captures', pattern: String.raw`foo(\d+)`, line: 'xxfoo123', engine: 'auto' },
   { name: 'positive-lookahead', pattern: String.raw`foo(?=bar)`, line: 'xxfoobar', engine: 'fallback' },
   { name: 'positive-lookbehind', pattern: String.raw`(?<=foo)bar`, line: 'xxfoobar', engine: 'fallback' },
+  { name: 'positive-lookbehind-capture', pattern: String.raw`(?<=(a))b`, line: 'ab', engine: 'fallback' },
+  { name: 'lookbehind-capture-backref', pattern: String.raw`(?<=(a))\1`, line: 'aa', engine: 'fallback' },
+  { name: 'lookbehind-scoped-flags', pattern: String.raw`(?<=(?i:foo))bar`, line: 'FOObar', engine: 'fallback' },
+  { name: 'atomic-ordered-failure', pattern: String.raw`(?>a|ab)c`, line: 'abc', engine: 'fallback', expectMiss: true },
+  { name: 'atomic-ordered-match', pattern: String.raw`(?>ab|a)c`, line: 'abc', engine: 'fallback' },
+  { name: 'compound-possessive-failure', pattern: String.raw`(a|ab)++c`, line: 'abc', engine: 'fallback', expectMiss: true },
+  { name: 'bounded-empty-repeat', pattern: String.raw`(?:){2}a`, line: 'a', engine: 'fallback' },
+  { name: 'variable-lookbehind-capture', pattern: String.raw`(?<=(a|aa))b`, line: 'aab', engine: 'fallback' },
+  { name: 'bounded-possessive-inner-backtrack', pattern: String.raw`(a|ab){1}+c`, line: 'abc', engine: 'fallback' },
+  { name: 'bounded-possessive-zero-width', pattern: String.raw`(a?){2}+a`, line: 'a', engine: 'fallback' },
   { name: 'numbered-backref', pattern: String.raw`(foo)\1`, line: 'xxfoofoo', engine: 'fallback' },
+  { name: 'numbered-conditional-matched', pattern: String.raw`(a)?(?(1)b|c)d`, line: 'abd', engine: 'fallback' },
+  { name: 'numbered-conditional-unmatched', pattern: String.raw`(a)?(?(1)b|c)d`, line: 'cd', engine: 'fallback' },
+  { name: 'named-conditional-matched', pattern: String.raw`(?<x>a)?(?(<x>)b|c)d`, line: 'abd', engine: 'fallback' },
+  { name: 'named-conditional-unmatched', pattern: String.raw`(?<x>a)?(?(<x>)b|c)d`, line: 'cd', engine: 'fallback' },
   { name: 'line-anchor-resume-miss', pattern: String.raw`^foo`, line: 'foo', engine: 'auto', from: 1, expectMiss: true },
 ]
 
@@ -67,8 +81,8 @@ for (const c of cases) {
   const onigMatch = c.expectMiss ? null : scanner.findNextMatchSync(c.line, c.from ?? 0)
   const ours = runMark(c)
   const pass = c.expectMiss
-    ? ours.match == null
-    : spansEqual(ours.match, onigMatch?.captureIndices?.[0])
+    ? ours.match == null && onigMatch == null
+    : capturesEqual(ours, onigMatch)
   records.push({ ...c, onig: simplifyOnig(onigMatch), mark: ours, pass })
 }
 const report = {
@@ -103,9 +117,21 @@ function parseSpan(line) {
 }
 function simplifyOnig(match) {
   if (!match) return null
-  return { index: match.index, captures: match.captureIndices.map(c => ({ start: c.start, end: c.end })) }
+  return { index: match.index, captures: match.captureIndices.map(normalizeOnigSpan) }
 }
 function spansEqual(mark, onig) {
+  onig = normalizeOnigSpan(onig)
   if (!mark || !onig) return mark == null && onig == null
   return mark.start === onig.start && mark.end === onig.end
+}
+function normalizeOnigSpan(span) {
+  if (!span || span.start === 0xffffffff || span.end === 0xffffffff) return null
+  return { start: span.start, end: span.end }
+}
+function capturesEqual(mark, onigMatch) {
+  if (!onigMatch) return mark.match == null
+  const oracle = onigMatch.captureIndices ?? []
+  if (!spansEqual(mark.match, oracle[0])) return false
+  if (mark.captures.length !== oracle.length) return false
+  return oracle.every((capture, index) => spansEqual(mark.captures[index], capture))
 }

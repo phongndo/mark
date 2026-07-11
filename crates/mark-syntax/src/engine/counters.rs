@@ -15,8 +15,24 @@ pub struct EngineCounters {
     pub state_cache_misses: u64,
     pub candidate_list_cache_hits: u64,
     pub candidate_list_cache_misses: u64,
+    #[serde(default)]
+    pub regex_compile_count: u64,
+    #[serde(default)]
+    pub pattern_set_construction_count: u64,
+    #[serde(default)]
+    pub inline_candidate_set_construction_count: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pattern_compile_counts: Vec<PatternCompileCount>,
     pub regex_dfa_attempts: u64,
     pub regex_fallback_attempts: u64,
+    #[serde(default)]
+    pub candidate_searches: u64,
+    #[serde(default)]
+    pub candidate_patterns_considered: u64,
+    #[serde(default)]
+    pub candidate_winners: u64,
+    #[serde(default)]
+    pub capture_replays: u64,
     pub prefilter_checks: u64,
     pub prefilter_hits: u64,
     pub prefilter_skips: u64,
@@ -41,6 +57,14 @@ pub struct PatternHotspot {
     pub fallback_budget_kills: u64,
     pub prefilter_hits: u64,
     pub prefilter_skips: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PatternCompileCount {
+    pub grammar_id: Option<u16>,
+    pub pattern_id: Option<u32>,
+    pub pattern: String,
+    pub count: u64,
 }
 
 impl PatternHotspot {
@@ -77,6 +101,22 @@ impl EngineCounters {
         self.regex_fallback_attempts = self.regex_fallback_attempts.saturating_add(1);
     }
 
+    pub(crate) fn record_candidate_search(&mut self) {
+        self.candidate_searches = self.candidate_searches.saturating_add(1);
+    }
+
+    pub(crate) fn record_candidate_pattern_considered(&mut self) {
+        self.candidate_patterns_considered = self.candidate_patterns_considered.saturating_add(1);
+    }
+
+    pub(crate) fn record_candidate_winner(&mut self) {
+        self.candidate_winners = self.candidate_winners.saturating_add(1);
+    }
+
+    pub(crate) fn record_capture_replay(&mut self) {
+        self.capture_replays = self.capture_replays.saturating_add(1);
+    }
+
     pub(crate) fn record_state_cache_hit(&mut self) {
         self.state_cache_hits = self.state_cache_hits.saturating_add(1);
     }
@@ -103,6 +143,39 @@ impl EngineCounters {
 
     pub(crate) fn record_candidate_list_cache_miss(&mut self) {
         self.candidate_list_cache_misses = self.candidate_list_cache_misses.saturating_add(1);
+    }
+
+    pub(crate) fn record_regex_compile(
+        &mut self,
+        grammar_id: Option<u16>,
+        pattern_id: Option<u32>,
+        pattern: &str,
+    ) {
+        self.regex_compile_count = self.regex_compile_count.saturating_add(1);
+        if let Some(entry) = self.pattern_compile_counts.iter_mut().find(|entry| {
+            entry.grammar_id == grammar_id
+                && entry.pattern_id == pattern_id
+                && entry.pattern == pattern
+        }) {
+            entry.count = entry.count.saturating_add(1);
+        } else {
+            self.pattern_compile_counts.push(PatternCompileCount {
+                grammar_id,
+                pattern_id,
+                pattern: pattern.to_owned(),
+                count: 1,
+            });
+        }
+    }
+
+    pub(crate) fn record_pattern_set_construction(&mut self) {
+        self.pattern_set_construction_count = self.pattern_set_construction_count.saturating_add(1);
+    }
+
+    pub(crate) fn record_inline_candidate_set_construction(&mut self) {
+        self.inline_candidate_set_construction_count = self
+            .inline_candidate_set_construction_count
+            .saturating_add(1);
     }
 
     pub(crate) fn record_prefilter_check(&mut self, may_match: bool) {
@@ -158,12 +231,42 @@ impl EngineCounters {
         self.candidate_list_cache_misses = self
             .candidate_list_cache_misses
             .saturating_add(other.candidate_list_cache_misses);
+        self.regex_compile_count = self
+            .regex_compile_count
+            .saturating_add(other.regex_compile_count);
+        self.pattern_set_construction_count = self
+            .pattern_set_construction_count
+            .saturating_add(other.pattern_set_construction_count);
+        self.inline_candidate_set_construction_count = self
+            .inline_candidate_set_construction_count
+            .saturating_add(other.inline_candidate_set_construction_count);
+        for other_count in other.pattern_compile_counts {
+            if let Some(count) = self.pattern_compile_counts.iter_mut().find(|count| {
+                count.grammar_id == other_count.grammar_id
+                    && count.pattern_id == other_count.pattern_id
+                    && count.pattern == other_count.pattern
+            }) {
+                count.count = count.count.saturating_add(other_count.count);
+            } else {
+                self.pattern_compile_counts.push(other_count);
+            }
+        }
         self.regex_dfa_attempts = self
             .regex_dfa_attempts
             .saturating_add(other.regex_dfa_attempts);
         self.regex_fallback_attempts = self
             .regex_fallback_attempts
             .saturating_add(other.regex_fallback_attempts);
+        self.candidate_searches = self
+            .candidate_searches
+            .saturating_add(other.candidate_searches);
+        self.candidate_patterns_considered = self
+            .candidate_patterns_considered
+            .saturating_add(other.candidate_patterns_considered);
+        self.candidate_winners = self
+            .candidate_winners
+            .saturating_add(other.candidate_winners);
+        self.capture_replays = self.capture_replays.saturating_add(other.capture_replays);
         self.prefilter_checks = self.prefilter_checks.saturating_add(other.prefilter_checks);
         self.prefilter_hits = self.prefilter_hits.saturating_add(other.prefilter_hits);
         self.prefilter_skips = self.prefilter_skips.saturating_add(other.prefilter_skips);

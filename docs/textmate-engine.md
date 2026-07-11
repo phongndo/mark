@@ -340,6 +340,8 @@ build, inside the 8 MB core-30 target.
 Phase 6+ covers broadening conformance beyond the proving corpus, raising
 scanner throughput, and expanding the catalog beyond core-30. The
 unavailable-backend shim has already been removed from the production path.
+The concrete performance sequence and acceptance gates are in
+[`textmate-performance-plan.md`](textmate-performance-plan.md).
 
 ## Reproducible oracle commands
 
@@ -398,6 +400,24 @@ Do not hand-edit `*.golden.jsonl`. Update sources, then regenerate.
 
 ## Known current limitations (honest)
 
+### VS Code screenshots are not a TextMate-only oracle
+
+VS Code normally overlays language-server semantic tokens on TextMate tokens.
+For Rust, rust-analyzer can therefore color parameters, local declarations,
+fields, and inferred types differently even when the underlying TextMate scope
+stream is identical. Inline type hints in a screenshot are another indication
+that semantic analysis is active. Mark currently promises parity with pinned
+`vscode-textmate`, not rust-analyzer semantic-token parity.
+
+For example, the `execute_inner` function in
+`engine/regex/bytecode.rs`—including its parameters and `let mut pc` /
+`let mut position` declarations—was compared token-by-token and has the exact
+same TextMate scopes in Mark and `vscode-textmate`. A visual difference there
+comes from semantic-token overlays and/or theme scope-color mappings, not a
+native tokenizer divergence. Visual investigations must first run VS Code with
+semantic highlighting disabled, then compare the full scope stacks before
+changing tokenizer behavior.
+
 1. **Corpus parity is not universal proof.** The checked-in core-30 fixtures are
    100% exact, but more adversarial and real-world fixtures are still needed.
 2. **Broader Oniguruma conformance.** Recursive subroutines, nested classes,
@@ -429,3 +449,4 @@ Do not hand-edit `*.golden.jsonl`. Update sources, then regenerate.
 - Oracle: `tools/golden-dump.mjs`, `tools/generate-goldens.mjs`, `tools/golden-oracle/`
 - Assets: `assets/tm-grammars/`
 - Engine: `crates/mark-syntax/src/engine/`
+- Performance continuation plan: `docs/textmate-performance-plan.md`

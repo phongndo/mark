@@ -469,7 +469,7 @@ impl SyntaxPalette {
             string: Some(palette.syntax_string.color()),
             tag: Some(palette.syntax_regexp.color()),
             r#type: Some(palette.syntax_variable.color()),
-            variable: Some(palette.syntax_variable.color()),
+            variable: None,
         }
     }
 

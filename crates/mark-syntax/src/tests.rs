@@ -332,6 +332,24 @@ fn direct_highlighting_uses_the_bundled_native_backend() {
 }
 
 #[test]
+fn bundled_markdown_loads_private_yang_and_twig_dependencies() {
+    let mut highlighter = SyntaxHighlighter::new();
+    let source = "```yang\nmodule demo {\n namespace \"urn:demo\";\n}\n```\n```twig\n{% if user %}{{ user.name }}{% endif %}\n```";
+    let highlighted = highlighter.highlight("markdown", source).unwrap();
+
+    let yang_line = "module demo {";
+    assert!(highlighted.lines[1].segments.iter().any(|segment| {
+        yang_line.get(segment.byte_start..segment.byte_end) == Some("module")
+            && segment.class == Some(SyntaxClass::Keyword)
+    }));
+    let twig_line = "{% if user %}{{ user.name }}{% endif %}";
+    assert!(highlighted.lines[6].segments.iter().any(|segment| {
+        twig_line.get(segment.byte_start..segment.byte_end) == Some("if")
+            && segment.class == Some(SyntaxClass::Keyword)
+    }));
+}
+
+#[test]
 fn core_language_identity_survives_without_a_backend() {
     let requested = BTreeSet::from(["rust".to_owned(), "ada".to_owned()]);
 

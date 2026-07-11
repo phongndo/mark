@@ -146,6 +146,7 @@ pub enum Ast {
     Empty,
     Literal(String),
     Dot,
+    Grapheme,
     Class(CharClass),
     Anchor(AnchorKind),
     Concat(Vec<Ast>),
@@ -156,6 +157,7 @@ pub enum Ast {
         max: Option<usize>,
         greedy: bool,
         possessive: bool,
+        atomic: bool,
     },
     Group {
         index: Option<u32>,
@@ -167,6 +169,11 @@ pub enum Ast {
         child: Box<Ast>,
     },
     Backref(Backref),
+    Conditional {
+        condition: Backref,
+        matched: Box<Ast>,
+        unmatched: Box<Ast>,
+    },
     Subroutine(Box<SubroutineCall>),
     Flags {
         flags: RegexFlags,
@@ -194,6 +201,16 @@ fn collect_group_paths(
                 path.pop();
             }
         }
+        Ast::Conditional {
+            matched, unmatched, ..
+        } => {
+            path.push(AstPathStep::Branch(0));
+            collect_group_paths(matched, path, paths);
+            path.pop();
+            path.push(AstPathStep::Branch(1));
+            collect_group_paths(unmatched, path, paths);
+            path.pop();
+        }
         Ast::Repeat { node, .. }
         | Ast::Group { child: node, .. }
         | Ast::Look { child: node, .. }
@@ -205,6 +222,7 @@ fn collect_group_paths(
         Ast::Empty
         | Ast::Literal(_)
         | Ast::Dot
+        | Ast::Grapheme
         | Ast::Class(_)
         | Ast::Anchor(_)
         | Ast::Backref(_)
@@ -230,6 +248,12 @@ fn resolve_subroutine_paths(
             for node in nodes {
                 resolve_subroutine_paths(node, named_captures, paths);
             }
+        }
+        Ast::Conditional {
+            matched, unmatched, ..
+        } => {
+            resolve_subroutine_paths(matched, named_captures, paths);
+            resolve_subroutine_paths(unmatched, named_captures, paths);
         }
         Ast::Repeat { node, .. }
         | Ast::Group { child: node, .. }
@@ -276,6 +300,9 @@ pub(crate) fn has_case_insensitive_scope(ast: &Ast) -> bool {
         Ast::Concat(nodes) | Ast::Alternation(nodes) => {
             nodes.iter().any(has_case_insensitive_scope)
         }
+        Ast::Conditional {
+            matched, unmatched, ..
+        } => has_case_insensitive_scope(matched) || has_case_insensitive_scope(unmatched),
         Ast::Repeat { node, .. }
         | Ast::Group { child: node, .. }
         | Ast::Look { child: node, .. } => has_case_insensitive_scope(node),
@@ -353,6 +380,16 @@ impl<'a> Parser<'a> {
             if Some(ch) == terminator || ch == '|' {
                 break;
             }
+            if self.flags.ignore_whitespace && ch.is_whitespace() {
+                self.bump();
+                continue;
+            }
+            if self.flags.ignore_whitespace && ch == '#' {
+                while self.peek().is_some_and(|next| next != '\n') {
+                    self.bump();
+                }
+                continue;
+            }
             push_concat_node(&mut nodes, self.parse_repeat());
         }
         match nodes.len() {
@@ -399,6 +436,7 @@ impl<'a> Parser<'a> {
                 max,
                 greedy,
                 possessive,
+                atomic: false,
             };
         }
         node
@@ -529,10 +567,13 @@ impl<'a> Parser<'a> {
                 self.features.possessive_or_atomic = true;
                 let child = self.parse_alternation(Some(')'));
                 self.expect(')');
-                Ast::Group {
-                    index: None,
-                    name: None,
-                    child: Box::new(child),
+                Ast::Repeat {
+                    node: Box::new(child),
+                    min: 1,
+                    max: Some(1),
+                    greedy: true,
+                    possessive: true,
+                    atomic: true,
                 }
             }
             Some('#') => {
@@ -543,8 +584,7 @@ impl<'a> Parser<'a> {
             }
             Some('(') => {
                 self.features.conditional = true;
-                self.take_balanced_group_tail();
-                Ast::Unsupported("conditional".to_owned())
+                self.parse_conditional()
             }
             Some(ch) if is_flag_char(ch) || ch == '-' => self.parse_flag_group(),
             _ => {
@@ -554,6 +594,42 @@ impl<'a> Parser<'a> {
                 Ast::Unsupported(format!("unsupported group (?{rest})"))
             }
         }
+    }
+
+    fn parse_conditional(&mut self) -> Ast {
+        self.bump(); // condition's opening `(`
+        let raw = self.take_until(')');
+        self.expect(')');
+        let condition = if let Ok(index) = raw.parse::<u32>() {
+            Some(Backref::Number(index))
+        } else if let Some(name) = raw.strip_prefix('<').and_then(|raw| raw.strip_suffix('>')) {
+            Some(Backref::Name(name.to_owned()))
+        } else {
+            raw.strip_prefix('\'')
+                .and_then(|raw| raw.strip_suffix('\''))
+                .map(|name| Backref::Name(name.to_owned()))
+        };
+
+        let matched = self.parse_concat(Some(')'));
+        let unmatched = if self.peek() == Some('|') {
+            self.bump();
+            self.parse_alternation(Some(')'))
+        } else {
+            Ast::Empty
+        };
+        self.expect(')');
+        condition.map_or_else(
+            || {
+                self.diagnostics
+                    .push(format!("unsupported conditional test ({raw})"));
+                Ast::Unsupported("conditional-test".to_owned())
+            },
+            |condition| Ast::Conditional {
+                condition,
+                matched: Box::new(matched),
+                unmatched: Box::new(unmatched),
+            },
+        )
     }
 
     fn parse_flag_group(&mut self) -> Ast {
@@ -573,7 +649,10 @@ impl<'a> Parser<'a> {
                 }
                 ':' => {
                     self.bump();
+                    let outer = self.flags;
+                    self.flags = local;
                     let child = self.parse_alternation(Some(')'));
+                    self.flags = outer;
                     self.expect(')');
                     return Ast::Flags {
                         flags: local,
@@ -778,6 +857,7 @@ impl<'a> Parser<'a> {
                 negated: false,
                 atoms: vec![ClassAtom::Perl(PerlClassKind::NotNewline)],
             }),
+            'X' => Ast::Grapheme,
             'p' | 'P' if self.peek() == Some('{') => {
                 self.bump();
                 let name = self.take_until('}');
@@ -838,10 +918,21 @@ impl<'a> Parser<'a> {
                 let digits = self.take_hex_digits(4);
                 Ast::Literal(hex_char(&digits).unwrap_or('u').to_string())
             }
-            'R' => Ast::Class(CharClass {
-                negated: false,
-                atoms: vec![ClassAtom::Perl(PerlClassKind::VerticalSpace)],
-            }),
+            'R' => Ast::Alternation(vec![
+                Ast::Literal("\r\n".to_owned()),
+                Ast::Class(CharClass {
+                    negated: false,
+                    atoms: vec![
+                        ClassAtom::Char('\n'),
+                        ClassAtom::Char('\r'),
+                        ClassAtom::Char('\u{000B}'),
+                        ClassAtom::Char('\u{000C}'),
+                        ClassAtom::Char('\u{0085}'),
+                        ClassAtom::Char('\u{2028}'),
+                        ClassAtom::Char('\u{2029}'),
+                    ],
+                }),
+            ]),
             _ => Ast::Literal(unescape_char(ch).to_string()),
         }
     }
@@ -914,25 +1005,6 @@ impl<'a> Parser<'a> {
             self.bump();
         }
         out
-    }
-
-    fn take_balanced_group_tail(&mut self) {
-        let mut depth = 1usize;
-        while let Some(ch) = self.bump() {
-            match ch {
-                '(' => depth += 1,
-                ')' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        break;
-                    }
-                }
-                '\\' => {
-                    self.bump();
-                }
-                _ => {}
-            }
-        }
     }
 
     fn expect(&mut self, expected: char) {

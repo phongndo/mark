@@ -1,13 +1,18 @@
-use std::ops::{Deref, DerefMut, Range};
+use std::{
+    ops::{Deref, DerefMut, Range},
+    sync::{Arc, OnceLock},
+};
+use unicode_segmentation::UnicodeSegmentation;
 
 use super::ast::{
     AnchorKind, Ast, AstPathStep, Backref, CharClass, ClassAtom, LookKind, ParsedRegex,
     PerlClassKind, RegexFlags, has_case_insensitive_scope, parse,
 };
+use super::bytecode::{BytecodeScratch, CompileError, Program};
 use super::prefilter::Prefilter;
 use super::{AnchorContext, MatchResult, Matcher};
 
-const DEFAULT_STEP_BUDGET: usize = 100_000;
+pub(crate) const DEFAULT_STEP_BUDGET: usize = 100_000;
 const STATE_LIMIT: usize = 2048;
 // Most branching expressions stay below this empirically measured fanout;
 // reserving it on the first split avoids repeated growth in hot alternations.
@@ -61,7 +66,8 @@ pub struct FallbackReport {
 
 #[derive(Debug, Clone)]
 pub struct FallbackMatcher {
-    parsed: ParsedRegex,
+    parsed: Arc<ParsedRegex>,
+    bytecode: OnceLock<Option<Arc<Program>>>,
     prefilter: Prefilter,
     start_bytes: Option<StartByteSet>,
     /// True when the pattern can match the empty string at a start position.
@@ -69,6 +75,8 @@ pub struct FallbackMatcher {
     start_nullable: bool,
     start_hint: StartHint,
     budget: usize,
+    /// Process-unique id keying scan-local prefilter cursors.
+    prefilter_slot: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -292,7 +300,10 @@ impl FallbackMatcher {
     }
 
     pub fn with_budget(pattern: &str, budget: usize) -> Self {
-        let parsed = parse(pattern);
+        Self::from_parsed(Arc::new(parse(pattern)), budget)
+    }
+
+    pub(crate) fn from_parsed(parsed: Arc<ParsedRegex>, budget: usize) -> Self {
         let prefilter = Prefilter::from_regex(&parsed);
         let (start_bytes, start_nullable) =
             if parsed.flags.case_insensitive || has_case_insensitive_scope(&parsed.ast) {
@@ -307,18 +318,59 @@ impl FallbackMatcher {
                 }
             };
         let start_hint = start_hint(&parsed.ast);
+        static NEXT_PREFILTER_SLOT: std::sync::atomic::AtomicU32 =
+            std::sync::atomic::AtomicU32::new(0);
+        let prefilter_slot = if prefilter.is_enabled() {
+            NEXT_PREFILTER_SLOT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        } else {
+            u32::MAX
+        };
         Self {
             parsed,
+            bytecode: OnceLock::new(),
             prefilter,
             start_bytes,
             start_nullable,
             start_hint,
             budget,
+            prefilter_slot,
         }
     }
 
     pub fn parsed(&self) -> &ParsedRegex {
         &self.parsed
+    }
+
+    fn bytecode(&self) -> Option<&Program> {
+        self.bytecode
+            .get_or_init(|| {
+                Program::is_beneficial(&self.parsed)
+                    .then(|| {
+                        // Subroutine calls need capture slots and routine
+                        // entries even for position selection; compile with
+                        // the minimal internal layout so those patterns still
+                        // avoid the recursive VM. Selection discards captures.
+                        // Backreference-only patterns measured faster on the
+                        // recursive path and keep it.
+                        Program::compile(&self.parsed)
+                            .or_else(|error| match error {
+                                CompileError::Subroutine | CompileError::Conditional => {
+                                    Program::compile_captures(&self.parsed, &[])
+                                }
+                                other => Err(other),
+                            })
+                            .ok()
+                            .map(Arc::new)
+                    })
+                    .flatten()
+            })
+            .as_deref()
+    }
+
+    fn active_bytecode(&self) -> Option<&Program> {
+        (position_engine_mode() != PositionEngineMode::Recursive)
+            .then(|| self.bytecode())
+            .flatten()
     }
 
     pub fn prefilter_may_match(&self, line: &str, from: usize) -> Option<bool> {
@@ -347,11 +399,21 @@ impl FallbackMatcher {
         from: usize,
         ctx: AnchorContext,
     ) -> Result<FallbackReport, FallbackError> {
-        if self.parsed.features.backreference || self.parsed.features.conditional {
-            self.try_find(line, from, ctx)
+        let capture_count = if self.active_bytecode().is_some() {
+            0
+        } else if self.parsed.features.backreference
+            || self.parsed.features.conditional
+            || self.parsed.features.subroutine
+        {
+            self.parsed.capture_count as usize + 1
         } else {
-            self.try_find_with_capture_count(line, from, ctx, 0)
+            0
+        };
+        let mut report = self.try_find_with_capture_count(line, from, ctx, capture_count)?;
+        if let Some(result) = &mut report.result {
+            result.captures.clear();
         }
+        Ok(report)
     }
 
     fn try_find_with_capture_count(
@@ -462,13 +524,16 @@ impl FallbackMatcher {
 
     /// Search-only variant used while selecting among a set of rules. Capture
     /// extraction is replayed only for the winning pattern by the tokenizer.
-    pub(crate) fn try_find_at_without_captures(
+    pub(crate) fn try_find_at_without_captures_with_scratch(
         &self,
         line: &str,
         start: usize,
         ctx: AnchorContext,
-    ) -> Result<Option<MatchResult>, FallbackError> {
-        let capture_count = if self.parsed.features.backreference
+        scratch: &mut BytecodeScratch,
+    ) -> Result<FallbackReport, FallbackError> {
+        let capture_count = if self.active_bytecode().is_some() {
+            0
+        } else if self.parsed.features.backreference
             || self.parsed.features.conditional
             || self.parsed.features.subroutine
         {
@@ -476,8 +541,13 @@ impl FallbackMatcher {
         } else {
             0
         };
-        self.try_find_at_with_capture_count(line, start, ctx, capture_count)
-            .map(|report| report.result)
+        self.try_find_at_with_capture_count_and_scratch(
+            line,
+            start,
+            ctx,
+            capture_count,
+            Some(scratch),
+        )
     }
 
     pub(crate) fn try_find_at(
@@ -486,25 +556,37 @@ impl FallbackMatcher {
         start: usize,
         ctx: AnchorContext,
     ) -> Result<FallbackReport, FallbackError> {
-        self.try_find_at_with_capture_count(
+        self.try_find_at_with_capture_count_and_scratch(
             line,
             start,
             ctx,
             self.parsed.capture_count as usize + 1,
+            None,
         )
     }
 
-    fn try_find_at_with_capture_count(
+    fn try_find_at_with_capture_count_and_scratch(
         &self,
         line: &str,
         start: usize,
         ctx: AnchorContext,
         capture_count: usize,
+        scratch: Option<&mut BytecodeScratch>,
     ) -> Result<FallbackReport, FallbackError> {
         if !line.is_char_boundary(start) {
             return Err(FallbackError::InvalidStart { from: start });
         }
-        if !self.prefilter.may_match(line, start) {
+        let mut scratch = scratch;
+        let prefilter_viable = match scratch.as_deref_mut() {
+            Some(scratch) => scratch.prefilter_cursors().may_match(
+                self.prefilter_slot,
+                &self.prefilter,
+                line,
+                start,
+            ),
+            None => self.prefilter.may_match(line, start),
+        };
+        if !prefilter_viable {
             return Ok(FallbackReport {
                 result: None,
                 steps: 0,
@@ -544,13 +626,49 @@ impl FallbackMatcher {
             });
         }
         let mut budget = StepBudget::new(self.budget);
-        let result = self.try_match_at_start_with_capture_count(
-            line,
-            start,
-            ctx,
-            &mut budget,
-            capture_count,
-        )?;
+        let result = if capture_count == 0
+            && let Some(program) = self.active_bytecode()
+        {
+            let mut local_scratch = BytecodeScratch::default();
+            let scratch = scratch.unwrap_or(&mut local_scratch);
+            let end = match position_engine_mode() {
+                PositionEngineMode::Recursive => {
+                    recursive_position_end(&self.parsed, line, start, ctx, &mut budget)?
+                }
+                PositionEngineMode::Candidate => program
+                    .execute(line, start, ctx, &mut budget, scratch)
+                    .map_err(|_| FallbackError::BudgetExceeded {
+                        steps: budget.used(),
+                    })?,
+                PositionEngineMode::Shadow => {
+                    let mut candidate_budget = StepBudget::new(self.budget);
+                    let candidate =
+                        program.execute(line, start, ctx, &mut candidate_budget, scratch);
+                    let recursive =
+                        recursive_position_end(&self.parsed, line, start, ctx, &mut budget)?;
+                    if candidate.as_ref().ok().copied() != Some(recursive) {
+                        eprintln!(
+                            "MARK_TEXTMATE_VM_MISMATCH pattern={:?} start={} recursive={:?} candidate={:?}",
+                            self.parsed.source, start, recursive, candidate
+                        );
+                    }
+                    recursive
+                }
+            };
+            end.map(|end| MatchResult {
+                start,
+                end,
+                captures: Vec::new(),
+            })
+        } else {
+            self.try_match_at_start_with_capture_count(
+                line,
+                start,
+                ctx,
+                &mut budget,
+                capture_count,
+            )?
+        };
         Ok(FallbackReport {
             result,
             steps: budget.used(),
@@ -575,19 +693,46 @@ impl FallbackMatcher {
         budget: &mut StepBudget,
         capture_count: usize,
     ) -> Result<Option<MatchResult>, FallbackError> {
-        if capture_count == 0 && position_only_eligible(&self.parsed) {
-            let positions = match_position_node(
-                &self.parsed.ast,
-                line,
+        if capture_count == 0
+            && let Some(program) = self.active_bytecode()
+        {
+            let end = match position_engine_mode() {
+                PositionEngineMode::Recursive => {
+                    recursive_position_end(&self.parsed, line, start, ctx, budget)?
+                }
+                PositionEngineMode::Candidate => program
+                    .execute(line, start, ctx, budget, &mut BytecodeScratch::default())
+                    .map_err(|_| FallbackError::BudgetExceeded {
+                        steps: budget.used(),
+                    })?,
+                PositionEngineMode::Shadow => {
+                    let mut candidate_budget = StepBudget::new(self.budget);
+                    let candidate = program.execute(
+                        line,
+                        start,
+                        ctx,
+                        &mut candidate_budget,
+                        &mut BytecodeScratch::default(),
+                    );
+                    let recursive = recursive_position_end(&self.parsed, line, start, ctx, budget)?;
+                    if candidate.as_ref().ok().copied() != Some(recursive) {
+                        eprintln!(
+                            "MARK_TEXTMATE_VM_MISMATCH pattern={:?} start={} recursive={:?} candidate={:?}",
+                            self.parsed.source, start, recursive, candidate
+                        );
+                    }
+                    recursive
+                }
+            };
+            return Ok(end.map(|end| MatchResult {
                 start,
-                ctx,
-                self.parsed.flags,
-                budget,
-            )
-            .map_err(|_| FallbackError::BudgetExceeded {
-                steps: budget.used(),
-            })?;
-            return Ok(positions.into_first().map(|end| MatchResult {
+                end,
+                captures: Vec::new(),
+            }));
+        }
+        if capture_count == 0 && position_only_eligible(&self.parsed) {
+            let end = recursive_position_end(&self.parsed, line, start, ctx, budget)?;
+            return Ok(end.map(|end| MatchResult {
                 start,
                 end,
                 captures: Vec::new(),
@@ -737,7 +882,12 @@ fn first_start_bytes(ast: &Ast) -> Option<StartBytes> {
             bytes: StartByteSet::empty(),
             nullable: true,
         }),
-        Ast::Dot | Ast::Backref(_) | Ast::Subroutine(_) | Ast::Unsupported(_) => None,
+        Ast::Dot
+        | Ast::Grapheme
+        | Ast::Backref(_)
+        | Ast::Conditional { .. }
+        | Ast::Subroutine(_)
+        | Ast::Unsupported(_) => None,
     }
 }
 
@@ -812,13 +962,9 @@ fn class_start_bytes(class: &CharClass) -> Option<StartByteSet> {
 fn insert_perl_start_bytes(bytes: &mut StartByteSet, kind: PerlClassKind) -> Option<()> {
     match kind {
         PerlClassKind::Digit => insert_range(bytes, b'0', b'9'),
-        PerlClassKind::Word => {
-            insert_range(bytes, b'0', b'9');
-            insert_range(bytes, b'A', b'Z');
-            insert_range(bytes, b'a', b'z');
-            bytes.insert(b'_');
-        }
-        PerlClassKind::Space => insert_ascii_space(bytes),
+        // The evaluator intentionally uses Unicode word/whitespace semantics.
+        // An ASCII-only byte hint would reject valid non-ASCII starts.
+        PerlClassKind::Word | PerlClassKind::Space => return None,
         PerlClassKind::HorizontalSpace => {
             insert_range(bytes, b'0', b'9');
             insert_range(bytes, b'A', b'F');
@@ -850,28 +996,12 @@ fn insert_posix_start_bytes(bytes: &mut StartByteSet, name: &str, negated: bool)
             insert_range(bytes, b'A', b'F');
             insert_range(bytes, b'a', b'f');
         }
-        "alpha" => {
-            insert_range(bytes, b'A', b'Z');
-            insert_range(bytes, b'a', b'z');
-        }
-        "alnum" => {
-            insert_range(bytes, b'0', b'9');
-            insert_range(bytes, b'A', b'Z');
-            insert_range(bytes, b'a', b'z');
-        }
-        "lower" => insert_range(bytes, b'a', b'z'),
-        "upper" => insert_range(bytes, b'A', b'Z'),
-        "word" => {
-            insert_range(bytes, b'0', b'9');
-            insert_range(bytes, b'A', b'Z');
-            insert_range(bytes, b'a', b'z');
-            bytes.insert(b'_');
-        }
+        // These predicates are Unicode-aware in `posix_class_contains`.
+        "alpha" | "alnum" | "lower" | "upper" | "word" | "space" => return None,
         "blank" => {
             bytes.insert(b'\t');
             bytes.insert(b' ');
         }
-        "space" => insert_ascii_space(bytes),
         "ascii" => insert_range(bytes, 0, 0x7f),
         _ => return None,
     }
@@ -880,12 +1010,6 @@ fn insert_posix_start_bytes(bytes: &mut StartByteSet, name: &str, negated: bool)
 
 fn insert_range(bytes: &mut StartByteSet, start: u8, end: u8) {
     for byte in start..=end {
-        bytes.insert(byte);
-    }
-}
-
-fn insert_ascii_space(bytes: &mut StartByteSet) {
-    for byte in [b'\t', b'\n', 0x0b, 0x0c, b'\r', b' '] {
         bytes.insert(byte);
     }
 }
@@ -937,6 +1061,9 @@ fn match_position_node(
                 PositionStates::empty()
             })
         }
+        Ast::Grapheme => Ok(
+            grapheme_end(line, position).map_or_else(PositionStates::empty, PositionStates::one)
+        ),
         Ast::Class(class) => {
             let Some((ch, next)) = char_at(line, position) else {
                 return Ok(PositionStates::empty());
@@ -981,12 +1108,14 @@ fn match_position_node(
             max,
             greedy,
             possessive,
+            atomic,
         } => match_position_repeat(
             node,
             *min,
             *max,
             *greedy,
             *possessive,
+            *atomic,
             line,
             position,
             ctx,
@@ -1030,8 +1159,69 @@ fn match_position_node(
                 })
             }
         },
-        Ast::Backref(_) | Ast::Subroutine(_) | Ast::Unsupported(_) => Ok(PositionStates::empty()),
+        Ast::Backref(_) | Ast::Conditional { .. } | Ast::Subroutine(_) | Ast::Unsupported(_) => {
+            Ok(PositionStates::empty())
+        }
     }
+}
+
+#[cfg(test)]
+pub(crate) fn recursive_position_span(
+    parsed: &ParsedRegex,
+    line: &str,
+    start: usize,
+    ctx: AnchorContext,
+) -> Option<std::ops::Range<usize>> {
+    let mut budget = StepBudget::new(DEFAULT_STEP_BUDGET);
+    match_position_node(&parsed.ast, line, start, ctx, parsed.flags, &mut budget)
+        .ok()?
+        .into_first()
+        .map(|end| start..end)
+}
+
+fn recursive_position_end(
+    parsed: &ParsedRegex,
+    line: &str,
+    start: usize,
+    ctx: AnchorContext,
+    budget: &mut StepBudget,
+) -> Result<Option<usize>, FallbackError> {
+    match_position_node(&parsed.ast, line, start, ctx, parsed.flags, budget)
+        .map(PositionStates::into_first)
+        .map_err(|_| FallbackError::BudgetExceeded {
+            steps: budget.used(),
+        })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PositionEngineMode {
+    Recursive,
+    Candidate,
+    Shadow,
+}
+
+pub(crate) fn position_engine_mode() -> PositionEngineMode {
+    static MODE: OnceLock<PositionEngineMode> = OnceLock::new();
+    *MODE.get_or_init(|| match std::env::var("MARK_TEXTMATE_VM").as_deref() {
+        Ok("candidate") => PositionEngineMode::Candidate,
+        Ok("shadow") => PositionEngineMode::Shadow,
+        Ok("recursive") => PositionEngineMode::Recursive,
+        _ => PositionEngineMode::Candidate,
+    })
+}
+
+pub(crate) fn capture_engine_mode() -> PositionEngineMode {
+    static MODE: OnceLock<PositionEngineMode> = OnceLock::new();
+    *MODE.get_or_init(|| {
+        let capture = std::env::var("MARK_TEXTMATE_CAPTURE_VM").ok();
+        let position = std::env::var("MARK_TEXTMATE_VM").ok();
+        match capture.as_deref().or(position.as_deref()) {
+            Some("recursive") => PositionEngineMode::Recursive,
+            Some("shadow") => PositionEngineMode::Shadow,
+            Some("candidate") | None => PositionEngineMode::Candidate,
+            Some(_) => PositionEngineMode::Candidate,
+        }
+    })
 }
 
 fn position_lookbehind_matches(
@@ -1092,12 +1282,16 @@ fn match_position_repeat(
     max: Option<usize>,
     greedy: bool,
     possessive: bool,
+    atomic: bool,
     line: &str,
     position: usize,
     ctx: AnchorContext,
     flags: RegexFlags,
     budget: &mut StepBudget,
 ) -> Result<PositionStates, BudgetExceeded> {
+    // With an exact repetition count there is no repetition-count choice to
+    // make possessive. Oniguruma still permits backtracking inside the atom.
+    let possessive = possessive && (atomic || max != Some(min));
     if is_simple_repeat_atom(node) {
         let max = max.unwrap_or(usize::MAX);
         let mut positions = Vec::new();
@@ -1135,36 +1329,82 @@ fn match_position_repeat(
         return Ok(PositionStates::from_vec(out));
     }
 
-    let max = max.unwrap_or_else(|| line.len().saturating_sub(position).saturating_add(1));
-    let mut frontier = vec![(0usize, position)];
-    let mut accepted = Vec::new();
-    while let Some((count, current)) = frontier.pop() {
-        budget.step()?;
-        if count >= min {
-            accepted.push(current);
-            if accepted.len() >= STATE_LIMIT {
+    if possessive {
+        let max = max.unwrap_or_else(|| line.len().saturating_sub(position).saturating_add(1));
+        let mut current = position;
+        let mut count = 0usize;
+        while count < max && (greedy || count < min) {
+            budget.step()?;
+            let Some(next) = match_position_node(node, line, current, ctx, flags, budget)?
+                .into_iter()
+                .next()
+            else {
+                break;
+            };
+            count += 1;
+            if next == current {
+                current = next;
                 break;
             }
+            current = next;
         }
-        if count >= max {
-            continue;
-        }
-        let next_positions = match_position_node(node, line, current, ctx, flags, budget)?;
-        for next in next_positions {
-            if next == current {
+        return Ok(if count >= min {
+            PositionStates::one(current)
+        } else {
+            PositionStates::empty()
+        });
+    }
+
+    let max = max.unwrap_or_else(|| line.len().saturating_sub(position).saturating_add(1));
+    // Preference-ordered DFS emission; see `match_repeat` for the rationale.
+    enum Work {
+        Visit(usize, usize),
+        Accept(usize),
+    }
+    let mut stack = vec![Work::Visit(0, position)];
+    let mut accepted: Vec<usize> = Vec::new();
+    while let Some(work) = stack.pop() {
+        budget.step()?;
+        let (count, current) = match work {
+            Work::Accept(position) => {
+                if !accepted.contains(&position) {
+                    accepted.push(position);
+                    if accepted.len() >= STATE_LIMIT {
+                        break;
+                    }
+                }
                 continue;
             }
-            frontier.push((count + 1, next));
-            if frontier.len() >= STATE_LIMIT {
-                break;
+            Work::Visit(count, position) => (count, position),
+        };
+        if greedy && count >= min {
+            stack.push(Work::Accept(current));
+        }
+        if count < max && stack.len() < STATE_LIMIT {
+            let next_positions = match_position_node(node, line, current, ctx, flags, budget)?;
+            let push = |next: usize, stack: &mut Vec<Work>| {
+                if next == current {
+                    if count < min {
+                        stack.push(Work::Visit(count + 1, next));
+                    }
+                    return;
+                }
+                stack.push(Work::Visit(count + 1, next));
+            };
+            match next_positions {
+                PositionStates::Empty => {}
+                PositionStates::One(next) => push(next, &mut stack),
+                PositionStates::Many(positions) => {
+                    for next in positions.into_iter().rev() {
+                        push(next, &mut stack);
+                    }
+                }
             }
         }
+        if !greedy && count >= min {
+            stack.push(Work::Accept(current));
+        }
     }
-    accepted.sort_unstable();
-    if greedy {
-        accepted.reverse();
-    }
-    accepted.dedup();
     Ok(PositionStates::from_vec(accepted))
 }
 
@@ -1203,6 +1443,11 @@ fn match_node(
         Ast::Literal(literal) => match_literal(literal, line, state, flags, budget),
         Ast::Dot => match_dot(line, state, flags),
         Ast::Class(class) => match_class(class, line, state, flags),
+        Ast::Grapheme => Ok(
+            grapheme_end(line, state.pos).map_or_else(VmStates::empty, |end| {
+                VmStates::one(VmState { pos: end, ..state })
+            }),
+        ),
         Ast::Anchor(anchor) => match_anchor(*anchor, line, state, ctx),
         Ast::Concat(nodes) => match_concat(nodes, line, state, ctx, flags, budget, parsed),
         Ast::Alternation(branches) => {
@@ -1220,12 +1465,14 @@ fn match_node(
             max,
             greedy,
             possessive,
+            atomic,
         } => match_repeat(
             node,
             *min,
             *max,
             *greedy,
             *possessive,
+            *atomic,
             line,
             state,
             ctx,
@@ -1249,6 +1496,30 @@ fn match_node(
             match_look(*kind, child, line, state, ctx, flags, budget, parsed)
         }
         Ast::Backref(backref) => match_backref(backref, line, state, parsed, flags, budget),
+        Ast::Conditional {
+            condition,
+            matched,
+            unmatched,
+        } => {
+            let group = match condition {
+                Backref::Number(group) => usize::try_from(*group).ok(),
+                Backref::Name(name) => parsed
+                    .named_captures
+                    .get(name)
+                    .and_then(|group| usize::try_from(*group).ok()),
+            }
+            .and_then(|group| state.captures.get(group))
+            .is_some_and(Option::is_some);
+            match_node(
+                if group { matched } else { unmatched },
+                line,
+                state,
+                ctx,
+                flags,
+                budget,
+                parsed,
+            )
+        }
         Ast::Subroutine(call) => {
             let group = call
                 .target_path
@@ -1355,7 +1626,12 @@ fn match_anchor(
     }
 }
 
-fn anchor_matches(anchor: AnchorKind, line: &str, pos: usize, ctx: AnchorContext) -> bool {
+pub(crate) fn anchor_matches(
+    anchor: AnchorKind,
+    line: &str,
+    pos: usize,
+    ctx: AnchorContext,
+) -> bool {
     match anchor {
         AnchorKind::LineStart => pos == 0,
         AnchorKind::LineEnd => is_line_end_position(line, pos),
@@ -1381,6 +1657,7 @@ fn match_repeat(
     max: Option<usize>,
     greedy: bool,
     possessive: bool,
+    atomic: bool,
     line: &str,
     state: VmState,
     ctx: AnchorContext,
@@ -1388,44 +1665,106 @@ fn match_repeat(
     budget: &mut StepBudget,
     parsed: &ParsedRegex,
 ) -> Result<VmStates, BudgetExceeded> {
+    // With an exact repetition count there is no repetition-count choice to
+    // make possessive. Oniguruma still permits backtracking inside the atom.
+    let possessive = possessive && (atomic || max != Some(min));
     if let Some(states) = match_simple_repeat(
         node, min, max, greedy, possessive, line, &state, flags, budget,
     )? {
         return Ok(states);
     }
-    let max = max.unwrap_or_else(|| line.len().saturating_sub(state.pos).saturating_add(1));
-    let mut frontier = vec![(0usize, state)];
-    let mut accepted = Vec::new();
-    while let Some((count, current)) = frontier.pop() {
-        budget.step()?;
-        if count >= min {
-            accepted.push(current.clone());
-            if accepted.len() >= STATE_LIMIT {
+    if possessive {
+        let max = max.unwrap_or_else(|| line.len().saturating_sub(state.pos).saturating_add(1));
+        let mut current = state;
+        let mut count = 0usize;
+        while count < max && (greedy || count < min) {
+            budget.step()?;
+            let Some(next) = match_node(node, line, current.clone(), ctx, flags, budget, parsed)?
+                .into_iter()
+                .next()
+            else {
+                break;
+            };
+            count += 1;
+            let zero_width = next.pos == current.pos && next.captures == current.captures;
+            current = next;
+            if zero_width {
                 break;
             }
         }
-        if count >= max {
-            continue;
-        }
-        let next_states = match_node(node, line, current.clone(), ctx, flags, budget, parsed)?;
-        for next in next_states {
-            // Zero-width quantified atoms are legal in Oniguruma, but cannot be
-            // allowed to loop forever. Keep the already-accepted state and stop
-            // expanding this branch.
-            if next.pos == current.pos && next.captures == current.captures {
+        return Ok(if count >= min {
+            VmStates::one(current)
+        } else {
+            VmStates::empty()
+        });
+    }
+    let max = max.unwrap_or_else(|| line.len().saturating_sub(state.pos).saturating_add(1));
+    // Emit exit states in Oniguruma preference order with an explicit DFS:
+    // a greedy repeat prefers another iteration over exiting, a lazy repeat
+    // prefers exiting, and the body's own state order is preserved either
+    // way. Sorting by position here would invert the preference of lazy or
+    // ordered-alternation bodies inside the repeat.
+    enum Work {
+        Visit(usize, VmState),
+        Accept(VmState),
+    }
+    let mut stack = vec![Work::Visit(0, state)];
+    let mut accepted: Vec<VmState> = Vec::new();
+    while let Some(work) = stack.pop() {
+        budget.step()?;
+        let (count, current) = match work {
+            Work::Accept(state) => {
+                let duplicate = accepted
+                    .iter()
+                    .any(|seen| seen.pos == state.pos && seen.captures == state.captures);
+                if !duplicate {
+                    accepted.push(state);
+                    if accepted.len() >= STATE_LIMIT {
+                        break;
+                    }
+                }
                 continue;
             }
-            frontier.push((count + 1, next));
-            if frontier.len() >= STATE_LIMIT {
-                break;
+            Work::Visit(count, state) => (count, state),
+        };
+        if greedy && count >= min {
+            // Popped after the children below, so exiting stays the least
+            // preferred continuation of this iteration count.
+            stack.push(Work::Accept(current.clone()));
+        }
+        let mut lazy_accept = (!greedy && count >= min).then(|| current.clone());
+        if count < max && stack.len() < STATE_LIMIT {
+            let next_states = match_node(node, line, current.clone(), ctx, flags, budget, parsed)?;
+            let push = |next: VmState, stack: &mut Vec<Work>| {
+                // Zero-width quantified atoms are legal in Oniguruma, but
+                // cannot be allowed to loop forever. They must still run
+                // enough times to satisfy a finite minimum, and a
+                // capture-changing zero-width iteration is meaningful once
+                // before it stabilizes.
+                if next.pos == current.pos && next.captures == current.captures {
+                    if count < min {
+                        stack.push(Work::Visit(count + 1, next));
+                    }
+                    return;
+                }
+                stack.push(Work::Visit(count + 1, next));
+            };
+            match next_states {
+                VmStates::Empty => {}
+                VmStates::One(next) => push(next, &mut stack),
+                VmStates::Many(states) => {
+                    // Reverse so the body's first-preference state pops first.
+                    for next in states.into_iter().rev() {
+                        push(next, &mut stack);
+                    }
+                }
             }
         }
+        if let Some(state) = lazy_accept.take() {
+            // Pushed after the children, so exiting pops first for lazy.
+            stack.push(Work::Accept(state));
+        }
     }
-    accepted.sort_by_key(|state| state.pos);
-    if greedy {
-        accepted.reverse();
-    }
-    accepted.dedup_by(|left, right| left.pos == right.pos && left.captures == right.captures);
     Ok(VmStates::from_vec(accepted))
 }
 
@@ -1541,32 +1880,28 @@ fn match_look(
         }
         return Ok(states);
     }
-    let matched = match kind {
+    match kind {
         LookKind::Ahead => unreachable!("positive lookahead returned above"),
         LookKind::NotAhead => {
             let states = match_node(child, line, state.clone(), ctx, flags, budget, parsed)?;
-            !states.is_empty()
+            Ok(if states.is_empty() {
+                VmStates::one(state)
+            } else {
+                VmStates::empty()
+            })
         }
         LookKind::Behind | LookKind::NotBehind => {
-            if let Some(literal) = ast_exact_literal(child) {
-                let start = state.pos.saturating_sub(literal.len());
-                state.pos >= literal.len()
-                    && line.is_char_boundary(start)
-                    && line.get(start..state.pos).is_some_and(|candidate| {
-                        match flags.case_insensitive {
-                            true => candidate.eq_ignore_ascii_case(&literal),
-                            false => candidate == literal,
-                        }
-                    })
-            } else if let Some((min_width, max_width)) = lookbehind_byte_width_bounds(child) {
-                if let Some(latest_start) = state.pos.checked_sub(min_width) {
-                    let earliest_start = state.pos.saturating_sub(max_width);
-                    lookbehind_matches_in_window(
+            let end = state.pos;
+            let matched = if let Some((min_width, max_width)) = lookbehind_byte_width_bounds(child)
+            {
+                if let Some(latest_start) = end.checked_sub(min_width) {
+                    let earliest_start = end.saturating_sub(max_width);
+                    lookbehind_state_in_window(
                         child,
                         line,
                         earliest_start,
                         latest_start,
-                        state.pos,
+                        end,
                         &state,
                         ctx,
                         flags,
@@ -1574,36 +1909,28 @@ fn match_look(
                         parsed,
                     )?
                 } else {
-                    false
+                    None
                 }
             } else {
-                let mut found = false;
-                for start in char_boundaries_until(line, state.pos) {
-                    let captures = state.captures.clone();
-                    let probe = VmState {
-                        pos: start,
-                        captures,
-                    };
-                    let states = match_node(child, line, probe, ctx, flags, budget, parsed)?;
-                    if states.iter().any(|end_state| end_state.pos == state.pos) {
-                        found = true;
-                        break;
-                    }
+                lookbehind_state_in_window(
+                    child, line, 0, end, end, &state, ctx, flags, budget, parsed,
+                )?
+            };
+            match (kind, matched) {
+                (LookKind::Behind, Some(mut matched)) => {
+                    matched.pos = end;
+                    Ok(VmStates::one(matched))
                 }
-                found
+                (LookKind::NotBehind, None) => Ok(VmStates::one(state)),
+                (LookKind::Behind, None) | (LookKind::NotBehind, Some(_)) => Ok(VmStates::empty()),
+                (LookKind::Ahead | LookKind::NotAhead, _) => unreachable!(),
             }
         }
-    };
-    let positive = kind == LookKind::Behind;
-    if matched == positive {
-        Ok(VmStates::one(state))
-    } else {
-        Ok(VmStates::empty())
     }
 }
 
 #[allow(clippy::too_many_arguments)]
-fn lookbehind_matches_in_window(
+fn lookbehind_state_in_window(
     child: &Ast,
     line: &str,
     earliest_start: usize,
@@ -1614,8 +1941,10 @@ fn lookbehind_matches_in_window(
     flags: RegexFlags,
     budget: &mut StepBudget,
     parsed: &ParsedRegex,
-) -> Result<bool, BudgetExceeded> {
-    for start in earliest_start..=latest_start {
+) -> Result<Option<VmState>, BudgetExceeded> {
+    // Oniguruma probes variable-width lookbehind from the closest viable
+    // boundary backwards. This affects both alternation priority and captures.
+    for start in (earliest_start..=latest_start).rev() {
         if !line.is_char_boundary(start) {
             continue;
         }
@@ -1624,11 +1953,11 @@ fn lookbehind_matches_in_window(
             captures: state.captures.clone(),
         };
         let states = match_node(child, line, probe, ctx, flags, budget, parsed)?;
-        if states.iter().any(|end_state| end_state.pos == end) {
-            return Ok(true);
+        if let Some(matched) = states.into_iter().find(|end_state| end_state.pos == end) {
+            return Ok(Some(matched));
         }
     }
-    Ok(false)
+    Ok(None)
 }
 
 fn lookbehind_byte_width_bounds(ast: &Ast) -> Option<(usize, usize)> {
@@ -1636,6 +1965,7 @@ fn lookbehind_byte_width_bounds(ast: &Ast) -> Option<(usize, usize)> {
         Ast::Empty | Ast::Anchor(_) | Ast::Look { .. } => Some((0, 0)),
         Ast::Literal(literal) => Some((literal.len(), literal.len())),
         Ast::Dot | Ast::Class(_) => Some((1, 4)),
+        Ast::Grapheme => None,
         Ast::Concat(nodes) => {
             let mut min = 0usize;
             let mut max = 0usize;
@@ -1662,7 +1992,9 @@ fn lookbehind_byte_width_bounds(ast: &Ast) -> Option<(usize, usize)> {
             Some((node_min.saturating_mul(*min), node_max.saturating_mul(max)))
         }
         Ast::Group { child, .. } | Ast::Flags { child, .. } => lookbehind_byte_width_bounds(child),
-        Ast::Backref(_) | Ast::Subroutine(_) | Ast::Unsupported(_) => None,
+        Ast::Backref(_) | Ast::Conditional { .. } | Ast::Subroutine(_) | Ast::Unsupported(_) => {
+            None
+        }
     }
 }
 
@@ -1686,6 +2018,10 @@ fn find_subroutine_group<'a>(
         Ast::Concat(nodes) | Ast::Alternation(nodes) => nodes
             .iter()
             .find_map(|node| find_subroutine_group(node, subroutine, parsed)),
+        Ast::Conditional {
+            matched, unmatched, ..
+        } => find_subroutine_group(matched, subroutine, parsed)
+            .or_else(|| find_subroutine_group(unmatched, subroutine, parsed)),
         Ast::Repeat { node, .. }
         | Ast::Group { child: node, .. }
         | Ast::Look { child: node, .. }
@@ -1700,6 +2036,16 @@ fn ast_at_path<'a>(mut ast: &'a Ast, path: &[AstPathStep]) -> Option<&'a Ast> {
             (AstPathStep::Branch(index), Ast::Concat(nodes) | Ast::Alternation(nodes)) => {
                 nodes.get(*index)?
             }
+            (
+                AstPathStep::Branch(index),
+                Ast::Conditional {
+                    matched, unmatched, ..
+                },
+            ) => match index {
+                0 => matched,
+                1 => unmatched,
+                _ => return None,
+            },
             (
                 AstPathStep::Child,
                 Ast::Repeat { node, .. }
@@ -1772,7 +2118,7 @@ fn push_limited(out: &mut VmStates, states: VmStates) {
     }
 }
 
-fn class_contains(class: &CharClass, ch: char, flags: RegexFlags) -> bool {
+pub(crate) fn class_contains(class: &CharClass, ch: char, flags: RegexFlags) -> bool {
     let matched = class
         .atoms
         .iter()
@@ -1912,9 +2258,14 @@ fn fold_char(ch: char, flags: RegexFlags) -> char {
     }
 }
 
-fn char_at(line: &str, pos: usize) -> Option<(char, usize)> {
+pub(crate) fn char_at(line: &str, pos: usize) -> Option<(char, usize)> {
     let ch = line.get(pos..)?.chars().next()?;
     Some((ch, pos + ch.len_utf8()))
+}
+
+fn grapheme_end(line: &str, position: usize) -> Option<usize> {
+    let grapheme = line.get(position..)?.graphemes(true).next()?;
+    Some(position + grapheme.len())
 }
 
 fn char_boundaries_from(line: &str, from: usize) -> Vec<usize> {
@@ -1993,6 +2344,15 @@ mod tests {
     }
 
     #[test]
+    fn newline_sequence_escape_handles_crlf_and_unicode_newlines() {
+        for line in ["\r\n", "\u{0085}", "\u{2028}", "\u{2029}"] {
+            let matcher = FallbackMatcher::new(r"^\R$");
+            let result = matcher.find(line, 0, ctx()).unwrap();
+            assert_eq!(result.start..result.end, 0..line.len(), "{line:?}");
+        }
+    }
+
+    #[test]
     fn nullable_start_filter_does_not_skip_a_later_line_end() {
         let matcher = FallbackMatcher::new(r#"($|(?="""))"#);
         let result = matcher.find("# comment\n", 1, ctx()).unwrap();
@@ -2049,11 +2409,55 @@ mod tests {
     }
 
     #[test]
+    fn positive_lookbehind_preserves_captures_and_scoped_flags() {
+        let captured = FallbackMatcher::new(r"(?<=(a))b")
+            .find("ab", 0, ctx())
+            .unwrap();
+        assert_eq!(captured.start..captured.end, 1..2);
+        assert_eq!(captured.captures[1], Some(0..1));
+
+        let variable = FallbackMatcher::new(r"(?<=(a|aa))b")
+            .find("aab", 0, ctx())
+            .unwrap();
+        assert_eq!(variable.start..variable.end, 2..3);
+        assert_eq!(variable.captures[1], Some(1..2));
+
+        let backref = FallbackMatcher::new(r"(?<=(a))\1")
+            .find("aa", 0, ctx())
+            .unwrap();
+        assert_eq!(backref.start..backref.end, 1..2);
+        assert_eq!(backref.captures[1], Some(0..1));
+
+        let scoped = FallbackMatcher::new(r"(?<=(?i:foo))bar")
+            .find("FOObar", 0, ctx())
+            .unwrap();
+        assert_eq!(scoped.start..scoped.end, 3..6);
+    }
+
+    #[test]
     fn exact_lookbehind_honors_case_insensitive_flag() {
         let matcher = FallbackMatcher::new(r"(?i)(?<=foo)bar");
         let result = matcher.find("xxFOObar", 0, ctx()).unwrap();
 
         assert_eq!(result.start..result.end, 5..8);
+    }
+
+    #[test]
+    fn extended_mode_ignores_unescaped_whitespace_and_comments() {
+        let spaced = FallbackMatcher::new("(?x:a b)")
+            .find("ab", 0, ctx())
+            .unwrap();
+        assert_eq!(spaced.start..spaced.end, 0..2);
+
+        let commented = FallbackMatcher::new("(?x:a # comment\n b)")
+            .find("ab", 0, ctx())
+            .unwrap();
+        assert_eq!(commented.start..commented.end, 0..2);
+
+        let escaped = FallbackMatcher::new(r"(?x:a\ b)")
+            .find("a b", 0, ctx())
+            .unwrap();
+        assert_eq!(escaped.start..escaped.end, 0..3);
     }
 
     #[test]
@@ -2098,6 +2502,44 @@ mod tests {
         let report = matcher.try_find("aaab", 0, ctx()).unwrap();
 
         assert_eq!(report.result, None);
+    }
+
+    #[test]
+    fn atomic_and_compound_possessive_repeats_commit_ordered_paths() {
+        assert!(
+            FallbackMatcher::new(r"(?>a|ab)c")
+                .try_find("abc", 0, ctx())
+                .unwrap()
+                .result
+                .is_none()
+        );
+        let committed = FallbackMatcher::new(r"(?>ab|a)c")
+            .find("abc", 0, ctx())
+            .unwrap();
+        assert_eq!(committed.start..committed.end, 0..3);
+        assert!(
+            FallbackMatcher::new(r"(a|ab)++c")
+                .try_find("abc", 0, ctx())
+                .unwrap()
+                .result
+                .is_none()
+        );
+        let control = FallbackMatcher::new(r"(a|ab)+c")
+            .find("abc", 0, ctx())
+            .unwrap();
+        assert_eq!(control.start..control.end, 0..3);
+
+        let exact = FallbackMatcher::new(r"(a|ab){1}+c")
+            .find("abc", 0, ctx())
+            .unwrap();
+        assert_eq!(exact.start..exact.end, 0..3);
+        assert_eq!(exact.captures[1], Some(0..2));
+
+        let zero_width = FallbackMatcher::new(r"(a?){2}+a")
+            .find("a", 0, ctx())
+            .unwrap();
+        assert_eq!(zero_width.start..zero_width.end, 0..1);
+        assert_eq!(zero_width.captures[1], Some(0..0));
     }
 
     #[test]
@@ -2173,6 +2615,17 @@ mod tests {
     }
 
     #[test]
+    fn unicode_capable_classes_do_not_receive_ascii_only_start_hints() {
+        for pattern in [r"\w+", r"\s+", r"[[:alpha:]]+", r"[[:word:]]+"] {
+            let line = if pattern == r"\s+" { "\u{2003}" } else { "λ" };
+            let matcher = FallbackMatcher::new(pattern);
+            let result = matcher.find(line, 0, ctx()).unwrap();
+            assert_eq!(result.start..result.end, 0..line.len(), "{pattern}");
+            assert!(matcher.restricted_start_bytes().is_none(), "{pattern}");
+        }
+    }
+
+    #[test]
     fn anchored_fallback_searches_only_anchor_position() {
         let matcher = FallbackMatcher::new(r"^foo(?=bar)");
         let report = matcher.try_find("xfoobar", 0, ctx()).unwrap();
@@ -2196,6 +2649,13 @@ mod tests {
         let matcher = FallbackMatcher::new(r"a?");
         let result = matcher.find("xxx", 0, ctx()).unwrap();
         assert_eq!(result.start..result.end, 0..0);
+    }
+
+    #[test]
+    fn finite_zero_width_repeats_satisfy_their_minimum() {
+        let matcher = FallbackMatcher::new(r"(?:){2}a");
+        let result = matcher.find("a", 0, ctx()).unwrap();
+        assert_eq!(result.start..result.end, 0..1);
     }
 
     #[test]

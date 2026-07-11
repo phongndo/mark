@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use super::ast::{Ast, ParsedRegex, parse};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,7 +22,7 @@ pub struct Translation {
     pub pattern: String,
     pub route: Route,
     pub anchor_strategy: AnchorStrategy,
-    pub parsed: ParsedRegex,
+    pub parsed: Arc<ParsedRegex>,
 }
 
 pub fn route(parsed: &ParsedRegex) -> Route {
@@ -33,7 +35,7 @@ pub fn route(parsed: &ParsedRegex) -> Route {
 }
 
 pub fn translate(pattern: &str) -> Translation {
-    let parsed = parse(pattern);
+    let parsed = Arc::new(parse(pattern));
     let mut reasons = fallback_reasons(&parsed);
     let (anchor_strategy, stripped) = anchor_strategy_and_stripped(pattern, &parsed);
     if anchor_strategy == AnchorStrategy::ContinuationGuard {
@@ -118,13 +120,18 @@ pub fn normalize_oniguruma_for_rust_regex(pattern: &str) -> String {
 
 pub fn is_ast_translatable(ast: &Ast) -> bool {
     match ast {
-        Ast::Backref(_) | Ast::Subroutine(_) | Ast::Look { .. } | Ast::Unsupported(_) => false,
+        Ast::Backref(_)
+        | Ast::Conditional { .. }
+        | Ast::Subroutine(_)
+        | Ast::Look { .. }
+        | Ast::Unsupported(_) => false,
         Ast::Repeat {
             node, possessive, ..
         } => !*possessive && is_ast_translatable(node),
         Ast::Concat(nodes) | Ast::Alternation(nodes) => nodes.iter().all(is_ast_translatable),
         Ast::Group { child, .. } | Ast::Flags { child, .. } => is_ast_translatable(child),
         Ast::Empty | Ast::Literal(_) | Ast::Dot | Ast::Class(_) | Ast::Anchor(_) => true,
+        Ast::Grapheme => false,
     }
 }
 

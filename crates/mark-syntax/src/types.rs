@@ -100,6 +100,17 @@ impl LineTextFingerprint {
     pub fn matches(self, text: &str) -> bool {
         self.byte_len == text.len() && self.hash == stable_text_hash(text.as_bytes())
     }
+
+    pub(crate) fn without_trailing_byte(self, byte: u8) -> Self {
+        // FNV-1a update is `(hash ^ byte) * PRIME`. PRIME is odd, so it has a
+        // multiplicative inverse modulo 2^64 and the final byte can be removed
+        // without hashing the line a second time.
+        const PRIME_INVERSE: u64 = 0xce96_5057_aff6_957b;
+        Self {
+            byte_len: self.byte_len.saturating_sub(1),
+            hash: self.hash.wrapping_mul(PRIME_INVERSE) ^ u64::from(byte),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -125,10 +136,6 @@ pub(crate) const SETTINGS_FILE: &str = "config.toml";
 pub(crate) const LEGACY_SETTINGS_FILE: &str = "syntax.toml";
 pub(crate) const COLORSCHEME_DIR: &str = "colorscheme";
 pub(crate) const BUNDLED_GRAMMAR_VERSION: &str = env!("CARGO_PKG_VERSION");
-pub(crate) const TEXTMATE_BUNDLE_VERSION: &str = match option_env!("MARK_SYNTAX_BUNDLE_VERSION") {
-    Some(version) => version,
-    None => BUNDLED_GRAMMAR_VERSION,
-};
 
 pub const DEFAULT_MAX_HIGHLIGHT_SOURCE_BYTES: usize = 1024 * 1024;
 pub const DEFAULT_MAX_HIGHLIGHT_LINE_BYTES: usize = 8 * 1024;

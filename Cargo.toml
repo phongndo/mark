@@ -36,3 +36,8 @@ mark-diff = { path = "crates/mark-diff" }
 mark-git = { path = "crates/mark-git" }
 mark-syntax = { path = "crates/mark-syntax" }
 mark-tui = { path = "crates/mark-tui" }
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+panic = "abort"

@@ -103,14 +103,16 @@ mod tests {
     #[test]
     fn embedded_bundle_parses_and_exposes_catalog() {
         let bundle = embedded_bundle();
-        // Phase 4 core-30 public languages; cpp-macro is a private blob only.
+        // Core-30 public languages plus private C++/Markdown dependency blobs.
         assert_eq!(bundle.languages.len(), 30);
-        assert_eq!(bundle.grammar_blobs.len(), 31);
+        assert_eq!(bundle.grammar_blobs.len(), 68);
         assert!(
             bundle
                 .grammar_blob_for_scope("source.cpp.embedded.macro")
                 .is_some()
         );
+        assert!(bundle.grammar_blob_for_scope("source.yang").is_some());
+        assert!(bundle.grammar_blob_for_scope("source.twig").is_some());
         assert!(!bundle.has_language("cpp-macro"));
         assert_eq!(bundle.canonical_language("rs"), Some("rust"));
         assert_eq!(bundle.canonical_language("shellscript"), Some("bash"));

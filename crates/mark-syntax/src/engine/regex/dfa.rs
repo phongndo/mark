@@ -1,8 +1,9 @@
-use std::fmt;
+use std::{fmt, sync::Arc};
 
 use super::ast::{AnchorKind, Ast};
 use super::backtrack::FallbackMatcher;
 use super::prefilter::{LiteralSet, Prefilter};
+use super::scanner::Scanner;
 use super::translate::{AnchorStrategy, Translation, translate};
 use super::{AnchorContext, MatchResult, Matcher};
 
@@ -119,6 +120,15 @@ impl SimpleMatcher {
             captures: vec![Some(start..end)],
         })
     }
+
+    fn unanchored_literal(&self) -> Option<&str> {
+        match self {
+            Self::Literal(literal) => Some(literal),
+            Self::LineStartLiteral(_)
+            | Self::FileStartLiteral(_)
+            | Self::ContinuationLiteral(_) => None,
+        }
+    }
 }
 
 impl Matcher for SimpleMatcher {
@@ -212,20 +222,20 @@ pub struct AutomataMatcher {
 impl AutomataMatcher {
     pub fn new(pattern: &str) -> Result<Self, AutomataBuildError> {
         let translation = translate(pattern);
-        Self::from_translation(pattern, translation)
+        Self::from_translation(translation)
     }
 
-    pub fn from_translation(
-        pattern: &str,
-        translation: Translation,
-    ) -> Result<Self, AutomataBuildError> {
+    pub fn from_translation(translation: Translation) -> Result<Self, AutomataBuildError> {
         let prefilter = Prefilter::from_regex(&translation.parsed);
         let engine = if let Some(simple) = SimpleMatcher::try_from_translation(&translation) {
             NativeEngine::Simple(simple)
         } else {
             // Match against the original Oniguruma pattern so anchors/classes
             // keep AST semantics (the translated spelling is diagnostic-only).
-            NativeEngine::Vm(FallbackMatcher::new(pattern))
+            NativeEngine::Vm(FallbackMatcher::from_parsed(
+                Arc::clone(&translation.parsed),
+                super::backtrack::DEFAULT_STEP_BUDGET,
+            ))
         };
         Ok(Self {
             engine,
@@ -240,6 +250,23 @@ impl AutomataMatcher {
 
     pub fn is_simple(&self) -> bool {
         matches!(self.engine, NativeEngine::Simple(_))
+    }
+
+    pub(crate) fn unanchored_literal(&self) -> Option<&str> {
+        match &self.engine {
+            NativeEngine::Simple(matcher) => matcher.unanchored_literal(),
+            NativeEngine::Vm(_) => None,
+        }
+    }
+
+    pub(crate) fn restricted_start_bytes(&self) -> Option<Vec<u8>> {
+        match &self.engine {
+            NativeEngine::Simple(matcher) => matcher
+                .unanchored_literal()
+                .and_then(|literal| literal.as_bytes().first().copied())
+                .map(|byte| vec![byte]),
+            NativeEngine::Vm(matcher) => matcher.restricted_start_bytes(),
+        }
     }
 
     pub fn prefilter_may_match(&self, line: &str, from: usize) -> Option<bool> {
@@ -257,7 +284,7 @@ impl AutomataMatcher {
         match &self.engine {
             NativeEngine::Simple(matcher) => Ok((matcher.find(line, from, ctx), None)),
             NativeEngine::Vm(matcher) => {
-                if !anchor_permits(self.translation.anchor_strategy, from, ctx, line) {
+                if !anchor_permits_search(self.translation.anchor_strategy, from, ctx, line) {
                     return Ok((None, None));
                 }
                 matcher
@@ -273,7 +300,7 @@ impl AutomataMatcher {
         start: usize,
         ctx: AnchorContext,
     ) -> Result<(Option<MatchResult>, Option<usize>), super::FallbackError> {
-        if !anchor_permits(self.translation.anchor_strategy, start, ctx, line) {
+        if !anchor_permits_at(self.translation.anchor_strategy, start, ctx, line) {
             return Ok((None, None));
         }
         match &self.engine {
@@ -281,6 +308,24 @@ impl AutomataMatcher {
             NativeEngine::Vm(matcher) => matcher
                 .try_find_at(line, start, ctx)
                 .map(|report| (report.result, Some(report.steps))),
+        }
+    }
+
+    pub(crate) fn find_at_without_captures_with_scratch(
+        &self,
+        line: &str,
+        start: usize,
+        ctx: AnchorContext,
+        scratch: &mut super::bytecode::BytecodeScratch,
+    ) -> Result<Option<MatchResult>, super::FallbackError> {
+        if !anchor_permits_at(self.translation.anchor_strategy, start, ctx, line) {
+            return Ok(None);
+        }
+        match &self.engine {
+            NativeEngine::Simple(matcher) => Ok(matcher.match_at(line, start)),
+            NativeEngine::Vm(matcher) => matcher
+                .try_find_at_without_captures_with_scratch(line, start, ctx, scratch)
+                .map(|report| report.result),
         }
     }
 }
@@ -293,7 +338,7 @@ impl Matcher for AutomataMatcher {
                 // Anchor strategies previously enforced by regex-automata Input
                 // spans. The VM also re-checks anchors, but bail early when the
                 // strategy makes a match impossible.
-                if !anchor_permits(self.translation.anchor_strategy, from, ctx, line) {
+                if !anchor_permits_search(self.translation.anchor_strategy, from, ctx, line) {
                     return None;
                 }
                 // FallbackMatcher applies its own prefilter; skip a redundant
@@ -304,7 +349,12 @@ impl Matcher for AutomataMatcher {
     }
 }
 
-fn anchor_permits(strategy: AnchorStrategy, from: usize, ctx: AnchorContext, line: &str) -> bool {
+fn anchor_permits_search(
+    strategy: AnchorStrategy,
+    from: usize,
+    ctx: AnchorContext,
+    line: &str,
+) -> bool {
     match strategy {
         AnchorStrategy::None => true,
         AnchorStrategy::TextStartGuard => ctx.allow_a && from == 0,
@@ -317,10 +367,38 @@ fn anchor_permits(strategy: AnchorStrategy, from: usize, ctx: AnchorContext, lin
     }
 }
 
+fn anchor_permits_at(
+    strategy: AnchorStrategy,
+    start: usize,
+    ctx: AnchorContext,
+    line: &str,
+) -> bool {
+    match strategy {
+        AnchorStrategy::ContinuationGuard => {
+            ctx.allow_g && ctx.g_pos == start && line.is_char_boundary(start)
+        }
+        _ => anchor_permits_search(strategy, start, ctx, line),
+    }
+}
+
 #[derive(Debug, Clone)]
 enum PatternEntry {
     Literal(String),
-    Matcher(FallbackMatcher),
+    Matcher(Arc<super::CompiledPattern>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FrontierBuildPolicy {
+    Auto,
+    #[cfg(test)]
+    Force,
+}
+
+#[derive(Debug, Clone)]
+struct CandidateFrontier {
+    scanner: Scanner,
+    opaque_unrestricted_entries: Vec<usize>,
+    opaque_start_byte_entries: Vec<Vec<usize>>,
 }
 
 /// Native multi-pattern matcher. Leftmost match wins; on equal start offsets
@@ -334,10 +412,35 @@ pub struct PatternSetMatcher {
     patterns: Vec<String>,
     /// Present when every pattern is a pure unanchored literal.
     literal_set: Option<LiteralSet>,
+    /// Shared ordered NFA for candidate sets wholly inside the regular subset.
+    scanner: Option<Scanner>,
+    /// Exact mixed frontier: regular candidates are scanned together, and the
+    /// opaque candidates are searched only as far as the regular bound they can
+    /// still beat. Candidate indexes are always the original grammar order.
+    frontier: Option<CandidateFrontier>,
+    #[cfg(test)]
+    force_regular_replay_failure: Option<usize>,
 }
 
 impl PatternSetMatcher {
     pub fn new(patterns: &[String]) -> Result<Self, AutomataBuildError> {
+        let patterns = patterns
+            .iter()
+            .map(|pattern| Arc::new(super::CompiledPattern::new(pattern)))
+            .collect::<Vec<_>>();
+        Ok(Self::from_compiled(&patterns))
+    }
+
+    /// Builds the ordered set from already-compiled patterns. The tokenizer
+    /// uses this path so constructing a candidate set never reparses regexes.
+    pub fn from_compiled(patterns: &[Arc<super::CompiledPattern>]) -> Self {
+        Self::from_compiled_with_frontier_policy(patterns, FrontierBuildPolicy::Auto)
+    }
+
+    fn from_compiled_with_frontier_policy(
+        patterns: &[Arc<super::CompiledPattern>],
+        frontier_policy: FrontierBuildPolicy,
+    ) -> Self {
         let mut entries = Vec::with_capacity(patterns.len());
         let mut translated = Vec::with_capacity(patterns.len());
         let mut all_literals = Vec::with_capacity(patterns.len());
@@ -346,13 +449,10 @@ impl PatternSetMatcher {
         let mut start_byte_entries = (0..=u8::MAX)
             .map(|_| Vec::<usize>::new())
             .collect::<Vec<_>>();
-
         for (index, pattern) in patterns.iter().enumerate() {
-            let translation = translate(pattern);
-            translated.push(translation.pattern.clone());
-            if let Some(SimpleMatcher::Literal(literal)) =
-                SimpleMatcher::try_from_translation(&translation)
-            {
+            translated.push(pattern.translated_pattern().to_owned());
+            if let Some(literal) = pattern.unanchored_literal() {
+                let literal = literal.to_owned();
                 if literals_only {
                     all_literals.push(literal.clone());
                 }
@@ -365,31 +465,95 @@ impl PatternSetMatcher {
             } else {
                 literals_only = false;
                 all_literals.clear();
-                let matcher = FallbackMatcher::new(pattern);
-                if let Some(bytes) = matcher.restricted_start_bytes() {
+                if let Some(bytes) = pattern.restricted_start_bytes() {
                     for byte in bytes {
-                        start_byte_entries[byte as usize].push(index);
+                        start_byte_entries[*byte as usize].push(index);
                     }
                 } else {
                     unrestricted_entries.push(index);
                 }
-                entries.push(PatternEntry::Matcher(matcher));
+                entries.push(PatternEntry::Matcher(Arc::clone(pattern)));
             }
         }
-
         let literal_set = if literals_only && !entries.is_empty() {
             Some(LiteralSet::new(all_literals))
         } else {
             None
         };
+        let (scanner, frontier) = if !literals_only && entries.len() > 1 {
+            if frontier_explicitly_disabled() {
+                (
+                    Scanner::compile_with_hints(patterns.iter().enumerate().map(
+                        |(index, pattern)| {
+                            (index, pattern.parsed(), pattern.restricted_start_bytes())
+                        },
+                    ))
+                    .ok(),
+                    None,
+                )
+            } else {
+                let regular = patterns
+                    .iter()
+                    .filter(|pattern| Scanner::supports(pattern.parsed()))
+                    .count();
+                let opaque = entries.len() - regular;
+                if opaque == 0 {
+                    (
+                        Scanner::compile_with_hints(patterns.iter().enumerate().map(
+                            |(index, pattern)| {
+                                (index, pattern.parsed(), pattern.restricted_start_bytes())
+                            },
+                        ))
+                        .ok(),
+                        None,
+                    )
+                } else if regular != 0
+                    && frontier_enabled(frontier_policy, entries.len(), regular, opaque)
+                {
+                    let (partial, failures) = Scanner::compile_partial_with_hints(
+                        patterns.iter().enumerate().map(|(index, pattern)| {
+                            (index, pattern.parsed(), pattern.restricted_start_bytes())
+                        }),
+                    );
+                    let frontier = if partial.entry_count() != 0 {
+                        let opaque_entries = failures
+                            .into_iter()
+                            .map(|failure| failure.pattern)
+                            .collect::<Vec<_>>();
+                        Some(CandidateFrontier::new(partial, &opaque_entries, patterns))
+                    } else {
+                        None
+                    };
+                    (None, frontier)
+                } else {
+                    (None, None)
+                }
+            }
+        } else {
+            (None, None)
+        };
 
-        Ok(Self {
+        Self {
             entries,
             unrestricted_entries,
             start_byte_entries,
             patterns: translated,
             literal_set,
-        })
+            scanner,
+            frontier,
+            #[cfg(test)]
+            force_regular_replay_failure: None,
+        }
+    }
+
+    #[cfg(test)]
+    fn from_compiled_with_forced_frontier(patterns: &[Arc<super::CompiledPattern>]) -> Self {
+        Self::from_compiled_with_frontier_policy(patterns, FrontierBuildPolicy::Force)
+    }
+
+    #[cfg(test)]
+    fn force_regular_replay_failure_for(&mut self, pattern: usize) {
+        self.force_regular_replay_failure = Some(pattern);
     }
 
     pub fn find(&self, line: &str, from: usize) -> Option<(usize, MatchResult)> {
@@ -401,6 +565,21 @@ impl PatternSetMatcher {
         line: &str,
         from: usize,
         ctx: AnchorContext,
+    ) -> Option<(usize, MatchResult)> {
+        self.find_with_context_and_scratch(
+            line,
+            from,
+            ctx,
+            &mut super::bytecode::BytecodeScratch::default(),
+        )
+    }
+
+    pub(crate) fn find_with_context_and_scratch(
+        &self,
+        line: &str,
+        from: usize,
+        ctx: AnchorContext,
+        scratch: &mut super::bytecode::BytecodeScratch,
     ) -> Option<(usize, MatchResult)> {
         if !line.is_char_boundary(from) {
             return None;
@@ -416,21 +595,54 @@ impl PatternSetMatcher {
                 },
             ));
         }
-
-        for start in line[from..]
-            .char_indices()
-            .map(|(offset, _)| from + offset)
-            .chain(std::iter::once(line.len()))
+        if let Some(frontier) = &self.frontier {
+            return self.find_with_frontier(line, from, ctx, scratch, frontier);
+        }
+        if scanner_candidate_enabled()
+            && let Some(result) = self.find_with_scanner(line, from, ctx, scratch)
         {
+            return result;
+        }
+
+        self.find_reference_with_buckets(
+            line,
+            from,
+            ctx,
+            scratch,
+            &self.unrestricted_entries,
+            &self.start_byte_entries,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn find_reference_with_buckets(
+        &self,
+        line: &str,
+        from: usize,
+        ctx: AnchorContext,
+        scratch: &mut super::bytecode::BytecodeScratch,
+        unrestricted_entries: &[usize],
+        start_byte_entries: &[Vec<usize>],
+        bound: Option<(usize, usize)>,
+    ) -> Option<(usize, MatchResult)> {
+        debug_assert_eq!(start_byte_entries.len(), usize::from(u8::MAX) + 1);
+
+        let ascii_line = scratch.line_is_ascii(line);
+        let mut start = from;
+        loop {
+            if bound.is_some_and(|(bound_start, _)| start > bound_start) {
+                break;
+            }
             let restricted = line.as_bytes().get(start).map_or(&[][..], |byte| {
-                self.start_byte_entries[*byte as usize].as_slice()
+                start_byte_entries[*byte as usize].as_slice()
             });
             let mut unrestricted_index = 0usize;
             let mut restricted_index = 0usize;
-            while unrestricted_index < self.unrestricted_entries.len()
+            while unrestricted_index < unrestricted_entries.len()
                 || restricted_index < restricted.len()
             {
-                let unrestricted = self.unrestricted_entries.get(unrestricted_index).copied();
+                let unrestricted = unrestricted_entries.get(unrestricted_index).copied();
                 let restricted = restricted.get(restricted_index).copied();
                 let idx = match (unrestricted, restricted) {
                     (Some(left), Some(right)) if left < right => {
@@ -451,20 +663,141 @@ impl PatternSetMatcher {
                     }
                     (None, None) => break,
                 };
-                let entry = &self.entries[idx];
-                let result = match entry {
-                    PatternEntry::Literal(literal) => match_literal_at(line, start, literal),
-                    PatternEntry::Matcher(matcher) => matcher
-                        .try_find_at_without_captures(line, start, ctx)
-                        .ok()
-                        .flatten(),
-                };
+                if bound.is_some_and(|(bound_start, bound_index)| {
+                    start == bound_start && idx >= bound_index
+                }) {
+                    continue;
+                }
+                let result = self.match_entry_at(idx, line, start, ctx, scratch);
                 if let Some(result) = result {
                     return Some((idx, result));
                 }
             }
+            if start == line.len() {
+                break;
+            }
+            start += if ascii_line {
+                1
+            } else {
+                line[start..]
+                    .chars()
+                    .next()
+                    .expect("start is before line end")
+                    .len_utf8()
+            };
         }
         None
+    }
+
+    fn find_with_frontier(
+        &self,
+        line: &str,
+        from: usize,
+        ctx: AnchorContext,
+        scratch: &mut super::bytecode::BytecodeScratch,
+        frontier: &CandidateFrontier,
+    ) -> Option<(usize, MatchResult)> {
+        let regular = frontier.scanner.find(line, from, ctx, scratch.scanner());
+        let opaque = if let Some(selected) = regular {
+            self.find_reference_with_buckets(
+                line,
+                from,
+                ctx,
+                scratch,
+                &frontier.opaque_unrestricted_entries,
+                &frontier.opaque_start_byte_entries,
+                Some((selected.start, selected.pattern)),
+            )
+        } else {
+            self.find_reference_with_buckets(
+                line,
+                from,
+                ctx,
+                scratch,
+                &frontier.opaque_unrestricted_entries,
+                &frontier.opaque_start_byte_entries,
+                None,
+            )
+        };
+        if let Some(opaque) = opaque {
+            return Some(opaque);
+        }
+
+        let selected = regular?;
+        let replay = if selected.pattern < self.entries.len() {
+            #[cfg(test)]
+            {
+                if self.force_regular_replay_failure == Some(selected.pattern) {
+                    None
+                } else {
+                    self.match_entry_at(selected.pattern, line, selected.start, ctx, scratch)
+                }
+            }
+            #[cfg(not(test))]
+            {
+                self.match_entry_at(selected.pattern, line, selected.start, ctx, scratch)
+            }
+        } else {
+            None
+        };
+        match replay {
+            Some(result)
+                if result.start == selected.start
+                    && result.end <= line.len()
+                    && line.is_char_boundary(result.end) =>
+            {
+                Some((selected.pattern, result))
+            }
+            _ => {
+                // The frontier is a selector only. If exact replay of the
+                // selected regular candidate fails (or a future scanner bug
+                // picks a non-authoritative endpoint), fall back to the known
+                // exact reference traversal instead of reporting no match.
+                self.find_reference_with_buckets(
+                    line,
+                    from,
+                    ctx,
+                    scratch,
+                    &self.unrestricted_entries,
+                    &self.start_byte_entries,
+                    None,
+                )
+            }
+        }
+    }
+
+    fn find_with_scanner(
+        &self,
+        line: &str,
+        from: usize,
+        ctx: AnchorContext,
+        scratch: &mut super::bytecode::BytecodeScratch,
+    ) -> Option<Option<(usize, MatchResult)>> {
+        let scanner = self.scanner.as_ref()?;
+        let Some(selected) = scanner.find(line, from, ctx, scratch.scanner()) else {
+            return Some(None);
+        };
+        let result = self.match_entry_at(selected.pattern, line, selected.start, ctx, scratch)?;
+        Some(Some((selected.pattern, result)))
+    }
+
+    fn match_entry_at(
+        &self,
+        index: usize,
+        line: &str,
+        start: usize,
+        ctx: AnchorContext,
+        scratch: &mut super::bytecode::BytecodeScratch,
+    ) -> Option<MatchResult> {
+        let entry = self.entries.get(index)?;
+        match entry {
+            PatternEntry::Literal(literal) => match_literal_at(line, start, literal),
+            PatternEntry::Matcher(pattern) => pattern
+                .matcher()
+                .find_at_without_captures_with_scratch(line, start, ctx, scratch)
+                .ok()
+                .flatten(),
+        }
     }
 
     pub fn patterns(&self) -> &[String] {
@@ -480,9 +813,112 @@ impl PatternSetMatcher {
     }
 }
 
+impl CandidateFrontier {
+    fn new(
+        scanner: Scanner,
+        opaque_entries: &[usize],
+        patterns: &[Arc<super::CompiledPattern>],
+    ) -> Self {
+        let mut opaque_unrestricted_entries = Vec::new();
+        let mut opaque_start_byte_entries = (0..=u8::MAX)
+            .map(|_| Vec::<usize>::new())
+            .collect::<Vec<_>>();
+        for &index in opaque_entries {
+            if let Some(bytes) = patterns
+                .get(index)
+                .and_then(|pattern| pattern.restricted_start_bytes())
+                .filter(|bytes| !bytes.is_empty())
+            {
+                for byte in bytes {
+                    opaque_start_byte_entries[*byte as usize].push(index);
+                }
+            } else {
+                opaque_unrestricted_entries.push(index);
+            }
+        }
+        for bucket in &mut opaque_start_byte_entries {
+            bucket.sort_unstable();
+            bucket.dedup();
+        }
+        opaque_unrestricted_entries.sort_unstable();
+        opaque_unrestricted_entries.dedup();
+        Self {
+            scanner,
+            opaque_unrestricted_entries,
+            opaque_start_byte_entries,
+        }
+    }
+}
+
+fn frontier_enabled(
+    policy: FrontierBuildPolicy,
+    total: usize,
+    regular: usize,
+    opaque: usize,
+) -> bool {
+    match policy {
+        #[cfg(test)]
+        FrontierBuildPolicy::Force => return true,
+        FrontierBuildPolicy::Auto => {}
+    }
+    match std::env::var("MARK_TEXTMATE_FRONTIER").as_deref() {
+        Ok("off" | "0" | "false") => return false,
+        Ok("on" | "1" | "true" | "candidate") => return true,
+        _ => {}
+    }
+    total >= frontier_min_total()
+        && regular >= frontier_min_regular()
+        && opaque <= frontier_max_opaque()
+        && regular >= opaque.saturating_mul(frontier_min_regular_per_opaque())
+}
+
+fn frontier_explicitly_disabled() -> bool {
+    matches!(
+        std::env::var("MARK_TEXTMATE_FRONTIER").as_deref(),
+        Ok("off" | "0" | "false")
+    )
+}
+
+fn frontier_min_total() -> usize {
+    static VALUE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *VALUE.get_or_init(|| frontier_env_usize("MARK_TEXTMATE_FRONTIER_MIN_TOTAL", 10))
+}
+
+fn frontier_min_regular() -> usize {
+    static VALUE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *VALUE.get_or_init(|| frontier_env_usize("MARK_TEXTMATE_FRONTIER_MIN_REGULAR", 8))
+}
+
+fn frontier_max_opaque() -> usize {
+    static VALUE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *VALUE.get_or_init(|| frontier_env_usize("MARK_TEXTMATE_FRONTIER_MAX_OPAQUE", 4))
+}
+
+fn frontier_min_regular_per_opaque() -> usize {
+    static VALUE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *VALUE.get_or_init(|| frontier_env_usize("MARK_TEXTMATE_FRONTIER_REGULAR_PER_OPAQUE", 4))
+}
+
+fn frontier_env_usize(name: &str, default: usize) -> usize {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(default)
+}
+
+fn scanner_candidate_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        matches!(
+            std::env::var("MARK_TEXTMATE_SCANNER").as_deref(),
+            Ok("candidate")
+        )
+    })
+}
+
 fn match_literal_at(line: &str, start: usize, literal: &str) -> Option<MatchResult> {
     let end = start.checked_add(literal.len())?;
-    (line.get(start..end)? == literal).then(|| MatchResult {
+    (line.as_bytes().get(start..end)? == literal.as_bytes()).then(|| MatchResult {
         start,
         end,
         captures: vec![Some(start..end)],
@@ -516,6 +952,7 @@ fn unescape_literal(pattern: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::regex::CompiledPattern;
 
     fn ctx() -> AnchorContext {
         AnchorContext {
@@ -630,5 +1067,143 @@ mod tests {
         let (idx, result) = set.find("x9foo", 0).unwrap();
         assert_eq!(idx, 0);
         assert_eq!(result.start..result.end, 1..2);
+    }
+
+    #[test]
+    fn pattern_set_replays_continuation_anchor_only_at_g_position() {
+        let patterns = vec![r"\Gfoo".into(), "nomatch".into()];
+        let set = PatternSetMatcher::new(&patterns).unwrap();
+        let (idx, result) = set
+            .find_with_context("foo xxfoo", 0, AnchorContext::continuation(6))
+            .unwrap();
+        assert_eq!(idx, 0);
+        assert_eq!(result.start..result.end, 6..9);
+    }
+
+    fn forced_frontier(patterns: &[&str]) -> PatternSetMatcher {
+        let compiled = patterns
+            .iter()
+            .map(|pattern| Arc::new(CompiledPattern::new(pattern)))
+            .collect::<Vec<_>>();
+        PatternSetMatcher::from_compiled_with_forced_frontier(&compiled)
+    }
+
+    #[test]
+    fn partial_frontier_opaque_can_beat_regular_bound() {
+        let set = forced_frontier(&["a", "(?=x)x"]);
+        let (idx, result) = set.find("x a", 0).unwrap();
+        assert_eq!(idx, 1);
+        assert_eq!(result.start..result.end, 0..1);
+    }
+
+    #[test]
+    fn partial_frontier_preserves_equal_start_grammar_order() {
+        let set = forced_frontier(&["(?=a)a", "a"]);
+        let (idx, result) = set.find("a", 0).unwrap();
+        assert_eq!(idx, 0);
+        assert_eq!(result.start..result.end, 0..1);
+
+        let set = forced_frontier(&["a", "(?=a)a"]);
+        let (idx, result) = set.find("a", 0).unwrap();
+        assert_eq!(idx, 0);
+        assert_eq!(result.start..result.end, 0..1);
+    }
+
+    #[test]
+    fn partial_frontier_ignores_opaque_after_regular_bound() {
+        let set = forced_frontier(&["a", "(?=z)z"]);
+        let (idx, result) = set.find("a z", 0).unwrap();
+        assert_eq!(idx, 0);
+        assert_eq!(result.start..result.end, 0..1);
+    }
+
+    #[test]
+    fn partial_frontier_falls_back_when_regular_replay_fails() {
+        let mut set = forced_frontier(&["a", "(?=z)z"]);
+        set.force_regular_replay_failure_for(0);
+        let (idx, result) = set.find("a z", 0).unwrap();
+        assert_eq!(idx, 0);
+        assert_eq!(result.start..result.end, 0..1);
+    }
+
+    #[test]
+    fn partial_frontier_honors_continuation_anchor() {
+        let set = forced_frontier(&[r"\Gfoo", "(?=q)q"]);
+        let (idx, result) = set
+            .find_with_context("xxfoo z", 0, AnchorContext::continuation(2))
+            .unwrap();
+        assert_eq!(idx, 0);
+        assert_eq!(result.start..result.end, 2..5);
+        assert!(
+            set.find_with_context("xxfoo z", 0, AnchorContext::continuation(3))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn partial_frontier_selection_still_defers_captures_to_replay() {
+        let set = forced_frontier(&["(a)", "(?=z)z"]);
+        let (idx, result) = set.find("a", 0).unwrap();
+        assert_eq!(idx, 0);
+        assert_eq!(result.start..result.end, 0..1);
+        assert!(
+            result.captures.is_empty(),
+            "candidate selection should not eagerly materialize captures"
+        );
+    }
+
+    #[test]
+    fn partial_frontier_matches_reference_search_on_mixed_sets() {
+        let cases = [
+            (
+                vec!["a+", "(?=a)a", "b"],
+                vec![
+                    ("", 0, AnchorContext::default()),
+                    ("baaa", 0, AnchorContext::default()),
+                    ("xaa", 0, AnchorContext::default()),
+                    ("xaa", 1, AnchorContext::default()),
+                ],
+            ),
+            (
+                vec![r"\Gfoo", "(?<=x)y", "foo"],
+                vec![
+                    ("xxfoo y", 0, AnchorContext::continuation(2)),
+                    ("xy foo", 0, AnchorContext::continuation(0)),
+                    ("xy foo", 2, AnchorContext::continuation(2)),
+                ],
+            ),
+            (
+                vec!["[A-Z]+", "(?=z)z", "end$"],
+                vec![
+                    ("aaZ z", 0, AnchorContext::default()),
+                    ("end", 0, AnchorContext::default()),
+                    ("lower", 0, AnchorContext::default()),
+                ],
+            ),
+        ];
+
+        for (patterns, probes) in cases {
+            let set = forced_frontier(&patterns);
+            for (line, from, ctx) in probes {
+                let actual = set.find_with_context(line, from, ctx).map(summarize_match);
+                let mut scratch = super::super::bytecode::BytecodeScratch::default();
+                let expected = set
+                    .find_reference_with_buckets(
+                        line,
+                        from,
+                        ctx,
+                        &mut scratch,
+                        &set.unrestricted_entries,
+                        &set.start_byte_entries,
+                        None,
+                    )
+                    .map(summarize_match);
+                assert_eq!(actual, expected, "patterns={patterns:?} line={line:?}");
+            }
+        }
+    }
+
+    fn summarize_match((idx, result): (usize, MatchResult)) -> (usize, usize, usize) {
+        (idx, result.start, result.end)
     }
 }

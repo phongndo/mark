@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use super::ast::{Ast, CharClass, ClassAtom, LookKind, ParsedRegex, has_case_insensitive_scope};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,10 +20,15 @@ impl RequiredLiterals {
 pub enum Prefilter {
     None,
     Byte(u8),
+    ByteSet {
+        bytes: Vec<u8>,
+        bitmap: [u64; 4],
+    },
     Literal(String),
     Any {
         literals: Vec<String>,
         ascii_case_insensitive: bool,
+        finder: Option<MultiLiteralFinder>,
     },
 }
 
@@ -40,14 +47,53 @@ impl Prefilter {
     }
 
     pub fn from_pattern(ast: &Ast) -> Self {
-        match required_literals(ast) {
+        Self::from_required(required_literals(ast), false)
+    }
+
+    fn from_required(required: RequiredLiterals, ascii_case_insensitive: bool) -> Self {
+        if ascii_case_insensitive {
+            let literals = match required {
+                RequiredLiterals::None => return Self::None,
+                RequiredLiterals::One(literal) => vec![literal],
+                RequiredLiterals::Any(literals) => literals,
+            };
+            if literals.is_empty()
+                || literals
+                    .iter()
+                    .any(|literal| literal.is_empty() || !literal.is_ascii())
+            {
+                return Self::None;
+            }
+            return Self::Any {
+                literals,
+                ascii_case_insensitive: true,
+                finder: None,
+            };
+        }
+        match required {
             RequiredLiterals::None => Self::None,
             RequiredLiterals::One(literal) => prefilter_one(literal),
             RequiredLiterals::Any(literals) if literals.is_empty() => Self::None,
             RequiredLiterals::Any(literals) if literals.len() == 1 => {
                 prefilter_one(literals.into_iter().next().expect("one literal"))
             }
+            RequiredLiterals::Any(literals)
+                if literals
+                    .iter()
+                    .all(|literal| literal.len() == 1 && literal.is_ascii()) =>
+            {
+                let bytes = literals
+                    .into_iter()
+                    .map(|literal| literal.as_bytes()[0])
+                    .collect::<Vec<_>>();
+                let mut bitmap = [0u64; 4];
+                for &byte in &bytes {
+                    bitmap[byte as usize >> 6] |= 1u64 << (byte & 63);
+                }
+                Self::ByteSet { bytes, bitmap }
+            }
             RequiredLiterals::Any(literals) => Self::Any {
+                finder: MultiLiteralFinder::for_literals(&literals),
                 literals,
                 ascii_case_insensitive: false,
             },
@@ -55,22 +101,7 @@ impl Prefilter {
     }
 
     fn from_case_insensitive_pattern(ast: &Ast) -> Self {
-        let literals = match required_literals(ast) {
-            RequiredLiterals::None => return Self::None,
-            RequiredLiterals::One(literal) => vec![literal],
-            RequiredLiterals::Any(literals) => literals,
-        };
-        if literals.is_empty()
-            || literals
-                .iter()
-                .any(|literal| literal.is_empty() || !literal.is_ascii())
-        {
-            return Self::None;
-        }
-        Self::Any {
-            literals,
-            ascii_case_insensitive: true,
-        }
+        Self::from_required(required_literals(ast), true)
     }
 
     pub fn may_match(&self, haystack: &str, from: usize) -> bool {
@@ -83,19 +114,70 @@ impl Prefilter {
         match self {
             Self::None => true,
             Self::Byte(byte) => find_byte(slice.as_bytes(), *byte).is_some(),
-            Self::Literal(literal) => slice.contains(literal.as_str()),
+            Self::ByteSet { bytes, bitmap } => {
+                find_byte_set(slice.as_bytes(), bytes, bitmap).is_some()
+            }
+            Self::Literal(literal) => find_literal(slice, literal).is_some(),
             Self::Any {
                 literals,
                 ascii_case_insensitive: false,
-            } => literals
-                .iter()
-                .any(|literal| slice.contains(literal.as_str())),
+                finder,
+            } => finder.as_ref().map_or_else(
+                || {
+                    literals
+                        .iter()
+                        .any(|literal| find_literal(slice, literal).is_some())
+                },
+                |finder| finder.find(slice.as_bytes()).is_some(),
+            ),
             Self::Any {
                 literals,
                 ascii_case_insensitive: true,
+                ..
             } => literals
                 .iter()
                 .any(|literal| contains_ignore_ascii_case(slice, literal)),
+        }
+    }
+
+    /// Position of the first viability point at or after `from`, or `None`
+    /// when the required literal cannot occur again on this line. `Self::None`
+    /// never filters, so it reports `from` itself.
+    pub fn next_occurrence(&self, haystack: &str, from: usize) -> Option<usize> {
+        if !haystack.is_char_boundary(from) {
+            return None;
+        }
+        let slice = haystack.get(from..)?;
+        match self {
+            Self::None => Some(from),
+            Self::Byte(byte) => find_byte(slice.as_bytes(), *byte).map(|pos| from + pos),
+            Self::ByteSet { bytes, bitmap } => {
+                find_byte_set(slice.as_bytes(), bytes, bitmap).map(|pos| from + pos)
+            }
+            Self::Literal(literal) => find_literal(slice, literal).map(|pos| from + pos),
+            Self::Any {
+                literals,
+                ascii_case_insensitive: false,
+                finder,
+            } => finder.as_ref().map_or_else(
+                || {
+                    literals
+                        .iter()
+                        .filter_map(|literal| find_literal(slice, literal))
+                        .min()
+                        .map(|pos| from + pos)
+                },
+                |finder| finder.find(slice.as_bytes()).map(|pos| from + pos),
+            ),
+            Self::Any {
+                literals,
+                ascii_case_insensitive: true,
+                ..
+            } => literals
+                .iter()
+                .filter_map(|literal| find_ignore_ascii_case(slice, literal))
+                .min()
+                .map(|pos| from + pos),
         }
     }
 
@@ -106,9 +188,161 @@ impl Prefilter {
     pub fn literals(&self) -> &[String] {
         match self {
             Self::Any { literals, .. } => literals,
-            _ => &[],
+            Self::None | Self::Byte(_) | Self::ByteSet { .. } | Self::Literal(_) => &[],
         }
     }
+}
+
+/// Compact failure-linked trie for large case-sensitive required-literal
+/// sets. Small sets retain the standard library's highly tuned two-way
+/// search; the trie is reserved for cases where rebuilding and running one
+/// searcher per alternative dominates (notably C/C++ keyword inventories).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[doc(hidden)]
+pub struct MultiLiteralFinder {
+    nodes: Vec<FinderNode>,
+    /// Every input byte probes the root at least once. A dense root table
+    /// avoids a linear scan over the large first-byte fanout while keeping
+    /// deeper, usually tiny transition sets compact.
+    root_edges: Box<[u32; 256]>,
+    max_literal_len: usize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct FinderNode {
+    edges: Vec<(u8, u32)>,
+    failure: u32,
+    /// Longest literal ending in this state or one of its failure states.
+    /// The longest output has the earliest start for a fixed end position.
+    output_len: usize,
+}
+
+impl MultiLiteralFinder {
+    fn for_literals(literals: &[String]) -> Option<Self> {
+        let total_bytes = literals.iter().map(String::len).sum::<usize>();
+        (literals.len() >= multi_literal_min_literals()
+            && total_bytes >= multi_literal_min_total_bytes())
+        .then(|| Self::new(literals))
+    }
+
+    fn new(literals: &[String]) -> Self {
+        let mut nodes = vec![FinderNode::default()];
+        let mut max_literal_len = 0usize;
+        for literal in literals {
+            debug_assert!(!literal.is_empty());
+            max_literal_len = max_literal_len.max(literal.len());
+            let mut state = 0usize;
+            for byte in literal.bytes() {
+                let next = edge(&nodes[state], byte);
+                state = if let Some(next) = next {
+                    next as usize
+                } else {
+                    let next = u32::try_from(nodes.len()).expect("prefilter trie exceeds u32");
+                    nodes.push(FinderNode::default());
+                    nodes[state].edges.push((byte, next));
+                    next as usize
+                };
+            }
+            nodes[state].output_len = nodes[state].output_len.max(literal.len());
+        }
+
+        let mut queue = VecDeque::new();
+        let root_children = nodes[0]
+            .edges
+            .iter()
+            .map(|(_, child)| *child)
+            .collect::<Vec<_>>();
+        for child in root_children {
+            queue.push_back(child);
+        }
+        while let Some(state) = queue.pop_front() {
+            let transitions = nodes[state as usize].edges.clone();
+            for (byte, child) in transitions {
+                let mut failure = nodes[state as usize].failure;
+                while failure != 0 && edge(&nodes[failure as usize], byte).is_none() {
+                    failure = nodes[failure as usize].failure;
+                }
+                if let Some(next) = edge(&nodes[failure as usize], byte)
+                    && next != child
+                {
+                    failure = next;
+                }
+                nodes[child as usize].failure = failure;
+                nodes[child as usize].output_len = nodes[child as usize]
+                    .output_len
+                    .max(nodes[failure as usize].output_len);
+                queue.push_back(child);
+            }
+        }
+        let mut root_edges = Box::new([u32::MAX; 256]);
+        for (byte, child) in &nodes[0].edges {
+            root_edges[*byte as usize] = *child;
+        }
+        Self {
+            nodes,
+            root_edges,
+            max_literal_len,
+        }
+    }
+
+    /// Returns the leftmost literal start. Scanning may stop once the maximum
+    /// literal length proves that no future match can begin earlier.
+    fn find(&self, haystack: &[u8]) -> Option<usize> {
+        let mut state = 0u32;
+        let mut best = None;
+        for (index, byte) in haystack.iter().copied().enumerate() {
+            while state != 0 && self.transition(state, byte).is_none() {
+                state = self.nodes[state as usize].failure;
+            }
+            state = self.transition(state, byte).unwrap_or(0);
+            let output_len = self.nodes[state as usize].output_len;
+            if output_len != 0 {
+                let start = index + 1 - output_len;
+                best = Some(best.map_or(start, |current: usize| current.min(start)));
+            }
+            if let Some(best) = best
+                && index.saturating_add(2) >= best.saturating_add(self.max_literal_len)
+            {
+                break;
+            }
+        }
+        best
+    }
+
+    fn transition(&self, state: u32, byte: u8) -> Option<u32> {
+        if state == 0 {
+            let next = self.root_edges[byte as usize];
+            (next != u32::MAX).then_some(next)
+        } else {
+            edge(&self.nodes[state as usize], byte)
+        }
+    }
+}
+
+fn multi_literal_min_literals() -> usize {
+    static VALUE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *VALUE.get_or_init(|| {
+        std::env::var("MARK_TEXTMATE_PREFILTER_MIN_LITERALS")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(4)
+    })
+}
+
+fn multi_literal_min_total_bytes() -> usize {
+    static VALUE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *VALUE.get_or_init(|| {
+        std::env::var("MARK_TEXTMATE_PREFILTER_MIN_BYTES")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(32)
+    })
+}
+
+fn edge(node: &FinderNode, byte: u8) -> Option<u32> {
+    node.edges
+        .iter()
+        .find_map(|(candidate, next)| (*candidate == byte).then_some(*next))
 }
 
 fn prefilter_one(literal: String) -> Prefilter {
@@ -121,20 +355,128 @@ fn prefilter_one(literal: String) -> Prefilter {
 
 /// Native single-byte search (memchr substitute).
 fn find_byte(haystack: &[u8], needle: u8) -> Option<usize> {
-    haystack.iter().position(|&b| b == needle)
+    memchr::memchr(needle, haystack)
+}
+
+fn find_byte_set(haystack: &[u8], bytes: &[u8], bitmap: &[u64; 4]) -> Option<usize> {
+    match bytes {
+        [] => None,
+        [byte] => memchr::memchr(*byte, haystack),
+        [a, b] => memchr::memchr2(*a, *b, haystack),
+        [a, b, c] => memchr::memchr3(*a, *b, *c, haystack),
+        _ => haystack
+            .iter()
+            .position(|byte| bitmap[*byte as usize >> 6] & (1u64 << (*byte & 63)) != 0),
+    }
+}
+
+fn find_literal(haystack: &str, needle: &str) -> Option<usize> {
+    memchr::memmem::find(haystack.as_bytes(), needle.as_bytes())
 }
 
 fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
+    find_ignore_ascii_case(haystack, needle).is_some()
+}
+
+fn find_ignore_ascii_case(haystack: &str, needle: &str) -> Option<usize> {
     if needle.is_empty() {
-        return true;
+        return Some(0);
     }
     let hay = haystack.as_bytes();
     let needle = needle.as_bytes();
     if needle.len() > hay.len() {
-        return false;
+        return None;
     }
     hay.windows(needle.len())
-        .any(|window| window.eq_ignore_ascii_case(needle))
+        .position(|window| window.eq_ignore_ascii_case(needle))
+}
+
+/// Scan-local memo of required-literal occurrences, keyed by compiled-pattern
+/// slot. Anchored pattern-set attempts ask the same rejection question at
+/// monotonically increasing positions; remembering the next occurrence turns
+/// the per-position tail search into an O(1) check. Rejection-only: a stale or
+/// missing entry falls back to a fresh search, so false negatives are
+/// impossible by construction.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PrefilterCursors {
+    line_ptr: usize,
+    line_len: usize,
+    generation: u64,
+    slots: Vec<CursorSlot>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct CursorSlot {
+    generation: u64,
+    searched_from: usize,
+    next_occurrence: Option<usize>,
+}
+
+impl PrefilterCursors {
+    pub(crate) fn begin_line(&mut self, line: &str) {
+        self.line_ptr = line.as_ptr() as usize;
+        self.line_len = line.len();
+        self.generation = self.generation.wrapping_add(1).max(1);
+    }
+
+    pub(crate) fn may_match(
+        &mut self,
+        slot: u32,
+        prefilter: &Prefilter,
+        line: &str,
+        start: usize,
+    ) -> bool {
+        if !prefilter.is_enabled() {
+            return true;
+        }
+        self.next_occurrence(slot, prefilter, line, start).is_some()
+    }
+
+    pub(crate) fn next_occurrence(
+        &mut self,
+        slot: u32,
+        prefilter: &Prefilter,
+        line: &str,
+        start: usize,
+    ) -> Option<usize> {
+        if !prefilter.is_enabled() {
+            return Some(start);
+        }
+        if slot == u32::MAX {
+            return prefilter.next_occurrence(line, start);
+        }
+        let slot = slot as usize;
+        let (line_ptr, line_len) = (line.as_ptr() as usize, line.len());
+        if self.line_ptr != line_ptr || self.line_len != line_len {
+            self.line_ptr = line_ptr;
+            self.line_len = line_len;
+            self.generation = self.generation.wrapping_add(1);
+        }
+        if slot >= self.slots.len() {
+            self.slots.resize(slot + 1, CursorSlot::default());
+        }
+        // Generation zero marks never-written slots; never treat it as bound.
+        if self.generation == 0 {
+            self.generation = 1;
+        }
+        let generation = self.generation;
+        let entry = &mut self.slots[slot];
+        let stale = entry.generation != generation || entry.searched_from > start;
+        if !stale {
+            match entry.next_occurrence {
+                None => return None,
+                Some(occurrence) if occurrence >= start => return Some(occurrence),
+                Some(_) => {}
+            }
+        }
+        let next = prefilter.next_occurrence(line, start);
+        *entry = CursorSlot {
+            generation,
+            searched_from: start,
+            next_occurrence: next,
+        };
+        next
+    }
 }
 
 pub fn required_literal(pattern: &str) -> Option<String> {
@@ -284,11 +626,48 @@ fn literal_prefix(pattern: &str) -> Option<String> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiteralSet {
     literals: Vec<String>,
+    trie: Vec<LiteralTrieNode>,
+    empty_pattern: Option<usize>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct LiteralTrieNode {
+    edges: Vec<(u8, usize)>,
+    terminal_patterns: Vec<usize>,
 }
 
 impl LiteralSet {
     pub fn new(literals: Vec<String>) -> Self {
-        Self { literals }
+        let mut trie = vec![LiteralTrieNode::default()];
+        let mut empty_pattern = None;
+        for (pattern, literal) in literals.iter().enumerate() {
+            if literal.is_empty() {
+                empty_pattern =
+                    Some(empty_pattern.map_or(pattern, |best: usize| best.min(pattern)));
+                continue;
+            }
+            let mut node = 0usize;
+            for byte in literal.bytes() {
+                let next = trie[node]
+                    .edges
+                    .iter()
+                    .find_map(|(edge, next)| (*edge == byte).then_some(*next));
+                node = if let Some(next) = next {
+                    next
+                } else {
+                    let next = trie.len();
+                    trie.push(LiteralTrieNode::default());
+                    trie[node].edges.push((byte, next));
+                    next
+                };
+            }
+            trie[node].terminal_patterns.push(pattern);
+        }
+        Self {
+            literals,
+            trie,
+            empty_pattern,
+        }
     }
 
     pub fn literals(&self) -> &[String] {
@@ -300,40 +679,35 @@ impl LiteralSet {
         if !haystack.is_char_boundary(from) {
             return None;
         }
-        let slice = haystack.get(from..)?;
-        let mut best: Option<(usize, usize, usize)> = None; // start, end, pattern_idx
-        for (idx, literal) in self.literals.iter().enumerate() {
-            if literal.is_empty() {
-                let start = from;
-                let end = from;
-                if is_better_match(best, start, idx) {
-                    best = Some((start, end, idx));
-                }
-                continue;
-            }
-            if let Some(rel) = slice.find(literal.as_str()) {
-                let start = from + rel;
-                let end = start + literal.len();
-                if is_better_match(best, start, idx) {
-                    best = Some((start, end, idx));
-                    // Nothing can start earlier than `from`. First hit at `from`
-                    // is optimal because we walk in index order.
-                    if start == from {
-                        return Some((idx, start, end));
+        for start in haystack[from..]
+            .char_indices()
+            .map(|(offset, _)| from + offset)
+            .chain(std::iter::once(haystack.len()))
+        {
+            let mut best = self.empty_pattern.map(|pattern| (pattern, start));
+            let mut node = 0usize;
+            let mut end = start;
+            while let Some(byte) = haystack.as_bytes().get(end) {
+                let Some(next) = self.trie[node]
+                    .edges
+                    .iter()
+                    .find_map(|(edge, next)| (*edge == *byte).then_some(*next))
+                else {
+                    break;
+                };
+                node = next;
+                end += 1;
+                for pattern in &self.trie[node].terminal_patterns {
+                    if best.is_none_or(|(best, _)| *pattern < best) {
+                        best = Some((*pattern, end));
                     }
                 }
             }
+            if let Some((pattern, end)) = best {
+                return Some((pattern, start, end));
+            }
         }
-        best.map(|(start, end, idx)| (idx, start, end))
-    }
-}
-
-fn is_better_match(best: Option<(usize, usize, usize)>, start: usize, idx: usize) -> bool {
-    match best {
-        None => true,
-        Some((best_start, _, best_idx)) => {
-            start < best_start || (start == best_start && idx < best_idx)
-        }
+        None
     }
 }
 
@@ -411,9 +785,70 @@ mod tests {
     }
 
     #[test]
+    fn multi_literal_finder_preserves_leftmost_and_failure_outputs() {
+        let literals = [
+            "bc", "abcd", "suffix", "hers", "his", "she", "he", "keyword",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+        let finder = MultiLiteralFinder::new(&literals);
+        // `bc` ends before `abcd`, but the longer literal starts earlier.
+        assert_eq!(finder.find(b"zabcd"), Some(1));
+        // `he` is reached through the failure link after scanning `she`.
+        assert_eq!(finder.find(b"ushers"), Some(1));
+        assert_eq!(finder.find(b"nothing"), None);
+    }
+
+    #[test]
+    fn explicit_line_boundary_invalidates_reused_string_storage() {
+        let parsed = parse("keyword");
+        let prefilter = Prefilter::from_pattern(&parsed.ast);
+        let mut cursors = PrefilterCursors::default();
+        let mut line = String::from("no-match");
+        cursors.begin_line(&line);
+        assert!(!cursors.may_match(7, &prefilter, &line, 0));
+
+        line.clear();
+        line.push_str("keyword!");
+        cursors.begin_line(&line);
+        assert!(cursors.may_match(7, &prefilter, &line, 0));
+    }
+
+    #[test]
+    fn large_any_prefilter_uses_compiled_finder_without_changing_answers() {
+        let parsed = parse(concat!(
+            "alpha_long|beta_long|gamma_long|delta_long|epsilon_long|zeta_long|theta_long|keyword_long|",
+            "iota_long|kappa_long|lambda_long|mu_long_value|nu_long_value|xi_long_value|omicron_long|pi_long_value",
+        ));
+        let prefilter = Prefilter::from_pattern(&parsed.ast);
+        let Prefilter::Any { finder, .. } = &prefilter else {
+            panic!("expected Any prefilter");
+        };
+        assert!(finder.is_some());
+        assert_eq!(
+            prefilter.next_occurrence("xx keyword_long alpha", 0),
+            Some(3)
+        );
+        assert!(prefilter.may_match("xx keyword_long alpha", 3));
+        assert!(!prefilter.may_match("xx keyword_long alpha", 4));
+        assert!(!prefilter.may_match("unrelated", 0));
+    }
+
+    #[test]
     fn literal_set_leftmost_lowest_index() {
         let set = LiteralSet::new(vec!["bb".into(), "b".into(), "a".into()]);
         assert_eq!(set.find("abb", 0), Some((2, 0, 1)));
         assert_eq!(set.find("abb", 1), Some((0, 1, 3)));
+    }
+
+    #[test]
+    fn literal_trie_preserves_empty_prefix_and_utf8_order() {
+        let set = LiteralSet::new(vec!["éx".into(), "é".into(), "".into()]);
+        assert_eq!(set.find("zéx", 1), Some((0, 1, 4)));
+
+        let set = LiteralSet::new(vec!["".into(), "é".into()]);
+        assert_eq!(set.find("é", 0), Some((0, 0, 0)));
+        assert_eq!(set.find("é", 1), None);
     }
 }

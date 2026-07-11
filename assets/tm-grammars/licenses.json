@@ -9,6 +9,42 @@
   },
   "assets": [
     {
+      "language": "abap",
+      "grammarName": "abap",
+      "scopeName": "source.abap",
+      "module": "abap.mjs",
+      "path": "assets/tm-grammars/languages/abap.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT",
+      "privateDependency": true
+    },
+    {
+      "language": "bat",
+      "grammarName": "bat",
+      "scopeName": "source.batchfile",
+      "module": "bat.mjs",
+      "path": "assets/tm-grammars/languages/bat.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT",
+      "privateDependency": true
+    },
+    {
+      "language": "bibtex",
+      "grammarName": "bibtex",
+      "scopeName": "text.bibtex",
+      "module": "bibtex.mjs",
+      "path": "assets/tm-grammars/languages/bibtex.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT",
+      "privateDependency": true
+    },
+    {
       "language": "c",
       "grammarName": "c",
       "scopeName": "source.c",
@@ -18,6 +54,30 @@
       "package": "@shikijs/langs",
       "version": "3.23.0",
       "license": "MIT"
+    },
+    {
+      "language": "clojure",
+      "grammarName": "clojure",
+      "scopeName": "source.clojure",
+      "module": "clojure.mjs",
+      "path": "assets/tm-grammars/languages/clojure.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT",
+      "privateDependency": true
+    },
+    {
+      "language": "coffee",
+      "grammarName": "coffee",
+      "scopeName": "source.coffee",
+      "module": "coffee.mjs",
+      "path": "assets/tm-grammars/languages/coffee.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT",
+      "privateDependency": true
     },
     {
       "language": "cpp",
@@ -64,6 +124,30 @@
       "license": "MIT"
     },
     {
+      "language": "dart",
+      "grammarName": "dart",
+      "scopeName": "source.dart",
+      "module": "dart.mjs",
+      "path": "assets/tm-grammars/languages/dart.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT",
+      "privateDependency": true
+    },
+    {
+      "language": "diff",
+      "grammarName": "diff",
+      "scopeName": "source.diff",
+      "module": "diff.mjs",
+      "path": "assets/tm-grammars/languages/diff.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT",
+      "privateDependency": true
+    },
+    {
       "language": "docker",
       "grammarName": "docker",
       "scopeName": "source.dockerfile",
@@ -73,6 +157,66 @@
       "package": "@shikijs/langs",
       "version": "3.23.0",
       "license": "MIT"
+    },
+    {
+      "language": "elixir",
+      "grammarName": "elixir",
+      "scopeName": "source.elixir",
+      "module": "elixir.mjs",
+      "path": "assets/tm-grammars/languages/elixir.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT",
+      "privateDependency": true
+    },
+    {
+      "language": "erlang",
+      "grammarName": "erlang",
+      "scopeName": "source.erlang",
+      "module": "erlang.mjs",
+      "path": "assets/tm-grammars/languages/erlang.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT",
+      "privateDependency": true
+    },
+    {
+      "language": "fsharp",
+      "grammarName": "fsharp",
+      "scopeName": "source.fsharp",
+      "module": "fsharp.mjs",
+      "path": "assets/tm-grammars/languages/fsharp.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT",
+      "privateDependency": true
+    },
+    {
+      "language": "git-commit",
+      "grammarName": "git-commit",
+      "scopeName": "text.git-commit",
+      "module": "git-commit.mjs",
+      "path": "assets/tm-grammars/languages/git-commit.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT",
+      "privateDependency": true
+    },
+    {
+      "language": "git-rebase",
+      "grammarName": "git-rebase",
+      "scopeName": "text.git-rebase",
+      "module": "git-rebase.mjs",
+      "path": "assets/tm-grammars/languages/git-rebase.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT",
+      "privateDependency": true
     },
     {
       "language": "go",
@@ -86,6 +230,30 @@
       "license": "MIT"
     },
     {
+      "language": "groovy",
+      "grammarName": "groovy",
+      "scopeName": "source.groovy",
+      "module": "groovy.mjs",
+      "path": "assets/tm-grammars/languages/groovy.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT",
+      "privateDependency": true
+    },
+    {
+      "language": "handlebars",
+      "grammarName": "handlebars",
+      "scopeName": "text.html.handlebars",
+      "module": "handlebars.mjs",
+      "path": "assets/tm-grammars/languages/handlebars.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT",
+      "privateDependency": true
+    },
+    {
       "language": "html",
       "grammarName": "html",
       "scopeName": "text.html.basic",
@@ -95,6 +263,42 @@
       "package": "@shikijs/langs",
       "version": "3.23.0",
       "license": "MIT"
+    },
+    {
+      "language": "html-derivative",
+      "grammarName": "html-derivative",
+      "scopeName": "text.html.derivative",
+      "module": "html-derivative.mjs",
+      "path": "assets/tm-grammars/languages/html-derivative.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT",
+      "privateDependency": true
+    },
+    {
+      "language": "ignore",
+      "grammarName": "Ignore",
+      "scopeName": "source.ignore",
+      "module": "git-base/syntaxes/ignore.tmLanguage.json",
+      "path": "assets/tm-grammars/languages/ignore.tmLanguage.json",
+      "source": "Visual Studio Code built-in extension",
+      "package": "microsoft/vscode",
+      "version": "1.128.0",
+      "license": "MIT",
+      "privateDependency": true
+    },
+    {
+      "language": "ini",
+      "grammarName": "ini",
+      "scopeName": "source.ini",
+      "module": "ini.mjs",
+      "path": "assets/tm-grammars/languages/ini.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT",
+      "privateDependency": true
     },
     {
       "language": "java",
@@ -119,6 +323,18 @@
       "license": "MIT"
     },
     {
+      "language": "js-regexp",
+      "grammarName": "Regular Expressions (JavaScript)",
+      "scopeName": "source.js.regexp",
+      "module": "javascript/syntaxes/Regular Expressions (JavaScript).tmLanguage",
+      "path": "assets/tm-grammars/languages/js-regexp.tmLanguage.json",
+      "source": "Visual Studio Code built-in extension",
+      "package": "microsoft/vscode",
+      "version": "1.128.0",
+      "license": "MIT",
+      "privateDependency": true
+    },
+    {
       "language": "json",
       "grammarName": "json",
       "scopeName": "source.json",
@@ -128,6 +344,30 @@
       "package": "@shikijs/langs",
       "version": "3.23.0",
       "license": "MIT"
+    },
+    {
+      "language": "jsonc",
+      "grammarName": "jsonc",
+      "scopeName": "source.json.comments",
+      "module": "jsonc.mjs",
+      "path": "assets/tm-grammars/languages/jsonc.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT",
+      "privateDependency": true
+    },
+    {
+      "language": "jsonl",
+      "grammarName": "jsonl",
+      "scopeName": "source.json.lines",
+      "module": "jsonl.mjs",
+      "path": "assets/tm-grammars/languages/jsonl.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT",
+      "privateDependency": true
     },
     {
       "language": "jsx",
@@ -141,6 +381,18 @@
       "license": "MIT"
     },
     {
+      "language": "julia",
+      "grammarName": "julia",
+      "scopeName": "source.julia",
+      "module": "julia.mjs",
+      "path": "assets/tm-grammars/languages/julia.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT",
+      "privateDependency": true
+    },
+    {
       "language": "kotlin",
       "grammarName": "kotlin",
       "scopeName": "source.kotlin",
@@ -150,6 +402,42 @@
       "package": "@shikijs/langs",
       "version": "3.23.0",
       "license": "MIT"
+    },
+    {
+      "language": "latex",
+      "grammarName": "latex",
+      "scopeName": "text.tex.latex",
+      "module": "latex.mjs",
+      "path": "assets/tm-grammars/languages/latex.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT",
+      "privateDependency": true
+    },
+    {
+      "language": "less",
+      "grammarName": "less",
+      "scopeName": "source.css.less",
+      "module": "less.mjs",
+      "path": "assets/tm-grammars/languages/less.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT",
+      "privateDependency": true
+    },
+    {
+      "language": "log",
+      "grammarName": "log",
+      "scopeName": "text.log",
+      "module": "log.mjs",
+      "path": "assets/tm-grammars/languages/log.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT",
+      "privateDependency": true
     },
     {
       "language": "lua",
@@ -196,6 +484,30 @@
       "license": "MIT"
     },
     {
+      "language": "objective-c",
+      "grammarName": "objective-c",
+      "scopeName": "source.objc",
+      "module": "objective-c.mjs",
+      "path": "assets/tm-grammars/languages/objective-c.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT",
+      "privateDependency": true
+    },
+    {
+      "language": "perl",
+      "grammarName": "perl",
+      "scopeName": "source.perl",
+      "module": "perl.mjs",
+      "path": "assets/tm-grammars/languages/perl.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT",
+      "privateDependency": true
+    },
+    {
       "language": "php",
       "grammarName": "php",
       "scopeName": "source.php",
@@ -218,6 +530,18 @@
       "license": "MIT"
     },
     {
+      "language": "pug",
+      "grammarName": "pug",
+      "scopeName": "text.pug",
+      "module": "pug.mjs",
+      "path": "assets/tm-grammars/languages/pug.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT",
+      "privateDependency": true
+    },
+    {
       "language": "python",
       "grammarName": "python",
       "scopeName": "source.python",
@@ -227,6 +551,54 @@
       "package": "@shikijs/langs",
       "version": "3.23.0",
       "license": "MIT"
+    },
+    {
+      "language": "r",
+      "grammarName": "r",
+      "scopeName": "source.r",
+      "module": "r.mjs",
+      "path": "assets/tm-grammars/languages/r.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT",
+      "privateDependency": true
+    },
+    {
+      "language": "raku",
+      "grammarName": "raku",
+      "scopeName": "source.perl.6",
+      "module": "raku.mjs",
+      "path": "assets/tm-grammars/languages/raku.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT",
+      "privateDependency": true
+    },
+    {
+      "language": "regexp",
+      "grammarName": "regexp",
+      "scopeName": "source.regexp.python",
+      "module": "regexp.mjs",
+      "path": "assets/tm-grammars/languages/regexp.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT",
+      "privateDependency": true
+    },
+    {
+      "language": "rst",
+      "grammarName": "rst",
+      "scopeName": "source.rst",
+      "module": "rst.mjs",
+      "path": "assets/tm-grammars/languages/rst.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT",
+      "privateDependency": true
     },
     {
       "language": "ruby",
@@ -249,6 +621,18 @@
       "package": "@shikijs/langs",
       "version": "3.23.0",
       "license": "MIT"
+    },
+    {
+      "language": "scala",
+      "grammarName": "scala",
+      "scopeName": "source.scala",
+      "module": "scala.mjs",
+      "path": "assets/tm-grammars/languages/scala.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT",
+      "privateDependency": true
     },
     {
       "language": "scss",
@@ -328,6 +712,18 @@
       "license": "MIT"
     },
     {
+      "language": "twig-source",
+      "grammarName": "twig",
+      "scopeName": "source.twig",
+      "module": "twig.mjs",
+      "path": "assets/tm-grammars/languages/twig-source.tmLanguage.json",
+      "source": "@shikijs/langs dist (root-scope alias)",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT",
+      "privateDependency": true
+    },
+    {
       "language": "typescript",
       "grammarName": "typescript",
       "scopeName": "source.ts",
@@ -339,6 +735,42 @@
       "license": "MIT"
     },
     {
+      "language": "vb",
+      "grammarName": "vb",
+      "scopeName": "source.asp.vb.net",
+      "module": "vb.mjs",
+      "path": "assets/tm-grammars/languages/vb.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT",
+      "privateDependency": true
+    },
+    {
+      "language": "xml",
+      "grammarName": "xml",
+      "scopeName": "text.xml",
+      "module": "xml.mjs",
+      "path": "assets/tm-grammars/languages/xml.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT",
+      "privateDependency": true
+    },
+    {
+      "language": "xsl",
+      "grammarName": "xsl",
+      "scopeName": "text.xml.xsl",
+      "module": "xsl.mjs",
+      "path": "assets/tm-grammars/languages/xsl.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "3.23.0",
+      "license": "MIT",
+      "privateDependency": true
+    },
+    {
       "language": "yaml",
       "grammarName": "yaml",
       "scopeName": "source.yaml",
@@ -348,6 +780,18 @@
       "package": "@shikijs/langs",
       "version": "3.23.0",
       "license": "MIT"
+    },
+    {
+      "language": "yang",
+      "grammarName": "yang",
+      "scopeName": "source.yang",
+      "module": "https://raw.githubusercontent.com/marko2276/yang-vscode-syntax/master/syntaxes/yang.tmLanguage",
+      "path": "assets/tm-grammars/languages/yang.tmLanguage.json",
+      "source": "marko2276/yang-vscode-syntax",
+      "package": "marko2276.yang",
+      "version": "0.1.3",
+      "license": "MIT",
+      "privateDependency": true
     }
   ]
 }

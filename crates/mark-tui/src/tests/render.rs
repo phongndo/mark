@@ -2646,7 +2646,7 @@ fn builtin_syntax_palettes_match_upstream_theme_colors() {
         assert_eq!(theme.syntax.color(SyntaxClass::Function), Some(function));
         assert_eq!(theme.syntax.color(SyntaxClass::Tag), Some(tag));
         assert_eq!(theme.syntax.color(SyntaxClass::String), Some(string));
-        assert_eq!(theme.syntax.color(SyntaxClass::Variable), Some(variable));
+        assert_eq!(theme.syntax.color(SyntaxClass::Variable), None);
         assert_eq!(theme.syntax.color(SyntaxClass::Type), Some(variable));
         assert_eq!(theme.syntax.color(SyntaxClass::Property), Some(constant));
         assert_eq!(theme.syntax.color(SyntaxClass::Punctuation), None);

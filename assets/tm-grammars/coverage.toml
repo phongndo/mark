@@ -1,15 +1,52 @@
 # Phase 4 core-30 public grammar packaging from recovered assets only.
-# Public catalog languages: 30. Grammar blobs: 31 (includes private cpp-macro).
+# Public catalog languages: 30. Grammar blobs: 68 (core plus private dependencies).
 public_language_count = 30
-asset_grammar_count = 31
-private_dependency_count = 1
+asset_grammar_count = 68
+private_dependency_count = 38
 kept_count = 28
 remapped_count = 2
 
 # Private dependency grammar blobs are present under languages/ and embedded in
 # the bundle, but are not public catalog languages.
 private_assets = [
+  "abap",
+  "bat",
+  "bibtex",
+  "clojure",
+  "coffee",
   "cpp-macro",
+  "dart",
+  "diff",
+  "elixir",
+  "erlang",
+  "fsharp",
+  "git-commit",
+  "git-rebase",
+  "groovy",
+  "handlebars",
+  "html-derivative",
+  "ignore",
+  "ini",
+  "js-regexp",
+  "jsonc",
+  "jsonl",
+  "julia",
+  "latex",
+  "less",
+  "log",
+  "objective-c",
+  "perl",
+  "pug",
+  "r",
+  "raku",
+  "regexp",
+  "rst",
+  "scala",
+  "twig-source",
+  "vb",
+  "xml",
+  "xsl",
+  "yang",
 ]
 
 # Languages whose public id matches the asset filename stem.
