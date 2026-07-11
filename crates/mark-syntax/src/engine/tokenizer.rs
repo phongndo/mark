@@ -28,7 +28,7 @@ use super::state::{GrammarId, LineTokens, PatternId, RuleId, ScopeId, ScopeStack
 
 const MAX_INCLUDE_DEPTH: usize = 128;
 const MAX_TOKENIZER_STEPS_PER_LINE: usize = 20_000;
-const MAX_FALLBACK_STEPS_PER_LINE: u64 = 250_000;
+const MAX_FALLBACK_STEPS_PER_LINE: u64 = 2_000_000;
 const MIN_FALLBACK_STEPS_PER_CALL: u64 = 10_000_000;
 const FALLBACK_STEPS_PER_SOURCE_BYTE: u64 = 512;
 const MAX_SUBSTITUTED_END_PATTERN_LEN: usize = 4096;
@@ -37,6 +37,7 @@ const MAX_INLINE_CANDIDATE_SETS: usize = 1024;
 const MAX_CANDIDATE_SETS: usize = 4096;
 const MAX_CANDIDATE_BLUEPRINTS: usize = 1024;
 const MAX_INJECTION_OUTCOMES: usize = 1024;
+const MAX_SCOPE_STACK_CACHE_ENTRIES: usize = 8192;
 
 #[derive(Debug, Default)]
 pub struct Tokenizer;
@@ -117,8 +118,8 @@ impl From<Vec<CompactScopedToken>> for CompactLineTokens {
 pub struct TokenizerState {
     // Parent-linked immutable chunks keep continuation updates bounded. Pushes
     // copy at most one 32-frame tail chunk instead of cloning every frame
-    // pointer in a deep stack, while equality can still use shared-tail pointer
-    // identity before falling back to exact frame comparison.
+    // pointer in a deep stack; a hash-consed stack id keeps equality exact and
+    // O(1) even when equal states were built independently.
     frames: FrameStack,
     interner_hash: u64,
 }
@@ -141,7 +142,7 @@ impl TokenizerState {
     }
 
     fn refresh_interner_hash(&mut self) {
-        self.interner_hash = self.frames.stack_hash();
+        self.interner_hash = u64::from(self.frames.interned_id().0);
     }
 
     /// Pushes a frame while maintaining the per-frame identity hash and the
@@ -168,6 +169,7 @@ impl TokenizerState {
         state_hash = fnv_mix_opt_str(state_hash, frame.end_pattern.as_deref());
         state_hash = fnv_mix_opt_str(state_hash, frame.while_pattern.as_deref());
         frame.state_hash = state_hash;
+        frame.interned_stack_id = intern_frame_stack_node(self.frames.interned_id(), &frame);
         self.frames.push(frame);
         self.refresh_interner_hash();
     }
@@ -194,7 +196,7 @@ impl TokenizerState {
 
 impl PartialEq for TokenizerState {
     fn eq(&self, other: &Self) -> bool {
-        self.frames.ptr_eq(&other.frames) || self.frames == other.frames
+        self.frames == other.frames
     }
 }
 
@@ -266,7 +268,17 @@ struct Frame {
     stack_hash: u64,
     /// Cumulative public `StateId` hash up to and including this frame.
     state_hash: u32,
+    /// Exact hash-consed identity of the full frame stack ending at this
+    /// frame. `TokenizerState` equality uses this id instead of walking every
+    /// frame in deep continuations.
+    interned_stack_id: InternedFrameStackId,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+struct InternedFrameStackId(u32);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct InternedFrameId(u32);
 
 impl Frame {
     fn compute_identity_hash(&self) -> u64 {
@@ -325,38 +337,196 @@ impl Hash for Frame {
     }
 }
 
-// Shallow and medium continuations are faster as one copy-on-write slice.
-// Switch only once copying that slice would dominate pathological nesting.
-const LINKED_FRAME_CHUNK: usize = 32;
-
-#[cfg(not(test))]
-fn linked_frame_threshold() -> usize {
-    static THRESHOLD: OnceLock<usize> = OnceLock::new();
-    *THRESHOLD.get_or_init(|| {
-        std::env::var("MARK_TEXTMATE_LINKED_FRAME_THRESHOLD")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(1_000_000)
-    })
-}
-#[cfg(test)]
-fn linked_frame_threshold() -> usize {
-    128
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct FrameIdentityKey {
+    grammar_id: GrammarId,
+    base_grammar_id: GrammarId,
+    rule_id: RuleId,
+    scope_prefix: Option<Arc<str>>,
+    name: Option<Arc<str>>,
+    content_name: Option<Arc<str>>,
+    end_pattern: Option<Arc<str>>,
+    end_pattern_id: Option<PatternId>,
+    while_pattern: Option<Arc<str>>,
+    while_pattern_id: Option<PatternId>,
+    apply_end_pattern_last: bool,
+    begin_captured_eol: bool,
 }
 
-#[derive(Debug, Clone)]
-struct FrameStack(Arc<FrameStorage>);
-#[derive(Debug, Clone)]
-enum FrameStorage {
-    Flat(Vec<Arc<Frame>>),
-    Linked(Vec<Arc<FrameChunk>>),
-}
-impl Default for FrameStack {
-    fn default() -> Self {
-        Self(Arc::new(FrameStorage::Flat(Vec::new())))
+impl FrameIdentityKey {
+    fn from_frame(frame: &Frame) -> Self {
+        Self {
+            grammar_id: frame.grammar_id,
+            base_grammar_id: frame.base_grammar_id,
+            rule_id: frame.rule_id,
+            scope_prefix: frame.scope_prefix.clone(),
+            name: frame.name.clone(),
+            content_name: frame.content_name.clone(),
+            end_pattern: frame.end_pattern.clone(),
+            end_pattern_id: frame.end_pattern_id,
+            while_pattern: frame.while_pattern.clone(),
+            while_pattern_id: frame.while_pattern_id,
+            apply_end_pattern_last: frame.apply_end_pattern_last,
+            begin_captured_eol: frame.begin_captured_eol,
+        }
+    }
+
+    fn matches_frame(&self, frame: &Frame) -> bool {
+        self.grammar_id == frame.grammar_id
+            && self.base_grammar_id == frame.base_grammar_id
+            && self.rule_id == frame.rule_id
+            && self.scope_prefix.as_deref() == frame.scope_prefix.as_deref()
+            && self.name.as_deref() == frame.name.as_deref()
+            && self.content_name.as_deref() == frame.content_name.as_deref()
+            && self.end_pattern.as_deref() == frame.end_pattern.as_deref()
+            && self.end_pattern_id == frame.end_pattern_id
+            && self.while_pattern.as_deref() == frame.while_pattern.as_deref()
+            && self.while_pattern_id == frame.while_pattern_id
+            && self.apply_end_pattern_last == frame.apply_end_pattern_last
+            && self.begin_captured_eol == frame.begin_captured_eol
     }
 }
+
+#[derive(Debug, Clone, Copy)]
+struct InternedFrameStackNode {
+    parent: InternedFrameStackId,
+    frame: Option<InternedFrameId>,
+    depth: usize,
+}
+
+#[derive(Debug, Clone)]
+struct InternedFrameStackScopeData {
+    parent: InternedFrameStackId,
+    scope_prefix: Option<Arc<str>>,
+    name: Option<Arc<str>>,
+    content_name: Option<Arc<str>>,
+}
+
 #[derive(Debug)]
+struct FrameStackInternTable {
+    frame_ids_by_hash: HashMap<u64, Vec<InternedFrameId>>,
+    frame_keys: Vec<FrameIdentityKey>,
+    stack_edges: HashMap<(InternedFrameStackId, InternedFrameId), InternedFrameStackId>,
+    stack_nodes: Vec<InternedFrameStackNode>,
+}
+
+impl FrameStackInternTable {
+    fn new() -> Self {
+        Self {
+            frame_ids_by_hash: HashMap::new(),
+            frame_keys: Vec::new(),
+            stack_edges: HashMap::new(),
+            stack_nodes: vec![InternedFrameStackNode {
+                parent: InternedFrameStackId::default(),
+                frame: None,
+                depth: 0,
+            }],
+        }
+    }
+
+    fn intern_frame(&mut self, frame: &Frame) -> InternedFrameId {
+        if let Some(ids) = self.frame_ids_by_hash.get(&frame.identity_hash) {
+            for id in ids {
+                if self
+                    .frame_keys
+                    .get(id.0 as usize)
+                    .is_some_and(|key| key.matches_frame(frame))
+                {
+                    return *id;
+                }
+            }
+        }
+        let id = InternedFrameId(self.frame_keys.len() as u32);
+        let key = FrameIdentityKey::from_frame(frame);
+        self.frame_keys.push(key);
+        self.frame_ids_by_hash
+            .entry(frame.identity_hash)
+            .or_default()
+            .push(id);
+        id
+    }
+
+    fn intern_stack_node(
+        &mut self,
+        parent: InternedFrameStackId,
+        frame: &Frame,
+    ) -> InternedFrameStackId {
+        let frame_id = self.intern_frame(frame);
+        let edge = (parent, frame_id);
+        if let Some(id) = self.stack_edges.get(&edge) {
+            return *id;
+        }
+        let parent_depth = self
+            .stack_nodes
+            .get(parent.0 as usize)
+            .map_or(0, |node| node.depth);
+        let id = InternedFrameStackId(self.stack_nodes.len() as u32);
+        self.stack_nodes.push(InternedFrameStackNode {
+            parent,
+            frame: Some(frame_id),
+            depth: parent_depth + 1,
+        });
+        self.stack_edges.insert(edge, id);
+        id
+    }
+
+    fn scope_data(&self, id: InternedFrameStackId) -> Option<InternedFrameStackScopeData> {
+        let node = self.stack_nodes.get(id.0 as usize)?;
+        let frame_id = node.frame?;
+        let frame = self.frame_keys.get(frame_id.0 as usize)?;
+        Some(InternedFrameStackScopeData {
+            parent: node.parent,
+            scope_prefix: frame.scope_prefix.clone(),
+            name: frame.name.clone(),
+            content_name: frame.content_name.clone(),
+        })
+    }
+}
+
+fn frame_stack_intern_table() -> &'static Mutex<FrameStackInternTable> {
+    static TABLE: OnceLock<Mutex<FrameStackInternTable>> = OnceLock::new();
+    TABLE.get_or_init(|| Mutex::new(FrameStackInternTable::new()))
+}
+
+fn intern_frame_stack_node(parent: InternedFrameStackId, frame: &Frame) -> InternedFrameStackId {
+    frame_stack_intern_table()
+        .lock()
+        .expect("frame stack interner poisoned")
+        .intern_stack_node(parent, frame)
+}
+
+fn interned_frame_stack_scope_data(
+    id: InternedFrameStackId,
+) -> Option<InternedFrameStackScopeData> {
+    frame_stack_intern_table()
+        .lock()
+        .expect("frame stack interner poisoned")
+        .scope_data(id)
+}
+
+// Continuation stacks are immutable parent-linked chunks. Push/pop clone at
+// most one small tail chunk and never clone the whole deep stack; exact
+// equality is the interned stack id maintained on each frame.
+const LINKED_FRAME_CHUNK: usize = 32;
+
+#[derive(Debug, Clone)]
+struct FrameStack {
+    tail: Option<Arc<FrameChunk>>,
+    len: usize,
+    interned_id: InternedFrameStackId,
+}
+
+impl Default for FrameStack {
+    fn default() -> Self {
+        Self {
+            tail: None,
+            len: 0,
+            interned_id: InternedFrameStackId::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 struct FrameChunk {
     parent: Option<Arc<FrameChunk>>,
     frames: Vec<Arc<Frame>>,
@@ -366,235 +536,207 @@ struct FrameChunk {
 impl FrameStack {
     #[inline]
     fn is_empty(&self) -> bool {
-        self.len() == 0
+        self.len == 0
     }
+
     #[inline]
     fn len(&self) -> usize {
-        match self.0.as_ref() {
-            FrameStorage::Flat(v) => v.len(),
-            FrameStorage::Linked(v) => v.last().map_or(0, |c| c.depth),
-        }
+        self.len
     }
+
     #[inline]
     fn last(&self) -> Option<&Frame> {
-        match self.0.as_ref() {
-            FrameStorage::Flat(v) => v.last().map(AsRef::as_ref),
-            FrameStorage::Linked(v) => v.last()?.frames.last().map(AsRef::as_ref),
-        }
+        self.tail.as_ref()?.frames.last().map(AsRef::as_ref)
     }
+
+    fn chunks_in_order(&self) -> Vec<&FrameChunk> {
+        let mut chunks = Vec::new();
+        let mut cursor = self.tail.as_deref();
+        while let Some(chunk) = cursor {
+            chunks.push(chunk);
+            cursor = chunk.parent.as_deref();
+        }
+        chunks.reverse();
+        chunks
+    }
+
     fn get(&self, index: usize) -> Option<&Frame> {
-        match self.0.as_ref() {
-            FrameStorage::Flat(v) => v.get(index).map(AsRef::as_ref),
-            FrameStorage::Linked(v) => v
-                .get(index / LINKED_FRAME_CHUNK)?
-                .frames
-                .get(index % LINKED_FRAME_CHUNK)
-                .map(AsRef::as_ref),
+        if index >= self.len {
+            return None;
         }
+        let mut cursor = self.tail.as_deref();
+        while let Some(chunk) = cursor {
+            let start = chunk.depth - chunk.frames.len();
+            if index >= start {
+                return chunk.frames.get(index - start).map(AsRef::as_ref);
+            }
+            cursor = chunk.parent.as_deref();
+        }
+        None
     }
+
     #[inline]
     fn push(&mut self, frame: Frame) {
-        let threshold = linked_frame_threshold();
-        let storage = Arc::make_mut(&mut self.0);
-        if let FrameStorage::Flat(v) = storage {
-            if v.len() < threshold {
-                v.push(Arc::new(frame));
-                return;
-            }
-            *storage = FrameStorage::Linked(chunk_frames(v));
+        let interned_id = frame.interned_stack_id;
+        let frame = Arc::new(frame);
+        if let Some(tail) = self.tail.as_mut()
+            && tail.frames.len() < LINKED_FRAME_CHUNK
+            && Arc::strong_count(tail) == 1
+        {
+            let tail = Arc::make_mut(tail);
+            tail.frames.push(frame);
+            tail.depth += 1;
+            self.len += 1;
+            self.interned_id = interned_id;
+            return;
         }
-        let FrameStorage::Linked(chunks) = storage else {
-            unreachable!()
-        };
-        let tail = chunks.last().unwrap();
-        let tail_len = tail.frames.len();
-        let (parent, mut frames) = if tail_len < LINKED_FRAME_CHUNK {
-            (tail.parent.clone(), tail.frames.clone())
-        } else {
-            (
+        let (parent, mut frames) = match self.tail.as_ref() {
+            Some(tail) if tail.frames.len() < LINKED_FRAME_CHUNK => {
+                (tail.parent.clone(), tail.frames.clone())
+            }
+            Some(tail) => (
                 Some(Arc::clone(tail)),
                 Vec::with_capacity(LINKED_FRAME_CHUNK),
-            )
+            ),
+            None => (None, Vec::with_capacity(LINKED_FRAME_CHUNK)),
         };
-        frames.push(Arc::new(frame));
+        frames.push(frame);
         let depth = parent.as_ref().map_or(0, |p| p.depth) + frames.len();
-        let chunk = Arc::new(FrameChunk {
+        self.tail = Some(Arc::new(FrameChunk {
             parent,
             frames,
             depth,
-        });
-        if tail_len < LINKED_FRAME_CHUNK {
-            *chunks.last_mut().unwrap() = chunk;
-        } else {
-            chunks.push(chunk);
-        }
+        }));
+        self.len += 1;
+        self.interned_id = interned_id;
     }
+
     #[inline]
     fn pop(&mut self) {
-        let threshold = linked_frame_threshold();
-        let storage = Arc::make_mut(&mut self.0);
-        match storage {
-            FrameStorage::Flat(v) => {
-                v.pop();
-            }
-            FrameStorage::Linked(chunks) => {
-                let tail = chunks.last().unwrap();
-                if tail.frames.len() == 1 {
-                    chunks.pop();
-                } else {
-                    let mut frames = tail.frames.clone();
-                    frames.pop();
-                    *chunks.last_mut().unwrap() = Arc::new(FrameChunk {
-                        parent: tail.parent.clone(),
-                        frames,
-                        depth: tail.depth - 1,
-                    });
-                }
-                if chunks.last().map_or(0, |c| c.depth) <= threshold {
-                    *storage = FrameStorage::Flat(flatten_chunks(chunks));
-                }
-            }
+        let Some(tail) = self.tail.as_ref() else {
+            return;
+        };
+        if tail.frames.len() == 1 {
+            self.tail = tail.parent.clone();
+        } else {
+            let mut frames = tail.frames.clone();
+            frames.pop();
+            self.tail = Some(Arc::new(FrameChunk {
+                parent: tail.parent.clone(),
+                frames,
+                depth: tail.depth - 1,
+            }));
         }
+        self.len -= 1;
+        self.refresh_interned_id_from_top();
     }
+
     fn truncate(&mut self, len: usize) {
-        if len >= self.len() {
+        if len >= self.len {
             return;
         }
-        let threshold = linked_frame_threshold();
-        let storage = Arc::make_mut(&mut self.0);
-        match storage {
-            FrameStorage::Flat(v) => v.truncate(len),
-            FrameStorage::Linked(chunks) => {
-                chunks.truncate(len.div_ceil(LINKED_FRAME_CHUNK));
-                if let Some(tail) = chunks.last()
-                    && !len.is_multiple_of(LINKED_FRAME_CHUNK)
-                {
-                    let keep = len % LINKED_FRAME_CHUNK;
-                    *chunks.last_mut().unwrap() = Arc::new(FrameChunk {
-                        parent: tail.parent.clone(),
-                        frames: tail.frames[..keep].to_vec(),
-                        depth: len,
-                    });
-                }
-                if len <= threshold {
-                    *storage = FrameStorage::Flat(flatten_chunks(chunks));
-                }
+        if len == 0 {
+            self.tail = None;
+            self.len = 0;
+            self.interned_id = InternedFrameStackId::default();
+            return;
+        }
+        let mut tail = self.tail.clone();
+        while let Some(chunk) = tail.as_ref() {
+            let parent_depth = chunk.parent.as_ref().map_or(0, |parent| parent.depth);
+            if len > parent_depth {
+                break;
+            }
+            tail = chunk.parent.clone();
+        }
+        if let Some(chunk) = tail.as_ref() {
+            let parent_depth = chunk.parent.as_ref().map_or(0, |parent| parent.depth);
+            let keep = len - parent_depth;
+            if keep < chunk.frames.len() {
+                tail = Some(Arc::new(FrameChunk {
+                    parent: chunk.parent.clone(),
+                    frames: chunk.frames[..keep].to_vec(),
+                    depth: len,
+                }));
             }
         }
+        self.tail = tail;
+        self.len = len;
+        self.refresh_interned_id_from_top();
     }
+
     fn prefix(&self, len: usize) -> Self {
         let mut s = self.clone();
         s.truncate(len);
         s
     }
+
     #[inline]
-    fn stack_hash(&self) -> u64 {
-        self.last().map_or(0, |f| f.stack_hash)
+    fn interned_id(&self) -> InternedFrameStackId {
+        self.interned_id
     }
-    fn ptr_eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.0, &other.0)
+
+    fn refresh_interned_id_from_top(&mut self) {
+        self.interned_id = self
+            .last()
+            .map_or(InternedFrameStackId::default(), |frame| {
+                frame.interned_stack_id
+            });
     }
+
+    #[cfg(test)]
     fn iter(&self) -> FrameStackIter<'_> {
-        match self.0.as_ref() {
-            FrameStorage::Flat(v) => FrameStackIter::Flat(v.iter()),
-            FrameStorage::Linked(v) => FrameStackIter::Linked(LinkedFrameIter::new(v, self.len())),
+        let mut frames = Vec::with_capacity(self.len);
+        for chunk in self.chunks_in_order() {
+            for frame in &chunk.frames {
+                frames.push(frame.as_ref());
+            }
         }
+        FrameStackIter { frames, index: 0 }
     }
+
     #[inline]
     fn for_each(&self, mut f: impl FnMut(usize, &Frame)) {
-        match self.0.as_ref() {
-            FrameStorage::Flat(v) => {
-                for (i, x) in v.iter().enumerate() {
-                    f(i, x);
-                }
-            }
-            FrameStorage::Linked(v) => {
-                for (i, x) in LinkedFrameIter::new(v, self.len()).enumerate() {
-                    f(i, x);
-                }
+        let mut index = 0usize;
+        for chunk in self.chunks_in_order() {
+            for frame in &chunk.frames {
+                f(index, frame);
+                index += 1;
             }
         }
     }
 }
-fn chunk_frames(frames: &[Arc<Frame>]) -> Vec<Arc<FrameChunk>> {
-    let mut out = Vec::with_capacity(frames.len().div_ceil(LINKED_FRAME_CHUNK));
-    for frames in frames.chunks(LINKED_FRAME_CHUNK) {
-        let parent = out.last().cloned();
-        let depth = parent.as_ref().map_or(0, |p: &Arc<FrameChunk>| p.depth) + frames.len();
-        out.push(Arc::new(FrameChunk {
-            parent,
-            frames: frames.to_vec(),
-            depth,
-        }));
-    }
-    out
-}
-fn flatten_chunks(chunks: &[Arc<FrameChunk>]) -> Vec<Arc<Frame>> {
-    chunks
-        .iter()
-        .flat_map(|c| c.frames.iter().cloned())
-        .collect()
-}
+
 impl PartialEq for FrameStack {
     fn eq(&self, other: &Self) -> bool {
-        self.ptr_eq(other)
-            || (self.len() == other.len()
-                && self.stack_hash() == other.stack_hash()
-                && self.iter().eq(other.iter()))
+        self.interned_id == other.interned_id
     }
 }
 impl Eq for FrameStack {}
 
-enum FrameStackIter<'a> {
-    Flat(std::slice::Iter<'a, Arc<Frame>>),
-    Linked(LinkedFrameIter<'a>),
+#[cfg(test)]
+struct FrameStackIter<'a> {
+    frames: Vec<&'a Frame>,
+    index: usize,
 }
+
+#[cfg(test)]
 impl<'a> Iterator for FrameStackIter<'a> {
     type Item = &'a Frame;
+
     fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            Self::Flat(v) => v.next().map(AsRef::as_ref),
-            Self::Linked(v) => v.next(),
-        }
+        let frame = self.frames.get(self.index).copied()?;
+        self.index += 1;
+        Some(frame)
     }
+
     fn size_hint(&self) -> (usize, Option<usize>) {
-        match self {
-            Self::Flat(v) => v.size_hint(),
-            Self::Linked(v) => v.size_hint(),
-        }
+        let remaining = self.frames.len().saturating_sub(self.index);
+        (remaining, Some(remaining))
     }
 }
+#[cfg(test)]
 impl ExactSizeIterator for FrameStackIter<'_> {}
-struct LinkedFrameIter<'a> {
-    chunks: std::slice::Iter<'a, Arc<FrameChunk>>,
-    frames: Option<std::slice::Iter<'a, Arc<Frame>>>,
-    remaining: usize,
-}
-impl<'a> LinkedFrameIter<'a> {
-    fn new(chunks: &'a [Arc<FrameChunk>], remaining: usize) -> Self {
-        Self {
-            chunks: chunks.iter(),
-            frames: None,
-            remaining,
-        }
-    }
-}
-impl<'a> Iterator for LinkedFrameIter<'a> {
-    type Item = &'a Frame;
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            if let Some(x) = self.frames.as_mut().and_then(Iterator::next) {
-                self.remaining -= 1;
-                return Some(x.as_ref());
-            }
-            self.frames = Some(self.chunks.next()?.frames.iter());
-        }
-    }
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.remaining, Some(self.remaining))
-    }
-}
-impl ExactSizeIterator for LinkedFrameIter<'_> {}
 
 #[derive(Debug, Clone, Default)]
 pub struct GrammarSet {
@@ -794,11 +936,14 @@ pub struct TextMateTokenizer {
     grammars: GrammarSet,
     root: GrammarId,
     root_scope_key: String,
+    injection_selectors: Vec<CompiledInjectionSelector>,
     matcher_cache: HashMap<(GrammarId, PatternId), Arc<CompiledPattern>>,
     dynamic_matcher_cache: HashMap<DynamicMatcherKey, Arc<CompiledPattern>>,
     scope_names: ScopeInterner,
     scope_templates: ScopeTemplateInterner,
     scope_stacks: ScopeStackInterner,
+    current_scope_stack_cache: HashMap<CurrentScopeStackKey, CachedCurrentScopeStackIds>,
+    resolved_scope_stack_cache: HashMap<ScopeStackId, Arc<[String]>>,
     capture_scope_templates: HashMap<(GrammarId, ScopeId), ScopeTemplateId>,
     state_interner: StateInterner,
     line_cache: LineCache<LineCacheKey, CachedLine>,
@@ -821,15 +966,19 @@ impl TextMateTokenizer {
             .grammar(root)
             .map(|grammar| grammar.scope_name.clone())
             .unwrap_or_else(|| format!("grammar:{}", root.0));
+        let injection_selectors = compile_injection_selectors(&grammars);
         Self {
             grammars,
             root,
             root_scope_key,
+            injection_selectors,
             matcher_cache: HashMap::new(),
             dynamic_matcher_cache: HashMap::new(),
             scope_names: ScopeInterner::default(),
             scope_templates: ScopeTemplateInterner::default(),
             scope_stacks: ScopeStackInterner::default(),
+            current_scope_stack_cache: HashMap::new(),
+            resolved_scope_stack_cache: HashMap::new(),
             capture_scope_templates: HashMap::new(),
             state_interner: StateInterner::new(),
             line_cache: LineCache::new(0),
@@ -990,8 +1139,7 @@ impl TextMateTokenizer {
         if self.fallback_call_budget_remaining == Some(0) {
             self.record_line_skipped();
             self.record_degraded_line();
-            let scopes = self.current_stack(&state, true);
-            let stack = self.intern_scope_stack(&scopes);
+            let stack = self.current_scope_stack_id(&state, true, None);
             return CompactTokenizedLine {
                 tokens: plain_compact_tokens(parse_text, stack).into(),
                 state,
@@ -1006,8 +1154,7 @@ impl TextMateTokenizer {
         {
             self.record_line_skipped();
             self.record_degraded_line();
-            let scopes = self.current_stack(&state, true);
-            let stack = self.intern_scope_stack(&scopes);
+            let stack = self.current_scope_stack_id(&state, true, None);
             return CompactTokenizedLine {
                 tokens: plain_compact_tokens(parse_text, stack).into(),
                 state,
@@ -1053,14 +1200,10 @@ impl TextMateTokenizer {
                 .then_some(0)
         };
         // vscode-textmate keeps a line-local anchor position stack for `\G`.
-        // Ordinary matches do not move it; begin rules set it and end rules
-        // restore the value from before the corresponding push.
-        let mut frame_anchor_positions = Vec::with_capacity(state.depth());
-        let mut parent_captured_eol = false;
-        state.frames.for_each(|_, frame| {
-            frame_anchor_positions.push(parent_captured_eol.then_some(0));
-            parent_captured_eol = frame.begin_captured_eol;
-        });
+        // Existing frames only need a synthetic restore value when they pop;
+        // avoid materializing one `None` per deep frame on every line.
+        let line_entry_depth = state.depth();
+        let mut frame_anchor_positions = Vec::new();
         let mut loop_candidates = None;
         // End rules such as `$` are zero-width at the logical line end. Keep
         // evaluating while frames remain so line-scoped rules close even when
@@ -1129,6 +1272,7 @@ impl TextMateTokenizer {
                 &result,
                 &mut anchor_pos,
                 &mut frame_anchor_positions,
+                line_entry_depth,
                 candidates.active_stack_id,
                 candidates.end_stack_id,
             );
@@ -1146,8 +1290,7 @@ impl TextMateTokenizer {
 
         if steps >= MAX_TOKENIZER_STEPS_PER_LINE && cursor < parse_text.len() {
             degraded = true;
-            let scopes = self.current_stack(&state, true);
-            let stack = self.intern_scope_stack(&scopes);
+            let stack = self.current_scope_stack_id(&state, true, None);
             self.push_token(&mut tokens, cursor..parse_text.len(), stack);
         }
         if degraded {
@@ -1196,6 +1339,7 @@ impl TextMateTokenizer {
             .grammar(root)
             .map(|grammar| grammar.scope_name.clone())
             .unwrap_or_else(|| format!("grammar:{}", root.0));
+        self.current_scope_stack_cache.clear();
         self.clear_line_cache();
         self.clear_candidate_cache();
     }
@@ -1243,6 +1387,8 @@ impl TextMateTokenizer {
     pub fn clear_candidate_cache(&mut self) {
         self.candidate_cache.clear();
         self.candidate_blueprint_cache.clear();
+        self.current_scope_stack_cache.clear();
+        self.resolved_scope_stack_cache.clear();
         self.injection_outcomes.clear();
         self.inline_candidate_cache.clear();
     }
@@ -1525,8 +1671,7 @@ impl TextMateTokenizer {
             match result {
                 Some(result) if result.start == *cursor => {
                     let frame_state = state.prefix(index + 1);
-                    let scopes = self.current_stack(&frame_state, false);
-                    let stack = self.intern_scope_stack(&scopes);
+                    let stack = self.current_scope_stack_id(&frame_state, false, None);
                     self.emit_match(
                         tokens,
                         line,
@@ -1870,21 +2015,23 @@ impl TextMateTokenizer {
         let mut left = Vec::new();
         let mut right = Vec::new();
         let mut seen = HashSet::new();
-        for grammar in self.grammars.grammars() {
-            for injection in &grammar.injections {
-                if selector_matches(&injection.selector_body, stack) {
-                    if !seen.insert((injection.priority, grammar.id, injection.patterns.clone())) {
-                        continue;
-                    }
-                    let candidate = InjectionCandidate {
-                        grammar_id: grammar.id,
-                        patterns: injection.patterns.clone(),
-                    };
-                    if injection.priority == InjectionPriority::Left {
-                        left.push(candidate);
-                    } else {
-                        right.push(candidate);
-                    }
+        for injection in &self.injection_selectors {
+            if selector_tokens_match(&injection.selector_tokens, stack) {
+                if !seen.insert((
+                    injection.priority,
+                    injection.grammar_id,
+                    injection.patterns.clone(),
+                )) {
+                    continue;
+                }
+                let candidate = InjectionCandidate {
+                    grammar_id: injection.grammar_id,
+                    patterns: injection.patterns.clone(),
+                };
+                if injection.priority == InjectionPriority::Left {
+                    left.push(candidate);
+                } else {
+                    right.push(candidate);
                 }
             }
         }
@@ -1908,11 +2055,11 @@ impl TextMateTokenizer {
             return candidates;
         }
         self.record_candidate_cache_miss();
-        let stack = self.current_stack(state, true);
-        let end_stack = self.current_stack(state, false);
-        let active_stack_id = self.intern_scope_stack(&stack);
-        let end_stack_id = self.intern_scope_stack(&end_stack);
-        let (injection_outcome_id, injection_outcome) = self.injection_outcome(&stack);
+        let stacks = self.current_scope_stack_ids(state, None);
+        let active_stack_id = stacks.active_stack_id;
+        let end_stack_id = stacks.end_stack_id;
+        let stack = self.resolve_scope_stack_cached(active_stack_id);
+        let (injection_outcome_id, injection_outcome) = self.injection_outcome(stack.as_ref());
         let blueprint_key = CandidateBlueprintKey {
             source: CandidateSourceKey::for_state(self.root, state),
             injection_outcome: injection_outcome_id,
@@ -1945,12 +2092,10 @@ impl TextMateTokenizer {
     fn build_candidate_set(
         &mut self,
         candidates: Vec<Candidate>,
-        active_stack: Vec<String>,
-        end_stack: Vec<String>,
+        active_stack_id: ScopeStackId,
+        end_stack_id: ScopeStackId,
     ) -> CandidateSet {
         let blueprint = Arc::new(self.build_candidate_blueprint(candidates));
-        let active_stack_id = self.intern_scope_stack(&active_stack);
-        let end_stack_id = self.intern_scope_stack(&end_stack);
         CandidateSet {
             blueprint,
             active_stack_id,
@@ -2478,6 +2623,7 @@ impl TextMateTokenizer {
         result: &MatchResult,
         anchor_pos: &mut Option<usize>,
         frame_anchor_positions: &mut Vec<Option<usize>>,
+        line_entry_depth: usize,
         active_stack: ScopeStackId,
         end_stack: ScopeStackId,
     ) -> usize {
@@ -2560,6 +2706,7 @@ impl TextMateTokenizer {
                     identity_hash: 0,
                     stack_hash: 0,
                     state_hash: 0,
+                    interned_stack_id: InternedFrameStackId::default(),
                 });
                 frame_anchor_positions.push(*anchor_pos);
                 *anchor_pos = Some(result.end);
@@ -2643,6 +2790,7 @@ impl TextMateTokenizer {
                     identity_hash: 0,
                     stack_hash: 0,
                     state_hash: 0,
+                    interned_stack_id: InternedFrameStackId::default(),
                 });
                 frame_anchor_positions.push(*anchor_pos);
                 *anchor_pos = Some(result.end);
@@ -2663,8 +2811,17 @@ impl TextMateTokenizer {
                     None,
                     captures,
                 );
+                let depth_before_pop = state.depth();
                 state.pop_frame();
-                *anchor_pos = frame_anchor_positions.pop().flatten();
+                *anchor_pos = if depth_before_pop > line_entry_depth {
+                    frame_anchor_positions.pop().flatten()
+                } else {
+                    state
+                        .frames
+                        .last()
+                        .is_some_and(|frame| frame.begin_captured_eol)
+                        .then_some(0)
+                };
                 consumed_end
             }
         }
@@ -2881,10 +3038,6 @@ impl TextMateTokenizer {
         compound_patterns: bool,
     ) {
         let base_stack_id = base_stack;
-        let base_stack: Arc<[String]> = self
-            .scope_stacks
-            .resolve(base_stack_id, &self.scope_names)
-            .into();
         let mut state = TokenizerState::default();
         let mut local_candidate_cache = HashMap::<TokenizerState, Arc<CandidateSet>>::new();
         let mut cursor = range.start;
@@ -2906,14 +3059,14 @@ impl TextMateTokenizer {
                     patterns: patterns.to_vec(),
                     compound_patterns,
                     state: state.clone(),
-                    base_stack: Arc::clone(&base_stack),
+                    base_stack: base_stack_id,
                 };
                 let candidate_set = if let Some(cached) =
                     self.inline_candidate_cache.get(&cache_key)
                 {
                     cached.clone()
                 } else {
-                    let (candidates, active_stack, end_stack) = if state.is_initial() {
+                    let (candidates, active_stack_id, end_stack_id) = if state.is_initial() {
                         let mut candidates = Vec::new();
                         let mut order = 0usize;
                         self.flatten_refs(
@@ -2925,21 +3078,22 @@ impl TextMateTokenizer {
                             &mut order,
                             0,
                         );
-                        (candidates, base_stack.to_vec(), base_stack.to_vec())
+                        (candidates, base_stack_id, base_stack_id)
                     } else {
-                        let active_stack =
-                            self.current_stack_with_base(&state, true, Some(base_stack.as_ref()));
-                        let end_stack =
-                            self.current_stack_with_base(&state, false, Some(base_stack.as_ref()));
-                        let (_, injection_outcome) = self.injection_outcome(&active_stack);
+                        let stacks = self.current_scope_stack_ids(&state, Some(base_stack_id));
+                        let active_scopes = self.resolve_scope_stack_cached(stacks.active_stack_id);
+                        let (_, injection_outcome) = self.injection_outcome(active_scopes.as_ref());
                         (
                             self.candidates_for_state(&state, &injection_outcome),
-                            active_stack,
-                            end_stack,
+                            stacks.active_stack_id,
+                            stacks.end_stack_id,
                         )
                     };
-                    let candidate_set =
-                        Arc::new(self.build_candidate_set(candidates, active_stack, end_stack));
+                    let candidate_set = Arc::new(self.build_candidate_set(
+                        candidates,
+                        active_stack_id,
+                        end_stack_id,
+                    ));
                     if self.inline_candidate_cache.len() >= MAX_INLINE_CANDIDATE_SETS {
                         self.inline_candidate_cache.clear();
                     }
@@ -3004,6 +3158,7 @@ impl TextMateTokenizer {
                 &result,
                 &mut anchor_pos,
                 &mut frame_anchor_positions,
+                0,
                 candidate_set.active_stack_id,
                 candidate_set.end_stack_id,
             );
@@ -3017,47 +3172,136 @@ impl TextMateTokenizer {
         }
     }
 
-    fn current_stack(&self, state: &TokenizerState, include_top_content: bool) -> Vec<String> {
-        self.current_stack_with_base(state, include_top_content, None)
-    }
-
-    fn current_stack_with_base(
-        &self,
+    fn current_scope_stack_id(
+        &mut self,
         state: &TokenizerState,
         include_top_content: bool,
-        base_stack: Option<&[String]>,
-    ) -> Vec<String> {
-        let mut stack = base_stack.map_or_else(|| self.root_stack(), <[String]>::to_vec);
-        state.frames.for_each(|index, frame| {
-            if let Some(prefix) = &frame.scope_prefix {
-                push_scope_once(&mut stack, prefix.to_string());
-            }
-            if let Some(name) = &frame.name {
-                push_scopes(&mut stack, name);
-            }
-            if (include_top_content || index + 1 < state.frames.len())
-                && let Some(content) = &frame.content_name
-            {
-                push_scopes(&mut stack, content);
-            }
-        });
-        stack
-    }
-
-    fn root_stack(&self) -> Vec<String> {
-        self.grammars
-            .grammar(self.root)
-            .map(|grammar| vec![grammar.scope_name.clone()])
-            .unwrap_or_default()
-    }
-
-    fn intern_scope_stack(&mut self, scopes: &[String]) -> ScopeStackId {
-        let mut stack = self.scope_stacks.empty();
-        for scope in scopes {
-            let scope = self.scope_names.intern(scope);
-            stack = self.scope_stacks.push(stack, scope, &self.scope_names);
+        base_stack: Option<ScopeStackId>,
+    ) -> ScopeStackId {
+        let stacks = self.current_scope_stack_ids(state, base_stack);
+        if include_top_content {
+            stacks.active_stack_id
+        } else {
+            stacks.end_stack_id
         }
-        stack
+    }
+
+    fn current_scope_stack_ids(
+        &mut self,
+        state: &TokenizerState,
+        base_stack: Option<ScopeStackId>,
+    ) -> CachedCurrentScopeStackIds {
+        let base_stack = match base_stack {
+            Some(base_stack) => base_stack,
+            None => self.root_scope_stack_id(),
+        };
+        self.current_scope_stack_ids_for_stack(state.frames.interned_id(), base_stack)
+    }
+
+    fn current_scope_stack_ids_for_stack(
+        &mut self,
+        frame_stack: InternedFrameStackId,
+        base_stack: ScopeStackId,
+    ) -> CachedCurrentScopeStackIds {
+        let mut cursor = frame_stack;
+        let mut missing = Vec::new();
+        let mut cached = loop {
+            let key = CurrentScopeStackKey {
+                root: self.root,
+                base_stack,
+                frame_stack: cursor,
+            };
+            if let Some(cached) = self.current_scope_stack_cache.get(&key).copied() {
+                break cached;
+            }
+            if cursor == InternedFrameStackId::default() {
+                let cached = CachedCurrentScopeStackIds {
+                    active_stack_id: base_stack,
+                    end_stack_id: base_stack,
+                };
+                self.insert_current_scope_stack_cache(key, cached);
+                break cached;
+            }
+            let frame = interned_frame_stack_scope_data(cursor)
+                .expect("interned frame stack id has scope data");
+            let parent = frame.parent;
+            missing.push((cursor, frame));
+            cursor = parent;
+        };
+
+        while let Some((stack_id, frame)) = missing.pop() {
+            cached = self.extend_current_scope_stack_ids(cached, &frame);
+            let key = CurrentScopeStackKey {
+                root: self.root,
+                base_stack,
+                frame_stack: stack_id,
+            };
+            self.insert_current_scope_stack_cache(key, cached);
+        }
+        cached
+    }
+
+    fn extend_current_scope_stack_ids(
+        &mut self,
+        parent: CachedCurrentScopeStackIds,
+        frame: &InternedFrameStackScopeData,
+    ) -> CachedCurrentScopeStackIds {
+        let mut end_stack = parent.active_stack_id;
+        if let Some(prefix) = frame.scope_prefix.as_deref() {
+            end_stack = self.push_scope_prefix_once_id(end_stack, prefix);
+        }
+        if let Some(name) = frame.name.as_deref() {
+            end_stack = self.push_scope_text_id(end_stack, name);
+        }
+        let mut active_stack = end_stack;
+        if let Some(content) = frame.content_name.as_deref() {
+            active_stack = self.push_scope_text_id(active_stack, content);
+        }
+        CachedCurrentScopeStackIds {
+            active_stack_id: active_stack,
+            end_stack_id: end_stack,
+        }
+    }
+
+    fn insert_current_scope_stack_cache(
+        &mut self,
+        key: CurrentScopeStackKey,
+        value: CachedCurrentScopeStackIds,
+    ) {
+        if self.current_scope_stack_cache.len() >= MAX_SCOPE_STACK_CACHE_ENTRIES {
+            self.current_scope_stack_cache.clear();
+        }
+        self.current_scope_stack_cache.entry(key).or_insert(value);
+    }
+
+    fn resolve_scope_stack_cached(&mut self, stack: ScopeStackId) -> Arc<[String]> {
+        if let Some(scopes) = self.resolved_scope_stack_cache.get(&stack).cloned() {
+            return scopes;
+        }
+        if self.resolved_scope_stack_cache.len() >= MAX_SCOPE_STACK_CACHE_ENTRIES {
+            self.resolved_scope_stack_cache.clear();
+        }
+        let scopes = Arc::from(
+            self.scope_stacks
+                .resolve(stack, &self.scope_names)
+                .into_boxed_slice(),
+        );
+        self.resolved_scope_stack_cache
+            .insert(stack, Arc::clone(&scopes));
+        scopes
+    }
+
+    fn root_scope_stack_id(&mut self) -> ScopeStackId {
+        let Some(root_scope) = self
+            .grammars
+            .grammar(self.root)
+            .map(|grammar| grammar.scope_name.clone())
+        else {
+            return self.scope_stacks.empty();
+        };
+        let empty = self.scope_stacks.empty();
+        let root_scope = self.scope_names.intern(&root_scope);
+        self.scope_stacks.push(empty, root_scope, &self.scope_names)
     }
 
     fn push_scope_text_id(&mut self, stack: ScopeStackId, text: &str) -> ScopeStackId {
@@ -3223,6 +3467,19 @@ struct CandidateBlueprintKey {
     injection_outcome: InjectionOutcomeId,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct CurrentScopeStackKey {
+    root: GrammarId,
+    base_stack: ScopeStackId,
+    frame_stack: InternedFrameStackId,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CachedCurrentScopeStackIds {
+    active_stack_id: ScopeStackId,
+    end_stack_id: ScopeStackId,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum CandidateSourceKey {
     Root(GrammarId),
@@ -3266,7 +3523,7 @@ struct InlineCandidateCacheKey {
     patterns: Vec<RuleRef>,
     compound_patterns: bool,
     state: TokenizerState,
-    base_stack: Arc<[String]>,
+    base_stack: ScopeStackId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -3355,6 +3612,14 @@ fn candidate_requires_capture_replay(candidate: &Candidate) -> bool {
 struct InjectionCandidate {
     grammar_id: GrammarId,
     patterns: Vec<RuleRef>,
+}
+
+#[derive(Debug, Clone)]
+struct CompiledInjectionSelector {
+    grammar_id: GrammarId,
+    priority: InjectionPriority,
+    patterns: Vec<RuleRef>,
+    selector_tokens: Arc<[SelectorToken]>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
@@ -3745,34 +4010,12 @@ fn push_scope_capture(
     }
 }
 
-fn push_scope_once(stack: &mut Vec<String>, scope: String) {
-    for scope in scope.split_whitespace() {
-        if stack.last().is_none_or(|last| last != scope) {
-            stack.push(scope.to_owned());
-        }
-    }
-}
-
 fn fallback_call_budget(source_bytes: usize) -> u64 {
     MIN_FALLBACK_STEPS_PER_CALL.max(
         u64::try_from(source_bytes)
             .unwrap_or(u64::MAX)
             .saturating_mul(FALLBACK_STEPS_PER_SOURCE_BYTE),
     )
-}
-
-fn push_scopes(stack: &mut Vec<String>, scopes: &str) {
-    stack.extend(scopes.split_whitespace().filter_map(|scope| {
-        if !scope.starts_with('.') && !scope.ends_with('.') && !scope.contains("..") {
-            return Some(scope.to_owned());
-        }
-        let normalized = scope
-            .split('.')
-            .filter(|component| !component.is_empty())
-            .collect::<Vec<_>>()
-            .join(".");
-        (!normalized.is_empty()).then_some(normalized)
-    }));
 }
 
 fn specified_outside_capture_end(result: &MatchResult, captures: &CaptureSpec) -> usize {
@@ -3828,13 +4071,36 @@ fn clamp_range(range: Range<usize>, parent: Range<usize>) -> Range<usize> {
     range.start.max(parent.start)..range.end.min(parent.end)
 }
 
+fn compile_injection_selectors(grammars: &GrammarSet) -> Vec<CompiledInjectionSelector> {
+    grammars
+        .grammars()
+        .iter()
+        .flat_map(|grammar| {
+            grammar
+                .injections
+                .iter()
+                .map(|injection| CompiledInjectionSelector {
+                    grammar_id: grammar.id,
+                    priority: injection.priority,
+                    patterns: injection.patterns.clone(),
+                    selector_tokens: tokenize_selector(&injection.selector_body).into(),
+                })
+        })
+        .collect()
+}
+
+#[cfg(test)]
 fn selector_matches(selector: &str, stack: &[String]) -> bool {
     let tokens = tokenize_selector(selector);
+    selector_tokens_match(&tokens, stack)
+}
+
+fn selector_tokens_match(tokens: &[SelectorToken], stack: &[String]) -> bool {
     if tokens.is_empty() {
         return false;
     }
     let mut parser = SelectorParser {
-        tokens: &tokens,
+        tokens,
         index: 0,
         stack,
     };
@@ -4017,6 +4283,7 @@ mod tests {
             identity_hash: 0,
             stack_hash: 0,
             state_hash: 0,
+            interned_stack_id: InternedFrameStackId::default(),
         }
     }
 

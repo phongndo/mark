@@ -10,7 +10,7 @@ pub mod scopes;
 pub mod state;
 pub mod tokenizer;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use mark_core::{MarkError, MarkResult};
 
@@ -34,33 +34,22 @@ impl Runtime {
 
     fn tokenizer(language: &str, counters_enabled: bool) -> MarkResult<TextMateTokenizer> {
         let mut grammars = GrammarSet::new();
-        let dependencies = grammar_dependencies(language);
         let mut root = None;
         let bundle = crate::grammars::embedded_bundle();
-        let blobs = if language == "markdown" {
-            // Markdown can reference every private fenced-code dependency by
-            // scope. Keep those blobs private in the public language catalog,
-            // but register the complete graph when Markdown is requested.
-            bundle.grammar_blobs.iter().collect::<Vec<_>>()
-        } else {
-            std::iter::once(language)
-                .chain(dependencies.iter().copied())
-                .map(|requested| {
-                    let blob = if requested == "cpp-macro" {
-                        bundle.grammar_blob_for_scope("source.cpp.embedded.macro")
-                    } else {
-                        bundle.grammar_blob_for_language(requested)
-                    };
-                    blob.ok_or_else(|| {
-                        MarkError::Usage(format!(
-                            "bundled TextMate grammar `{requested}` is missing"
-                        ))
-                    })
-                })
-                .collect::<MarkResult<Vec<_>>>()?
-        };
-        for blob in blobs {
-            let source = std::str::from_utf8(&blob.bytes).map_err(|_| {
+        let root_blob = bundle.grammar_blob_for_language(language).ok_or_else(|| {
+            MarkError::Usage(format!("bundled TextMate grammar `{language}` is missing"))
+        })?;
+        let root_scope = root_blob.scope_name.clone();
+        let blob_indices = grammar_blob_closure(bundle, &root_scope)?;
+        for index in blob_indices {
+            let blob = &bundle.grammar_blobs[index];
+            let bytes = blob.decoded_bytes().map_err(|error| {
+                MarkError::Usage(format!(
+                    "failed to decode bundled TextMate grammar `{}`: {error:?}",
+                    blob.language
+                ))
+            })?;
+            let source = std::str::from_utf8(&bytes).map_err(|_| {
                 MarkError::Usage(format!(
                     "bundled TextMate grammar `{}` is not UTF-8",
                     blob.language
@@ -72,7 +61,7 @@ impl Runtime {
                     blob.language
                 ))
             })?;
-            if blob.language == language {
+            if blob.scope_name == root_scope {
                 root = Some(grammar_id);
             }
         }
@@ -120,16 +109,67 @@ impl Runtime {
     }
 }
 
-fn grammar_dependencies(language: &str) -> &'static [&'static str] {
-    match language {
-        "cpp" => &["cpp-macro"],
-        "dockerfile" => &["bash"],
-        "html" => &["css", "javascript"],
-        "jsx" => &["javascript"],
-        "php" => &["css", "html", "javascript"],
-        "scss" => &["css"],
-        "tsx" => &["javascript", "jsx", "typescript"],
-        _ => &[],
+fn grammar_blob_closure(
+    bundle: &grammars::bundle::Bundle,
+    root_scope: &str,
+) -> MarkResult<Vec<usize>> {
+    let mut pending = vec![root_scope.to_owned()];
+    let mut selected = BTreeSet::new();
+    while let Some(scope) = pending.pop() {
+        let Some((index, blob)) = bundle
+            .grammar_blobs
+            .iter()
+            .enumerate()
+            .find(|(_, blob)| blob.scope_name == scope)
+        else {
+            continue;
+        };
+        if !selected.insert(index) {
+            continue;
+        }
+        let bytes = blob.decoded_bytes().map_err(|error| {
+            MarkError::Usage(format!(
+                "failed to decode bundled TextMate grammar `{}`: {error:?}",
+                blob.language
+            ))
+        })?;
+        let json = serde_json::from_slice::<serde_json::Value>(&bytes).map_err(|error| {
+            MarkError::Usage(format!(
+                "failed to inspect bundled TextMate grammar `{}`: {error}",
+                blob.language
+            ))
+        })?;
+        collect_external_scopes(&json, bundle, &mut pending);
+    }
+    Ok(selected.into_iter().collect())
+}
+
+fn collect_external_scopes(
+    value: &serde_json::Value,
+    bundle: &grammars::bundle::Bundle,
+    pending: &mut Vec<String>,
+) {
+    match value {
+        serde_json::Value::Object(object) => {
+            if let Some(include) = object.get("include").and_then(|value| value.as_str())
+                && !include.starts_with('#')
+                && !matches!(include, "$self" | "$base")
+            {
+                let scope = include.split('#').next().unwrap_or(include);
+                if bundle.grammar_blob_for_scope(scope).is_some() {
+                    pending.push(scope.to_owned());
+                }
+            }
+            for child in object.values() {
+                collect_external_scopes(child, bundle, pending);
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for child in values {
+                collect_external_scopes(child, bundle, pending);
+            }
+        }
+        _ => {}
     }
 }
 

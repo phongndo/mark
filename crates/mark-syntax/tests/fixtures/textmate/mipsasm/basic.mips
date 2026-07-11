@@ -1,0 +1,5 @@
+# MIPS basic ñ
+.text
+main:
+  li $v0, 1
+  syscall

@@ -1,12 +1,13 @@
 # Golden oracle dependencies
 
 Development-only package used by `../golden-dump.mjs`, `../generate-goldens.mjs`,
-and `../regex-conformance.mjs`. Versions are pinned exactly (no ranges) so
-oracle output stays reproducible.
+`../regex-conformance.mjs`, and `../vendor-shiki-grammars.mjs`. Versions are
+pinned exactly (no ranges) so oracle output and vendored grammar imports stay
+reproducible.
 
 These dependencies are **not** used by release builds and are intentionally kept
-out of the Rust workspace. Install only when regenerating goldens or running
-regex conformance.
+out of the Rust workspace. Install only when regenerating goldens, running regex
+conformance, or checking the Shiki grammar vendor snapshot.
 
 ## Install
 
@@ -53,10 +54,21 @@ This compares a small set of patterns against `vscode-oniguruma` by driving the
 `mark-syntax` `regex-parse` example. It requires a working `cargo` toolchain and
 is also dev-only.
 
+## Shiki grammar vendor check
+
+```sh
+node tools/vendor-shiki-grammars.mjs --check
+```
+
+This verifies `assets/tm-grammars/languages/`, `coverage.toml`,
+`coverage.full-shiki.toml`, and `licenses.json` against the pinned
+`@shikijs/langs` package installed here.
+
 ## Pins
 
 | Package | Version | Role |
 | --- | --- | --- |
+| `@shikijs/langs` | `3.23.0` | Pinned source for vendored TextMate grammars |
 | `vscode-textmate` | `9.2.0` | TextMate line tokenizer reference |
 | `vscode-oniguruma` | `1.7.0` | Oniguruma WASM used by the reference |
 

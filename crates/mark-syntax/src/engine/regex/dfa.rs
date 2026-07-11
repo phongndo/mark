@@ -1,6 +1,6 @@
-use std::{fmt, sync::Arc};
+use std::{collections::HashSet, fmt, sync::Arc};
 
-use super::ast::{AnchorKind, Ast};
+use super::ast::{AnchorKind, Ast, ClassAtom, PerlClassKind, RegexFlags};
 use super::backtrack::FallbackMatcher;
 use super::prefilter::{LiteralSet, Prefilter};
 use super::scanner::Scanner;
@@ -205,8 +205,487 @@ fn pure_literal_body(ast: &Ast) -> Option<String> {
 #[derive(Debug, Clone)]
 enum NativeEngine {
     Simple(SimpleMatcher),
+    WordSet(WordSetMatcher),
+    NixUri(NixUriMatcher),
     /// General native VM for DFA-routable (and best-effort) patterns.
     Vm(FallbackMatcher),
+}
+
+/// Native matcher for the Nix unquoted URI production
+/// `([A-Za-z][-+.0-9A-Za-z]*:[!$-'*-:=?-Z_a-z~]+)`. The generic VM is
+/// correct but hot on Nix files because every identifier-like token probes for
+/// a following `:`. This keeps the exact ASCII byte language and capture shape
+/// while reducing each negative probe to a tight byte scan.
+#[derive(Debug, Clone, Copy)]
+struct NixUriMatcher;
+
+impl NixUriMatcher {
+    const PATTERN: &'static str = "([A-Za-z][-+.0-9A-Za-z]*:[!$-'*-:=?-Z_a-z~]+)";
+
+    fn try_from_translation(translation: &Translation) -> Option<Self> {
+        (translation.pattern == Self::PATTERN).then_some(Self)
+    }
+
+    fn find(&self, line: &str, from: usize) -> Option<MatchResult> {
+        let bytes = line.as_bytes();
+        let mut pos = from;
+        while pos < bytes.len() {
+            let found = memchr::memchr2(b':', b'<', &bytes[pos..])
+                .map(|offset| pos + offset)
+                .unwrap_or(bytes.len());
+            // A colon is required. If the next potentially interesting byte is
+            // not a colon, continue after it (notably over Nix `<spath>`s).
+            if found >= bytes.len() {
+                return None;
+            }
+            if bytes[found] != b':' {
+                pos = found + 1;
+                continue;
+            }
+            let mut run_start = found;
+            while run_start > from && is_nix_uri_scheme_byte(bytes[run_start - 1]) {
+                run_start -= 1;
+            }
+            for start in run_start..found {
+                if is_ascii_alpha(bytes[start])
+                    && line.is_char_boundary(start)
+                    && let Some(result) = self.match_at(line, start)
+                {
+                    return Some(result);
+                }
+            }
+            pos = found + 1;
+        }
+        None
+    }
+
+    fn match_at(&self, line: &str, start: usize) -> Option<MatchResult> {
+        let bytes = line.as_bytes();
+        let first = *bytes.get(start)?;
+        if !is_ascii_alpha(first) || !line.is_char_boundary(start) {
+            return None;
+        }
+        let mut pos = start + 1;
+        while pos < bytes.len() && is_nix_uri_scheme_byte(bytes[pos]) {
+            pos += 1;
+        }
+        if bytes.get(pos).copied() != Some(b':') {
+            return None;
+        }
+        pos += 1;
+        let body_start = pos;
+        while pos < bytes.len() && is_nix_uri_body_byte(bytes[pos]) {
+            pos += 1;
+        }
+        if pos == body_start || !line.is_char_boundary(pos) {
+            return None;
+        }
+        Some(MatchResult {
+            start,
+            end: pos,
+            captures: vec![Some(start..pos), Some(start..pos)],
+        })
+    }
+}
+
+fn is_ascii_alpha(byte: u8) -> bool {
+    byte.is_ascii_alphabetic()
+}
+
+fn is_nix_uri_scheme_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'+' | b'.')
+}
+
+fn is_nix_uri_body_byte(byte: u8) -> bool {
+    matches!(byte, b'!' | b'$'..=b'\'' | b'*'..=b':' | b'=' | b'?'..=b'Z' | b'_' | b'a'..=b'z' | b'~')
+}
+
+/// Specialized matcher for the common keyword-list spelling
+/// `\b(?i)(foo|bar|...)\b` / `(?i:\b(?:foo|bar|...)\b)`, plus the SQL
+/// function-list suffix `\s*\(`.
+#[derive(Debug, Clone)]
+struct WordSetMatcher {
+    buckets: Vec<WordBucket>,
+    case_insensitive: bool,
+    suffix: WordSetSuffix,
+    start_bytes: Vec<u8>,
+    capture_group: Option<u32>,
+    capture_count: usize,
+}
+
+#[derive(Debug, Clone)]
+struct WordBucket {
+    len: usize,
+    words: HashSet<Vec<u8>>,
+}
+
+#[derive(Debug, Clone)]
+struct WordSetSpec {
+    words: Vec<String>,
+    case_insensitive: bool,
+    suffix: WordSetSuffix,
+    capture_group: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WordSetSuffix {
+    None,
+    OpenParenAfterOptionalSpace,
+}
+
+impl WordSetMatcher {
+    fn try_from_translation(translation: &Translation) -> Option<Self> {
+        if !matches!(translation.anchor_strategy, AnchorStrategy::None) {
+            return None;
+        }
+        let spec = word_set_spec(&translation.parsed.ast, translation.parsed.flags)?;
+        if !spec.case_insensitive || spec.words.len() < word_set_min_words() {
+            return None;
+        }
+        Some(Self::new(
+            spec.words,
+            spec.case_insensitive,
+            spec.suffix,
+            spec.capture_group,
+            translation.parsed.capture_count as usize + 1,
+        ))
+    }
+
+    fn new(
+        words: Vec<String>,
+        case_insensitive: bool,
+        suffix: WordSetSuffix,
+        capture_group: Option<u32>,
+        capture_count: usize,
+    ) -> Self {
+        let mut buckets = Vec::<WordBucket>::new();
+        let mut start_bitmap = [0u64; 4];
+        for word in words {
+            debug_assert!(!word.is_empty());
+            debug_assert!(word.bytes().all(is_ascii_word_byte));
+            let mut bytes = word.into_bytes();
+            if case_insensitive {
+                bytes.make_ascii_lowercase();
+            }
+            if let Some(&first) = bytes.first() {
+                if case_insensitive && first.is_ascii_alphabetic() {
+                    let lower = first.to_ascii_lowercase();
+                    let upper = first.to_ascii_uppercase();
+                    start_bitmap[lower as usize >> 6] |= 1u64 << (lower & 63);
+                    start_bitmap[upper as usize >> 6] |= 1u64 << (upper & 63);
+                } else {
+                    start_bitmap[first as usize >> 6] |= 1u64 << (first & 63);
+                }
+            }
+            let len = bytes.len();
+            match buckets.binary_search_by_key(&len, |bucket| bucket.len) {
+                Ok(index) => {
+                    buckets[index].words.insert(bytes);
+                }
+                Err(index) => {
+                    let mut set = HashSet::new();
+                    set.insert(bytes);
+                    buckets.insert(index, WordBucket { len, words: set });
+                }
+            }
+        }
+        let start_bytes = (0u8..=u8::MAX)
+            .filter(|byte| start_bitmap[*byte as usize >> 6] & (1u64 << (*byte & 63)) != 0)
+            .collect();
+        Self {
+            buckets,
+            case_insensitive,
+            suffix,
+            start_bytes,
+            capture_group,
+            capture_count,
+        }
+    }
+
+    fn find(&self, line: &str, from: usize) -> Option<MatchResult> {
+        if !line.is_char_boundary(from) {
+            return None;
+        }
+        let bytes = line.as_bytes();
+        let mut position = from;
+        while position < bytes.len() {
+            let Some(offset) = bytes[position..]
+                .iter()
+                .position(|byte| is_ascii_word_byte(*byte))
+            else {
+                return None;
+            };
+            position += offset;
+            if previous_char(line, position).is_some_and(is_word_char) {
+                position = ascii_word_end(bytes, position);
+                continue;
+            }
+            let end = ascii_word_end(bytes, position);
+            if char_at(line, end).is_some_and(|(ch, _)| is_word_char(ch)) {
+                position = end;
+                continue;
+            }
+            if self.contains(&bytes[position..end])
+                && let Some(match_end) = self.suffix_end(line, end)
+            {
+                return Some(self.match_result(position, end, match_end));
+            }
+            position = end;
+        }
+        None
+    }
+
+    fn match_at(&self, line: &str, start: usize) -> Option<MatchResult> {
+        if start > line.len() || !line.is_char_boundary(start) {
+            return None;
+        }
+        let bytes = line.as_bytes();
+        let first = *bytes.get(start)?;
+        if !is_ascii_word_byte(first) || previous_char(line, start).is_some_and(is_word_char) {
+            return None;
+        }
+        let end = ascii_word_end(bytes, start);
+        if char_at(line, end).is_some_and(|(ch, _)| is_word_char(ch)) {
+            return None;
+        }
+        if !self.contains(&bytes[start..end]) {
+            return None;
+        }
+        let match_end = self.suffix_end(line, end)?;
+        Some(self.match_result(start, end, match_end))
+    }
+
+    fn contains(&self, token: &[u8]) -> bool {
+        let Ok(index) = self
+            .buckets
+            .binary_search_by_key(&token.len(), |bucket| bucket.len)
+        else {
+            return false;
+        };
+        if self.case_insensitive {
+            let mut folded = token.to_vec();
+            folded.make_ascii_lowercase();
+            self.buckets[index].words.contains(&folded)
+        } else {
+            self.buckets[index].words.contains(token)
+        }
+    }
+
+    fn suffix_end(&self, line: &str, word_end: usize) -> Option<usize> {
+        match self.suffix {
+            WordSetSuffix::None => Some(word_end),
+            WordSetSuffix::OpenParenAfterOptionalSpace => {
+                let mut position = word_end;
+                while let Some((ch, next)) = char_at(line, position) {
+                    if !ch.is_whitespace() {
+                        break;
+                    }
+                    position = next;
+                }
+                (line.as_bytes().get(position) == Some(&b'(')).then_some(position + 1)
+            }
+        }
+    }
+
+    fn match_result(&self, start: usize, word_end: usize, match_end: usize) -> MatchResult {
+        let mut captures = vec![None; self.capture_count];
+        captures[0] = Some(start..match_end);
+        if let Some(group) = self.capture_group
+            && let Some(slot) = captures.get_mut(group as usize)
+        {
+            *slot = Some(start..word_end);
+        }
+        MatchResult {
+            start,
+            end: match_end,
+            captures,
+        }
+    }
+}
+
+fn word_set_min_words() -> usize {
+    static VALUE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *VALUE.get_or_init(|| {
+        std::env::var("MARK_TEXTMATE_WORD_SET_MIN_WORDS")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(4)
+    })
+}
+
+fn word_set_spec(ast: &Ast, flags: RegexFlags) -> Option<WordSetSpec> {
+    match ast {
+        Ast::Flags {
+            flags: scoped_flags,
+            child,
+        } => word_set_spec(child, *scoped_flags),
+        Ast::Concat(nodes) => word_set_spec_from_concat(nodes, flags),
+        _ => None,
+    }
+}
+
+fn word_set_spec_from_concat(nodes: &[Ast], flags: RegexFlags) -> Option<WordSetSpec> {
+    let significant = nodes
+        .iter()
+        .filter(|node| !matches!(node, Ast::Empty))
+        .collect::<Vec<_>>();
+    if significant.len() < 3 {
+        return None;
+    }
+    if !matches!(significant[0], Ast::Anchor(AnchorKind::WordBoundary)) {
+        return None;
+    }
+    if !matches!(significant[2], Ast::Anchor(AnchorKind::WordBoundary)) {
+        return None;
+    }
+    let mut effective_flags = flags;
+    let mut body = significant[1];
+    if let Ast::Flags {
+        flags: scoped_flags,
+        child,
+    } = body
+    {
+        effective_flags = *scoped_flags;
+        body = child.as_ref();
+    }
+    let suffix = word_set_suffix(&significant[3..])?;
+    let (alternation, capture_group) = match body {
+        Ast::Group {
+            index,
+            child,
+            name: None,
+        } => (child.as_ref(), *index),
+        Ast::Alternation(_) => (body, None),
+        _ => return None,
+    };
+    let Ast::Alternation(branches) = alternation else {
+        return None;
+    };
+    let mut words = Vec::with_capacity(branches.len());
+    let mut unsupported_branches = 0usize;
+    for branch in branches {
+        let Some(variants) = word_variants(branch) else {
+            unsupported_branches += 1;
+            continue;
+        };
+        let mut accepted = false;
+        for word in variants {
+            if word.is_empty() || !word.bytes().all(is_ascii_word_byte) {
+                continue;
+            }
+            accepted = true;
+            words.push(word);
+        }
+        if !accepted {
+            unsupported_branches += 1;
+        }
+    }
+    if words.len() != branches.len() && (words.len() < 32 || unsupported_branches > 16) {
+        return None;
+    }
+    Some(WordSetSpec {
+        words,
+        case_insensitive: effective_flags.case_insensitive,
+        suffix,
+        capture_group,
+    })
+}
+
+fn word_set_suffix(nodes: &[&Ast]) -> Option<WordSetSuffix> {
+    match nodes {
+        [] => Some(WordSetSuffix::None),
+        [
+            Ast::Repeat {
+                node,
+                min: 0,
+                max: None,
+                possessive: false,
+                ..
+            },
+            Ast::Literal(literal),
+        ] if literal == "(" && is_perl_space_class(node) => {
+            Some(WordSetSuffix::OpenParenAfterOptionalSpace)
+        }
+        _ => None,
+    }
+}
+
+fn is_perl_space_class(ast: &Ast) -> bool {
+    let Ast::Class(class) = ast else {
+        return false;
+    };
+    !class.negated
+        && matches!(
+            class.atoms.as_slice(),
+            [ClassAtom::Perl(PerlClassKind::Space)]
+        )
+}
+
+fn word_variants(ast: &Ast) -> Option<Vec<String>> {
+    match ast {
+        Ast::Empty => Some(vec![String::new()]),
+        Ast::Literal(literal) => Some(vec![literal.clone()]),
+        Ast::Group {
+            child, name: None, ..
+        } => word_variants(child),
+        Ast::Concat(nodes) => {
+            let mut variants = vec![String::new()];
+            for node in nodes {
+                let part = word_variants(node)?;
+                if variants.len().saturating_mul(part.len()) > 8 {
+                    return None;
+                }
+                let mut next = Vec::with_capacity(variants.len() * part.len());
+                for prefix in &variants {
+                    for suffix in &part {
+                        let mut combined = prefix.clone();
+                        combined.push_str(suffix);
+                        next.push(combined);
+                    }
+                }
+                variants = next;
+            }
+            Some(variants)
+        }
+        Ast::Repeat {
+            node,
+            min: 0,
+            max: Some(1),
+            possessive: false,
+            atomic: false,
+            ..
+        } => {
+            let mut variants = vec![String::new()];
+            variants.extend(word_variants(node)?);
+            Some(variants)
+        }
+        _ => None,
+    }
+}
+
+fn is_ascii_word_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
+}
+
+fn ascii_word_end(bytes: &[u8], start: usize) -> usize {
+    let mut end = start;
+    while bytes.get(end).is_some_and(|byte| is_ascii_word_byte(*byte)) {
+        end += 1;
+    }
+    end
+}
+
+fn char_at(line: &str, pos: usize) -> Option<(char, usize)> {
+    let ch = line.get(pos..)?.chars().next()?;
+    Some((ch, pos + ch.len_utf8()))
+}
+
+fn previous_char(line: &str, pos: usize) -> Option<char> {
+    line.get(..pos)?.chars().next_back()
+}
+
+fn is_word_char(ch: char) -> bool {
+    ch == '_' || ch.is_alphanumeric()
 }
 
 /// Native "fast path" matcher. Previously backed by regex-automata; now uses
@@ -229,6 +708,10 @@ impl AutomataMatcher {
         let prefilter = Prefilter::from_regex(&translation.parsed);
         let engine = if let Some(simple) = SimpleMatcher::try_from_translation(&translation) {
             NativeEngine::Simple(simple)
+        } else if let Some(word_set) = WordSetMatcher::try_from_translation(&translation) {
+            NativeEngine::WordSet(word_set)
+        } else if let Some(uri) = NixUriMatcher::try_from_translation(&translation) {
+            NativeEngine::NixUri(uri)
         } else {
             // Match against the original Oniguruma pattern so anchors/classes
             // keep AST semantics (the translated spelling is diagnostic-only).
@@ -252,9 +735,15 @@ impl AutomataMatcher {
         matches!(self.engine, NativeEngine::Simple(_))
     }
 
+    pub fn is_word_set(&self) -> bool {
+        matches!(self.engine, NativeEngine::WordSet(_))
+    }
+
     pub(crate) fn unanchored_literal(&self) -> Option<&str> {
         match &self.engine {
             NativeEngine::Simple(matcher) => matcher.unanchored_literal(),
+            NativeEngine::WordSet(_) => None,
+            NativeEngine::NixUri(_) => None,
             NativeEngine::Vm(_) => None,
         }
     }
@@ -265,6 +754,8 @@ impl AutomataMatcher {
                 .unanchored_literal()
                 .and_then(|literal| literal.as_bytes().first().copied())
                 .map(|byte| vec![byte]),
+            NativeEngine::WordSet(matcher) => Some(matcher.start_bytes.clone()),
+            NativeEngine::NixUri(_) => Some((b'A'..=b'Z').chain(b'a'..=b'z').collect()),
             NativeEngine::Vm(matcher) => matcher.restricted_start_bytes(),
         }
     }
@@ -283,6 +774,8 @@ impl AutomataMatcher {
     ) -> Result<(Option<MatchResult>, Option<usize>), super::FallbackError> {
         match &self.engine {
             NativeEngine::Simple(matcher) => Ok((matcher.find(line, from, ctx), None)),
+            NativeEngine::WordSet(matcher) => Ok((matcher.find(line, from), None)),
+            NativeEngine::NixUri(matcher) => Ok((matcher.find(line, from), None)),
             NativeEngine::Vm(matcher) => {
                 if !anchor_permits_search(self.translation.anchor_strategy, from, ctx, line) {
                     return Ok((None, None));
@@ -305,6 +798,8 @@ impl AutomataMatcher {
         }
         match &self.engine {
             NativeEngine::Simple(matcher) => Ok((matcher.match_at(line, start), None)),
+            NativeEngine::WordSet(matcher) => Ok((matcher.match_at(line, start), None)),
+            NativeEngine::NixUri(matcher) => Ok((matcher.match_at(line, start), None)),
             NativeEngine::Vm(matcher) => matcher
                 .try_find_at(line, start, ctx)
                 .map(|report| (report.result, Some(report.steps))),
@@ -323,6 +818,8 @@ impl AutomataMatcher {
         }
         match &self.engine {
             NativeEngine::Simple(matcher) => Ok(matcher.match_at(line, start)),
+            NativeEngine::WordSet(matcher) => Ok(matcher.match_at(line, start)),
+            NativeEngine::NixUri(matcher) => Ok(matcher.match_at(line, start)),
             NativeEngine::Vm(matcher) => matcher
                 .try_find_at_without_captures_with_scratch(line, start, ctx, scratch)
                 .map(|report| report.result),
@@ -334,6 +831,8 @@ impl Matcher for AutomataMatcher {
     fn find(&self, line: &str, from: usize, ctx: AnchorContext) -> Option<MatchResult> {
         match &self.engine {
             NativeEngine::Simple(matcher) => matcher.find(line, from, ctx),
+            NativeEngine::WordSet(matcher) => matcher.find(line, from),
+            NativeEngine::NixUri(matcher) => matcher.find(line, from),
             NativeEngine::Vm(matcher) => {
                 // Anchor strategies previously enforced by regex-automata Input
                 // spans. The VM also re-checks anchors, but bail early when the
@@ -399,6 +898,13 @@ struct CandidateFrontier {
     scanner: Scanner,
     opaque_unrestricted_entries: Vec<usize>,
     opaque_start_byte_entries: Vec<Vec<usize>>,
+    opaque_start_prefilter: Option<StartBytePrefilter>,
+}
+
+#[derive(Debug, Clone)]
+struct StartBytePrefilter {
+    bytes: Vec<u8>,
+    bitmap: [u64; 4],
 }
 
 /// Native multi-pattern matcher. Leftmost match wins; on equal start offsets
@@ -408,6 +914,7 @@ pub struct PatternSetMatcher {
     entries: Vec<PatternEntry>,
     unrestricted_entries: Vec<usize>,
     start_byte_entries: Vec<Vec<usize>>,
+    start_prefilter: Option<StartBytePrefilter>,
     /// Translated pattern spellings (diagnostic / inventory surface).
     patterns: Vec<String>,
     /// Present when every pattern is a pure unanchored literal.
@@ -480,6 +987,8 @@ impl PatternSetMatcher {
         } else {
             None
         };
+        let start_prefilter =
+            StartBytePrefilter::from_buckets(&unrestricted_entries, &start_byte_entries);
         let (scanner, frontier) = if !literals_only && entries.len() > 1 {
             if frontier_explicitly_disabled() {
                 (
@@ -537,6 +1046,7 @@ impl PatternSetMatcher {
             entries,
             unrestricted_entries,
             start_byte_entries,
+            start_prefilter,
             patterns: translated,
             literal_set,
             scanner,
@@ -611,6 +1121,7 @@ impl PatternSetMatcher {
             scratch,
             &self.unrestricted_entries,
             &self.start_byte_entries,
+            self.start_prefilter.as_ref(),
             None,
         )
     }
@@ -624,12 +1135,16 @@ impl PatternSetMatcher {
         scratch: &mut super::bytecode::BytecodeScratch,
         unrestricted_entries: &[usize],
         start_byte_entries: &[Vec<usize>],
+        start_prefilter: Option<&StartBytePrefilter>,
         bound: Option<(usize, usize)>,
     ) -> Option<(usize, MatchResult)> {
         debug_assert_eq!(start_byte_entries.len(), usize::from(u8::MAX) + 1);
 
         let ascii_line = scratch.line_is_ascii(line);
-        let mut start = from;
+        let mut start = match start_prefilter {
+            Some(prefilter) => prefilter.next_start(line, from)?,
+            None => from,
+        };
         loop {
             if bound.is_some_and(|(bound_start, _)| start > bound_start) {
                 break;
@@ -676,14 +1191,19 @@ impl PatternSetMatcher {
             if start == line.len() {
                 break;
             }
-            start += if ascii_line {
-                1
-            } else {
-                line[start..]
-                    .chars()
-                    .next()
-                    .expect("start is before line end")
-                    .len_utf8()
+            let next = start
+                + if ascii_line {
+                    1
+                } else {
+                    line[start..]
+                        .chars()
+                        .next()
+                        .expect("start is before line end")
+                        .len_utf8()
+                };
+            start = match start_prefilter {
+                Some(prefilter) => prefilter.next_start(line, next)?,
+                None => next,
             };
         }
         None
@@ -706,6 +1226,7 @@ impl PatternSetMatcher {
                 scratch,
                 &frontier.opaque_unrestricted_entries,
                 &frontier.opaque_start_byte_entries,
+                frontier.opaque_start_prefilter.as_ref(),
                 Some((selected.start, selected.pattern)),
             )
         } else {
@@ -716,6 +1237,7 @@ impl PatternSetMatcher {
                 scratch,
                 &frontier.opaque_unrestricted_entries,
                 &frontier.opaque_start_byte_entries,
+                frontier.opaque_start_prefilter.as_ref(),
                 None,
             )
         };
@@ -760,6 +1282,7 @@ impl PatternSetMatcher {
                     scratch,
                     &self.unrestricted_entries,
                     &self.start_byte_entries,
+                    self.start_prefilter.as_ref(),
                     None,
                 )
             }
@@ -842,11 +1365,65 @@ impl CandidateFrontier {
         }
         opaque_unrestricted_entries.sort_unstable();
         opaque_unrestricted_entries.dedup();
+        let opaque_start_prefilter = StartBytePrefilter::from_buckets(
+            &opaque_unrestricted_entries,
+            &opaque_start_byte_entries,
+        );
         Self {
             scanner,
             opaque_unrestricted_entries,
             opaque_start_byte_entries,
+            opaque_start_prefilter,
         }
+    }
+}
+
+impl StartBytePrefilter {
+    fn from_buckets(
+        unrestricted_entries: &[usize],
+        start_byte_entries: &[Vec<usize>],
+    ) -> Option<Self> {
+        if !unrestricted_entries.is_empty() {
+            return None;
+        }
+        let mut bytes = Vec::new();
+        let mut bitmap = [0u64; 4];
+        for (byte, bucket) in start_byte_entries.iter().enumerate() {
+            if !bucket.is_empty() {
+                let byte = byte as u8;
+                bytes.push(byte);
+                bitmap[byte as usize >> 6] |= 1u64 << (byte & 63);
+            }
+        }
+        (!bytes.is_empty()).then_some(Self { bytes, bitmap })
+    }
+
+    fn next_start(&self, line: &str, from: usize) -> Option<usize> {
+        if from > line.len() {
+            return None;
+        }
+        let mut base = from;
+        loop {
+            let slice = line.as_bytes().get(base..)?;
+            let offset = find_start_byte(slice, &self.bytes, &self.bitmap)?;
+            let position = base + offset;
+            if line.is_char_boundary(position) {
+                return Some(position);
+            }
+            base = position.saturating_add(1);
+        }
+    }
+}
+
+fn find_start_byte(haystack: &[u8], bytes: &[u8], bitmap: &[u64; 4]) -> Option<usize> {
+    match bytes {
+        [] => None,
+        [byte] => memchr::memchr(*byte, haystack),
+        [a, b] => memchr::memchr2(*a, *b, haystack),
+        [a, b, c] => memchr::memchr3(*a, *b, *c, haystack),
+        _ => haystack
+            .iter()
+            .position(|byte| bitmap[*byte as usize >> 6] & (1u64 << (*byte & 63)) != 0),
     }
 }
 
@@ -909,9 +1486,9 @@ fn frontier_env_usize(name: &str, default: usize) -> usize {
 fn scanner_candidate_enabled() -> bool {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ENABLED.get_or_init(|| {
-        matches!(
+        !matches!(
             std::env::var("MARK_TEXTMATE_SCANNER").as_deref(),
-            Ok("candidate")
+            Ok("off" | "0" | "false")
         )
     })
 }
@@ -966,6 +1543,81 @@ mod tests {
     fn simple_literal_finds_unanchored_match() {
         let matcher = SimpleMatcher::from_pattern("foo");
         assert_eq!(matcher.find("xxfoo", 0, ctx()).unwrap().start, 2);
+    }
+
+    #[test]
+    fn case_insensitive_word_set_matches_keyword_tokens() {
+        let matcher =
+            AutomataMatcher::new(r"\b(?i)(select|from|where|abort_after_wait)\b").unwrap();
+        assert!(matcher.is_word_set());
+        let result = matcher
+            .find(
+                "xx SELECT abort_after_waiting abort_after_wait",
+                0,
+                AnchorContext::default(),
+            )
+            .unwrap();
+        assert_eq!(result.start..result.end, 3..9);
+        assert_eq!(result.captures[1], Some(3..9));
+        let result = matcher
+            .find(
+                "xx abort_after_waiting abort_after_wait",
+                0,
+                AnchorContext::default(),
+            )
+            .unwrap();
+        assert_eq!(result.start..result.end, 23..39);
+        assert!(
+            matcher
+                .find("éSELECT", 0, AnchorContext::default())
+                .is_none()
+        );
+        assert!(
+            matcher
+                .find("SELECTé", 0, AnchorContext::default())
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn scoped_word_set_supports_noncapturing_inventory() {
+        let matcher = AutomataMatcher::new(r"(?i:\b(?:select|from|where|join)\b)").unwrap();
+        assert!(matcher.is_word_set());
+        let result = matcher
+            .find("xx JOIN", 0, AnchorContext::default())
+            .unwrap();
+        assert_eq!(result.start..result.end, 3..7);
+        assert_eq!(result.captures, vec![Some(3..7)]);
+    }
+
+    #[test]
+    fn word_set_allows_sql_function_call_suffix() {
+        let matcher = AutomataMatcher::new(r"(?i)\b(abs|acos|asin|atan)\b\s*\(").unwrap();
+        assert!(matcher.is_word_set());
+        let result = matcher
+            .find("xx ACOS (value)", 0, AnchorContext::default())
+            .unwrap();
+        assert_eq!(result.start..result.end, 3..9);
+        assert_eq!(result.captures[1], Some(3..7));
+        assert!(
+            matcher
+                .find("xx ACOS value", 0, AnchorContext::default())
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn start_byte_prefilter_jumps_to_candidate_bytes() {
+        let mut buckets = (0..=u8::MAX)
+            .map(|_| Vec::<usize>::new())
+            .collect::<Vec<_>>();
+        buckets[b'x' as usize].push(0);
+        buckets["é".as_bytes()[0] as usize].push(1);
+        let prefilter = StartBytePrefilter::from_buckets(&[], &buckets).unwrap();
+        assert_eq!(prefilter.next_start("abcx", 0), Some(3));
+        assert_eq!(prefilter.next_start("abc", 0), None);
+        assert_eq!(prefilter.next_start("aéx", 0), Some(1));
+        assert!(StartBytePrefilter::from_buckets(&[0], &buckets).is_none());
     }
 
     #[test]
@@ -1195,12 +1847,39 @@ mod tests {
                         &mut scratch,
                         &set.unrestricted_entries,
                         &set.start_byte_entries,
+                        set.start_prefilter.as_ref(),
                         None,
                     )
                     .map(summarize_match);
                 assert_eq!(actual, expected, "patterns={patterns:?} line={line:?}");
             }
         }
+    }
+
+    #[test]
+    fn nix_uri_specialization_matches_ascii_uri_shape() {
+        let matcher = AutomataMatcher::new(NixUriMatcher::PATTERN).unwrap();
+        let result = matcher
+            .find(
+                "xx 1abc:def <nixpkgs> mailto:user",
+                0,
+                AnchorContext::default(),
+            )
+            .unwrap();
+        assert_eq!(result.start..result.end, 4..11);
+        assert_eq!(result.captures, vec![Some(4..11), Some(4..11)]);
+        assert!(
+            matcher
+                .find("<nixpkgs>", 0, AnchorContext::default())
+                .is_none()
+        );
+        assert_eq!(
+            matcher
+                .find("prefix mailto:user", 7, AnchorContext::default())
+                .unwrap()
+                .start,
+            7
+        );
     }
 
     fn summarize_match((idx, result): (usize, MatchResult)) -> (usize, usize, usize) {

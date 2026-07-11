@@ -14,6 +14,7 @@ use crate::engine::{
 pub const MAGIC: &[u8; 4] = b"MRKB";
 pub const FORMAT_VERSION: u16 = 1;
 pub const CODEC_NONE: u32 = 0;
+pub const CODEC_DEFLATE_ZLIB: u32 = 1;
 pub const SECTION_STRINGS: u32 = 3;
 pub const SECTION_SCOPES: u32 = 4;
 pub const SECTION_LANGUAGES: u32 = 5;
@@ -99,6 +100,7 @@ pub enum BundleError {
     BadGrammarBlobId(u32),
     BadLicenseId(u32),
     BadCodec(u32),
+    Inflate { language: String },
     Truncated(&'static str),
     TrailingBytes(&'static str),
     GrammarParse { language: String, message: String },
@@ -137,10 +139,8 @@ impl BundleGrammarRegistry {
                 .bundle
                 .grammar_blob_for_language(&canonical)
                 .ok_or(BundleError::BadGrammarBlobId(u32::MAX))?;
-            if blob.codec != CODEC_NONE {
-                return Err(BundleError::BadCodec(blob.codec));
-            }
-            let source = std::str::from_utf8(&blob.bytes).map_err(|_| BundleError::BadUtf8)?;
+            let bytes = blob.decoded_bytes()?;
+            let source = std::str::from_utf8(&bytes).map_err(|_| BundleError::BadUtf8)?;
             let id = GrammarId(self.cache.len() as u16);
             let grammar = load_dev_grammar_from_str(id, source).map_err(|error| {
                 BundleError::GrammarParse {
@@ -165,6 +165,29 @@ impl BundleGrammarRegistry {
             .map(|entry| entry.canonical.clone())
             .ok_or_else(|| BundleError::UnknownLanguage(scope_name.to_owned()))?;
         self.grammar(&canonical)
+    }
+}
+
+impl GrammarBlob {
+    pub fn decoded_bytes(&self) -> Result<Vec<u8>, BundleError> {
+        match self.codec {
+            CODEC_NONE => Ok(self.bytes.clone()),
+            CODEC_DEFLATE_ZLIB => {
+                let bytes =
+                    miniz_oxide::inflate::decompress_to_vec_zlib(&self.bytes).map_err(|_| {
+                        BundleError::Inflate {
+                            language: self.language.clone(),
+                        }
+                    })?;
+                if bytes.len() != self.raw_len as usize {
+                    return Err(BundleError::Inflate {
+                        language: self.language.clone(),
+                    });
+                }
+                Ok(bytes)
+            }
+            other => Err(BundleError::BadCodec(other)),
+        }
     }
 }
 

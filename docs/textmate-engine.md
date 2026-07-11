@@ -5,8 +5,8 @@ This is the migration from the removed syntect/two-face hybrid to a single
 in-house engine with vendored TextMate grammars.
 
 Production highlighting is switched to the bundled native backend. The engine,
-grammar bundle path, oracle harness, and core-30 catalog are in-tree. The full
-checked-in core-30 corpus now passes exact scope-stack and coarse class parity
+grammar bundle path, oracle harness, and full public catalog are in-tree. The
+checked-in fixture corpus passes exact scope-stack and coarse class parity
 without divergence allowlists.
 
 ## Goals
@@ -31,15 +31,15 @@ crates/mark-syntax/src/
     scopes.rs       # scope interning + scope → SyntaxClass
     line.rs         # line splitting / UTF-8 boundary helpers
   grammars/
-    registry.rs     # core-30 dev/test asset table (raw JSON via include_str!)
+    registry.rs     # curated dev/test asset table (raw JSON via include_str!)
     bundle.rs       # MRKB embedded bundle reader
     catalog.rs      # aliases / extensions / basenames for the bundle
   highlight.rs, language.rs, storage.rs, types.rs  # public config / API surface
 
-assets/tm-grammars/           # committed TextMate JSON (core-30 + cpp-macro)
+assets/tm-grammars/           # committed TextMate JSON (full public catalog + private deps)
   SOURCE.toml                 # pin: @shikijs/langs@3.23.0
   licenses.json               # per-grammar license manifest
-  coverage.toml               # historical keep/drop notes from the full catalog era
+  coverage.toml               # active public/private grammar coverage manifest
 
 tools/                        # dev-only Node oracle (not linked into the binary)
   golden-oracle/              # pinned vscode-textmate@9.2.0, vscode-oniguruma@1.7.0
@@ -78,11 +78,15 @@ so TUI queue/LRU layers do not need a redesign:
 - language detection / config management (`language.rs`, `storage.rs`)
 - `SyntaxHighlighter` must remain `Send` (worker-thread highlighting)
 
-## Core-30 languages
+## Public language catalog
 
-The initial native catalog is the **core-30** set vendored under
-`assets/tm-grammars/languages/`. Support grammar `cpp-macro` is included for
-C++ preprocessor embeddings and is not a user-facing language id.
+The native catalog is the full pinned Shiki language set plus the MLIR grammar
+imported from LLVM, vendored under `assets/tm-grammars/languages/`. The active
+public ids are listed in `assets/tm-grammars/coverage.toml`; private dependency
+blobs such as `yang` and `twig-source` are embedded but hidden from user-facing
+language selection.
+
+The original core regression set remains covered by fixtures and includes:
 
 | Language id | Grammar asset | Root scope |
 | --- | --- | --- |
@@ -91,7 +95,7 @@ C++ preprocessor embeddings and is not a user-facing language id.
 | `cpp` | `cpp.tmLanguage.json` | `source.cpp` |
 | `csharp` | `csharp.tmLanguage.json` | `source.cs` |
 | `css` | `css.tmLanguage.json` | `source.css` |
-| `dockerfile` | `docker.tmLanguage.json` | `source.dockerfile` |
+| `docker` | `docker.tmLanguage.json` | `source.dockerfile` |
 | `go` | `go.tmLanguage.json` | `source.go` |
 | `html` | `html.tmLanguage.json` | `text.html.basic` |
 | `java` | `java.tmLanguage.json` | `source.java` |
@@ -119,9 +123,9 @@ C++ preprocessor embeddings and is not a user-facing language id.
 
 Grammar pin: `@shikijs/langs@3.23.0` (see `assets/tm-grammars/SOURCE.toml`).
 
-Earlier recovery work also carried a `zig` stress fixture; zig is **not** in
-core-30 and was removed from the golden corpus. Expanding beyond core-30 is an
-asset decision (vendor a grammar + add fixtures), not an engine fork.
+The first-class extended fixtures include `zig`, `llvm`, `riscv`, `mipsasm`,
+`odin`, `asm`, `mojo`, `ocaml`, and `mlir`; adding more coverage is an asset and
+fixture decision, not an engine fork.
 
 ## Dependency policy
 
@@ -149,12 +153,13 @@ The package is `"private": true` and lives outside the Rust workspace.
 
 - Grammar source pin (`SOURCE.toml`) and license manifest.
 - Pattern-feature inventory (`tools/grammar-stats.mjs` over vendored JSON).
-- Coverage keep/drop notes (`coverage.toml`; historical full-catalog work).
+- Coverage keep/drop notes (`coverage.toml`; active full catalog).
 - Golden-token oracle tools and fixture corpus.
-- A divergence file that must stay empty while the core-30 corpus is exact.
+- A divergence file that must stay empty while committed fixtures are exact.
 
-**Current state.** Core-30 assets are vendored. Oracle tools and a full-language
-smoke/stress corpus exist. Production still does not depend on Node.
+**Current state.** Full-catalog assets are vendored. Oracle tools and a
+full-language smoke/stress corpus exist. Production still does not depend on
+Node.
 
 ### Phase 1 — grammar model and dev loader
 
@@ -332,14 +337,26 @@ Routing atomic/possessive patterns through the position VM also preserved the
 tested outputs but was reverted after regressions of about 0.8% on both Rust
 and TypeScript and 1.7% on C++.
 
-The stripped release `mark` binary is 6,728,128 bytes on the measured macOS
-build, inside the 8 MB core-30 target.
+The current bytecode path now covers ordered alternation/repetition with a
+deterministic C/C++ comment-or-space separator instruction and compact
+backreference capture layouts for position selection. The `profile-cold`
+driver also configures the same syntax limits as production so its line cache
+behavior matches the runtime. On the checked-in repeated C++ stress member this
+raises process-cold throughput above the P2 floor (about 2.1 MB/s with the line
+cache disabled, about 10 MB/s with production limits). The dedicated libc++
+fixture is pinned as a separate zero-divergence oracle case. PHP and Nix remain
+below the aspirational 3 MB/s floor and are tracked as remaining hotspot work;
+the correctness gates still require zero oracle divergences and zero committed
+fixture budget degradation.
+
+The stripped release `mark` binary remains under the 8 MB target on the measured
+macOS build with compressed embedded grammar blobs.
 
 ### After phase 5 (not detailed here)
 
-Phase 6+ covers broadening conformance beyond the proving corpus, raising
-scanner throughput, and expanding the catalog beyond core-30. The
-unavailable-backend shim has already been removed from the production path.
+Phase 6+ covers broadening conformance beyond the proving corpus and raising
+scanner throughput. The unavailable-backend shim has already been removed from
+the production path.
 The concrete performance sequence and acceptance gates are in
 [`textmate-performance-plan.md`](textmate-performance-plan.md).
 
@@ -418,8 +435,8 @@ native tokenizer divergence. Visual investigations must first run VS Code with
 semantic highlighting disabled, then compare the full scope stacks before
 changing tokenizer behavior.
 
-1. **Corpus parity is not universal proof.** The checked-in core-30 fixtures are
-   100% exact, but more adversarial and real-world fixtures are still needed.
+1. **Corpus parity is not universal proof.** The checked-in fixtures are 100%
+   exact, but more adversarial and real-world fixtures are still needed.
 2. **Broader Oniguruma conformance.** Recursive subroutines, nested classes,
    dynamic ends, lookaround captures, anchors, and backreferences are covered
    by the proving set; the full Oniguruma surface is larger.
@@ -428,10 +445,9 @@ changing tokenizer behavior.
    fallback dominates hot matches.
 4. **Performance target remains open.** The measured 2.1x scanner improvement
    is substantial, but cold full-file throughput is still well below 12 MB/s.
-5. **Core-30 only.** The product catalog for this migration is the 30 languages
-   above. Broader Shiki/tm-grammars coverage is deferred; `coverage.toml` still
-   records older full-catalog keep/drop notes and may disagree with the on-disk
-   core-30 asset tree until production catalog code is realigned.
+5. **Catalog breadth.** The product catalog now follows the full pinned Shiki
+   import plus MLIR. Full Shiki parity still relies on smoke/stress fixtures and
+   the budget guard; adversarial coverage remains incremental.
 6. **Oracle is Node-only.** Correctness regen requires Node ≥ 20 and the pinned
    packages under `tools/golden-oracle`. CI that only runs `cargo test` does not
    re-derive goldens unless a separate job runs `generate-goldens.mjs --check`.

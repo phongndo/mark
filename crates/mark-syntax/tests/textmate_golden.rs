@@ -219,6 +219,55 @@ fn manifest_golden_cases_match_or_are_allowlisted() {
 }
 
 #[test]
+fn manifest_golden_cases_have_no_budget_degradation() {
+    for case in load_manifest() {
+        let mut tokenizer = tokenizer_for_case(&case);
+        tokenizer.set_counters_enabled(true);
+        let source = fs::read_to_string(repo_path(&case.fixture)).expect("fixture source");
+        let _ = tokenizer.tokenize_source(&source);
+        let counters = tokenizer.take_counters();
+        assert_eq!(
+            counters.degraded_lines, 0,
+            "{} degraded committed fixture lines",
+            case.fixture
+        );
+        assert_eq!(
+            counters.fallback_budget_kills, 0,
+            "{} exhausted fallback budget",
+            case.fixture
+        );
+    }
+}
+
+#[test]
+fn libcxx_cpp_fixture_has_zero_oracle_divergence() {
+    let cases = load_manifest();
+    let case = cases
+        .iter()
+        .find(|case| case.fixture.contains("cpp/libcxx_"))
+        .expect("manifest should contain a dedicated libc++ C++ fixture");
+    let allowlisted: Vec<_> = load_divergences()
+        .into_iter()
+        .filter(|divergence| divergence.spec.fixture == case.fixture)
+        .collect();
+    assert!(
+        allowlisted.is_empty(),
+        "libc++ fixture must not rely on divergence allowlist entries"
+    );
+
+    let records = load_golden_records(case);
+    let mut divergences = Vec::new();
+    let mut failures = Vec::new();
+    compare_exact_scopes(case, &records, &mut divergences, &mut failures);
+    compare_coarse_highlights(case, &records, &mut divergences, &mut failures);
+    assert!(
+        failures.is_empty(),
+        "libc++ fixture diverged from oracle:\n{}",
+        failures.join("\n")
+    );
+}
+
+#[test]
 fn tokenizer_never_panics_on_generated_utf8_inputs() {
     let grammar = fs::read_to_string(repo_path(
         "assets/tm-grammars/languages/json.tmLanguage.json",

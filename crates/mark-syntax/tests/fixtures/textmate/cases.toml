@@ -148,6 +148,18 @@ golden = "crates/mark-syntax/tests/fixtures/textmate/cpp/stress.golden.jsonl"
 scope = "source.cpp.embedded.macro"
 grammar = "assets/tm-grammars/languages/cpp-macro.tmLanguage.json"
 
+
+[[case]]
+language = "cpp"
+scope = "source.cpp"
+grammar = "assets/tm-grammars/languages/cpp.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/cpp/libcxx_vector.cpp"
+golden = "crates/mark-syntax/tests/fixtures/textmate/cpp/libcxx_vector.golden.jsonl"
+
+[[case.embedded]]
+scope = "source.cpp.embedded.macro"
+grammar = "assets/tm-grammars/languages/cpp-macro.tmLanguage.json"
+
 [[case]]
 language = "bash"
 scope = "source.shell"
@@ -281,3 +293,131 @@ grammar = "assets/tm-grammars/languages/css.tmLanguage.json"
 [[case.embedded]]
 scope = "source.sql"
 grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"
+
+# --- requested Shiki/MLIR language cases ---
+
+[[case]]
+language = "zig"
+scope = "source.zig"
+grammar = "assets/tm-grammars/languages/zig.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/zig/basic.zig"
+golden = "crates/mark-syntax/tests/fixtures/textmate/zig/basic.golden.jsonl"
+
+[[case]]
+language = "zig"
+scope = "source.zig"
+grammar = "assets/tm-grammars/languages/zig.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/zig/stress.zig"
+golden = "crates/mark-syntax/tests/fixtures/textmate/zig/stress.golden.jsonl"
+
+[[case]]
+language = "llvm"
+scope = "source.llvm"
+grammar = "assets/tm-grammars/languages/llvm.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/llvm/basic.ll"
+golden = "crates/mark-syntax/tests/fixtures/textmate/llvm/basic.golden.jsonl"
+
+[[case]]
+language = "llvm"
+scope = "source.llvm"
+grammar = "assets/tm-grammars/languages/llvm.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/llvm/stress.ll"
+golden = "crates/mark-syntax/tests/fixtures/textmate/llvm/stress.golden.jsonl"
+
+[[case]]
+language = "riscv"
+scope = "source.riscv"
+grammar = "assets/tm-grammars/languages/riscv.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/riscv/basic.riscv"
+golden = "crates/mark-syntax/tests/fixtures/textmate/riscv/basic.golden.jsonl"
+
+[[case]]
+language = "riscv"
+scope = "source.riscv"
+grammar = "assets/tm-grammars/languages/riscv.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/riscv/stress.riscv"
+golden = "crates/mark-syntax/tests/fixtures/textmate/riscv/stress.golden.jsonl"
+
+[[case]]
+language = "mipsasm"
+scope = "source.mips"
+grammar = "assets/tm-grammars/languages/mipsasm.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/mipsasm/basic.mips"
+golden = "crates/mark-syntax/tests/fixtures/textmate/mipsasm/basic.golden.jsonl"
+
+[[case]]
+language = "mipsasm"
+scope = "source.mips"
+grammar = "assets/tm-grammars/languages/mipsasm.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/mipsasm/stress.mips"
+golden = "crates/mark-syntax/tests/fixtures/textmate/mipsasm/stress.golden.jsonl"
+
+[[case]]
+language = "odin"
+scope = "source.odin"
+grammar = "assets/tm-grammars/languages/odin.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/odin/basic.odin"
+golden = "crates/mark-syntax/tests/fixtures/textmate/odin/basic.golden.jsonl"
+
+[[case]]
+language = "odin"
+scope = "source.odin"
+grammar = "assets/tm-grammars/languages/odin.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/odin/stress.odin"
+golden = "crates/mark-syntax/tests/fixtures/textmate/odin/stress.golden.jsonl"
+
+[[case]]
+language = "asm"
+scope = "source.asm.x86_64"
+grammar = "assets/tm-grammars/languages/asm.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/asm/basic.asm"
+golden = "crates/mark-syntax/tests/fixtures/textmate/asm/basic.golden.jsonl"
+
+[[case]]
+language = "asm"
+scope = "source.asm.x86_64"
+grammar = "assets/tm-grammars/languages/asm.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/asm/stress.asm"
+golden = "crates/mark-syntax/tests/fixtures/textmate/asm/stress.golden.jsonl"
+
+[[case]]
+language = "mojo"
+scope = "source.mojo"
+grammar = "assets/tm-grammars/languages/mojo.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/mojo/basic.mojo"
+golden = "crates/mark-syntax/tests/fixtures/textmate/mojo/basic.golden.jsonl"
+
+[[case]]
+language = "mojo"
+scope = "source.mojo"
+grammar = "assets/tm-grammars/languages/mojo.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/mojo/stress.mojo"
+golden = "crates/mark-syntax/tests/fixtures/textmate/mojo/stress.golden.jsonl"
+
+[[case]]
+language = "ocaml"
+scope = "source.ocaml"
+grammar = "assets/tm-grammars/languages/ocaml.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/ocaml/basic.ml"
+golden = "crates/mark-syntax/tests/fixtures/textmate/ocaml/basic.golden.jsonl"
+
+[[case]]
+language = "ocaml"
+scope = "source.ocaml"
+grammar = "assets/tm-grammars/languages/ocaml.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/ocaml/stress.ml"
+golden = "crates/mark-syntax/tests/fixtures/textmate/ocaml/stress.golden.jsonl"
+
+[[case]]
+language = "mlir"
+scope = "source.mlir"
+grammar = "assets/tm-grammars/languages/mlir.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/mlir/basic.mlir"
+golden = "crates/mark-syntax/tests/fixtures/textmate/mlir/basic.golden.jsonl"
+
+[[case]]
+language = "mlir"
+scope = "source.mlir"
+grammar = "assets/tm-grammars/languages/mlir.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/mlir/stress.mlir"
+golden = "crates/mark-syntax/tests/fixtures/textmate/mlir/stress.golden.jsonl"

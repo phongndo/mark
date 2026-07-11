@@ -1,6 +1,8 @@
 use super::DiffApp;
 use crate::model::{ContextSourceKey, FileIndex, UiRow};
-use crate::syntax::{DiffSide, SyntaxPosition, SyntaxPriority, SyntaxRuntime, unified_syntax_side};
+use crate::syntax::{
+    DiffSide, SyntaxKey, SyntaxPosition, SyntaxPriority, SyntaxRuntime, unified_syntax_side,
+};
 use crate::theme::{MAX_SYNTAX_RESULTS_PER_FRAME, SyntaxBenchmarkReport};
 use mark_syntax::HighlightedLine;
 use std::collections::HashSet;
@@ -185,10 +187,75 @@ impl DiffApp {
     }
 
     pub(crate) fn drain_syntax(&mut self) {
-        if let Some(syntax) = self.config.syntax.as_mut()
-            && syntax.drain(self.document.generation, MAX_SYNTAX_RESULTS_PER_FRAME)
+        let Some(syntax) = self.config.syntax.as_mut() else {
+            return;
+        };
+        let drain = syntax.drain(self.document.generation, MAX_SYNTAX_RESULTS_PER_FRAME);
+        if drain.changed
+            && drain
+                .changed_keys
+                .iter()
+                .any(|key| self.syntax_key_affects_viewport(*key))
         {
             self.runtime.dirty = true;
+        }
+    }
+
+    fn syntax_key_affects_viewport(&self, key: SyntaxKey) -> bool {
+        if key.generation() != self.document.generation {
+            return false;
+        }
+        let Some(visible_range) =
+            self.visible_model_range_for_viewport(self.viewport.viewport_rows)
+        else {
+            return false;
+        };
+
+        visible_range
+            .filter_map(|row_index| self.document.model.row(row_index))
+            .any(|row| self.syntax_key_affects_row(key, row))
+    }
+
+    fn syntax_key_affects_row(&self, key: SyntaxKey, row: UiRow) -> bool {
+        match row {
+            UiRow::UnifiedLine { file, hunk, line } => {
+                let Some(diff_line) = self
+                    .document
+                    .changeset
+                    .files
+                    .get(file.get())
+                    .and_then(|file_diff| file_diff.hunks().get(hunk.get()))
+                    .and_then(|hunk_diff| hunk_diff.lines.get(line.get()))
+                else {
+                    return false;
+                };
+                unified_syntax_side(diff_line.kind()).is_some_and(|side| {
+                    key.source.generation == self.document.generation
+                        && key.source.file == file.get()
+                        && key.source.side == side
+                })
+            }
+            UiRow::SplitLine {
+                file,
+                hunk: _,
+                left,
+                right,
+            } => {
+                key.source.generation == self.document.generation
+                    && key.source.file == file.get()
+                    && ((left.is_some() && key.source.side == DiffSide::Old)
+                        || (right.is_some() && key.source.side == DiffSide::New))
+            }
+            UiRow::ContextLine { file, .. } => {
+                key.source.generation == self.document.generation && key.source.file == file.get()
+            }
+            UiRow::FileSeparator
+            | UiRow::FileHeader(_)
+            | UiRow::FileBodyNotice(_)
+            | UiRow::Collapsed { .. }
+            | UiRow::ContextHide { .. }
+            | UiRow::HunkHeader { .. }
+            | UiRow::MetaLine { .. } => false,
         }
     }
 

@@ -26,15 +26,31 @@ impl DiffApp {
     }
 
     pub(crate) fn mouse_scroll_or_focus_hunk(&mut self, direction: MouseScrollDirection) {
-        let delta = self
-            .input
-            .mouse_scroll
-            .scroll_delta(direction, Instant::now());
+        self.mouse_scroll_or_focus_hunk_ticks(direction, 1);
+    }
+
+    pub(crate) fn mouse_scroll_or_focus_hunk_ticks(
+        &mut self,
+        direction: MouseScrollDirection,
+        ticks: usize,
+    ) {
+        if ticks == 0 {
+            return;
+        }
+
+        let now = Instant::now();
+        let mut delta = 0isize;
+        for _ in 0..ticks {
+            delta = delta.saturating_add(self.input.mouse_scroll.scroll_delta(direction, now));
+        }
         let previous_scroll = self.viewport.scroll;
         self.scroll_by(delta);
         if self.viewport.scroll == previous_scroll {
-            let hunk_delta = self.input.mouse_scroll.hunk_focus_delta(direction);
-            if hunk_delta != 0 {
+            for _ in 0..ticks {
+                let hunk_delta = self.input.mouse_scroll.hunk_focus_delta(direction);
+                if hunk_delta == 0 {
+                    continue;
+                }
                 self.move_focused_hunk(hunk_delta);
             }
         } else {

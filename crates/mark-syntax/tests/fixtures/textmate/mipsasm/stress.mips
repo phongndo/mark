@@ -1,0 +1,240 @@
+# block 1
+label_1: addi $t0, $t0, 1
+# block 2
+label_2: addi $t0, $t0, 2
+# block 3
+label_3: addi $t0, $t0, 3
+# block 4
+label_4: addi $t0, $t0, 4
+# block 5
+label_5: addi $t0, $t0, 5
+# block 6
+label_6: addi $t0, $t0, 6
+# block 7
+label_7: addi $t0, $t0, 7
+# block 8
+label_8: addi $t0, $t0, 8
+# block 9
+label_9: addi $t0, $t0, 9
+# block 10
+label_10: addi $t0, $t0, 10
+# block 11
+label_11: addi $t0, $t0, 11
+# block 12
+label_12: addi $t0, $t0, 12
+# block 13
+label_13: addi $t0, $t0, 13
+# block 14
+label_14: addi $t0, $t0, 14
+# block 15
+label_15: addi $t0, $t0, 15
+# block 16
+label_16: addi $t0, $t0, 16
+# block 17
+label_17: addi $t0, $t0, 17
+# block 18
+label_18: addi $t0, $t0, 18
+# block 19
+label_19: addi $t0, $t0, 19
+# block 20
+label_20: addi $t0, $t0, 20
+# block 21
+label_21: addi $t0, $t0, 21
+# block 22
+label_22: addi $t0, $t0, 22
+# block 23
+label_23: addi $t0, $t0, 23
+# block 24
+label_24: addi $t0, $t0, 24
+# block 25
+label_25: addi $t0, $t0, 25
+# block 26
+label_26: addi $t0, $t0, 26
+# block 27
+label_27: addi $t0, $t0, 27
+# block 28
+label_28: addi $t0, $t0, 28
+# block 29
+label_29: addi $t0, $t0, 29
+# block 30
+label_30: addi $t0, $t0, 30
+# block 31
+label_31: addi $t0, $t0, 31
+# block 32
+label_32: addi $t0, $t0, 0
+# block 33
+label_33: addi $t0, $t0, 1
+# block 34
+label_34: addi $t0, $t0, 2
+# block 35
+label_35: addi $t0, $t0, 3
+# block 36
+label_36: addi $t0, $t0, 4
+# block 37
+label_37: addi $t0, $t0, 5
+# block 38
+label_38: addi $t0, $t0, 6
+# block 39
+label_39: addi $t0, $t0, 7
+# block 40
+label_40: addi $t0, $t0, 8
+# block 41
+label_41: addi $t0, $t0, 9
+# block 42
+label_42: addi $t0, $t0, 10
+# block 43
+label_43: addi $t0, $t0, 11
+# block 44
+label_44: addi $t0, $t0, 12
+# block 45
+label_45: addi $t0, $t0, 13
+# block 46
+label_46: addi $t0, $t0, 14
+# block 47
+label_47: addi $t0, $t0, 15
+# block 48
+label_48: addi $t0, $t0, 16
+# block 49
+label_49: addi $t0, $t0, 17
+# block 50
+label_50: addi $t0, $t0, 18
+# block 51
+label_51: addi $t0, $t0, 19
+# block 52
+label_52: addi $t0, $t0, 20
+# block 53
+label_53: addi $t0, $t0, 21
+# block 54
+label_54: addi $t0, $t0, 22
+# block 55
+label_55: addi $t0, $t0, 23
+# block 56
+label_56: addi $t0, $t0, 24
+# block 57
+label_57: addi $t0, $t0, 25
+# block 58
+label_58: addi $t0, $t0, 26
+# block 59
+label_59: addi $t0, $t0, 27
+# block 60
+label_60: addi $t0, $t0, 28
+# block 61
+label_61: addi $t0, $t0, 29
+# block 62
+label_62: addi $t0, $t0, 30
+# block 63
+label_63: addi $t0, $t0, 31
+# block 64
+label_64: addi $t0, $t0, 0
+# block 65
+label_65: addi $t0, $t0, 1
+# block 66
+label_66: addi $t0, $t0, 2
+# block 67
+label_67: addi $t0, $t0, 3
+# block 68
+label_68: addi $t0, $t0, 4
+# block 69
+label_69: addi $t0, $t0, 5
+# block 70
+label_70: addi $t0, $t0, 6
+# block 71
+label_71: addi $t0, $t0, 7
+# block 72
+label_72: addi $t0, $t0, 8
+# block 73
+label_73: addi $t0, $t0, 9
+# block 74
+label_74: addi $t0, $t0, 10
+# block 75
+label_75: addi $t0, $t0, 11
+# block 76
+label_76: addi $t0, $t0, 12
+# block 77
+label_77: addi $t0, $t0, 13
+# block 78
+label_78: addi $t0, $t0, 14
+# block 79
+label_79: addi $t0, $t0, 15
+# block 80
+label_80: addi $t0, $t0, 16
+# block 81
+label_81: addi $t0, $t0, 17
+# block 82
+label_82: addi $t0, $t0, 18
+# block 83
+label_83: addi $t0, $t0, 19
+# block 84
+label_84: addi $t0, $t0, 20
+# block 85
+label_85: addi $t0, $t0, 21
+# block 86
+label_86: addi $t0, $t0, 22
+# block 87
+label_87: addi $t0, $t0, 23
+# block 88
+label_88: addi $t0, $t0, 24
+# block 89
+label_89: addi $t0, $t0, 25
+# block 90
+label_90: addi $t0, $t0, 26
+# block 91
+label_91: addi $t0, $t0, 27
+# block 92
+label_92: addi $t0, $t0, 28
+# block 93
+label_93: addi $t0, $t0, 29
+# block 94
+label_94: addi $t0, $t0, 30
+# block 95
+label_95: addi $t0, $t0, 31
+# block 96
+label_96: addi $t0, $t0, 0
+# block 97
+label_97: addi $t0, $t0, 1
+# block 98
+label_98: addi $t0, $t0, 2
+# block 99
+label_99: addi $t0, $t0, 3
+# block 100
+label_100: addi $t0, $t0, 4
+# block 101
+label_101: addi $t0, $t0, 5
+# block 102
+label_102: addi $t0, $t0, 6
+# block 103
+label_103: addi $t0, $t0, 7
+# block 104
+label_104: addi $t0, $t0, 8
+# block 105
+label_105: addi $t0, $t0, 9
+# block 106
+label_106: addi $t0, $t0, 10
+# block 107
+label_107: addi $t0, $t0, 11
+# block 108
+label_108: addi $t0, $t0, 12
+# block 109
+label_109: addi $t0, $t0, 13
+# block 110
+label_110: addi $t0, $t0, 14
+# block 111
+label_111: addi $t0, $t0, 15
+# block 112
+label_112: addi $t0, $t0, 16
+# block 113
+label_113: addi $t0, $t0, 17
+# block 114
+label_114: addi $t0, $t0, 18
+# block 115
+label_115: addi $t0, $t0, 19
+# block 116
+label_116: addi $t0, $t0, 20
+# block 117
+label_117: addi $t0, $t0, 21
+# block 118
+label_118: addi $t0, $t0, 22
+# block 119
+label_119: addi $t0, $t0, 23
+# block 120
+label_120: addi $t0, $t0, 24

@@ -8,9 +8,15 @@ use super::{
     },
 };
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct SyntaxDrain {
+    pub(crate) changed: bool,
+    pub(crate) changed_keys: Vec<SyntaxKey>,
+}
+
 impl SyntaxRuntime {
-    pub(crate) fn drain(&mut self, generation: u64, max_results: usize) -> bool {
-        let mut changed = false;
+    pub(crate) fn drain(&mut self, generation: u64, max_results: usize) -> SyntaxDrain {
+        let mut drain = SyntaxDrain::default();
         for _ in 0..max_results {
             let Ok(result) = self.result_rx.try_recv() else {
                 break;
@@ -39,12 +45,14 @@ impl SyntaxRuntime {
                         .stats
                         .estimated_memory_peak_bytes
                         .max(self.estimated_memory_bytes() as u64);
-                    changed = true;
+                    drain.changed = true;
+                    drain.changed_keys.push(result.key);
                 }
                 Err(SyntaxJobFailure::Unavailable) => {
                     self.handle_unavailable_source(result.key);
                     self.stats.jobs_skipped = self.stats.jobs_skipped.saturating_add(1);
-                    changed = true;
+                    drain.changed = true;
+                    drain.changed_keys.push(result.key);
                 }
                 Err(SyntaxJobFailure::HighlightError) => {
                     self.failed.insert(result.key);
@@ -57,7 +65,7 @@ impl SyntaxRuntime {
                 }
             }
         }
-        changed
+        drain
     }
 
     pub(crate) fn handle_unavailable_source(&mut self, key: SyntaxKey) {

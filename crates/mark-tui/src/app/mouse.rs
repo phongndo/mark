@@ -1,10 +1,11 @@
-use crossterm::event::MouseEvent;
+use crossterm::event::{MouseEvent, MouseEventKind};
 use mark_core::MarkResult;
 
 use super::{ActionOutcome, DiffApp};
 use crate::render::compositor::{
     ComponentEventResult, ComponentId, EventComponent, route_event_through_layers,
 };
+use crate::theme::HORIZONTAL_SCROLL_STEP;
 
 mod annotation_clicks;
 mod click;
@@ -150,11 +151,94 @@ impl DiffApp {
         Ok(outcome)
     }
 
+    pub(crate) fn handle_mouse_scroll_burst_with_effects(
+        &mut self,
+        mouse: MouseEvent,
+        ticks: usize,
+    ) -> MarkResult<ActionOutcome> {
+        if ticks <= 1 || !is_scroll_kind(mouse.kind) {
+            return self.handle_mouse_with_effects(mouse);
+        }
+
+        if self.handle_open_menu_mouse_scroll_ticks(mouse.kind, ticks) {
+            return Ok(self.mouse_burst_outcome());
+        }
+        if self.overlays.help_menu_is_open() {
+            self.input.reset_mouse_scroll();
+            return Ok(self.mouse_burst_outcome());
+        }
+
+        self.update_diff_mouse_hover(mouse.column, mouse.row);
+        match mouse.kind {
+            MouseEventKind::ScrollDown => {
+                if self.is_file_sidebar_position(mouse.column, mouse.row) {
+                    self.input.reset_mouse_scroll();
+                    self.scroll_file_sidebar_by(ticks.min(isize::MAX as usize) as isize);
+                } else {
+                    self.mouse_scroll_or_focus_hunk_ticks(MouseScrollDirection::Down, ticks);
+                    self.update_diff_mouse_hover(mouse.column, mouse.row);
+                }
+                Ok(self.mouse_burst_outcome())
+            }
+            MouseEventKind::ScrollUp => {
+                if self.is_file_sidebar_position(mouse.column, mouse.row) {
+                    self.input.reset_mouse_scroll();
+                    self.scroll_file_sidebar_by(-(ticks.min(isize::MAX as usize) as isize));
+                } else {
+                    self.mouse_scroll_or_focus_hunk_ticks(MouseScrollDirection::Up, ticks);
+                    self.update_diff_mouse_hover(mouse.column, mouse.row);
+                }
+                Ok(self.mouse_burst_outcome())
+            }
+            MouseEventKind::ScrollLeft => {
+                if self.is_file_sidebar_position(mouse.column, mouse.row) {
+                    self.input.reset_mouse_scroll();
+                } else {
+                    let delta = HORIZONTAL_SCROLL_STEP
+                        .saturating_mul(ticks)
+                        .min(isize::MAX as usize) as isize;
+                    self.scroll_horizontally_by(-delta);
+                    self.update_diff_mouse_hover(mouse.column, mouse.row);
+                }
+                Ok(self.mouse_burst_outcome())
+            }
+            MouseEventKind::ScrollRight => {
+                if self.is_file_sidebar_position(mouse.column, mouse.row) {
+                    self.input.reset_mouse_scroll();
+                } else {
+                    let delta = HORIZONTAL_SCROLL_STEP
+                        .saturating_mul(ticks)
+                        .min(isize::MAX as usize) as isize;
+                    self.scroll_horizontally_by(delta);
+                    self.update_diff_mouse_hover(mouse.column, mouse.row);
+                }
+                Ok(self.mouse_burst_outcome())
+            }
+            _ => self.handle_mouse_with_effects(mouse),
+        }
+    }
+
+    fn mouse_burst_outcome(&mut self) -> ActionOutcome {
+        let mut outcome = ActionOutcome::consumed();
+        outcome.extend_effects(self.take_queued_effects());
+        outcome
+    }
+
     #[cfg(test)]
     pub(crate) fn handle_mouse(&mut self, mouse: MouseEvent) -> MarkResult<()> {
         let outcome = self.handle_mouse_with_effects(mouse)?;
         self.run_effects(outcome.into_effects())
     }
+}
+
+fn is_scroll_kind(kind: MouseEventKind) -> bool {
+    matches!(
+        kind,
+        MouseEventKind::ScrollDown
+            | MouseEventKind::ScrollUp
+            | MouseEventKind::ScrollLeft
+            | MouseEventKind::ScrollRight
+    )
 }
 
 #[cfg(test)]

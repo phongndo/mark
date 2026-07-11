@@ -6,7 +6,10 @@
 
 use super::AnchorContext;
 use super::ast::{Ast, Backref, CharClass, LookKind, ParsedRegex, RegexFlags};
-use super::backtrack::{BudgetExceeded, StepBudget, anchor_matches, char_at, class_contains};
+use super::backtrack::{
+    BudgetExceeded, StepBudget, anchor_matches, char_at, class_contains,
+    is_cpp_space_comment_separator,
+};
 use std::ops::Range;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -205,6 +208,14 @@ enum Instruction {
         max: Option<usize>,
         next: usize,
     },
+    /// C/C++ grammars repeat this separator between declaration fragments:
+    /// block-comments, whitespace, word-boundary assertions, and text/line
+    /// anchors. In position-only mode captures are irrelevant, so the VM can
+    /// emit the branch-ordered endpoints directly instead of expanding the
+    /// nested possessive/comment regex at every candidate offset.
+    CppSpaceCommentSeparator {
+        next: usize,
+    },
     Accept,
     Fail,
 }
@@ -332,6 +343,87 @@ impl BytecodeScratch {
     pub(crate) fn prefilter_cursors(&mut self) -> &mut super::prefilter::PrefilterCursors {
         &mut self.prefilter_cursors
     }
+}
+
+fn push_cpp_space_comment_separator_positions(
+    line: &str,
+    position: usize,
+    ctx: AnchorContext,
+    out: &mut Vec<(u32, usize)>,
+) {
+    out.clear();
+    push_cpp_comment_sequence_ends(line, position, out);
+
+    let space_end = consume_whitespace(line, position);
+    if space_end > position {
+        out.push((0, space_end));
+    }
+    if previous_char(line, position).is_some_and(|ch| !cpp_is_word_char(ch)) {
+        out.push((0, position));
+    }
+    if char_at(line, position).is_some_and(|(ch, _)| !cpp_is_word_char(ch)) {
+        out.push((0, position));
+    }
+    if position == 0 {
+        out.push((0, position));
+    }
+    if is_line_end_position(line, position) {
+        if line.as_bytes().get(position) == Some(&b'\n') {
+            out.push((0, position + 1));
+        }
+        out.push((0, position));
+    }
+    if ctx.allow_a && position == 0 {
+        out.push((0, position));
+    }
+    if position == line.len() || line.get(position..).is_some_and(|tail| tail == "\n") {
+        out.push((0, position));
+    }
+}
+
+fn push_cpp_comment_sequence_ends(line: &str, start: usize, out: &mut Vec<(u32, usize)>) {
+    let base = out.len();
+    let mut pos = start;
+    loop {
+        pos = consume_whitespace(line, pos);
+        let Some(after_comment) = consume_c_block_comment(line, pos) else {
+            break;
+        };
+        pos = consume_whitespace(line, after_comment);
+        out.push((0, pos));
+    }
+    out[base..].reverse();
+}
+
+fn consume_whitespace(line: &str, mut pos: usize) -> usize {
+    while let Some((ch, next)) = char_at(line, pos) {
+        if !ch.is_whitespace() {
+            break;
+        }
+        pos = next;
+    }
+    pos
+}
+
+fn consume_c_block_comment(line: &str, pos: usize) -> Option<usize> {
+    let rest = line.get(pos..)?;
+    if !rest.starts_with("/*") {
+        return None;
+    }
+    let end = rest.get(2..)?.find("*/")?;
+    Some(pos + 2 + end + 2)
+}
+
+fn previous_char(line: &str, pos: usize) -> Option<char> {
+    line.get(..pos)?.chars().next_back()
+}
+
+fn cpp_is_word_char(ch: char) -> bool {
+    ch == '_' || ch.is_alphanumeric()
+}
+
+fn is_line_end_position(line: &str, pos: usize) -> bool {
+    pos == line.len() || line.as_bytes().get(pos) == Some(&b'\n')
 }
 
 impl Program {
@@ -825,6 +917,30 @@ impl Program {
                         return Ok(None);
                     }
                 }
+                Instruction::CppSpaceCommentSeparator { next } => {
+                    push_cpp_space_comment_separator_positions(
+                        line,
+                        position,
+                        ctx,
+                        &mut scratch.literal_matches,
+                    );
+                    if let Some((_, preferred)) = scratch.literal_matches.first().copied() {
+                        for &(_, alternate) in scratch.literal_matches[1..].iter().rev() {
+                            scratch.backtrack.push(BacktrackFrame {
+                                pc: *next,
+                                position: alternate,
+                                repeat_undo_mark: scratch.repeat_undo.len(),
+                                capture_undo_mark: scratch.capture_undo.len(),
+                                call_depth: scratch.call_depth,
+                                action: ResumeAction::None,
+                            });
+                        }
+                        position = preferred;
+                        pc = *next;
+                    } else if !self.backtrack_or_resolve(line, scratch, &mut pc, &mut position)? {
+                        return Ok(None);
+                    }
+                }
                 Instruction::Fail => {
                     if !self.backtrack_or_resolve(line, scratch, &mut pc, &mut position)? {
                         return Ok(None);
@@ -1262,9 +1378,12 @@ impl Compiler {
                 entry
             }
             Ast::Alternation(branches) => {
-                if self.capture_layout.is_empty()
-                    && let Some(literals) = exact_literal_branches(branches)
-                {
+                let captures_can_be_elided =
+                    !branches_contain_live_capture(branches, &self.capture_layout);
+                if captures_can_be_elided && is_cpp_space_comment_separator(branches) {
+                    return Ok(self.push(Instruction::CppSpaceCommentSeparator { next }));
+                }
+                if captures_can_be_elided && let Some(literals) = exact_literal_branches(branches) {
                     let id = self.intern_literal_trie(&literals, flags)?;
                     return Ok(self.push(Instruction::LiteralTrie { id, flags, next }));
                 }
@@ -1588,6 +1707,43 @@ fn exact_literal_branches(branches: &[Ast]) -> Option<Vec<String>> {
         .collect::<Option<Vec<_>>>()
 }
 
+fn branches_contain_live_capture(branches: &[Ast], capture_layout: &[u32]) -> bool {
+    !capture_layout.is_empty()
+        && branches
+            .iter()
+            .any(|branch| ast_contains_live_capture(branch, capture_layout))
+}
+
+fn ast_contains_live_capture(ast: &Ast, capture_layout: &[u32]) -> bool {
+    match ast {
+        Ast::Group { index, child, .. } => {
+            index.is_some_and(|index| index != 0 && capture_layout.binary_search(&index).is_ok())
+                || ast_contains_live_capture(child, capture_layout)
+        }
+        Ast::Concat(nodes) | Ast::Alternation(nodes) => nodes
+            .iter()
+            .any(|node| ast_contains_live_capture(node, capture_layout)),
+        Ast::Repeat { node, .. }
+        | Ast::Look { child: node, .. }
+        | Ast::Flags { child: node, .. } => ast_contains_live_capture(node, capture_layout),
+        Ast::Conditional {
+            matched, unmatched, ..
+        } => {
+            ast_contains_live_capture(matched, capture_layout)
+                || ast_contains_live_capture(unmatched, capture_layout)
+        }
+        Ast::Empty
+        | Ast::Literal(_)
+        | Ast::Dot
+        | Ast::Grapheme
+        | Ast::Class(_)
+        | Ast::Anchor(_)
+        | Ast::Backref(_)
+        | Ast::Subroutine(_)
+        | Ast::Unsupported(_) => false,
+    }
+}
+
 fn exact_literal_ast(ast: &Ast) -> Option<String> {
     match ast {
         Ast::Empty => Some(String::new()),
@@ -1718,6 +1874,32 @@ mod tests {
         Some(start..end)
     }
 
+    #[test]
+    fn c_family_space_comment_separator_compiles_to_deterministic_instruction() {
+        let pattern =
+            r"((?:\s*+(/\*)((?:[^*]++|\*+(?!/))*+(\*/))\s*+)+|\s++|(?<=\W)|(?=\W)|^|\n?$|\A|\Z)foo";
+        let program = Program::compile(&parse(pattern)).expect("separator bytecode");
+        assert!(
+            program.instructions.iter().any(|instruction| matches!(
+                instruction,
+                Instruction::CppSpaceCommentSeparator { .. }
+            )),
+            "expected C/C++ separator instruction in {:#?}",
+            program.instructions
+        );
+        let mut scratch = BytecodeScratch::default();
+        let mut budget = StepBudget::new(100_000);
+        let end = program
+            .execute("/* c */  foo", 0, context(), &mut budget, &mut scratch)
+            .unwrap();
+        assert_eq!(end, Some("/* c */  foo".len()));
+        let mut budget = StepBudget::new(100_000);
+        let end = program
+            .execute("bar foo", 3, context(), &mut budget, &mut scratch)
+            .unwrap();
+        assert_eq!(end, Some("bar foo".len()));
+    }
+
     fn assert_capture_replay(pattern: &str, line: &str, start: usize, live: &[u32]) {
         let parsed = parse(pattern);
         let program = Program::compile_captures(&parsed, live).expect("capture-safe pattern");
@@ -1774,6 +1956,27 @@ mod tests {
             );
         }
         assert_eq!(bytecode_span(r"(?:foo|bar|baz|quux)", "nope", 0), None);
+    }
+
+    #[test]
+    fn literal_trie_elides_only_dead_branch_captures() {
+        let parsed = parse(r"(?:(aa)|(ab)|(ac)|(ad))z");
+        let position_only = Program::compile_captures(&parsed, &[]).unwrap();
+        assert!(
+            position_only
+                .instructions
+                .iter()
+                .any(|instruction| matches!(instruction, Instruction::LiteralTrie { .. }))
+        );
+
+        let capture_replay = Program::compile_captures(&parsed, &[3]).unwrap();
+        assert!(
+            !capture_replay
+                .instructions
+                .iter()
+                .any(|instruction| matches!(instruction, Instruction::LiteralTrie { .. }))
+        );
+        assert_capture_replay(r"(?:(aa)|(ab)|(ac)|(ad))z", "acz", 0, &[3]);
     }
 
     #[test]

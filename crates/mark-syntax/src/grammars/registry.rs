@@ -59,11 +59,11 @@ impl GrammarRegistry {
     }
 }
 
-/// Core-30 public languages plus the private `cpp-macro` dependency grammar.
+/// Curated core regression asset set used by legacy registry tests.
 ///
-/// Order is stable and alphabetical by public language id. Asset path stems that
-/// differ from the public id (`bash`/`shellscript`, `dockerfile`/`docker`) use
-/// the recovered filename under `assets/tm-grammars/languages/`.
+/// Order is stable and alphabetical by language id. Asset path stems that differ
+/// from the test id (`bash`/`shellscript`) use the recovered filename under
+/// `assets/tm-grammars/languages/`.
 pub(crate) const CORE_ASSETS: &[GrammarAsset] = &[
     GrammarAsset {
         language: "bash",

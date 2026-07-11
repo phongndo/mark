@@ -2,17 +2,13 @@
 
 Vendored TextMate grammar source assets for the in-house engine migration.
 
-Phase 4 packages a **core-30** public language catalog from recovered assets:
-
-`rust`, `c`, `cpp`, `csharp`, `go`, `python`, `java`, `kotlin`, `swift`,
-`ruby`, `php`, `lua`, `javascript`, `jsx`, `typescript`, `tsx`, `bash`,
-`powershell`, `html`, `css`, `scss`, `json`, `yaml`, `toml`, `markdown`, `sql`,
-`dockerfile`, `make`, `nix`, `terraform`.
+The active public catalog is the full pinned Shiki language set plus the MLIR
+grammar imported from LLVM. `coverage.toml` is the source of truth for the public
+language ids (254 languages) and the private dependency blobs embedded alongside
+them.
 
 Private dependency grammars are also embedded without becoming public catalog
-languages. They include `cpp-macro` and every external root scope referenced by
-the Markdown grammar, so fenced blocks retain their exact embedded grammar
-instead of silently falling back to plain Markdown.
+languages. The non-Shiki compatibility assets are recorded in `SOURCE.toml`.
 
 Asset filename remaps:
 
@@ -21,12 +17,14 @@ Asset filename remaps:
 
 The files under `languages/` are real grammar JSON objects, primarily imported
 from the pinned `@shikijs/langs` package recorded in `SOURCE.toml`; the two VS
-Code dependencies and YANG source are recorded there as additional MIT
-sources. They are committed as text so diffs remain reviewable. The generated
-runtime bundle (`bundle.bin`) is not committed; it is produced by `build.rs` /
+Code dependencies and YANG source are recorded there as additional MIT sources.
+They are committed as text so diffs remain reviewable. The generated runtime
+bundle (`bundle.bin`) is not committed; it is produced by `build.rs` /
 `grammar-compile`.
 
 `licenses.json` records source package, version, license, scope name, module, and
-path for every vendored grammar. `coverage.toml` records the public keep/remap
-list for the core-30 catalog and its private dependency blobs. Regenerate the
-Markdown dependencies with `node tools/vendor-markdown-grammars.mjs`.
+path for every vendored grammar. `coverage.toml` records the active public
+keep/remap list and private dependency blobs; `coverage.full-shiki.toml` is the
+generated Shiki-only baseline used to check the import set. Regenerate/check the
+Shiki assets with `node tools/vendor-shiki-grammars.mjs` /
+`node tools/vendor-shiki-grammars.mjs --check`.

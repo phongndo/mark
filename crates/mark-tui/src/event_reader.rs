@@ -8,9 +8,12 @@ use std::{
     time::Duration,
 };
 
-use crossterm::event::{self, Event};
+use crossterm::event::{self, Event, MouseEventKind};
 use mark_core::{MarkError, MarkResult};
-use tokio::sync::mpsc::{self, Receiver, Sender, error::TryRecvError};
+use tokio::sync::mpsc::{
+    self, Receiver, Sender,
+    error::{TryRecvError, TrySendError},
+};
 
 const EVENT_READER_POLL: Duration = Duration::from_millis(2);
 const EVENT_READER_CHANNEL_CAPACITY: usize = 1024;
@@ -173,7 +176,32 @@ fn drain_ready_terminal_events() {
 }
 
 fn send_terminal_event(tx: &Sender<io::Result<Event>>, event: io::Result<Event>) -> bool {
+    if matches!(event.as_ref(), Ok(event) if is_mouse_scroll_event(event)) {
+        return send_mouse_scroll_event(tx, event);
+    }
+
     tx.blocking_send(event).is_ok()
+}
+
+fn send_mouse_scroll_event(tx: &Sender<io::Result<Event>>, event: io::Result<Event>) -> bool {
+    match tx.try_send(event) {
+        Ok(()) => true,
+        Err(TrySendError::Full(_)) => true,
+        Err(TrySendError::Closed(_)) => false,
+    }
+}
+
+fn is_mouse_scroll_event(event: &Event) -> bool {
+    matches!(
+        event,
+        Event::Mouse(mouse) if matches!(
+            mouse.kind,
+            MouseEventKind::ScrollDown
+                | MouseEventKind::ScrollUp
+                | MouseEventKind::ScrollLeft
+                | MouseEventKind::ScrollRight
+        )
+    )
 }
 
 fn drain_ready_events(
@@ -199,6 +227,7 @@ fn reader_stopped_error() -> MarkError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crossterm::event::{KeyModifiers, MouseEvent};
 
     #[test]
     fn try_read_returns_queued_event() {
@@ -259,5 +288,24 @@ mod tests {
 
         rx.close();
         assert!(!handle.join().unwrap());
+    }
+
+    #[test]
+    fn terminal_scroll_event_is_dropped_when_receiver_is_full() {
+        let (tx, mut rx) = mpsc::channel(1);
+        tx.try_send(Ok(Event::Resize(80, 24))).unwrap();
+
+        assert!(send_terminal_event(
+            &tx,
+            Ok(Event::Mouse(MouseEvent {
+                kind: MouseEventKind::ScrollDown,
+                column: 1,
+                row: 2,
+                modifiers: KeyModifiers::NONE,
+            })),
+        ));
+
+        assert_eq!(rx.try_recv().unwrap().unwrap(), Event::Resize(80, 24));
+        assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
     }
 }

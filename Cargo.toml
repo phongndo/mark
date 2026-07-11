@@ -17,6 +17,7 @@ clap = { version = "4.5", features = ["derive"] }
 crossterm = { version = "0.28.1", features = ["use-dev-tty"] }
 fff-grep = "0.9.5-nightly.ec57eb0"
 memchr = "2.7"
+miniz_oxide = "0.9.1"
 notify = "8"
 ratatui = "0.29"
 rustix = { version = "0.38.44", default-features = false, features = ["std", "stdio", "termios"] }

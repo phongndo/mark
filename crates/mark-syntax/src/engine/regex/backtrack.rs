@@ -69,6 +69,7 @@ pub struct FallbackMatcher {
     parsed: Arc<ParsedRegex>,
     bytecode: OnceLock<Option<Arc<Program>>>,
     prefilter: Prefilter,
+    special: Option<SpecialFallbackMatcher>,
     start_bytes: Option<StartByteSet>,
     /// True when the pattern can match the empty string at a start position.
     /// Used with `start_bytes` so we still try `from` for patterns like `a?`.
@@ -85,6 +86,152 @@ enum StartHint {
     LineStart,
     TextStart,
     Continuation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SpecialFallbackMatcher {
+    NixFunctionLookahead,
+    NixExpressionEndLookahead,
+}
+
+impl SpecialFallbackMatcher {
+    fn from_source(source: &str) -> Option<Self> {
+        match source {
+            r##"(?=(\b[A-Z_a-z][-'0-9A-Z_a-z]*\s*[:@]|\{[^"'}]*}\s*:|\{[^"#'/=}]*[,?]))"## => {
+                Some(Self::NixFunctionLookahead)
+            }
+            r#"(?=([]),;}]|\b(else|then)\b))"# => Some(Self::NixExpressionEndLookahead),
+            _ => None,
+        }
+    }
+
+    fn match_at(&self, line: &str, start: usize, capture_count: usize) -> Option<MatchResult> {
+        match self {
+            Self::NixFunctionLookahead => nix_function_lookahead_match(line, start)
+                .map(|capture| zero_width_special_match(start, capture_count, Some(capture))),
+            Self::NixExpressionEndLookahead => nix_expression_end_lookahead_match(line, start)
+                .map(|capture| zero_width_special_match(start, capture_count, capture)),
+        }
+    }
+}
+
+fn zero_width_special_match(
+    start: usize,
+    capture_count: usize,
+    first_capture: Option<Range<usize>>,
+) -> MatchResult {
+    let mut captures = vec![None; capture_count];
+    if let Some(whole) = captures.get_mut(0) {
+        *whole = Some(start..start);
+    }
+    if let Some(capture) = first_capture
+        && let Some(slot) = captures.get_mut(1)
+    {
+        *slot = Some(capture);
+    }
+    MatchResult {
+        start,
+        end: start,
+        captures,
+    }
+}
+
+fn nix_function_lookahead_match(line: &str, start: usize) -> Option<Range<usize>> {
+    if !line.is_char_boundary(start) {
+        return None;
+    }
+    let bytes = line.as_bytes();
+    match bytes.get(start).copied()? {
+        byte if is_nix_identifier_start(byte) => {
+            if !is_word_boundary(line, start) {
+                return None;
+            }
+            let mut pos = start + 1;
+            while bytes
+                .get(pos)
+                .copied()
+                .is_some_and(is_nix_identifier_continue)
+            {
+                pos += 1;
+            }
+            pos = consume_whitespace(line, pos)?;
+            if bytes
+                .get(pos)
+                .copied()
+                .is_some_and(|byte| matches!(byte, b':' | b'@'))
+            {
+                Some(start..pos + 1)
+            } else {
+                None
+            }
+        }
+        b'{' => nix_function_attrset_colon_match(line, start)
+            .or_else(|| nix_function_attrset_comma_or_question_match(line, start)),
+        _ => None,
+    }
+}
+
+fn nix_function_attrset_colon_match(line: &str, start: usize) -> Option<Range<usize>> {
+    let bytes = line.as_bytes();
+    let mut pos = start + 1;
+    while let Some((ch, next)) = char_at(line, pos) {
+        if matches!(ch, '"' | '\'' | '}') {
+            break;
+        }
+        pos = next;
+    }
+    if bytes.get(pos).copied() != Some(b'}') {
+        return None;
+    }
+    pos = consume_whitespace(line, pos + 1)?;
+    (bytes.get(pos).copied() == Some(b':')).then_some(start..pos + 1)
+}
+
+fn nix_function_attrset_comma_or_question_match(line: &str, start: usize) -> Option<Range<usize>> {
+    let bytes = line.as_bytes();
+    let mut pos = start + 1;
+    while let Some((ch, next)) = char_at(line, pos) {
+        if matches!(ch, '"' | '#' | '\'' | '/' | '=' | '}') {
+            break;
+        }
+        if matches!(ch, ',' | '?') {
+            return Some(start..next);
+        }
+        pos = next;
+    }
+    bytes
+        .get(pos)
+        .copied()
+        .and_then(|byte| matches!(byte, b',' | b'?').then_some(start..pos + 1))
+}
+
+fn nix_expression_end_lookahead_match(line: &str, start: usize) -> Option<Option<Range<usize>>> {
+    let bytes = line.as_bytes();
+    if bytes
+        .get(start)
+        .copied()
+        .is_some_and(|byte| matches!(byte, b']' | b')' | b',' | b';' | b'}'))
+    {
+        return Some(None);
+    }
+    for word in ["else", "then"] {
+        let end = start + word.len();
+        if line.get(start..end) == Some(word)
+            && is_word_boundary(line, start)
+            && is_word_boundary(line, end)
+        {
+            return Some(Some(start..end));
+        }
+    }
+    None
+}
+
+fn is_nix_identifier_start(byte: u8) -> bool {
+    byte == b'_' || byte.is_ascii_alphabetic()
+}
+
+fn is_nix_identifier_continue(byte: u8) -> bool {
+    byte == b'_' || byte == b'-' || byte == b'\'' || byte.is_ascii_alphanumeric()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -305,18 +452,24 @@ impl FallbackMatcher {
 
     pub(crate) fn from_parsed(parsed: Arc<ParsedRegex>, budget: usize) -> Self {
         let prefilter = Prefilter::from_regex(&parsed);
-        let (start_bytes, start_nullable) =
-            if parsed.flags.case_insensitive || has_case_insensitive_scope(&parsed.ast) {
-                (None, false)
-            } else {
-                match first_start_bytes(&parsed.ast) {
-                    Some(info) if !info.bytes.is_empty() && info.bytes.len() < 128 => {
-                        (Some(info.bytes), info.nullable)
+        let (start_bytes, start_nullable) = if has_case_insensitive_scope(&parsed.ast) {
+            (None, false)
+        } else {
+            match first_start_bytes(&parsed.ast) {
+                Some(mut info) if !info.bytes.is_empty() => {
+                    if parsed.flags.case_insensitive {
+                        expand_ascii_case_start_bytes(&mut info.bytes);
                     }
-                    Some(info) => (None, info.nullable),
-                    None => (None, false),
+                    if info.bytes.len() < 128 {
+                        (Some(info.bytes), info.nullable)
+                    } else {
+                        (None, info.nullable)
+                    }
                 }
-            };
+                Some(info) => (None, info.nullable),
+                None => (None, false),
+            }
+        };
         let start_hint = start_hint(&parsed.ast);
         static NEXT_PREFILTER_SLOT: std::sync::atomic::AtomicU32 =
             std::sync::atomic::AtomicU32::new(0);
@@ -325,10 +478,12 @@ impl FallbackMatcher {
         } else {
             u32::MAX
         };
+        let special = SpecialFallbackMatcher::from_source(&parsed.source);
         Self {
             parsed,
             bytecode: OnceLock::new(),
             prefilter,
+            special,
             start_bytes,
             start_nullable,
             start_hint,
@@ -350,11 +505,16 @@ impl FallbackMatcher {
                         // entries even for position selection; compile with
                         // the minimal internal layout so those patterns still
                         // avoid the recursive VM. Selection discards captures.
-                        // Backreference-only patterns measured faster on the
-                        // recursive path and keep it.
+                        // Backreference patterns need only the referenced
+                        // groups for position selection. Keeping them on the
+                        // bytecode path lets hot C/C++ declaration patterns
+                        // use the deterministic separator and literal-trie
+                        // specializations before replaying winner captures.
                         Program::compile(&self.parsed)
                             .or_else(|error| match error {
-                                CompileError::Subroutine | CompileError::Conditional => {
+                                CompileError::Backreference
+                                | CompileError::Subroutine
+                                | CompileError::Conditional => {
                                     Program::compile_captures(&self.parsed, &[])
                                 }
                                 other => Err(other),
@@ -625,6 +785,12 @@ impl FallbackMatcher {
                 steps: 0,
             });
         }
+        if let Some(special) = self.special {
+            return Ok(FallbackReport {
+                result: special.match_at(line, start, capture_count),
+                steps: 0,
+            });
+        }
         let mut budget = StepBudget::new(self.budget);
         let result = if capture_count == 0
             && let Some(program) = self.active_bytecode()
@@ -693,6 +859,9 @@ impl FallbackMatcher {
         budget: &mut StepBudget,
         capture_count: usize,
     ) -> Result<Option<MatchResult>, FallbackError> {
+        if let Some(special) = self.special {
+            return Ok(special.match_at(line, start, capture_count));
+        }
         if capture_count == 0
             && let Some(program) = self.active_bytecode()
         {
@@ -822,6 +991,15 @@ impl StartByteSet {
     }
 }
 
+fn expand_ascii_case_start_bytes(bytes: &mut StartByteSet) {
+    for byte in b'a'..=b'z' {
+        if bytes.contains(byte) || bytes.contains(byte.to_ascii_uppercase()) {
+            bytes.insert(byte);
+            bytes.insert(byte.to_ascii_uppercase());
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct StartBytes {
     bytes: StartByteSet,
@@ -873,11 +1051,7 @@ fn first_start_bytes(ast: &Ast) -> Option<StartBytes> {
         Ast::Look {
             kind: LookKind::Ahead,
             child,
-        } => {
-            let mut info = first_start_bytes(child)?;
-            info.nullable = true;
-            Some(info)
-        }
+        } => first_start_bytes(child),
         Ast::Look { .. } => Some(StartBytes {
             bytes: StartByteSet::empty(),
             nullable: true,
@@ -1095,6 +1269,11 @@ fn match_position_node(
             Ok(positions)
         }
         Ast::Alternation(branches) => {
+            if let Some(positions) =
+                match_cpp_space_comment_separator_positions(branches, line, position, ctx)
+            {
+                return Ok(positions);
+            }
             let mut out = PositionStates::empty();
             for branch in branches {
                 let matches = match_position_node(branch, line, position, ctx, flags, budget)?;
@@ -1451,6 +1630,11 @@ fn match_node(
         Ast::Anchor(anchor) => match_anchor(*anchor, line, state, ctx),
         Ast::Concat(nodes) => match_concat(nodes, line, state, ctx, flags, budget, parsed),
         Ast::Alternation(branches) => {
+            if state.captures.is_empty()
+                && let Some(states) = match_cpp_space_comment_separator(branches, line, &state, ctx)
+            {
+                return Ok(states);
+            }
             let mut out = VmStates::empty();
             for branch in branches {
                 let branch_states =
@@ -1536,6 +1720,257 @@ fn match_node(
             child,
         } => match_node(child, line, state, ctx, *local, budget, parsed),
         Ast::Unsupported(_) => Ok(VmStates::empty()),
+    }
+}
+
+fn match_cpp_space_comment_separator(
+    branches: &[Ast],
+    line: &str,
+    state: &VmState,
+    ctx: AnchorContext,
+) -> Option<VmStates> {
+    let positions = cpp_space_comment_separator_positions(branches, line, state.pos, ctx)?;
+    let mut out = VmStates::empty();
+    for pos in positions {
+        push_limited(
+            &mut out,
+            VmStates::one(VmState {
+                pos,
+                ..state.clone()
+            }),
+        );
+    }
+    Some(out)
+}
+
+fn match_cpp_space_comment_separator_positions(
+    branches: &[Ast],
+    line: &str,
+    position: usize,
+    ctx: AnchorContext,
+) -> Option<PositionStates> {
+    let positions = cpp_space_comment_separator_positions(branches, line, position, ctx)?;
+    Some(PositionStates::from_vec(positions))
+}
+
+pub(crate) fn cpp_space_comment_separator_positions(
+    branches: &[Ast],
+    line: &str,
+    position: usize,
+    ctx: AnchorContext,
+) -> Option<Vec<usize>> {
+    if !is_cpp_space_comment_separator(branches) {
+        return None;
+    }
+    Some(cpp_space_comment_separator_positions_unchecked(
+        line, position, ctx,
+    ))
+}
+
+pub(crate) fn cpp_space_comment_separator_positions_unchecked(
+    line: &str,
+    position: usize,
+    ctx: AnchorContext,
+) -> Vec<usize> {
+    let mut out = Vec::new();
+
+    let mut comment_ends = cpp_comment_sequence_ends(line, position);
+    comment_ends.reverse();
+    out.extend(comment_ends);
+
+    if let Some(pos) = consume_whitespace(line, position).filter(|pos| *pos > position) {
+        out.push(pos);
+    }
+    if previous_char(line, position).is_some_and(|ch| !is_word_char(ch)) {
+        out.push(position);
+    }
+    if char_at(line, position).is_some_and(|(ch, _)| !is_word_char(ch)) {
+        out.push(position);
+    }
+    if position == 0 {
+        out.push(position);
+    }
+    if is_line_end_position(line, position) {
+        if line.as_bytes().get(position) == Some(&b'\n') {
+            out.push(position + 1);
+        }
+        out.push(position);
+    }
+    if ctx.allow_a && position == 0 {
+        out.push(position);
+    }
+    if position == line.len() || line.get(position..).is_some_and(|tail| tail == "\n") {
+        out.push(position);
+    }
+
+    out
+}
+
+fn cpp_comment_sequence_ends(line: &str, start: usize) -> Vec<usize> {
+    let mut ends = Vec::new();
+    let mut pos = start;
+    loop {
+        pos = consume_whitespace(line, pos).unwrap_or(pos);
+        let Some(after_comment) = consume_c_block_comment(line, pos) else {
+            break;
+        };
+        pos = consume_whitespace(line, after_comment).unwrap_or(after_comment);
+        ends.push(pos);
+    }
+    ends
+}
+
+fn consume_whitespace(line: &str, mut pos: usize) -> Option<usize> {
+    while let Some((ch, next)) = char_at(line, pos) {
+        if !ch.is_whitespace() {
+            break;
+        }
+        pos = next;
+    }
+    Some(pos)
+}
+
+fn consume_c_block_comment(line: &str, pos: usize) -> Option<usize> {
+    let rest = line.get(pos..)?;
+    if !rest.starts_with("/*") {
+        return None;
+    }
+    let end = rest.get(2..)?.find("*/")?;
+    Some(pos + 2 + end + 2)
+}
+
+pub(crate) fn is_cpp_space_comment_separator(branches: &[Ast]) -> bool {
+    branches.len() >= 6
+        && branches.iter().any(is_cpp_comment_sequence_branch)
+        && branches.iter().any(is_space_possessive_plus_branch)
+        && branches
+            .iter()
+            .any(|branch| is_not_word_look(branch, LookKind::Behind))
+        && branches
+            .iter()
+            .any(|branch| is_not_word_look(branch, LookKind::Ahead))
+        && branches.iter().any(|branch| {
+            matches!(
+                strip_nonsemantic_group(branch),
+                Ast::Anchor(AnchorKind::LineStart)
+            )
+        })
+        && branches.iter().any(is_optional_newline_line_end_branch)
+        && branches.iter().any(|branch| {
+            matches!(
+                strip_nonsemantic_group(branch),
+                Ast::Anchor(AnchorKind::TextStart)
+            )
+        })
+        && branches.iter().any(|branch| {
+            matches!(
+                strip_nonsemantic_group(branch),
+                Ast::Anchor(AnchorKind::TextEndOrFinalNewline)
+            )
+        })
+}
+
+fn strip_nonsemantic_group(ast: &Ast) -> &Ast {
+    let mut ast = ast;
+    while let Ast::Group {
+        child, name: None, ..
+    } = ast
+    {
+        ast = child;
+    }
+    ast
+}
+
+fn is_cpp_comment_sequence_branch(ast: &Ast) -> bool {
+    let ast = strip_nonsemantic_group(ast);
+    let Ast::Repeat {
+        node,
+        min: 1,
+        max: None,
+        ..
+    } = ast
+    else {
+        return false;
+    };
+    let Ast::Concat(nodes) = strip_nonsemantic_group(node) else {
+        return false;
+    };
+    nodes.iter().any(|node| ast_contains_literal(node, "/*"))
+        && nodes.iter().any(|node| ast_contains_literal(node, "*/"))
+        && nodes.iter().any(is_space_star_branch)
+}
+
+fn is_space_star_branch(ast: &Ast) -> bool {
+    matches!(
+        strip_nonsemantic_group(ast),
+        Ast::Repeat {
+            node,
+            min: 0,
+            max: None,
+            possessive: true,
+            ..
+        } if is_perl_class(node, PerlClassKind::Space)
+    )
+}
+
+fn is_space_possessive_plus_branch(ast: &Ast) -> bool {
+    matches!(
+        strip_nonsemantic_group(ast),
+        Ast::Repeat {
+            node,
+            min: 1,
+            max: None,
+            possessive: true,
+            ..
+        } if is_perl_class(node, PerlClassKind::Space)
+    )
+}
+
+fn is_not_word_look(ast: &Ast, wanted: LookKind) -> bool {
+    matches!(
+        strip_nonsemantic_group(ast),
+        Ast::Look { kind, child } if *kind == wanted && is_perl_class(child, PerlClassKind::NotWord)
+    )
+}
+
+fn is_optional_newline_line_end_branch(ast: &Ast) -> bool {
+    let Ast::Concat(nodes) = strip_nonsemantic_group(ast) else {
+        return false;
+    };
+    matches!(
+        nodes.as_slice(),
+        [
+            Ast::Repeat {
+                node,
+                min: 0,
+                max: Some(1),
+                ..
+            },
+            Ast::Anchor(AnchorKind::LineEnd)
+        ] if matches!(strip_nonsemantic_group(node), Ast::Literal(literal) if literal == "\n")
+    )
+}
+
+fn is_perl_class(ast: &Ast, wanted: PerlClassKind) -> bool {
+    let Ast::Class(class) = strip_nonsemantic_group(ast) else {
+        return false;
+    };
+    !class.negated && matches!(class.atoms.as_slice(), [ClassAtom::Perl(kind)] if *kind == wanted)
+}
+
+fn ast_contains_literal(ast: &Ast, wanted: &str) -> bool {
+    match strip_nonsemantic_group(ast) {
+        Ast::Literal(literal) => literal == wanted,
+        Ast::Concat(nodes) | Ast::Alternation(nodes) => {
+            nodes.iter().any(|node| ast_contains_literal(node, wanted))
+        }
+        Ast::Repeat { node, .. }
+        | Ast::Look { child: node, .. }
+        | Ast::Flags { child: node, .. } => ast_contains_literal(node, wanted),
+        Ast::Conditional {
+            matched, unmatched, ..
+        } => ast_contains_literal(matched, wanted) || ast_contains_literal(unmatched, wanted),
+        _ => false,
     }
 }
 
@@ -2543,6 +2978,26 @@ mod tests {
     }
 
     #[test]
+    fn c_family_space_comment_separator_fast_path_matches_shape() {
+        let parsed = parse(
+            r"((?:\s*+(/\*)((?:[^*]++|\*+(?!/))*+(\*/))\s*+)+|\s++|(?<=\W)|(?=\W)|^|\n?$|\A|\Z)",
+        );
+        let Ast::Group { child, .. } = &parsed.ast else {
+            panic!("unexpected ast: {:#?}", parsed.ast);
+        };
+        let Ast::Alternation(branches) = child.as_ref() else {
+            panic!("unexpected child: {child:#?}");
+        };
+        assert!(is_cpp_space_comment_separator(branches));
+        let positions =
+            match_cpp_space_comment_separator_positions(branches, "  /* ok */  value", 0, ctx())
+                .expect("fast path applies")
+                .into_iter()
+                .collect::<Vec<_>>();
+        assert_eq!(positions.first().copied(), Some("  /* ok */  ".len()));
+    }
+
+    #[test]
     fn h_class_matches_hex_digits() {
         let matcher = FallbackMatcher::new(r"\h+");
         let result = matcher.find("xx c0ffee", 0, ctx()).unwrap();
@@ -2595,6 +3050,7 @@ mod tests {
 
         assert_eq!(result.start..result.end, 16..16);
         assert!(report.steps < 12, "{report:#?}");
+        assert_eq!(matcher.restricted_start_bytes(), Some(vec![b')', b';']));
     }
 
     #[test]
@@ -2608,10 +3064,37 @@ mod tests {
     }
 
     #[test]
-    fn start_byte_hint_is_disabled_for_case_insensitive_patterns() {
+    fn nix_function_lookahead_specialization_matches_capture_shape() {
+        let matcher = FallbackMatcher::new(
+            r##"(?=(\b[A-Z_a-z][-'0-9A-Z_a-z]*\s*[:@]|\{[^"'}]*}\s*:|\{[^"#'/=}]*[,?]))"##,
+        );
+        let result = matcher
+            .find("{ pkgs ? import <nixpkgs> {} }:", 0, ctx())
+            .unwrap();
+        assert_eq!(result.start..result.end, 0..0);
+        assert_eq!(result.captures, vec![Some(0..0), Some(0..8)]);
+
+        let result = matcher.find("name @ value", 0, ctx()).unwrap();
+        assert_eq!(result.start..result.end, 0..0);
+        assert_eq!(result.captures, vec![Some(0..0), Some(0..6)]);
+    }
+
+    #[test]
+    fn nix_expression_end_lookahead_specialization_matches_capture_shape() {
+        let matcher = FallbackMatcher::new(r#"(?=([]),;}]|\b(else|then)\b))"#);
+        let result = matcher.find(", next", 0, ctx()).unwrap();
+        assert_eq!(result.captures, vec![Some(0..0), None, None]);
+
+        let result = matcher.find("then value", 0, ctx()).unwrap();
+        assert_eq!(result.captures, vec![Some(0..0), Some(0..4), None]);
+    }
+
+    #[test]
+    fn start_byte_hint_expands_case_insensitive_ascii_patterns() {
         let matcher = FallbackMatcher::new(r"(?i)foo");
         let result = matcher.find("xxFOO", 0, ctx()).unwrap();
         assert_eq!(result.start..result.end, 2..5);
+        assert_eq!(matcher.restricted_start_bytes(), Some(vec![b'F', b'f']));
     }
 
     #[test]

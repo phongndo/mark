@@ -99,13 +99,19 @@ impl BundleSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::{
+        grammar::load_dev_grammar_from_str,
+        state::GrammarId,
+        tokenizer::{GrammarSet, TextMateTokenizer},
+    };
 
     #[test]
     fn embedded_bundle_parses_and_exposes_catalog() {
         let bundle = embedded_bundle();
-        // Core-30 public languages plus private C++/Markdown dependency blobs.
-        assert_eq!(bundle.languages.len(), 30);
-        assert_eq!(bundle.grammar_blobs.len(), 68);
+        // Full public catalog plus private dependency blobs. `coverage.toml`
+        // decides which embedded blobs are public catalog entries.
+        assert_eq!(bundle.languages.len(), 254);
+        assert_eq!(bundle.grammar_blobs.len(), 258);
         assert!(
             bundle
                 .grammar_blob_for_scope("source.cpp.embedded.macro")
@@ -113,10 +119,13 @@ mod tests {
         );
         assert!(bundle.grammar_blob_for_scope("source.yang").is_some());
         assert!(bundle.grammar_blob_for_scope("source.twig").is_some());
-        assert!(!bundle.has_language("cpp-macro"));
+        assert!(bundle.has_language("cpp-macro"));
         assert_eq!(bundle.canonical_language("rs"), Some("rust"));
-        assert_eq!(bundle.canonical_language("shellscript"), Some("bash"));
-        assert_eq!(bundle.canonical_language("docker"), Some("dockerfile"));
+        assert_eq!(
+            bundle.canonical_language("shellscript"),
+            Some("shellscript")
+        );
+        assert_eq!(bundle.canonical_language("docker"), Some("docker"));
         assert_eq!(bundle.detect_language_from_path("src/lib.rs"), Some("rust"));
         assert_eq!(
             bundle.detect_language_from_path("component.tsx"),
@@ -125,7 +134,7 @@ mod tests {
         assert_eq!(bundle.detect_language_from_path("include/foo.h"), Some("c"));
         assert_eq!(
             bundle.detect_language_from_path("Dockerfile"),
-            Some("dockerfile")
+            Some("docker")
         );
         assert_eq!(bundle.detect_language_from_path("Makefile"), Some("make"));
         assert_eq!(
@@ -149,5 +158,52 @@ mod tests {
         let grammar = registry.grammar("json").unwrap();
         assert_eq!(grammar.scope_name, "source.json");
         assert_eq!(registry.cached_grammar_count(), 1);
+    }
+
+    #[test]
+    fn every_public_language_has_a_smoke_fixture_budget_gate() {
+        let bundle = embedded_bundle();
+        let mut grammars = GrammarSet::new();
+        for (index, blob) in bundle.grammar_blobs.iter().enumerate() {
+            let bytes = blob.decoded_bytes().unwrap();
+            let source = std::str::from_utf8(&bytes).unwrap();
+            let grammar = load_dev_grammar_from_str(GrammarId(index as u16), source)
+                .unwrap_or_else(|error| panic!("{} failed to parse: {error}", blob.language));
+            grammars.add(grammar);
+        }
+
+        let mut failures = Vec::new();
+        for language in &bundle.languages {
+            let root = grammars
+                .grammar_by_scope(&language.scope_name)
+                .unwrap_or_else(|| panic!("missing grammar for {}", language.canonical))
+                .id;
+            let mut tokenizer = TextMateTokenizer::new(grammars.clone(), root);
+            tokenizer.set_counters_enabled(true);
+            let _ = tokenizer.tokenize_source(language_smoke_fixture(&language.canonical));
+            let counters = tokenizer.take_counters();
+            if counters.degraded_lines != 0 || counters.fallback_budget_kills != 0 {
+                failures.push(format!(
+                    "{} degraded={} fallback_budget_kills={}",
+                    language.canonical, counters.degraded_lines, counters.fallback_budget_kills
+                ));
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "public language smoke fixture budget failures:\n{}",
+            failures.join("\n")
+        );
+    }
+
+    fn language_smoke_fixture(language: &str) -> &'static str {
+        match language {
+            "csv" => "a,b,c\n",
+            "tsv" => "a\tb\tc\n",
+            "json" | "jsonc" => "{\"key\": 1}\n",
+            "xml" | "html" => "<root>text</root>\n",
+            "yaml" => "key: value\n",
+            _ => "x\n",
+        }
     }
 }

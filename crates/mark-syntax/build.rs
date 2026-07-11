@@ -10,6 +10,7 @@ mod catalog;
 const MAGIC: &[u8; 4] = b"MRKB";
 const FORMAT_VERSION: u16 = 1;
 const CODEC_NONE: u32 = 0;
+const CODEC_DEFLATE_ZLIB: u32 = 1;
 const SECTION_STRINGS: u32 = 3;
 const SECTION_SCOPES: u32 = 4;
 const SECTION_LANGUAGES: u32 = 5;
@@ -190,19 +191,27 @@ fn build_bundle(assets: &Path, input_hash: u64) -> Result<Vec<u8>, String> {
 
     let grammar_blobs = grammars
         .iter()
-        .map(|grammar| GrammarBlob {
-            language: grammar.language.clone(),
-            scope_name: grammar.scope_name.clone(),
-            codec: CODEC_NONE,
-            flags: 0,
-            raw_len: grammar.bytes.len() as u32,
-            bytes: grammar.bytes.clone(),
-            pattern_count: count_key(&grammar.bytes, b"\"match\"")
-                + count_key(&grammar.bytes, b"\"begin\"")
-                + count_key(&grammar.bytes, b"\"end\"")
-                + count_key(&grammar.bytes, b"\"while\""),
-            dfa_count: 0,
-            fallback_count: 0,
+        .map(|grammar| {
+            let compressed = miniz_oxide::deflate::compress_to_vec_zlib(&grammar.bytes, 6);
+            let (codec, bytes) = if compressed.len() < grammar.bytes.len() {
+                (CODEC_DEFLATE_ZLIB, compressed)
+            } else {
+                (CODEC_NONE, grammar.bytes.clone())
+            };
+            GrammarBlob {
+                language: grammar.language.clone(),
+                scope_name: grammar.scope_name.clone(),
+                codec,
+                flags: 0,
+                raw_len: grammar.bytes.len() as u32,
+                bytes,
+                pattern_count: count_key(&grammar.bytes, b"\"match\"")
+                    + count_key(&grammar.bytes, b"\"begin\"")
+                    + count_key(&grammar.bytes, b"\"end\"")
+                    + count_key(&grammar.bytes, b"\"while\""),
+                dfa_count: 0,
+                fallback_count: 0,
+            }
         })
         .collect::<Vec<_>>();
 

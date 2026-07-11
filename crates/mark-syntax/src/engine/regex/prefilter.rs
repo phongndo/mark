@@ -34,6 +34,14 @@ pub enum Prefilter {
 
 impl Prefilter {
     pub fn from_regex(parsed: &ParsedRegex) -> Self {
+        if let Ast::Flags { flags, child } = &parsed.ast
+            && !has_flag_scope(child)
+        {
+            // TextMate grammars commonly spell a whole pattern as
+            // `(?i:...)`. Treat that as a uniform case policy instead of
+            // disabling required-literal filtering for the scoped flag node.
+            return Self::from_required(required_literals(child), flags.case_insensitive);
+        }
         if parsed.flags.case_insensitive {
             Self::from_case_insensitive_pattern(&parsed.ast)
         } else if has_case_insensitive_scope(&parsed.ast) {
@@ -190,6 +198,20 @@ impl Prefilter {
             Self::Any { literals, .. } => literals,
             Self::None | Self::Byte(_) | Self::ByteSet { .. } | Self::Literal(_) => &[],
         }
+    }
+}
+
+fn has_flag_scope(ast: &Ast) -> bool {
+    match ast {
+        Ast::Flags { .. } => true,
+        Ast::Concat(nodes) | Ast::Alternation(nodes) => nodes.iter().any(has_flag_scope),
+        Ast::Conditional {
+            matched, unmatched, ..
+        } => has_flag_scope(matched) || has_flag_scope(unmatched),
+        Ast::Repeat { node, .. }
+        | Ast::Group { child: node, .. }
+        | Ast::Look { child: node, .. } => has_flag_scope(node),
+        _ => false,
     }
 }
 
@@ -566,7 +588,17 @@ fn choose_more_selective(left: RequiredLiterals, right: RequiredLiterals) -> Req
     }
     let left_len = max_literal_len(&left);
     let right_len = max_literal_len(&right);
-    if right_len > left_len { right } else { left }
+    if right_len > left_len {
+        return right;
+    }
+    if right_len < left_len {
+        return left;
+    }
+    if literal_cardinality(&right) < literal_cardinality(&left) {
+        right
+    } else {
+        left
+    }
 }
 
 fn max_literal_len(literals: &RequiredLiterals) -> usize {
@@ -574,6 +606,14 @@ fn max_literal_len(literals: &RequiredLiterals) -> usize {
         RequiredLiterals::None => 0,
         RequiredLiterals::One(literal) => literal.len(),
         RequiredLiterals::Any(literals) => literals.iter().map(String::len).max().unwrap_or(0),
+    }
+}
+
+fn literal_cardinality(literals: &RequiredLiterals) -> usize {
+    match literals {
+        RequiredLiterals::None => usize::MAX,
+        RequiredLiterals::One(_) => 1,
+        RequiredLiterals::Any(literals) => literals.len(),
     }
 }
 

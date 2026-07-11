@@ -9,6 +9,7 @@ use std::{
     time::Instant,
 };
 
+use mark_syntax::SyntaxLimits;
 use mark_syntax::engine::{
     grammar::load_dev_grammar_from_str,
     state::GrammarId,
@@ -138,6 +139,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut tokenizer = reusable_tokenizer
             .take()
             .unwrap_or_else(|| TextMateTokenizer::new(set.clone(), root));
+        tokenizer.configure_limits(SyntaxLimits::default());
         if let Some(capacity) = env::var("MARK_TEXTMATE_BENCH_LINE_CACHE")
             .ok()
             .and_then(|value| value.parse().ok())

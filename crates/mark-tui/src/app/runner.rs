@@ -4,11 +4,13 @@ use crate::event_reader::TerminalEventReader;
 use crate::live_diff::{LiveDiff, LiveDiffReload, live_diff_supported};
 use crate::render::draw;
 use crate::theme::MAX_READY_EVENTS_PER_FRAME;
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use mark_core::MarkResult;
 use ratatui::layout::Rect;
 use std::time::Instant;
 use tokio::sync::mpsc::Receiver;
+
+const MAX_SCROLL_EVENTS_DRAIN_PER_FRAME: usize = 2048;
 
 pub(crate) async fn run_loop(
     terminal: &mut CrosstermTerminal,
@@ -61,20 +63,160 @@ fn handle_ready_events(
     first_event: Event,
     events: &mut TerminalEventReader,
 ) -> MarkResult<bool> {
-    if handle_event(app, first_event, live_diff, events)? {
-        return Ok(true);
-    }
+    let mut pending = Some(first_event);
+    let mut handled = 0usize;
 
-    for _ in 1..MAX_READY_EVENTS_PER_FRAME {
-        let Some(event) = events.try_read()? else {
+    'events: while handled < MAX_READY_EVENTS_PER_FRAME {
+        let event = if let Some(event) = pending.take() {
+            Some(event)
+        } else {
+            events.try_read()?
+        };
+        let Some(event) = event else {
             break;
         };
+
+        if is_mouse_scroll_event(&event) {
+            let drained = drain_mouse_scroll_run(event, events)?;
+            if let Some(quit) = drained.quit_event {
+                return handle_event(app, quit, live_diff, events);
+            }
+
+            if let Some(next_event) = drained.next_event {
+                // A newer non-scroll input means the scroll burst sitting in
+                // front of it is stale. Prefer the user's latest intent over
+                // faithfully replaying old wheel ticks after they have already
+                // moved on to keyboard/mouse navigation.
+                if handle_event(app, next_event, live_diff, events)? {
+                    return Ok(true);
+                }
+                handled += 1;
+                if app.runtime.dirty {
+                    break 'events;
+                }
+                continue;
+            }
+
+            for (mouse, ticks) in mouse_scroll_runs(drained.scroll_events) {
+                if handle_mouse_scroll_burst(app, mouse, ticks, live_diff, events)? {
+                    return Ok(true);
+                }
+            }
+            handled += 1;
+
+            if app.runtime.dirty {
+                break 'events;
+            }
+            continue;
+        }
+
         if handle_event(app, event, live_diff, events)? {
             return Ok(true);
+        }
+        handled += 1;
+        if app.runtime.dirty {
+            break;
         }
     }
 
     Ok(false)
+}
+
+struct DrainedMouseScrollRun {
+    scroll_events: Vec<Event>,
+    next_event: Option<Event>,
+    quit_event: Option<Event>,
+}
+
+fn drain_mouse_scroll_run(
+    first_event: Event,
+    events: &mut TerminalEventReader,
+) -> MarkResult<DrainedMouseScrollRun> {
+    let mut scroll_events = vec![first_event];
+    let mut next_event = None;
+    let mut quit_event = None;
+
+    for _ in 0..MAX_SCROLL_EVENTS_DRAIN_PER_FRAME {
+        let Some(event) = events.try_read()? else {
+            break;
+        };
+
+        if is_quit_event(&event) {
+            quit_event = Some(event);
+            break;
+        }
+
+        if is_mouse_scroll_event(&event) {
+            scroll_events.push(event);
+        } else {
+            next_event = Some(event);
+            break;
+        }
+    }
+
+    Ok(DrainedMouseScrollRun {
+        scroll_events,
+        next_event,
+        quit_event,
+    })
+}
+
+fn mouse_scroll_runs(events: Vec<Event>) -> Vec<(MouseEvent, usize)> {
+    let mut runs: Vec<(MouseEvent, usize)> = Vec::new();
+    for event in events {
+        let Event::Mouse(mouse) = event else {
+            continue;
+        };
+        if !is_mouse_scroll_kind(mouse.kind) {
+            continue;
+        }
+        if let Some((last, ticks)) = runs.last_mut()
+            && same_mouse_scroll(*last, mouse)
+        {
+            *ticks = ticks.saturating_add(1);
+            continue;
+        }
+        runs.push((mouse, 1));
+    }
+    runs
+}
+
+fn same_mouse_scroll(left: MouseEvent, right: MouseEvent) -> bool {
+    left.kind == right.kind
+        && left.column == right.column
+        && left.row == right.row
+        && left.modifiers == right.modifiers
+}
+
+fn handle_mouse_scroll_burst(
+    app: &mut DiffApp,
+    mouse: MouseEvent,
+    ticks: usize,
+    live_diff: &mut Option<LiveDiff>,
+    events: &mut TerminalEventReader,
+) -> MarkResult<bool> {
+    let outcome = app.handle_mouse_scroll_burst_with_effects(mouse, ticks)?;
+    let should_quit = outcome.handled_quit_request().unwrap_or(false);
+    run_event_effects(app, outcome.into_effects(), live_diff, events)?;
+    Ok(should_quit)
+}
+
+fn is_quit_event(event: &Event) -> bool {
+    matches!(event, Event::Key(key) if is_quit_key(*key))
+}
+
+fn is_mouse_scroll_event(event: &Event) -> bool {
+    matches!(event, Event::Mouse(mouse) if is_mouse_scroll_kind(mouse.kind))
+}
+
+fn is_mouse_scroll_kind(kind: MouseEventKind) -> bool {
+    matches!(
+        kind,
+        MouseEventKind::ScrollDown
+            | MouseEventKind::ScrollUp
+            | MouseEventKind::ScrollLeft
+            | MouseEventKind::ScrollRight
+    )
 }
 
 pub(crate) fn drain_live_diff_invalidation(app: &mut DiffApp, live_diff: Option<&LiveDiff>) {
@@ -241,4 +383,42 @@ pub(crate) fn is_quit_key(key: KeyEvent) -> bool {
     key.modifiers.contains(KeyModifiers::CONTROL)
         && !key.modifiers.contains(KeyModifiers::SHIFT)
         && key.code == KeyCode::Char('c')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyModifiers, MouseEvent};
+    use tokio::sync::mpsc;
+
+    fn mouse(kind: MouseEventKind, column: u16, row: u16) -> Event {
+        Event::Mouse(MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        })
+    }
+
+    #[test]
+    fn scroll_run_drain_surfaces_quit_before_more_scroll() {
+        let (tx, rx) = mpsc::channel(4);
+        tx.try_send(Ok(mouse(MouseEventKind::ScrollDown, 4, 5)))
+            .unwrap();
+        tx.try_send(Ok(Event::Key(KeyEvent::new(
+            KeyCode::Char('c'),
+            KeyModifiers::CONTROL,
+        ))))
+        .unwrap();
+        tx.try_send(Ok(mouse(MouseEventKind::ScrollDown, 4, 5)))
+            .unwrap();
+        let mut reader = TerminalEventReader::from_receiver(rx);
+
+        let drained = drain_mouse_scroll_run(mouse(MouseEventKind::ScrollDown, 4, 5), &mut reader)
+            .expect("drain scroll run");
+
+        assert_eq!(drained.scroll_events.len(), 2);
+        assert!(matches!(drained.quit_event, Some(Event::Key(key)) if is_quit_key(key)));
+        assert!(drained.next_event.is_none());
+    }
 }

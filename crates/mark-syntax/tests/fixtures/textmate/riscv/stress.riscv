@@ -1,0 +1,240 @@
+# block 1
+label_1: addi a0, a0, 1
+# block 2
+label_2: addi a0, a0, 2
+# block 3
+label_3: addi a0, a0, 3
+# block 4
+label_4: addi a0, a0, 4
+# block 5
+label_5: addi a0, a0, 5
+# block 6
+label_6: addi a0, a0, 6
+# block 7
+label_7: addi a0, a0, 7
+# block 8
+label_8: addi a0, a0, 8
+# block 9
+label_9: addi a0, a0, 9
+# block 10
+label_10: addi a0, a0, 10
+# block 11
+label_11: addi a0, a0, 11
+# block 12
+label_12: addi a0, a0, 12
+# block 13
+label_13: addi a0, a0, 13
+# block 14
+label_14: addi a0, a0, 14
+# block 15
+label_15: addi a0, a0, 15
+# block 16
+label_16: addi a0, a0, 16
+# block 17
+label_17: addi a0, a0, 17
+# block 18
+label_18: addi a0, a0, 18
+# block 19
+label_19: addi a0, a0, 19
+# block 20
+label_20: addi a0, a0, 20
+# block 21
+label_21: addi a0, a0, 21
+# block 22
+label_22: addi a0, a0, 22
+# block 23
+label_23: addi a0, a0, 23
+# block 24
+label_24: addi a0, a0, 24
+# block 25
+label_25: addi a0, a0, 25
+# block 26
+label_26: addi a0, a0, 26
+# block 27
+label_27: addi a0, a0, 27
+# block 28
+label_28: addi a0, a0, 28
+# block 29
+label_29: addi a0, a0, 29
+# block 30
+label_30: addi a0, a0, 30
+# block 31
+label_31: addi a0, a0, 31
+# block 32
+label_32: addi a0, a0, 0
+# block 33
+label_33: addi a0, a0, 1
+# block 34
+label_34: addi a0, a0, 2
+# block 35
+label_35: addi a0, a0, 3
+# block 36
+label_36: addi a0, a0, 4
+# block 37
+label_37: addi a0, a0, 5
+# block 38
+label_38: addi a0, a0, 6
+# block 39
+label_39: addi a0, a0, 7
+# block 40
+label_40: addi a0, a0, 8
+# block 41
+label_41: addi a0, a0, 9
+# block 42
+label_42: addi a0, a0, 10
+# block 43
+label_43: addi a0, a0, 11
+# block 44
+label_44: addi a0, a0, 12
+# block 45
+label_45: addi a0, a0, 13
+# block 46
+label_46: addi a0, a0, 14
+# block 47
+label_47: addi a0, a0, 15
+# block 48
+label_48: addi a0, a0, 16
+# block 49
+label_49: addi a0, a0, 17
+# block 50
+label_50: addi a0, a0, 18
+# block 51
+label_51: addi a0, a0, 19
+# block 52
+label_52: addi a0, a0, 20
+# block 53
+label_53: addi a0, a0, 21
+# block 54
+label_54: addi a0, a0, 22
+# block 55
+label_55: addi a0, a0, 23
+# block 56
+label_56: addi a0, a0, 24
+# block 57
+label_57: addi a0, a0, 25
+# block 58
+label_58: addi a0, a0, 26
+# block 59
+label_59: addi a0, a0, 27
+# block 60
+label_60: addi a0, a0, 28
+# block 61
+label_61: addi a0, a0, 29
+# block 62
+label_62: addi a0, a0, 30
+# block 63
+label_63: addi a0, a0, 31
+# block 64
+label_64: addi a0, a0, 0
+# block 65
+label_65: addi a0, a0, 1
+# block 66
+label_66: addi a0, a0, 2
+# block 67
+label_67: addi a0, a0, 3
+# block 68
+label_68: addi a0, a0, 4
+# block 69
+label_69: addi a0, a0, 5
+# block 70
+label_70: addi a0, a0, 6
+# block 71
+label_71: addi a0, a0, 7
+# block 72
+label_72: addi a0, a0, 8
+# block 73
+label_73: addi a0, a0, 9
+# block 74
+label_74: addi a0, a0, 10
+# block 75
+label_75: addi a0, a0, 11
+# block 76
+label_76: addi a0, a0, 12
+# block 77
+label_77: addi a0, a0, 13
+# block 78
+label_78: addi a0, a0, 14
+# block 79
+label_79: addi a0, a0, 15
+# block 80
+label_80: addi a0, a0, 16
+# block 81
+label_81: addi a0, a0, 17
+# block 82
+label_82: addi a0, a0, 18
+# block 83
+label_83: addi a0, a0, 19
+# block 84
+label_84: addi a0, a0, 20
+# block 85
+label_85: addi a0, a0, 21
+# block 86
+label_86: addi a0, a0, 22
+# block 87
+label_87: addi a0, a0, 23
+# block 88
+label_88: addi a0, a0, 24
+# block 89
+label_89: addi a0, a0, 25
+# block 90
+label_90: addi a0, a0, 26
+# block 91
+label_91: addi a0, a0, 27
+# block 92
+label_92: addi a0, a0, 28
+# block 93
+label_93: addi a0, a0, 29
+# block 94
+label_94: addi a0, a0, 30
+# block 95
+label_95: addi a0, a0, 31
+# block 96
+label_96: addi a0, a0, 0
+# block 97
+label_97: addi a0, a0, 1
+# block 98
+label_98: addi a0, a0, 2
+# block 99
+label_99: addi a0, a0, 3
+# block 100
+label_100: addi a0, a0, 4
+# block 101
+label_101: addi a0, a0, 5
+# block 102
+label_102: addi a0, a0, 6
+# block 103
+label_103: addi a0, a0, 7
+# block 104
+label_104: addi a0, a0, 8
+# block 105
+label_105: addi a0, a0, 9
+# block 106
+label_106: addi a0, a0, 10
+# block 107
+label_107: addi a0, a0, 11
+# block 108
+label_108: addi a0, a0, 12
+# block 109
+label_109: addi a0, a0, 13
+# block 110
+label_110: addi a0, a0, 14
+# block 111
+label_111: addi a0, a0, 15
+# block 112
+label_112: addi a0, a0, 16
+# block 113
+label_113: addi a0, a0, 17
+# block 114
+label_114: addi a0, a0, 18
+# block 115
+label_115: addi a0, a0, 19
+# block 116
+label_116: addi a0, a0, 20
+# block 117
+label_117: addi a0, a0, 21
+# block 118
+label_118: addi a0, a0, 22
+# block 119
+label_119: addi a0, a0, 23
+# block 120
+label_120: addi a0, a0, 24

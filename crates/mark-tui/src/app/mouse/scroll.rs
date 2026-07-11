@@ -114,9 +114,17 @@ impl MouseScroll {
 
 impl DiffApp {
     pub(super) fn handle_open_menu_mouse_scroll(&mut self, kind: MouseEventKind) -> bool {
+        self.handle_open_menu_mouse_scroll_ticks(kind, 1)
+    }
+
+    pub(super) fn handle_open_menu_mouse_scroll_ticks(
+        &mut self,
+        kind: MouseEventKind,
+        ticks: usize,
+    ) -> bool {
         let delta = match kind {
-            MouseEventKind::ScrollDown => 1,
-            MouseEventKind::ScrollUp => -1,
+            MouseEventKind::ScrollDown => ticks.min(isize::MAX as usize) as isize,
+            MouseEventKind::ScrollUp => -(ticks.min(isize::MAX as usize) as isize),
             _ => return false,
         };
 
