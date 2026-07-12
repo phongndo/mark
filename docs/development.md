@@ -101,6 +101,17 @@ scripts/test-diff-error-pane
 
 The interactive smoke test must run in a terminal.
 
+## Profile-guided builds
+
+`scripts/build-pgo` produces a profile-guided release `mark` binary:
+it builds instrumented binaries, trains on the committed engine corpora and
+bench fixtures, merges the profiles with `llvm-profdata` (needs
+`rustup component add llvm-tools`), and rebuilds with `-Cprofile-use`.
+Engine-bound corpora run 15–35% faster than a plain release build
+(`docs/performance-reports/2026-07-12-engine-optimization.md`). Retrain
+whenever the engine or the global allocator changes materially — a stale
+profile silently forfeits most of the gain.
+
 ## Release flow
 
 The main `mark` binary release uses GitHub Releases.

@@ -197,13 +197,20 @@ size check before reading all bytes.
 
 ### 2.2 Engine performance gates
 
+"Today" = round 7 (2026-07-12, `scripts/build-pgo` build with mimalloc; see
+`performance-reports/2026-07-12-engine-optimization.md`).
+
 | Gate | Target | Today |
 | --- | --- | ---: |
-| large Rust process-cold | ≥ 12 MB/s | 10.05 |
-| libc++ C++ process-cold | ≥ 2.5 MB/s, zero degradation | 2.32 |
-| nix / php repeated process-cold | ≥ 4 MB/s | 2.2 / 2.7 |
-| TS/TSX/JS representative corpora | ≥ 4 MB/s **without** relying on repeated-line cache wins | 2.09 (cache-off TS) |
-| core repeated mixed-language sweep | ≥ 6 MB/s aggregate; minimum ≥ 8 MB/s after E4 | — |
+| large Rust process-cold | ≥ 12 MB/s | **17.0 ✅** |
+| libc++ C++ process-cold | ≥ 2.5 MB/s, zero degradation | **3.17 ✅** |
+| nix / php repeated process-cold | ≥ 4 MB/s (stretch: nix ≥ 8, php ≥ 6) | **7.0 / 5.8** (base ✅, stretch ✗) |
+| TS/TSX/JS representative corpora | ≥ 4 MB/s **without** relying on repeated-line cache wins | 3.8–3.9 (cache-off TS, borderline) |
+| core repeated mixed-language sweep | ≥ 6 MB/s aggregate; minimum ≥ 8 MB/s after E4 | markdown 21.8, cpp 16.7, TS 24.6 |
+
+Release binaries are expected to come from `scripts/build-pgo`; a plain
+`cargo build --release` lands 15–35% below the numbers above on
+engine-bound corpora.
 
 ### 2.3 Whole-binary 10M-diff gates (mega-diff harness, release build)
 
@@ -312,6 +319,14 @@ can land any time.
   remains (they may simply be the survivors once allocation noise is gone).
 
 ## 5. Phase E — TextMate engine hot path (carried over, re-based)
+
+> **Round-7 status (2026-07-12):** E1 landed (`7bd00e6`, `36ad492` — see
+> `performance-reports/2026-07-12-engine-optimization.md`). E2/E3's gates
+> (cpp, large-rust, libc++) now pass via E1 + mimalloc + PGO without the
+> prefilter/bytecode rewrites; those items are superseded. Remaining engine
+> work is E4-class: php/nix/TS-cache-off are 3–12% short of their stretch
+> gates with the time concentrated in `PatternSetMatcher` per-position
+> scanning and the bytecode VM. E6 diagnosability remains open.
 
 Methodology unchanged: alternating-order separate-process A/B, paired
 medians, byte-exact scope streams vs the pinned oracle before/after; validate
