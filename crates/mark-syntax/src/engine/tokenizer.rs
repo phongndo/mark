@@ -980,6 +980,7 @@ pub struct TextMateTokenizer {
     candidate_cache: HashMap<StateId, Arc<CandidateSet>, BuildHasherDefault<StateIdentityHasher>>,
     candidate_blueprint_cache: FastMap<CandidateBlueprintKey, Arc<CandidateBlueprint>>,
     injection_outcomes: InjectionOutcomeInterner,
+    injection_outcome_cache: FastMap<ScopeStackId, (InjectionOutcomeId, Arc<InjectionOutcome>)>,
     inline_candidate_cache: FastMap<InlineCandidateCacheKey, Arc<CandidateSet>>,
     /// Per-tokenizer mirror of the global frame-stack intern table's edges so
     /// repeat pushes of a known (parent stack, frame) transition skip the
@@ -1023,6 +1024,7 @@ impl TextMateTokenizer {
             candidate_cache: HashMap::with_hasher(BuildHasherDefault::default()),
             candidate_blueprint_cache: hashing::fast_map(),
             injection_outcomes: InjectionOutcomeInterner::default(),
+            injection_outcome_cache: hashing::fast_map(),
             inline_candidate_cache: hashing::fast_map(),
             frame_edge_cache: hashing::fast_map(),
             frame_node_cache: hashing::fast_map(),
@@ -1430,6 +1432,7 @@ impl TextMateTokenizer {
         self.current_scope_stack_cache.clear();
         self.resolved_scope_stack_cache.clear();
         self.injection_outcomes.clear();
+        self.injection_outcome_cache.clear();
         self.inline_candidate_cache.clear();
     }
 
@@ -2108,6 +2111,7 @@ impl TextMateTokenizer {
             // reconstructed approximately.
             self.injection_outcomes.clear();
             self.candidate_blueprint_cache.clear();
+            self.injection_outcome_cache.clear();
         }
         self.injection_outcomes.intern(outcome)
     }
@@ -2122,8 +2126,21 @@ impl TextMateTokenizer {
         let stacks = self.current_scope_stack_ids(state, None);
         let active_stack_id = stacks.active_stack_id;
         let end_stack_id = stacks.end_stack_id;
-        let stack = self.resolve_scope_stack_cached(active_stack_id);
-        let (injection_outcome_id, injection_outcome) = self.injection_outcome(stack.as_ref());
+        // Injection selectors are pure functions of the resolved scope stack,
+        // so one interned stack id never needs its selectors re-evaluated.
+        let (injection_outcome_id, injection_outcome) =
+            if let Some(cached) = self.injection_outcome_cache.get(&active_stack_id) {
+                cached.clone()
+            } else {
+                let stack = self.resolve_scope_stack_cached(active_stack_id);
+                let outcome = self.injection_outcome(stack.as_ref());
+                if self.injection_outcome_cache.len() >= MAX_SCOPE_STACK_CACHE_ENTRIES {
+                    self.injection_outcome_cache.clear();
+                }
+                self.injection_outcome_cache
+                    .insert(active_stack_id, outcome.clone());
+                outcome
+            };
         let blueprint_key = CandidateBlueprintKey {
             source: CandidateSourceKey::for_state(self.root, state),
             injection_outcome: injection_outcome_id,

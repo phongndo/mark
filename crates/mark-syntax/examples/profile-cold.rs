@@ -2,6 +2,10 @@
 //!
 //! usage: profile-cold --mode line-cold --assets assets/tm-grammars/languages --scope source.rust <file> [iterations]
 
+#[cfg(feature = "alloc-trial")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     env, fs,
