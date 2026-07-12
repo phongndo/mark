@@ -82,7 +82,8 @@ pub(crate) fn render_unified_line_wrapped_with_focus(
     grep_filter: &str,
 ) -> Vec<Line<'static>> {
     let content_width = unified_content_width(width);
-    let scrolls = wrapped_line_start_columns(line.text(), content_width);
+    let text = line.text_lossy();
+    let scrolls = wrapped_line_start_columns(&text, content_width);
     let mut lines = Vec::with_capacity(scrolls.len());
     for (wrap_index, horizontal_scroll) in scrolls.iter().copied().enumerate() {
         let rendered = render_unified_line_segment_with_focus(
@@ -158,8 +159,9 @@ fn render_unified_line_segment_with_focus(
             theme,
         ));
     }
+    let text = line.text_lossy();
     spans.extend(content_spans_at_scroll(
-        line.text(),
+        &text,
         syntax,
         inline,
         line.kind(),
@@ -187,7 +189,7 @@ fn highlight_wrapped_unified_grep_line(
         &rendered.spans,
         unified_content_start_column(width),
         width,
-        1 + scrolled_text_byte_start(line.text(), horizontal_scroll),
+        1 + scrolled_text_byte_start(&line.text_lossy(), horizontal_scroll),
     )
     .into_iter()
     .collect();

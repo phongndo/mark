@@ -127,6 +127,23 @@ The first-class extended fixtures include `zig`, `llvm`, `riscv`, `mipsasm`,
 `odin`, `asm`, `mojo`, `ocaml`, and `mlir`; adding more coverage is an asset and
 fixture decision, not an engine fork.
 
+### Adding or updating a grammar (checklist)
+
+1. Vendor the compact JSON from the pinned package via
+   `tools/vendor-shiki-grammars.mjs` (or `[[additional_sources]]` in
+   `SOURCE.toml` for non-Shiki grammars like `mlir`), stable key order.
+2. `licenses.json` entry from the package's per-grammar license metadata.
+3. `coverage.toml` public entry; aliases/extensions merged into `catalog.rs`
+   with ids matching Shiki's `bundledLanguagesInfo`.
+4. `tools/grammar-stats.mjs` inventory first — any regex construct not in
+   `tools/regex-conformance.mjs`'s proving set gets a conformance case
+   **before** the grammar lands.
+5. Fixtures + oracle goldens (`stoppedEarly: false`), exact + coarse parity,
+   `divergences.toml` stays empty, zero degraded lines.
+6. Perf: process-cold stress ≥ 2 MB/s floor per language; a floor breach
+   gets a counters audit + tracked issue, never a silent merge. Add a sweep
+   corpus member so the aggregate tracks the language forever.
+
 ## Dependency policy
 
 | Layer | Allowed | Forbidden in release |
@@ -237,120 +254,44 @@ budgets, counters, and lazy per-language tokenizer instances are implemented.
 The existing TUI worker, file/hunk cache, and render integration now use the
 native backend.
 
-Measured on the generated 1,897,788-byte / 32,000-line Rust fixture (release,
-one cold iteration, all 32,001 tokenizer lines, no degradation), candidate
-search improvements reduced Mark from about 3.21 s / 0.59 MB/s to about
-0.91–0.93 s / 2.04–2.09 MB/s. This is a roughly 3.5x throughput improvement
-and is ahead of both measured JavaScript implementations on this corpus:
-pinned Shiki took about 1.55 s / 1.22 MB/s, while the direct pinned
-`vscode-textmate` oracle took
-about 1.46–1.48 s / 1.28–1.30 MB/s. A separate 3.24 MB repeated checked-in
-fixture set spanning 29 detected languages improved by about 5% over the
-pre-optimization binary, guarding against
-retaining a Rust-only micro-optimization. It does **not** yet meet the original
-12 MB/s acceptance target or historical Tree-sitter throughput; scanner/VM
-optimization remains open.
+Current throughput numbers, hotspot diagnoses, and the remaining optimization
+backlog live in [`performance-plan.md`](performance-plan.md) — the interim
+measurement history that used to live here is superseded by that document's
+§1 tables.
 
-The latest changes were evaluated as alternating-order, separate-process A/B
-runs. Retained changes had repeatable paired-median wins: inline zero/one VM
-states (~5.3%), candidate-index results and deferred ownership (~4.5%
-combined), per-line unchanged-state candidate reuse (~10.7%), pre-sized VM
-fanout (~5% across the tested capacity steps), direct bounded-lookbehind
-positions (~1.4%), and reduced token/capture/stack cloning and allocation
-(several additional 0.5–2% steps). Avoiding winner replay when a rule cannot
-observe captures yielded another ~8.2% on the large Rust corpus and ~1% on the
-repeated multi-language set. Experiments that were neutral or slower
-were reverted, including leading-word-boundary gates, mandatory-prefix checks,
-compact line-cache keys, possessive-repeat
-specialization, iterator-based lookbehind positions, ASCII class branches,
-and source line pre-counting.
+**Retained optimizations** (each validated with alternating-order,
+separate-process A/B runs, paired medians, and byte-exact scope streams):
+candidate-index results with deferred ownership, per-line unchanged-state
+candidate reuse, pre-sized VM fanout, inline zero/one VM states,
+parse-time-resolved subroutine target paths (~41% on libc++), anchored winner
+capture replay, capture-observability gating (position-only selection VM for
+lookahead/lookbehind with winner-only capture replay), the ordered
+alternation/repetition bytecode path with the deterministic C-family
+comment-or-space separator instruction, compact backreference capture
+layouts, reduced token/capture/stack cloning, and a 512 steps-per-byte
+source-wide fallback allowance (128 was too low for valid complex grammars).
+`profile-cold` configures production syntax limits so its line-cache behavior
+matches the runtime.
 
-The next cold-pass profiling round added representative TypeScript, Markdown,
-and libc++ C++ corpora. Regex subroutine calls now carry a parse-time-resolved
-path to their target capture instead of recursively searching the complete AST
-for every call. On the 184,514-byte libc++ `<string>` corpus this reduced a
-single cold pass from about 5.6 seconds to 3.34 seconds (roughly 41%), while the
-large Rust and TypeScript runs remained within about 1% of their prior medians.
-Winning capture replay is also anchored at the already-known match start rather
-than repeating an unanchored search; paired medians improved about 1.3% on the
-TypeScript corpus and 1.1% on Markdown and were neutral to slightly positive on
-Rust. C++ remains pathologically slow despite the subroutine improvement, so
-this is not a substitute for the planned iterative VM.
+**Reverted experiments — do not retry as-is** (measured deltas in the git
+history of this file):
 
-That C++ run also exposed that the source-wide fallback allowance of 128 VM
-steps per source byte was too low for complex but valid grammars: the separate
-diagnostic pass exhausted it and source-skipped 2,339 of 4,039 tokenizer lines.
-The allowance is now 512 steps per byte. On the same corpus the diagnostic pass
-source-skips zero lines (about 91.1 million fallback steps); per-match and
-per-line hard limits still intentionally degrade 222 pathological lines. The
-timed cold pass remained about 3.32 seconds, so removing the source-wide skips
-did not create a measured throughput regression, but the remaining per-line
-degradation is explicitly part of the unresolved C++ VM work.
-
-Simply raising the per-match and per-line limits by 10x was also rejected. It
-reduced libc++ oracle-mismatched lines only from 1,488 to 1,417 while slowing
-the cold pass from about 3.33 seconds to 4.63 seconds. The remaining quality
-gap needs more efficient execution, not merely a larger backtracking budget.
-
-A semantics-safe per-candidate next-match memo was prototyped with invalidation
-for tokenizer state and anchor-context changes. It was reverted: independently
-searching every candidate up front was about 2.14x slower than the unified
-ordered pattern-set scan on the large Rust corpus. Any future memoized scanner
-must preserve the unified scan's grammar-order laziness rather than reintroduce
-per-pattern whole-line searches.
-
-A conservative deterministic bytecode slice for linear literal/class/dot/
-anchor/group patterns also passed strict parity, but was reverted after cold
-A/B runs: it was about 0.5% slower on Rust, 0.9% slower on TypeScript, neutral
-on Markdown, and only about 0.7% faster on the already-pathological C++ case.
-The useful bytecode cutover needs to cover ordered alternation and repetition,
-where recursive state fanout dominates, rather than only the uncommon
-single-path subset.
-
-The first dedicated position-only selection VM was retained. For patterns
-whose captures cannot affect matching (no backreference, subroutine, conditional,
-unsupported construct, or atomic/possessive feature),
-selection now propagates inline `usize` positions rather than full `VmState`
-values with capture vectors. Positive/negative lookahead and bounded or
-unbounded lookbehind run on this path and collapse assertion results back to
-the asserted position. Full capture
-extraction remains on the existing VM and is replayed only for the winner.
-Strict goldens and focused ambiguous repeat/alternation/lookahead/UTF-8
-differential tests pass. The regular subset improved the large Rust corpus by
-about 3.5% and Markdown by 1.3%; enabling lookahead added about 2.4% and 1.4%
-respectively. Position-only lookbehind then added about 1.1% on Rust and 6.1%
-on TypeScript and was neutral to slightly positive on Markdown and C++.
-The complete 4,039-line libc++ scope stream was also byte-for-byte identical
-to the capture-aware VM output (not merely equal token counts), while both were
-compared separately with the pinned `vscode-textmate` oracle.
-The route is limited to regexes that actually declare captures; capture-free
-regexes already carry an allocation-free empty vector, and routing those too
-was slightly worse overall. This gate was neutral on the large Rust,
-TypeScript, and Markdown corpora and turned the 3.24 MB repeated multi-language
-corpus into a repeatable ~0.9% win over the pre-position-VM binary.
-Position-only recursive subroutines were faster (about 30% on libc++), but were
-reverted because full-corpus scope comparison against `vscode-textmate` showed
-that they increased mismatched C++ lines from 1,488 to 1,804. Subroutine calls
-therefore remain capture-aware. Compiling the safe position evaluator to
-iterative bytecode remains follow-up work.
-Routing atomic/possessive patterns through the position VM also preserved the
-tested outputs but was reverted after regressions of about 0.8% on both Rust
-and TypeScript and 1.7% on C++.
-
-The current bytecode path now covers ordered alternation/repetition with a
-deterministic C/C++ comment-or-space separator instruction and compact
-backreference capture layouts for position selection. The `profile-cold`
-driver also configures the same syntax limits as production so its line cache
-behavior matches the runtime. On the checked-in repeated C++ stress member this
-raises process-cold throughput above the P2 floor (about 2.1 MB/s with the line
-cache disabled, about 10 MB/s with production limits). The dedicated libc++
-fixture is pinned as a separate zero-divergence oracle case. PHP and Nix remain
-below the aspirational 3 MB/s floor and are tracked as remaining hotspot work;
-the correctness gates still require zero oracle divergences and zero committed
-fixture budget degradation.
-
-The stripped release `mark` binary remains under the 8 MB target on the measured
-macOS build with compressed embedded grammar blobs.
+- Per-candidate next-match memoization: independent per-pattern searches were
+  2.14× slower than the unified ordered grammar-order scan; any future memo
+  must preserve the unified scan's laziness.
+- Linear-only bytecode slice (literal/class/dot/anchor/group): neutral-to-
+  slower; bytecode must cover ordered alternation/repetition where recursive
+  fanout dominates.
+- Position-only recursive subroutines: ~30% faster on libc++ but increased
+  mismatched C++ lines 1,488 → 1,804; subroutine calls stay capture-aware.
+- Routing atomic/possessive patterns through the position VM: 0.8–1.7%
+  regressions.
+- 10× per-match/per-line budgets: 1.4× slower for only ~5% fewer mismatches —
+  quality needs cheaper execution, not bigger budgets.
+- Also neutral/slower: leading-word-boundary gates, mandatory-prefix checks,
+  compact line-cache keys, possessive-repeat specialization, iterator-based
+  lookbehind positions, ASCII class branches, source line pre-counting,
+  routing capture-free regexes through the position VM.
 
 ### After phase 5 (not detailed here)
 
@@ -358,7 +299,7 @@ Phase 6+ covers broadening conformance beyond the proving corpus and raising
 scanner throughput. The unavailable-backend shim has already been removed from
 the production path.
 The concrete performance sequence and acceptance gates are in
-[`textmate-performance-plan.md`](textmate-performance-plan.md).
+[`performance-plan.md`](performance-plan.md).
 
 ## Reproducible oracle commands
 
@@ -465,4 +406,4 @@ changing tokenizer behavior.
 - Oracle: `tools/golden-dump.mjs`, `tools/generate-goldens.mjs`, `tools/golden-oracle/`
 - Assets: `assets/tm-grammars/`
 - Engine: `crates/mark-syntax/src/engine/`
-- Performance continuation plan: `docs/textmate-performance-plan.md`
+- Performance continuation plan: `docs/performance-plan.md`

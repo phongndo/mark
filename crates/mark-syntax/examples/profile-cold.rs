@@ -46,6 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut assets = None;
     let mut scope = None;
     let mut mode = Mode::LineCold;
+    let mut assert_min_mb_s = None;
     let mut positional = Vec::new();
     let mut index = 0;
     while index < args.len() {
@@ -60,6 +61,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             "--mode" => {
                 mode = Mode::parse(&args[index + 1])?;
+                index += 2;
+            }
+            "--assert-min-mb-s" => {
+                assert_min_mb_s = Some(args[index + 1].parse::<f64>()?);
                 index += 2;
             }
             other => {
@@ -171,12 +176,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let elapsed = started.elapsed();
+    let avg_mb_s = (source.len() * iterations) as f64 / elapsed.as_secs_f64() / 1e6;
     eprintln!(
         "total mode={}: {:.3}s  avg {:.2} MB/s  tokens={total_tokens}",
         mode.name(),
         elapsed.as_secs_f64(),
-        (source.len() * iterations) as f64 / elapsed.as_secs_f64() / 1e6
+        avg_mb_s
     );
+    if let Some(min_mb_s) = assert_min_mb_s
+        && avg_mb_s < min_mb_s
+    {
+        return Err(format!(
+            "throughput assertion failed: {avg_mb_s:.2} MB/s < {min_mb_s:.2} MB/s"
+        )
+        .into());
+    }
     Ok(())
 }
 

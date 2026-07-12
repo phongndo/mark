@@ -86,9 +86,7 @@ impl DiffApp {
 
     fn exportable_annotation_keys(&self, model: &UiModel) -> HashSet<AnnotationKey> {
         model
-            .rows
-            .iter()
-            .copied()
+            .iter_rows()
             .flat_map(|row| AnnotationKey::candidates_from_ui_row(&self.document.changeset, row))
             .collect()
     }
@@ -102,13 +100,13 @@ impl DiffApp {
             return false;
         }
 
-        model.rows.iter().any(|row| {
+        model.iter_rows().any(|row| {
             let UiRow::Collapsed {
                 file,
                 new_start,
                 lines,
                 ..
-            } = *row
+            } = row
             else {
                 return false;
             };
@@ -119,6 +117,8 @@ impl DiffApp {
                 return false;
             }
 
+            let new_start = new_start as usize;
+            let lines = lines as usize;
             key.line >= new_start && key.line.saturating_sub(new_start) < lines
         }) || self.trailing_context_contains_annotation_key(key)
     }

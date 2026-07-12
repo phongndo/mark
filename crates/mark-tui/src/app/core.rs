@@ -317,7 +317,7 @@ impl WrappedVisualLayout {
         self.layout == app.viewport.layout
             && self.viewport_width == app.viewport.viewport_width
             && self.model_rows == app.document.model.len()
-            && self.model_rows_ptr == app.document.model.rows.as_ptr() as usize
+            && self.model_rows_ptr == app.document.model.cache_key()
     }
 }
 

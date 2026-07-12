@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use mark_diff::{Changeset, DiffOptions};
 
 use crate::theme::SYNTAX_THEME_ID;
@@ -13,6 +15,7 @@ use super::{
         DiffSide, SyntaxKey, SyntaxPosition, SyntaxSkipReason, SyntaxSourceId, SyntaxSourceKind,
     },
 };
+use crate::theme::SyntaxBenchmarkReport;
 
 impl SyntaxRuntime {
     pub(crate) fn queue_hunk(
@@ -170,19 +173,19 @@ impl SyntaxRuntime {
         }
 
         let Some(file_diff) = changeset.files.get(file) else {
-            self.skip_source(source_id);
+            self.skip_source(source_id, SyntaxSkipReason::InvalidPosition);
             return;
         };
         let Some(path) = syntax_path(file_diff, side) else {
-            self.skip_source(source_id);
+            self.skip_source(source_id, SyntaxSkipReason::NoPath);
             return;
         };
         let Some(language) = self.languages.language_for_path(path) else {
-            self.skip_source(source_id);
+            self.skip_source(source_id, SyntaxSkipReason::NoLanguage);
             return;
         };
         let Some(source) = full_file_source(&changeset.repo, options, file_diff, side) else {
-            self.skip_source(source_id);
+            self.skip_source(source_id, SyntaxSkipReason::NoSource);
             return;
         };
 
@@ -193,7 +196,7 @@ impl SyntaxRuntime {
         };
         self.source_keys.insert(source_id, key);
         if self.unavailable_full_files.contains(&key) || self.failed.contains(&key) {
-            self.skip_source(source_id);
+            self.skip_source(source_id, SyntaxSkipReason::HighlightError);
             return;
         }
 
@@ -225,6 +228,14 @@ impl SyntaxRuntime {
         }
 
         let source_bytes = source.known_bytes();
+        if source_bytes.is_some_and(|bytes| bytes as usize > self.limits.max_source_bytes) {
+            if let Some(position) = position {
+                self.skip(position, SyntaxSkipReason::TooLarge);
+            } else {
+                self.skip_source(key.source, SyntaxSkipReason::TooLarge);
+            }
+            return false;
+        }
         let source_lines = source.known_lines();
 
         let job = SyntaxJob {
@@ -232,15 +243,33 @@ impl SyntaxRuntime {
             language,
             source,
             limits: self.limits,
+            queued_source_bytes: source_bytes.unwrap_or_default(),
+            priority,
+            queued_at: Instant::now(),
         };
 
         match self.queue.try_push(job, priority) {
             Ok(push) => {
-                if let Some(dropped) = push.dropped {
+                for dropped in std::iter::once(push.dropped)
+                    .chain(push.dropped_more.into_iter().map(Some))
+                    .flatten()
+                {
                     self.pending.remove(&dropped);
                     self.stats.jobs_evicted = self.stats.jobs_evicted.saturating_add(1);
                 }
+                if push.dropped_overflow {
+                    self.stats.jobs_evicted = self.stats.jobs_evicted.saturating_add(1);
+                }
                 self.stats.jobs_queued = self.stats.jobs_queued.saturating_add(1);
+                match key.source.kind {
+                    SyntaxSourceKind::HunkSide { .. } => {
+                        self.stats.hunk_jobs_queued = self.stats.hunk_jobs_queued.saturating_add(1);
+                    }
+                    SyntaxSourceKind::FullFile => {
+                        self.stats.full_file_jobs_queued =
+                            self.stats.full_file_jobs_queued.saturating_add(1);
+                    }
+                }
                 self.stats.queue_depth_peak = self.stats.queue_depth_peak.max(push.depth);
                 if let Some(source_bytes) = source_bytes {
                     self.stats.source_bytes_queued =
@@ -261,7 +290,7 @@ impl SyntaxRuntime {
                 if let Some(position) = position {
                     self.skip(position, SyntaxSkipReason::QueueClosed);
                 } else {
-                    self.skip_source(key.source);
+                    self.skip_source(key.source, SyntaxSkipReason::QueueClosed);
                 }
                 false
             }
@@ -271,12 +300,40 @@ impl SyntaxRuntime {
     pub(crate) fn skip(&mut self, position: SyntaxPosition, reason: SyntaxSkipReason) {
         if self.skipped.insert(position, reason).is_none() {
             self.stats.jobs_skipped = self.stats.jobs_skipped.saturating_add(1);
+            record_skip_reason(&mut self.stats, reason);
         }
     }
 
-    pub(crate) fn skip_source(&mut self, source_id: SyntaxSourceId) {
+    pub(crate) fn skip_source(&mut self, source_id: SyntaxSourceId, reason: SyntaxSkipReason) {
         if self.skipped_sources.insert(source_id) {
             self.stats.jobs_skipped = self.stats.jobs_skipped.saturating_add(1);
+            record_skip_reason(&mut self.stats, reason);
+        }
+    }
+}
+
+fn record_skip_reason(stats: &mut SyntaxBenchmarkReport, reason: SyntaxSkipReason) {
+    match reason {
+        SyntaxSkipReason::InvalidPosition => {
+            stats.skips_invalid_position = stats.skips_invalid_position.saturating_add(1);
+        }
+        SyntaxSkipReason::NoPath => {
+            stats.skips_no_path = stats.skips_no_path.saturating_add(1);
+        }
+        SyntaxSkipReason::NoLanguage => {
+            stats.skips_no_language = stats.skips_no_language.saturating_add(1);
+        }
+        SyntaxSkipReason::NoSource => {
+            stats.skips_no_source = stats.skips_no_source.saturating_add(1);
+        }
+        SyntaxSkipReason::TooLarge => {
+            stats.skips_too_large = stats.skips_too_large.saturating_add(1);
+        }
+        SyntaxSkipReason::QueueClosed => {
+            stats.skips_queue_closed = stats.skips_queue_closed.saturating_add(1);
+        }
+        SyntaxSkipReason::HighlightError => {
+            stats.skips_highlight_error = stats.skips_highlight_error.saturating_add(1);
         }
     }
 }

@@ -272,9 +272,10 @@ pub(crate) fn render_split_context_line_wrapped(
     let right_width = width.saturating_sub(left_width);
     let left_content_width = split_cell_content_width(left_width);
     let right_content_width = split_cell_content_width(right_width);
-    let left_scrolls = wrapped_line_start_columns(line.text(), left_content_width);
-    let right_scrolls = wrapped_line_start_columns(line.text(), right_content_width);
-    let text_width = display_width(line.text());
+    let text = line.text_lossy();
+    let left_scrolls = wrapped_line_start_columns(&text, left_content_width);
+    let right_scrolls = wrapped_line_start_columns(&text, right_content_width);
+    let text_width = display_width(&text);
     let rows = left_scrolls.len().max(right_scrolls.len());
     let mut lines = Vec::with_capacity(rows);
     for wrap_index in 0..rows {

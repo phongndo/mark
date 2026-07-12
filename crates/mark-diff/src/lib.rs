@@ -4,6 +4,7 @@ use std::{
     fs,
     io::{self, Read, Write},
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 const STREAM_BUFFER_BYTES: usize = 1024 * 1024;
@@ -23,16 +24,16 @@ use git_io::{
     git_diff_bytes, git_diff_bytes_with_untracked, git_diff_bytes_with_untracked_pathspecs,
     git_diff_to_writer, git_diff_to_writer_with_untracked,
 };
-pub use parser::parse_patch;
+pub use parser::{parse_patch, parse_patch_bytes, parse_patch_bytes_limited};
 #[cfg(test)]
 use stats::parse_patch_stats;
 use stats::{patch_stats, render_patch_stats, terminal_safe_text};
 pub use types::{
-    BranchName, Changeset, CommitSha, DiffFile, DiffFileBody, DiffHunk, DiffLine, DiffLineKind,
-    DiffOptions, DiffOutput, DiffPath, DiffRowRef, DiffSource, DiffStats, DiffViewModel,
-    DisplayPath, FileChange, FileStatus, HunkLineRanges, LineSpan, NewLineNumber, OldLineNumber,
-    PatchLabel, PatchSource, PullRequestId, RefName, RemoteName, RepoArg, RepoRelativePath,
-    RepoRoot, RevSpec, ReviewId, UntrackedMode, WorktreePath,
+    BranchName, Changeset, CommitSha, DiffFile, DiffFileBody, DiffHunk, DiffLimitExceeded,
+    DiffLimits, DiffLine, DiffLineKind, DiffOptions, DiffOutput, DiffPath, DiffRowRef, DiffSource,
+    DiffStats, DiffViewModel, DisplayPath, FileChange, FileStatus, HunkLineRanges, LineSpan,
+    NewLineNumber, OldLineNumber, PatchLabel, PatchSource, PullRequestId, RefName, RemoteName,
+    RepoArg, RepoRelativePath, RepoRoot, RevSpec, ReviewId, UntrackedMode, WorktreePath,
 };
 
 pub fn load(options: DiffOptions) -> MarkResult<Changeset> {
@@ -45,6 +46,10 @@ pub fn load_review(options: DiffOptions) -> MarkResult<Changeset> {
 
 pub fn load_review_ref(options: &DiffOptions) -> MarkResult<Changeset> {
     load_changeset(options, false)
+}
+
+pub fn load_review_ref_limited(options: &DiffOptions, limits: DiffLimits) -> MarkResult<Changeset> {
+    load_changeset_limited(options, false, limits)
 }
 
 pub fn load_review_ref_with_patch_bytes(options: &DiffOptions) -> MarkResult<(Changeset, u64)> {
@@ -60,17 +65,34 @@ pub fn load_review_ref_paths(options: &DiffOptions, paths: &[PathBuf]) -> MarkRe
 }
 
 fn load_changeset(options: &DiffOptions, keep_raw_patch: bool) -> MarkResult<Changeset> {
-    load_changeset_with_patch_bytes(options, keep_raw_patch).map(|(changeset, _)| changeset)
+    load_changeset_limited(options, keep_raw_patch, DiffLimits::from_env())
+}
+
+fn load_changeset_limited(
+    options: &DiffOptions,
+    keep_raw_patch: bool,
+    limits: DiffLimits,
+) -> MarkResult<Changeset> {
+    load_changeset_with_patch_bytes_limited(options, keep_raw_patch, limits)
+        .map(|(changeset, _)| changeset)
 }
 
 fn load_changeset_with_patch_bytes(
     options: &DiffOptions,
     keep_raw_patch: bool,
 ) -> MarkResult<(Changeset, u64)> {
+    load_changeset_with_patch_bytes_limited(options, keep_raw_patch, DiffLimits::from_env())
+}
+
+fn load_changeset_with_patch_bytes_limited(
+    options: &DiffOptions,
+    keep_raw_patch: bool,
+    limits: DiffLimits,
+) -> MarkResult<(Changeset, u64)> {
     let title = diff_title(options);
     let (repo, patch) = diff_patch_bytes(options)?;
     let patch_bytes = u64::try_from(patch.len()).unwrap_or(u64::MAX);
-    let changeset = changeset_from_patch(repo, title, patch, keep_raw_patch)?;
+    let changeset = changeset_from_patch_limited(repo, title, patch, keep_raw_patch, limits)?;
     Ok((changeset, patch_bytes))
 }
 
@@ -81,25 +103,39 @@ fn load_changeset_paths(
 ) -> MarkResult<Changeset> {
     let title = diff_title(options);
     let (repo, patch) = diff_patch_bytes_paths(options, paths)?;
-    changeset_from_patch(repo, title, Cow::Owned(patch), keep_raw_patch)
+    changeset_from_patch_limited(
+        repo,
+        title,
+        Cow::Owned(patch),
+        keep_raw_patch,
+        DiffLimits::from_env(),
+    )
 }
 
-fn changeset_from_patch(
+fn changeset_from_patch_limited(
     repo: PathBuf,
     title: String,
     patch: Cow<'_, [u8]>,
     keep_raw_patch: bool,
+    limits: DiffLimits,
 ) -> MarkResult<Changeset> {
-    let files = {
-        // The parsed model is text-only for stats/TUI display. Keep raw_patch
-        // as bytes and only decode lossily at this display/parsing boundary.
-        let patch_text = String::from_utf8_lossy(patch.as_ref());
-        parse_patch(&patch_text)
+    if let Some(max_patch_bytes) = limits.max_patch_bytes
+        && patch.len() > max_patch_bytes
+    {
+        return Err(MarkError::Usage(
+            DiffLimitExceeded::new("patch bytes", max_patch_bytes, patch.len()).to_string(),
+        ));
+    }
+    let patch: Arc<[u8]> = match patch {
+        Cow::Borrowed(bytes) => Arc::from(bytes),
+        Cow::Owned(bytes) => Arc::from(bytes),
     };
+    let files = parse_patch_bytes_limited(Arc::clone(&patch), limits)
+        .map_err(|error| MarkError::Usage(error.to_string()))?;
     let raw_patch = if keep_raw_patch {
-        patch.into_owned()
+        patch
     } else {
-        Vec::new()
+        Changeset::empty_raw_patch()
     };
 
     Ok(Changeset {

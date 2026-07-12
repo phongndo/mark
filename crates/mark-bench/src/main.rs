@@ -134,9 +134,15 @@ struct MeasureArgs {
     /// Maximum measured scroll positions per scenario and mode.
     #[arg(long, default_value_t = 200)]
     max_scroll_steps: usize,
+    /// Number of repeated samples per scenario/mode for JSON p50/p95/max stats.
+    #[arg(long, default_value_t = 1)]
+    samples: usize,
     /// Emit JSON instead of a human table.
     #[arg(long)]
     json: bool,
+    /// Fail if RSS delta exceeds this multiple of patch bytes.
+    #[arg(long, value_name = "RATIO")]
+    assert_max_rss_ratio: Option<f64>,
 }
 
 #[derive(Debug, Parser)]
@@ -162,9 +168,15 @@ struct MeasureRepoArgs {
     /// Maximum measured scroll positions per mode.
     #[arg(long, default_value_t = 200)]
     max_scroll_steps: usize,
+    /// Number of repeated samples per mode for JSON p50/p95/max stats.
+    #[arg(long, default_value_t = 1)]
+    samples: usize,
     /// Emit JSON instead of a human table.
     #[arg(long)]
     json: bool,
+    /// Fail if RSS delta exceeds this multiple of patch bytes.
+    #[arg(long, value_name = "RATIO")]
+    assert_max_rss_ratio: Option<f64>,
 }
 
 #[derive(Debug, Parser)]
@@ -187,9 +199,15 @@ struct MeasurePatchArgs {
     /// Maximum measured scroll positions per mode.
     #[arg(long, default_value_t = 200)]
     max_scroll_steps: usize,
+    /// Number of repeated samples per mode for JSON p50/p95/max stats.
+    #[arg(long, default_value_t = 1)]
+    samples: usize,
     /// Emit JSON instead of a human table.
     #[arg(long)]
     json: bool,
+    /// Fail if RSS delta exceeds this multiple of patch bytes.
+    #[arg(long, value_name = "RATIO")]
+    assert_max_rss_ratio: Option<f64>,
 }
 
 #[derive(Debug, Parser)]
@@ -259,6 +277,19 @@ enum ScenarioKind {
     MinifiedOneLine,
     BinaryFiles,
     HugeMixedStress,
+    #[value(name = "mega-diff-100k")]
+    MegaDiff100k,
+    #[value(name = "mega-diff-1m")]
+    MegaDiff1m,
+    #[value(name = "mega-diff-10m")]
+    MegaDiff10m,
+    MegaDiffOneHugeHunk,
+    MegaDiffManyHunks,
+    MegaDiffManyFiles,
+    MegaDiffBinaryHeavy,
+    MegaDiffGenerated,
+    MegaDiffMinifiedLongLines,
+    MegaDiffNonUtf8,
     SyntaxManySmallRust,
     SyntaxLargeRust,
     SyntaxMinifiedRust,
@@ -275,6 +306,16 @@ impl ScenarioKind {
             Self::MinifiedOneLine => "minified-one-line",
             Self::BinaryFiles => "binary-files",
             Self::HugeMixedStress => "huge-mixed-stress",
+            Self::MegaDiff100k => "mega-diff-100k",
+            Self::MegaDiff1m => "mega-diff-1m",
+            Self::MegaDiff10m => "mega-diff-10m",
+            Self::MegaDiffOneHugeHunk => "mega-diff-one-huge-hunk",
+            Self::MegaDiffManyHunks => "mega-diff-many-hunks",
+            Self::MegaDiffManyFiles => "mega-diff-many-files",
+            Self::MegaDiffBinaryHeavy => "mega-diff-binary-heavy",
+            Self::MegaDiffGenerated => "mega-diff-generated",
+            Self::MegaDiffMinifiedLongLines => "mega-diff-minified-long-lines",
+            Self::MegaDiffNonUtf8 => "mega-diff-non-utf8",
             Self::SyntaxManySmallRust => "syntax-many-small-rust",
             Self::SyntaxLargeRust => "syntax-large-rust",
             Self::SyntaxMinifiedRust => "syntax-minified-rust",
@@ -291,6 +332,16 @@ impl ScenarioKind {
             Self::MinifiedOneLine => "A pathological single-line minified file edit.",
             Self::BinaryFiles => "Binary modified and untracked files plus a small text edit.",
             Self::HugeMixedStress => "Large opt-in stress case for max-size and memory testing.",
+            Self::MegaDiff100k => "Synthetic mixed unified diff with 100k diff body rows.",
+            Self::MegaDiff1m => "Synthetic mixed unified diff with 1M diff body rows.",
+            Self::MegaDiff10m => "Synthetic mixed unified diff with 10M diff body rows.",
+            Self::MegaDiffOneHugeHunk => "Mega diff variant dominated by one huge hunk.",
+            Self::MegaDiffManyHunks => "Mega diff variant with many small hunks.",
+            Self::MegaDiffManyFiles => "Mega diff variant with many files.",
+            Self::MegaDiffBinaryHeavy => "Mega diff variant with many binary notices.",
+            Self::MegaDiffGenerated => "Mega diff variant with generated-file paths.",
+            Self::MegaDiffMinifiedLongLines => "Mega diff variant with minified long lines.",
+            Self::MegaDiffNonUtf8 => "Mega diff variant containing invalid UTF-8 payload bytes.",
             Self::SyntaxManySmallRust => "Rust many-small-file diff for syntax-enabled runs.",
             Self::SyntaxLargeRust => "Rust large-single-file diff for syntax-enabled runs.",
             Self::SyntaxMinifiedRust => {
@@ -478,10 +529,11 @@ struct MeasureOptionsReport {
     viewport_rows: usize,
     scroll_step: usize,
     max_scroll_steps: usize,
+    samples: usize,
     syntax_languages: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct MeasureRunReport {
     scenario: String,
     mode: String,
@@ -490,15 +542,47 @@ struct MeasureRunReport {
     rss_before_bytes: Option<u64>,
     rss_after_bytes: Option<u64>,
     rss_delta_bytes: Option<i128>,
+    stage_timings: Vec<StageTimingReport>,
     tui: TuiMeasureReport,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    samples: Option<MeasureSampleStats>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
+struct StageTimingReport {
+    stage: String,
+    micros: u128,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct MeasureSampleStats {
+    count: usize,
+    load_micros: U128Stats,
+    open_micros: U128Stats,
+    grep_filter_micros: U128Stats,
+    random_scroll_max_micros: U128Stats,
+    rss_delta_bytes_max: Option<i128>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct U128Stats {
+    p50: u128,
+    p95: u128,
+    max: u128,
+}
+
+#[derive(Debug, Clone, Serialize)]
 struct TuiMeasureReport {
     syntax_enabled: bool,
     row_count: usize,
     file_count: usize,
     hunk_count: usize,
+    changeset_estimated_memory_bytes: usize,
+    ui_model_estimated_memory_bytes: usize,
+    search_index_estimated_memory_bytes: usize,
+    inline_cache_entries: usize,
+    diff_cache_entries: usize,
+    syntax_cache_estimated_memory_bytes: usize,
     open_micros: u128,
     file_filter_micros: u128,
     legacy_file_filter_micros: u128,
@@ -519,19 +603,32 @@ struct TuiMeasureReport {
     warm_scroll_total_micros: u128,
     warm_scroll_max_micros: u128,
     warm_scroll_avg_micros: u128,
+    random_scroll_steps: usize,
+    random_scroll_total_micros: u128,
+    random_scroll_max_micros: u128,
+    random_scroll_avg_micros: u128,
     warm_cache_hits: u64,
     warm_cache_misses: u64,
     warm_cache_hit_rate: Option<f64>,
     syntax: SyntaxMeasureReport,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct SyntaxMeasureReport {
     queue_requests: u64,
     jobs_queued: u64,
+    hunk_jobs_queued: u64,
+    full_file_jobs_queued: u64,
     jobs_completed: u64,
     jobs_failed: u64,
     jobs_skipped: u64,
+    skips_invalid_position: u64,
+    skips_no_path: u64,
+    skips_no_language: u64,
+    skips_no_source: u64,
+    skips_too_large: u64,
+    skips_queue_closed: u64,
+    skips_highlight_error: u64,
     jobs_rejected: u64,
     jobs_evicted: u64,
     stale_results: u64,
@@ -542,6 +639,21 @@ struct SyntaxMeasureReport {
     source_bytes_queued: u64,
     source_lines_queued: u64,
     estimated_memory_peak_bytes: u64,
+    first_visible_latency_micros: Option<u128>,
+    latency_buckets: Vec<SyntaxLatencyMeasureBucket>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SyntaxLatencyMeasureBucket {
+    language: String,
+    source_kind: String,
+    jobs: u64,
+    queue_latency_total_micros: u128,
+    queue_latency_max_micros: u128,
+    queue_latency_avg_micros: u128,
+    run_latency_total_micros: u128,
+    run_latency_max_micros: u128,
+    run_latency_avg_micros: u128,
 }
 
 #[derive(Debug, Serialize)]
@@ -620,7 +732,9 @@ trait DiffBenchmarkSelection {
     fn viewport_rows(&self) -> usize;
     fn scroll_step(&self) -> usize;
     fn max_scroll_steps(&self) -> usize;
+    fn samples(&self) -> usize;
     fn json(&self) -> bool;
+    fn assert_max_rss_ratio(&self) -> Option<f64>;
 }
 
 impl DiffBenchmarkSelection for MeasureRepoArgs {
@@ -644,8 +758,16 @@ impl DiffBenchmarkSelection for MeasureRepoArgs {
         self.max_scroll_steps
     }
 
+    fn samples(&self) -> usize {
+        self.samples
+    }
+
     fn json(&self) -> bool {
         self.json
+    }
+
+    fn assert_max_rss_ratio(&self) -> Option<f64> {
+        self.assert_max_rss_ratio
     }
 }
 
@@ -670,8 +792,16 @@ impl DiffBenchmarkSelection for MeasurePatchArgs {
         self.max_scroll_steps
     }
 
+    fn samples(&self) -> usize {
+        self.samples
+    }
+
     fn json(&self) -> bool {
         self.json
+    }
+
+    fn assert_max_rss_ratio(&self) -> Option<f64> {
+        self.assert_max_rss_ratio
     }
 }
 
@@ -693,22 +823,24 @@ fn measure_fixtures(args: MeasureArgs) -> BenchResult<()> {
     for scenario in scenarios {
         let scenario_dir = args.fixtures.join(scenario.name());
         let manifest = load_manifest(&scenario_dir)?;
-        runs.push(measure_fixture_run(
+        runs.push(measure_fixture_run_sampled(
             scenario,
             "plain",
             &scenario_dir,
             &manifest,
             None,
             options,
+            args.samples,
         )?);
         if !syntax_languages.is_empty() {
-            runs.push(measure_fixture_run(
+            runs.push(measure_fixture_run_sampled(
                 scenario,
                 "syntax",
                 &scenario_dir,
                 &manifest,
                 Some(syntax_languages.clone()),
                 options,
+                args.samples,
             )?);
         }
     }
@@ -721,10 +853,15 @@ fn measure_fixtures(args: MeasureArgs) -> BenchResult<()> {
             viewport_rows: options.viewport_rows,
             scroll_step: options.scroll_step,
             max_scroll_steps: options.max_scroll_steps,
+            samples: args.samples,
             syntax_languages,
         },
         runs,
     };
+
+    if let Some(max_ratio) = args.assert_max_rss_ratio {
+        assert_rss_ratio(&report, max_ratio)?;
+    }
 
     if args.json {
         println!("{}", serde_json::to_string_pretty(&report)?);
@@ -1417,22 +1554,24 @@ fn measure_one_diff_source(
     };
     let syntax_languages = selection.syntax_languages().to_vec();
     let mut runs = Vec::new();
-    runs.push(measure_diff_options_run(
+    runs.push(measure_diff_options_run_sampled(
         scenario.clone(),
         "plain",
         &diff_options,
         None,
         patch_bytes_hint,
         options,
+        selection.samples(),
     )?);
     if !syntax_languages.is_empty() {
-        runs.push(measure_diff_options_run(
+        runs.push(measure_diff_options_run_sampled(
             scenario,
             "syntax",
             &diff_options,
             Some(syntax_languages.clone()),
             patch_bytes_hint,
             options,
+            selection.samples(),
         )?);
     }
 
@@ -1444,10 +1583,15 @@ fn measure_one_diff_source(
             viewport_rows: options.viewport_rows,
             scroll_step: options.scroll_step,
             max_scroll_steps: options.max_scroll_steps,
+            samples: selection.samples(),
             syntax_languages,
         },
         runs,
     };
+
+    if let Some(max_ratio) = selection.assert_max_rss_ratio() {
+        assert_rss_ratio(&report, max_ratio)?;
+    }
 
     if selection.json() {
         println!("{}", serde_json::to_string_pretty(&report)?);
@@ -1457,18 +1601,43 @@ fn measure_one_diff_source(
     Ok(())
 }
 
+fn assert_rss_ratio(report: &MeasureSuiteReport, max_ratio: f64) -> BenchResult<()> {
+    if !max_ratio.is_finite() || max_ratio <= 0.0 {
+        return Err(BenchError::Usage(
+            "--assert-max-rss-ratio must be a positive finite number".to_owned(),
+        ));
+    }
+    for run in &report.runs {
+        let Some(delta) = run.rss_delta_bytes else {
+            continue;
+        };
+        if delta <= 0 || run.patch_bytes == 0 {
+            continue;
+        }
+        let ratio = delta as f64 / run.patch_bytes as f64;
+        if ratio > max_ratio {
+            return Err(BenchError::Usage(format!(
+                "RSS ratio assertion failed for {} {}: {:.2} > {:.2}",
+                run.scenario, run.mode, ratio, max_ratio
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn load_manifest(scenario_dir: &Path) -> BenchResult<FixtureManifest> {
     let bytes = fs::read(scenario_dir.join("manifest.json"))?;
     Ok(serde_json::from_slice(&bytes)?)
 }
 
-fn measure_fixture_run(
+fn measure_fixture_run_sampled(
     scenario: ScenarioKind,
     mode: &'static str,
     scenario_dir: &Path,
     manifest: &FixtureManifest,
     syntax_languages: Option<Vec<String>>,
     options: mark_tui::DiffBenchmarkOptions,
+    samples: usize,
 ) -> BenchResult<MeasureRunReport> {
     let patch = scenario_dir.join(&manifest.paths.patch);
     let diff_options = mark_diff::DiffOptions {
@@ -1477,14 +1646,54 @@ fn measure_fixture_run(
         local_untracked: mark_diff::UntrackedMode::Exclude,
         output: mark_diff::DiffOutput::Patch,
     };
-    measure_diff_options_run(
+    measure_diff_options_run_sampled(
         scenario.name().to_owned(),
         mode,
         &diff_options,
         syntax_languages,
         Some(manifest.patch_bytes),
         options,
+        samples,
     )
+}
+
+fn measure_diff_options_run_sampled(
+    scenario: String,
+    mode: &str,
+    diff_options: &mark_diff::DiffOptions,
+    syntax_languages: Option<Vec<String>>,
+    patch_bytes_hint: Option<u64>,
+    options: mark_tui::DiffBenchmarkOptions,
+    samples: usize,
+) -> BenchResult<MeasureRunReport> {
+    if samples <= 1 {
+        return measure_diff_options_run(
+            scenario,
+            mode,
+            diff_options,
+            syntax_languages,
+            patch_bytes_hint,
+            options,
+        );
+    }
+
+    let mut reports = Vec::with_capacity(samples);
+    for _ in 0..samples {
+        reports.push(measure_diff_options_run(
+            scenario.clone(),
+            mode,
+            diff_options,
+            syntax_languages.clone(),
+            patch_bytes_hint,
+            options,
+        )?);
+    }
+    let mut report = reports
+        .last()
+        .cloned()
+        .expect("at least one sample was recorded");
+    report.samples = Some(sample_stats(&reports));
+    Ok(report)
 }
 
 fn measure_diff_options_run(
@@ -1500,8 +1709,13 @@ fn measure_diff_options_run(
     let load_micros = load_start.elapsed().as_micros();
 
     let rss_before = current_rss_bytes();
-    let tui = mark_tui::benchmark_diff_view(changeset, syntax_languages, options);
+    let tui = tui_report(mark_tui::benchmark_diff_view(
+        changeset,
+        syntax_languages,
+        options,
+    ));
     let rss_after = current_rss_bytes();
+    let stage_timings = stage_timings(load_micros, &tui);
 
     Ok(MeasureRunReport {
         scenario,
@@ -1513,8 +1727,90 @@ fn measure_diff_options_run(
         rss_delta_bytes: rss_before
             .zip(rss_after)
             .map(|(before, after)| after as i128 - before as i128),
-        tui: tui_report(tui),
+        stage_timings,
+        tui,
+        samples: None,
     })
+}
+
+fn stage_timings(load_micros: u128, tui: &TuiMeasureReport) -> Vec<StageTimingReport> {
+    let mut stages = vec![
+        ("git_read_parse", load_micros),
+        ("open_model", tui.open_micros),
+        ("file_filter_search", tui.file_filter_micros),
+        ("grep_filter_search", tui.grep_filter_micros),
+        ("file_filter_apply", tui.file_filter_apply_micros),
+        ("grep_filter_apply", tui.grep_filter_apply_micros),
+        ("hunk_navigation", tui.hunk_navigation_total_micros),
+        ("initial_render", tui.initial_render_micros),
+        ("cold_scroll", tui.cold_scroll_total_micros),
+        ("warm_scroll", tui.warm_scroll_total_micros),
+        ("random_scroll", tui.random_scroll_total_micros),
+    ];
+    if let Some(syntax_settle_micros) = tui.syntax_settle_micros {
+        stages.push(("syntax_settle", syntax_settle_micros));
+    }
+    stages
+        .into_iter()
+        .map(|(stage, micros)| StageTimingReport {
+            stage: stage.to_owned(),
+            micros,
+        })
+        .collect()
+}
+
+fn sample_stats(reports: &[MeasureRunReport]) -> MeasureSampleStats {
+    MeasureSampleStats {
+        count: reports.len(),
+        load_micros: stats_u128(reports.iter().map(|report| report.load_micros).collect()),
+        open_micros: stats_u128(
+            reports
+                .iter()
+                .map(|report| report.tui.open_micros)
+                .collect(),
+        ),
+        grep_filter_micros: stats_u128(
+            reports
+                .iter()
+                .map(|report| report.tui.grep_filter_micros)
+                .collect(),
+        ),
+        random_scroll_max_micros: stats_u128(
+            reports
+                .iter()
+                .map(|report| report.tui.random_scroll_max_micros)
+                .collect(),
+        ),
+        rss_delta_bytes_max: reports
+            .iter()
+            .filter_map(|report| report.rss_delta_bytes)
+            .max(),
+    }
+}
+
+fn stats_u128(mut values: Vec<u128>) -> U128Stats {
+    values.sort_unstable();
+    let len = values.len();
+    U128Stats {
+        p50: percentile_sorted(&values, 50),
+        p95: percentile_sorted(&values, 95),
+        max: values
+            .get(len.saturating_sub(1))
+            .copied()
+            .unwrap_or_default(),
+    }
+}
+
+fn percentile_sorted(values: &[u128], percentile: usize) -> u128 {
+    if values.is_empty() {
+        return 0;
+    }
+    let rank = values
+        .len()
+        .saturating_sub(1)
+        .saturating_mul(percentile)
+        .div_ceil(100);
+    values[rank.min(values.len() - 1)]
 }
 
 fn load_benchmark_changeset(
@@ -1541,6 +1837,12 @@ fn tui_report(report: mark_tui::DiffBenchmarkReport) -> TuiMeasureReport {
         row_count: report.row_count,
         file_count: report.file_count,
         hunk_count: report.hunk_count,
+        changeset_estimated_memory_bytes: report.changeset_estimated_memory_bytes,
+        ui_model_estimated_memory_bytes: report.ui_model_estimated_memory_bytes,
+        search_index_estimated_memory_bytes: report.search_index_estimated_memory_bytes,
+        inline_cache_entries: report.inline_cache_entries,
+        diff_cache_entries: report.diff_cache_entries,
+        syntax_cache_estimated_memory_bytes: report.syntax_cache_estimated_memory_bytes,
         open_micros: report.open_micros,
         file_filter_micros: report.file_filter_micros,
         legacy_file_filter_micros: report.legacy_file_filter_micros,
@@ -1567,6 +1869,13 @@ fn tui_report(report: mark_tui::DiffBenchmarkReport) -> TuiMeasureReport {
             report.warm_scroll_total_micros,
             report.warm_scroll_steps,
         ),
+        random_scroll_steps: report.random_scroll_steps,
+        random_scroll_total_micros: report.random_scroll_total_micros,
+        random_scroll_max_micros: report.random_scroll_max_micros,
+        random_scroll_avg_micros: average_micros(
+            report.random_scroll_total_micros,
+            report.random_scroll_steps,
+        ),
         warm_cache_hits: report.warm_cache_hits,
         warm_cache_misses: report.warm_cache_misses,
         warm_cache_hit_rate: (warm_cache_total > 0)
@@ -1579,9 +1888,18 @@ fn syntax_report(report: mark_tui::SyntaxBenchmarkReport) -> SyntaxMeasureReport
     SyntaxMeasureReport {
         queue_requests: report.queue_requests,
         jobs_queued: report.jobs_queued,
+        hunk_jobs_queued: report.hunk_jobs_queued,
+        full_file_jobs_queued: report.full_file_jobs_queued,
         jobs_completed: report.jobs_completed,
         jobs_failed: report.jobs_failed,
         jobs_skipped: report.jobs_skipped,
+        skips_invalid_position: report.skips_invalid_position,
+        skips_no_path: report.skips_no_path,
+        skips_no_language: report.skips_no_language,
+        skips_no_source: report.skips_no_source,
+        skips_too_large: report.skips_too_large,
+        skips_queue_closed: report.skips_queue_closed,
+        skips_highlight_error: report.skips_highlight_error,
         jobs_rejected: report.jobs_rejected,
         jobs_evicted: report.jobs_evicted,
         stale_results: report.stale_results,
@@ -1592,6 +1910,28 @@ fn syntax_report(report: mark_tui::SyntaxBenchmarkReport) -> SyntaxMeasureReport
         source_bytes_queued: report.source_bytes_queued,
         source_lines_queued: report.source_lines_queued,
         estimated_memory_peak_bytes: report.estimated_memory_peak_bytes,
+        first_visible_latency_micros: report.first_visible_latency_micros,
+        latency_buckets: report
+            .latency_buckets
+            .into_iter()
+            .map(|bucket| SyntaxLatencyMeasureBucket {
+                queue_latency_avg_micros: average_micros(
+                    bucket.queue_latency_total_micros,
+                    bucket.jobs as usize,
+                ),
+                run_latency_avg_micros: average_micros(
+                    bucket.run_latency_total_micros,
+                    bucket.jobs as usize,
+                ),
+                language: bucket.language,
+                source_kind: bucket.source_kind,
+                jobs: bucket.jobs,
+                queue_latency_total_micros: bucket.queue_latency_total_micros,
+                queue_latency_max_micros: bucket.queue_latency_max_micros,
+                run_latency_total_micros: bucket.run_latency_total_micros,
+                run_latency_max_micros: bucket.run_latency_max_micros,
+            })
+            .collect(),
     }
 }
 
@@ -1785,6 +2125,85 @@ fn generate_scenario(
                 file_count: 500,
                 lines: 160,
                 extension: "ts",
+            },
+        )?,
+        ScenarioKind::MegaDiff100k => {
+            generate_mega_diff_scenario(&scenario_dir, scenario, MegaDiffShape::tier(100_000))?
+        }
+        ScenarioKind::MegaDiff1m => {
+            generate_mega_diff_scenario(&scenario_dir, scenario, MegaDiffShape::tier(1_000_000))?
+        }
+        ScenarioKind::MegaDiff10m => {
+            generate_mega_diff_scenario(&scenario_dir, scenario, MegaDiffShape::tier(10_000_000))?
+        }
+        ScenarioKind::MegaDiffOneHugeHunk => generate_mega_diff_scenario(
+            &scenario_dir,
+            scenario,
+            MegaDiffShape {
+                rows: 1_000_000,
+                file_target_rows: 1_000_000,
+                hunk_target_rows: 1_000_000,
+                variant: MegaDiffVariant::Text,
+            },
+        )?,
+        ScenarioKind::MegaDiffManyHunks => generate_mega_diff_scenario(
+            &scenario_dir,
+            scenario,
+            MegaDiffShape {
+                rows: 1_000_000,
+                file_target_rows: 10_000,
+                hunk_target_rows: 64,
+                variant: MegaDiffVariant::Text,
+            },
+        )?,
+        ScenarioKind::MegaDiffManyFiles => generate_mega_diff_scenario(
+            &scenario_dir,
+            scenario,
+            MegaDiffShape {
+                rows: 1_000_000,
+                file_target_rows: 256,
+                hunk_target_rows: 128,
+                variant: MegaDiffVariant::Text,
+            },
+        )?,
+        ScenarioKind::MegaDiffBinaryHeavy => generate_mega_diff_scenario(
+            &scenario_dir,
+            scenario,
+            MegaDiffShape {
+                rows: 250_000,
+                file_target_rows: 512,
+                hunk_target_rows: 128,
+                variant: MegaDiffVariant::BinaryHeavy,
+            },
+        )?,
+        ScenarioKind::MegaDiffGenerated => generate_mega_diff_scenario(
+            &scenario_dir,
+            scenario,
+            MegaDiffShape {
+                rows: 1_000_000,
+                file_target_rows: 4_096,
+                hunk_target_rows: 512,
+                variant: MegaDiffVariant::Generated,
+            },
+        )?,
+        ScenarioKind::MegaDiffMinifiedLongLines => generate_mega_diff_scenario(
+            &scenario_dir,
+            scenario,
+            MegaDiffShape {
+                rows: 100_000,
+                file_target_rows: 512,
+                hunk_target_rows: 128,
+                variant: MegaDiffVariant::LongLines,
+            },
+        )?,
+        ScenarioKind::MegaDiffNonUtf8 => generate_mega_diff_scenario(
+            &scenario_dir,
+            scenario,
+            MegaDiffShape {
+                rows: 100_000,
+                file_target_rows: 4_096,
+                hunk_target_rows: 512,
+                variant: MegaDiffVariant::NonUtf8,
             },
         )?,
         ScenarioKind::SyntaxManySmallRust => generate_tracked_text_scenario(
@@ -2014,6 +2433,190 @@ fn generate_binary_scenario(
         &repo,
         &[PathBuf::from("bin/new-untracked.dat")],
     )
+}
+
+#[derive(Debug, Clone, Copy)]
+struct MegaDiffShape {
+    rows: usize,
+    file_target_rows: usize,
+    hunk_target_rows: usize,
+    variant: MegaDiffVariant,
+}
+
+impl MegaDiffShape {
+    fn tier(rows: usize) -> Self {
+        Self {
+            rows,
+            file_target_rows: 4_096,
+            hunk_target_rows: 4_096,
+            variant: MegaDiffVariant::Text,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MegaDiffVariant {
+    Text,
+    BinaryHeavy,
+    Generated,
+    LongLines,
+    NonUtf8,
+}
+
+fn generate_mega_diff_scenario(
+    scenario_dir: &Path,
+    scenario: ScenarioKind,
+    shape: MegaDiffShape,
+) -> BenchResult<FixtureManifest> {
+    fs::create_dir_all(scenario_dir.join("repo"))?;
+    fs::create_dir_all(scenario_dir.join("pair"))?;
+    write_file(&scenario_dir.join("pair/before.ts"), b"before\n")?;
+    write_file(&scenario_dir.join("pair/after.ts"), b"after\n")?;
+
+    let mut patch = Vec::new();
+    let mut remaining = shape.rows;
+    let mut file_index = 0usize;
+    let mut additions = 0usize;
+    let mut deletions = 0usize;
+    let mut binary_files = 0usize;
+    while remaining > 0 {
+        file_index += 1;
+        if shape.variant == MegaDiffVariant::BinaryHeavy && file_index.is_multiple_of(3) {
+            let path = mega_diff_path(file_index, shape.variant);
+            append_mega_line(&mut patch, format_args!("diff --git a/{path} b/{path}\n"));
+            append_mega_line(&mut patch, &b"Binary files a/blob and b/blob differ\n"[..]);
+            binary_files = binary_files.saturating_add(1);
+            continue;
+        }
+
+        let path = mega_diff_path(file_index, shape.variant);
+        append_mega_line(&mut patch, format_args!("diff --git a/{path} b/{path}\n"));
+        append_mega_line(&mut patch, format_args!("--- a/{path}\n"));
+        append_mega_line(&mut patch, format_args!("+++ b/{path}\n"));
+        let mut file_rows = remaining.min(shape.file_target_rows.max(1));
+        let mut old_line = 1usize;
+        let mut new_line = 1usize;
+        while file_rows > 0 {
+            let hunk_rows = file_rows.min(shape.hunk_target_rows.max(1));
+            let (old_count, new_count) = mega_hunk_counts(hunk_rows);
+            append_mega_line(
+                &mut patch,
+                format_args!("@@ -{old_line},{old_count} +{new_line},{new_count} @@\n"),
+            );
+            for row in 0..hunk_rows {
+                match row % 5 {
+                    0 => {
+                        append_mega_diff_body(&mut patch, b'-', file_index, row, shape.variant);
+                        deletions = deletions.saturating_add(1);
+                    }
+                    1 => {
+                        append_mega_diff_body(&mut patch, b'+', file_index, row, shape.variant);
+                        additions = additions.saturating_add(1);
+                    }
+                    _ => append_mega_diff_body(&mut patch, b' ', file_index, row, shape.variant),
+                }
+            }
+            old_line = old_line.saturating_add(old_count);
+            new_line = new_line.saturating_add(new_count);
+            remaining = remaining.saturating_sub(hunk_rows);
+            file_rows = file_rows.saturating_sub(hunk_rows);
+        }
+    }
+
+    write_file(&scenario_dir.join("patch.diff"), &patch)?;
+    write_file(&scenario_dir.join("head.patch"), &patch)?;
+    let counts = FixtureCounts {
+        tracked_files: file_index,
+        binary_files,
+        expected_text_additions: additions,
+        expected_text_deletions: deletions,
+        ..FixtureCounts::default()
+    };
+    let manifest = FixtureManifest {
+        version: 1,
+        scenario: scenario.name().to_owned(),
+        description: scenario.description().to_owned(),
+        paths: FixturePaths {
+            repo: "repo".to_owned(),
+            patch: "patch.diff".to_owned(),
+            head_patch: "head.patch".to_owned(),
+            pair_before: "pair/before.ts".to_owned(),
+            pair_after: "pair/after.ts".to_owned(),
+        },
+        counts,
+        patch_bytes: patch.len() as u64,
+        head_patch_bytes: patch.len() as u64,
+    };
+    Ok(manifest)
+}
+
+fn mega_hunk_counts(rows: usize) -> (usize, usize) {
+    let deletions = rows.div_ceil(5);
+    let additions = rows.saturating_sub(1).div_ceil(5);
+    let context = rows.saturating_sub(deletions).saturating_sub(additions);
+    (
+        context.saturating_add(deletions),
+        context.saturating_add(additions),
+    )
+}
+
+fn mega_diff_path(index: usize, variant: MegaDiffVariant) -> String {
+    match variant {
+        MegaDiffVariant::Generated => format!("generated/chunk_{index}.ts"),
+        MegaDiffVariant::LongLines => format!("minified/bundle_{index}.js"),
+        MegaDiffVariant::NonUtf8 => format!("binaryish/file_{index}.txt"),
+        _ => format!("src/file_{index}.ts"),
+    }
+}
+
+fn append_mega_diff_body(
+    patch: &mut Vec<u8>,
+    prefix: u8,
+    file_index: usize,
+    row: usize,
+    variant: MegaDiffVariant,
+) {
+    patch.push(prefix);
+    match variant {
+        MegaDiffVariant::LongLines => {
+            patch.extend_from_slice(b"const minified = '");
+            for _ in 0..256 {
+                patch.extend_from_slice(b"abcdefghijklmnopqrstuvwxyz0123456789");
+            }
+            append_mega_line(patch, format_args!("{file_index}_{row}';\n"));
+        }
+        MegaDiffVariant::NonUtf8 if row.is_multiple_of(17) => {
+            patch.extend_from_slice(b"non utf8 payload ");
+            patch.extend_from_slice(&[0xff, 0xfe, b' ', b'x', b'\n']);
+        }
+        _ => append_mega_line(
+            patch,
+            format_args!(
+                "export function file_{file_index}_row_{row}(value: number) {{ return value + {row}; }}\n"
+            ),
+        ),
+    }
+}
+
+fn append_mega_line(target: &mut Vec<u8>, line: impl MegaAppend) {
+    line.append_to(target);
+}
+
+trait MegaAppend {
+    fn append_to(self, target: &mut Vec<u8>);
+}
+
+impl MegaAppend for std::fmt::Arguments<'_> {
+    fn append_to(self, target: &mut Vec<u8>) {
+        use std::io::Write as _;
+        let _ = target.write_fmt(self);
+    }
+}
+
+impl MegaAppend for &[u8] {
+    fn append_to(self, target: &mut Vec<u8>) {
+        target.extend_from_slice(self);
+    }
 }
 
 fn create_text_repo(scenario_dir: &Path, shape: TextShape) -> BenchResult<PathBuf> {

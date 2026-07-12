@@ -138,7 +138,7 @@ fn grep_match_stays_centered_after_viewport_rows_are_known() {
 
 #[test]
 fn queue_close_wakes_blocked_pop() {
-    let queue = SyntaxWorkerQueue::new(8, 0);
+    let queue = SyntaxWorkerQueue::new(8, 0, usize::MAX);
     let worker_queue = queue.clone();
     let worker = thread::spawn(move || worker_queue.pop());
 

@@ -21,6 +21,7 @@ pub(crate) struct SyntaxWorkerQueueInner {
     pub(crate) state: Mutex<SyntaxWorkerQueueState>,
     pub(crate) ready: Condvar,
     pub(crate) capacity: usize,
+    pub(crate) capacity_bytes: u64,
 }
 
 #[derive(Debug)]
@@ -28,12 +29,15 @@ pub(crate) struct SyntaxWorkerQueueState {
     pub(crate) generation: u64,
     pub(crate) visible: VecDeque<SyntaxJob>,
     pub(crate) prefetch: VecDeque<SyntaxJob>,
+    pub(crate) queued_bytes: u64,
     pub(crate) closed: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SyntaxQueuePush {
     pub(crate) dropped: Option<SyntaxKey>,
+    pub(crate) dropped_more: Vec<SyntaxKey>,
+    pub(crate) dropped_overflow: bool,
     pub(crate) depth: usize,
 }
 
@@ -45,17 +49,19 @@ pub(crate) enum SyntaxQueueError {
 }
 
 impl SyntaxWorkerQueue {
-    pub(crate) fn new(capacity: usize, generation: u64) -> Self {
+    pub(crate) fn new(capacity: usize, generation: u64, capacity_bytes: usize) -> Self {
         Self {
             inner: Arc::new(SyntaxWorkerQueueInner {
                 state: Mutex::new(SyntaxWorkerQueueState {
                     generation,
                     visible: VecDeque::new(),
                     prefetch: VecDeque::new(),
+                    queued_bytes: 0,
                     closed: false,
                 }),
                 ready: Condvar::new(),
                 capacity,
+                capacity_bytes: capacity_bytes as u64,
             }),
         }
     }
@@ -81,13 +87,24 @@ impl SyntaxWorkerQueue {
         }
 
         let mut dropped = None;
-        if state.len() >= self.inner.capacity {
+        let mut dropped_more = Vec::new();
+        while state.len() >= self.inner.capacity
+            || state.queued_bytes.saturating_add(job.queued_source_bytes)
+                > self.inner.capacity_bytes
+        {
             match priority {
                 SyntaxPriority::Visible => {
                     let Some(evicted) = state.prefetch.pop_back() else {
                         return Err(SyntaxQueueError::Full);
                     };
-                    dropped = Some(evicted.key);
+                    state.queued_bytes = state
+                        .queued_bytes
+                        .saturating_sub(evicted.queued_source_bytes);
+                    if dropped.is_none() {
+                        dropped = Some(evicted.key);
+                    } else {
+                        dropped_more.push(evicted.key);
+                    }
                 }
                 SyntaxPriority::Prefetch => return Err(SyntaxQueueError::Full),
             }
@@ -97,9 +114,21 @@ impl SyntaxWorkerQueue {
             SyntaxPriority::Visible => state.visible.push_back(job),
             SyntaxPriority::Prefetch => state.prefetch.push_back(job),
         }
+        let queued = match priority {
+            SyntaxPriority::Visible => state.visible.back(),
+            SyntaxPriority::Prefetch => state.prefetch.back(),
+        }
+        .map(|job| job.queued_source_bytes)
+        .unwrap_or_default();
+        state.queued_bytes = state.queued_bytes.saturating_add(queued);
         let depth = state.len();
         self.inner.ready.notify_one();
-        Ok(SyntaxQueuePush { dropped, depth })
+        Ok(SyntaxQueuePush {
+            dropped,
+            dropped_more,
+            dropped_overflow: false,
+            depth,
+        })
     }
 
     pub(crate) fn promote(&self, key: SyntaxKey) -> bool {
@@ -132,6 +161,12 @@ impl SyntaxWorkerQueue {
         state
             .prefetch
             .retain(|job| job.key.generation() == generation);
+        state.queued_bytes = state
+            .visible
+            .iter()
+            .chain(state.prefetch.iter())
+            .map(|job| job.queued_source_bytes)
+            .sum();
         self.inner.ready.notify_all();
     }
 
@@ -147,6 +182,7 @@ impl SyntaxWorkerQueue {
                 .pop_front()
                 .or_else(|| state.prefetch.pop_front());
             if let Some(job) = job {
+                state.queued_bytes = state.queued_bytes.saturating_sub(job.queued_source_bytes);
                 if job.key.generation() == state.generation {
                     return Some(job);
                 }
@@ -164,6 +200,7 @@ impl SyntaxWorkerQueue {
         state.closed = true;
         state.visible.clear();
         state.prefetch.clear();
+        state.queued_bytes = 0;
         self.inner.ready.notify_all();
     }
 

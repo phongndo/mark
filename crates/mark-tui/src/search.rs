@@ -1,17 +1,19 @@
-use std::{collections::HashSet, io};
+use std::collections::HashSet;
 
-use fff_grep::{LineTerminator, Match, Matcher, NoError, Searcher, Sink, SinkMatch};
-use mark_diff::{Changeset, DiffLine};
+use fff_grep::{LineTerminator, Match, Matcher, NoError};
+use mark_diff::Changeset;
 use memchr::{memchr, memchr2, memmem};
 
 use crate::{
     controls::diff_line_grep_prefix,
-    model::{DiffLineIndex, FileIndex, HunkIndex, ModelRow, UiModel, UiRow},
+    model::{DiffLineIndex, FileIndex, HunkIndex, ModelRow, UiModel},
     render::{
         headers::normalized_hunk_header_text,
-        text::{display_width, terminal_text},
+        text::{display_width, terminal_text_cow},
     },
 };
+
+const MAX_EAGER_SEARCH_WIDTH_LINES: usize = 200_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum SearchLineRef {
@@ -66,32 +68,31 @@ impl SearchMatchIndex {
 #[derive(Debug, Clone)]
 pub(crate) struct DiffSearchIndex {
     files: Vec<FileSearchIndex>,
-    searcher: Searcher,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct FileSearchIndex {
     filter_texts: Vec<String>,
-    grep_text: Vec<u8>,
-    grep_lines: Vec<SearchLineRef>,
-    max_line_width: usize,
+    max_line_width: Option<usize>,
 }
 
 impl DiffSearchIndex {
     pub(crate) fn empty() -> Self {
-        Self {
-            files: Vec::new(),
-            searcher: Searcher::new(),
-        }
+        Self { files: Vec::new() }
     }
 
     pub(crate) fn new(changeset: &Changeset) -> Self {
+        let compute_widths = changeset
+            .files
+            .iter()
+            .flat_map(|file| file.hunks())
+            .map(|hunk| hunk.lines.len())
+            .sum::<usize>()
+            <= MAX_EAGER_SEARCH_WIDTH_LINES;
         let files = changeset
             .files
             .iter()
-            .enumerate()
-            .map(|(file_index, file)| {
-                let file_index = FileIndex::new(file_index);
+            .map(|file| {
                 let mut filter_texts = Vec::with_capacity(4);
                 filter_texts.push(file.display_path().to_ascii_lowercase());
                 if let Some(old_path) = file.old_path()
@@ -106,87 +107,40 @@ impl DiffSearchIndex {
                 }
                 filter_texts.push(file.status().label().to_ascii_lowercase());
 
-                let grep_line_count = file
-                    .hunks()
-                    .iter()
-                    .map(|hunk| hunk.lines.len().saturating_add(1))
-                    .sum::<usize>()
-                    .saturating_add(usize::from(
-                        file.is_binary() || file.has_no_textual_changes(),
-                    ));
-                let grep_text_bytes = file
-                    .hunks()
-                    .iter()
-                    .map(|hunk| {
-                        hunk.header.len().saturating_add(1).saturating_add(
-                            hunk.lines
-                                .iter()
-                                .map(|line| line.text().len().saturating_add(2))
-                                .sum::<usize>(),
-                        )
-                    })
-                    .sum::<usize>();
-                let mut grep_text = Vec::with_capacity(grep_text_bytes);
-                let mut grep_lines = Vec::with_capacity(grep_line_count);
-                let mut max_line_width = 0usize;
-
-                for (hunk_index, hunk) in file.hunks().iter().enumerate() {
-                    let hunk_index = HunkIndex::new(hunk_index);
-                    push_search_line(
-                        &mut grep_text,
-                        &mut grep_lines,
-                        SearchLineRef::hunk_header(file_index, hunk_index),
-                        normalized_hunk_header_text(&hunk.header).as_bytes(),
-                    );
-                    for (line_index, line) in hunk.lines.iter().enumerate() {
-                        let line_index = DiffLineIndex::new(line_index);
-                        max_line_width = max_line_width.max(display_width(line.text()));
-                        push_diff_line_search_line(
-                            &mut grep_text,
-                            &mut grep_lines,
-                            SearchLineRef::diff_line(file_index, hunk_index, line_index),
-                            line,
-                        );
+                let max_line_width = if compute_widths {
+                    let mut max_line_width = 0usize;
+                    for hunk in file.hunks() {
+                        for line in &hunk.lines {
+                            max_line_width = max_line_width.max(display_width(&line.text_lossy()));
+                        }
                     }
-                }
-
-                if file.is_binary() {
-                    push_search_line(
-                        &mut grep_text,
-                        &mut grep_lines,
-                        SearchLineRef::file_body(file_index),
-                        b"binary file",
-                    );
-                } else if file.has_no_textual_changes() {
-                    push_search_line(
-                        &mut grep_text,
-                        &mut grep_lines,
-                        SearchLineRef::file_body(file_index),
-                        b"no textual changes",
-                    );
-                }
+                    Some(max_line_width)
+                } else {
+                    None
+                };
 
                 FileSearchIndex {
                     filter_texts,
-                    grep_text,
-                    grep_lines,
                     max_line_width,
                 }
             })
             .collect();
 
-        Self {
-            files,
-            searcher: Searcher::new(),
-        }
+        Self { files }
     }
 
-    pub(crate) fn search(&self, file_filter: &str, grep_filter: &str) -> DiffSearchResult {
-        self.search_with_grep_match_limit(file_filter, grep_filter, usize::MAX)
+    pub(crate) fn search(
+        &self,
+        changeset: &Changeset,
+        file_filter: &str,
+        grep_filter: &str,
+    ) -> DiffSearchResult {
+        self.search_with_grep_match_limit(changeset, file_filter, grep_filter, usize::MAX)
     }
 
     pub(crate) fn search_with_grep_match_limit(
         &self,
+        changeset: &Changeset,
         file_filter: &str,
         grep_filter: &str,
         max_grep_matches: usize,
@@ -209,32 +163,21 @@ impl DiffSearchIndex {
             };
 
             let remaining_matches = max_grep_matches.saturating_sub(grep_matches.len());
-            if remaining_matches == 0 {
-                let mut sink = FirstMatchSink { matched: false };
-                self.searcher
-                    .search_slice(matcher, &file.grep_text, &mut sink)
-                    .expect("in-memory diff grep should not fail");
-                if sink.matched {
-                    visible_files.push(file_index);
-                    grep_matches_truncated = true;
-                }
-                continue;
-            }
-
-            let mut sink = LineRefSink {
-                line_refs: &file.grep_lines,
+            let file_diff = changeset.files.get(file_index.get());
+            let mut sink = FileSearchSink {
+                matcher,
                 matches: Vec::new(),
                 match_limit: remaining_matches,
-                truncated: false,
-                last_match: None,
+                truncated: remaining_matches == 0,
+                matched_after_limit: false,
             };
-            self.searcher
-                .search_slice(matcher, &file.grep_text, &mut sink)
-                .expect("in-memory diff grep should not fail");
-            if !sink.matches.is_empty() {
+            if let Some(file_diff) = file_diff {
+                sink.search_file(file_index, file_diff);
+            }
+            if !sink.matches.is_empty() || sink.matched_after_limit {
                 visible_files.push(file_index);
                 grep_matches.extend(sink.matches);
-                grep_matches_truncated |= sink.truncated;
+                grep_matches_truncated |= sink.truncated || sink.matched_after_limit;
             }
         }
 
@@ -248,7 +191,7 @@ impl DiffSearchIndex {
     pub(crate) fn max_line_width(&self) -> usize {
         self.files
             .iter()
-            .map(|file| file.max_line_width)
+            .filter_map(|file| file.max_line_width)
             .max()
             .unwrap_or_default()
     }
@@ -257,9 +200,21 @@ impl DiffSearchIndex {
         files
             .iter()
             .filter_map(|file| self.files.get(file.get()))
-            .map(|file| file.max_line_width)
+            .filter_map(|file| file.max_line_width)
             .max()
             .unwrap_or_default()
+    }
+
+    pub(crate) fn estimated_memory_bytes(&self) -> usize {
+        self.files
+            .len()
+            .saturating_mul(std::mem::size_of::<FileSearchIndex>())
+            .saturating_add(
+                self.files
+                    .iter()
+                    .map(FileSearchIndex::estimated_memory_bytes)
+                    .sum::<usize>(),
+            )
     }
 }
 
@@ -271,30 +226,13 @@ impl FileSearchIndex {
                 .iter()
                 .any(|text| file_match_score(query, text).is_some())
     }
-}
 
-fn push_search_line(
-    grep_text: &mut Vec<u8>,
-    grep_lines: &mut Vec<SearchLineRef>,
-    line_ref: SearchLineRef,
-    text: &[u8],
-) {
-    grep_lines.push(line_ref);
-    grep_text.extend_from_slice(text);
-    grep_text.push(b'\n');
-}
-
-fn push_diff_line_search_line(
-    grep_text: &mut Vec<u8>,
-    grep_lines: &mut Vec<SearchLineRef>,
-    line_ref: SearchLineRef,
-    line: &DiffLine,
-) {
-    let text = terminal_text(line.text());
-    grep_lines.push(line_ref);
-    grep_text.push(diff_line_grep_prefix(line.kind()) as u8);
-    grep_text.extend_from_slice(text.as_bytes());
-    grep_text.push(b'\n');
+    fn estimated_memory_bytes(&self) -> usize {
+        self.filter_texts
+            .len()
+            .saturating_mul(std::mem::size_of::<String>())
+            .saturating_add(self.filter_texts.iter().map(String::len).sum::<usize>())
+    }
 }
 
 fn file_match_score(query: &str, text: &str) -> Option<(usize, usize)> {
@@ -352,6 +290,36 @@ impl GrepMatcher {
                 .iter()
                 .any(|byte| byte.is_ascii_uppercase()),
         })
+    }
+
+    fn matches_prefixed(&self, prefix: u8, text: &[u8]) -> bool {
+        self.matches_at_prefixed_start(prefix, text)
+            || <&GrepMatcher as Matcher>::find_at(&self, text, 0)
+                .ok()
+                .flatten()
+                .is_some()
+    }
+
+    fn matches_at_prefixed_start(&self, prefix: u8, text: &[u8]) -> bool {
+        let query = if self.case_sensitive {
+            self.query.as_slice()
+        } else {
+            self.lowercase_query.as_slice()
+        };
+        let Some((&first, rest)) = query.split_first() else {
+            return false;
+        };
+        if !byte_equal_for_mode(prefix, first, self.case_sensitive) {
+            return false;
+        }
+        rest.len() <= text.len()
+            && bytes_equal_for_mode(&text[..rest.len()], rest, self.case_sensitive)
+    }
+
+    fn raw_prefilter_safe(&self) -> bool {
+        self.query
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
     }
 }
 
@@ -416,51 +384,143 @@ fn ascii_case_insensitive_bytes_equal(candidate: &[u8], lowercase_query: &[u8]) 
             .all(|(candidate, query)| candidate.to_ascii_lowercase() == *query)
 }
 
-#[derive(Debug)]
-struct LineRefSink<'a> {
-    line_refs: &'a [SearchLineRef],
+fn byte_equal_for_mode(candidate: u8, query: u8, case_sensitive: bool) -> bool {
+    if case_sensitive {
+        candidate == query
+    } else {
+        candidate.to_ascii_lowercase() == query
+    }
+}
+
+fn bytes_equal_for_mode(candidate: &[u8], query: &[u8], case_sensitive: bool) -> bool {
+    if case_sensitive {
+        candidate == query
+    } else {
+        ascii_case_insensitive_bytes_equal(candidate, query)
+    }
+}
+
+struct FileSearchSink<'a> {
+    matcher: &'a GrepMatcher,
     matches: Vec<SearchLineRef>,
     match_limit: usize,
     truncated: bool,
-    last_match: Option<SearchLineRef>,
+    matched_after_limit: bool,
 }
 
-impl Sink for LineRefSink<'_> {
-    type Error = io::Error;
-
-    fn matched(&mut self, _searcher: &Searcher, mat: &SinkMatch<'_>) -> Result<bool, Self::Error> {
-        if let Some(line_number) = mat.line_number()
-            && let Some(line_ref) = line_number
-                .checked_sub(1)
-                .and_then(|index| usize::try_from(index).ok())
-                .and_then(|index| self.line_refs.get(index))
-        {
-            if self.last_match == Some(*line_ref) {
-                return Ok(true);
+impl FileSearchSink<'_> {
+    fn search_file(&mut self, file_index: FileIndex, file: &mark_diff::DiffFile) {
+        for (hunk_index, hunk) in file.hunks().iter().enumerate() {
+            let hunk_index = HunkIndex::new(hunk_index);
+            let header = normalized_hunk_header_text(&hunk.header);
+            self.search_line(
+                SearchLineRef::hunk_header(file_index, hunk_index),
+                header.as_bytes(),
+            );
+            if self.done_without_need_for_visibility() {
+                return;
             }
-            self.last_match = Some(*line_ref);
-            self.matches.push(*line_ref);
-            if self.matches.len() >= self.match_limit {
-                self.truncated = true;
-                return Ok(false);
+            if !self.hunk_may_match_raw(&hunk.lines) {
+                continue;
+            }
+            for (line_index, line) in hunk.lines.iter().enumerate() {
+                let line_ref = SearchLineRef::diff_line(
+                    file_index,
+                    hunk_index,
+                    DiffLineIndex::new(line_index),
+                );
+                self.search_prefixed_line(
+                    line_ref,
+                    diff_line_grep_prefix(line.kind()) as u8,
+                    line.text_bytes(),
+                );
+                if self.done_without_need_for_visibility() {
+                    return;
+                }
             }
         }
-        Ok(true)
+
+        if file.is_binary() {
+            self.search_line(SearchLineRef::file_body(file_index), b"binary file");
+        } else if file.has_no_textual_changes() {
+            self.search_line(SearchLineRef::file_body(file_index), b"no textual changes");
+        }
+    }
+
+    fn search_line(&mut self, line_ref: SearchLineRef, text: &[u8]) {
+        if self.matcher.find_at(text, 0).ok().flatten().is_none() {
+            return;
+        }
+        if self.match_limit == 0 || self.matches.len() >= self.match_limit {
+            self.truncated = true;
+            self.matched_after_limit = true;
+            return;
+        }
+        self.matches.push(line_ref);
+        if self.matches.len() >= self.match_limit {
+            self.truncated = true;
+        }
+    }
+
+    fn search_prefixed_line(&mut self, line_ref: SearchLineRef, prefix: u8, text: &[u8]) {
+        let matched = if needs_terminal_text_for_search(text) {
+            self.matches_terminal_text(prefix, text)
+        } else {
+            self.matcher.matches_prefixed(prefix, text)
+        };
+        if !matched {
+            return;
+        }
+        if self.match_limit == 0 || self.matches.len() >= self.match_limit {
+            self.truncated = true;
+            self.matched_after_limit = true;
+            return;
+        }
+        self.matches.push(line_ref);
+        if self.matches.len() >= self.match_limit {
+            self.truncated = true;
+        }
+    }
+
+    fn matches_terminal_text(&self, prefix: u8, text: &[u8]) -> bool {
+        let text = String::from_utf8_lossy(text);
+        let text = terminal_text_cow(&text);
+        self.matcher.matches_prefixed(prefix, text.as_bytes())
+    }
+
+    fn hunk_may_match_raw(&self, lines: &[mark_diff::DiffLine]) -> bool {
+        if !self.matcher.raw_prefilter_safe() {
+            return true;
+        }
+        let Some((raw, range)) = hunk_raw_range(lines) else {
+            return true;
+        };
+        self.matcher
+            .find_at(&raw[range], 0)
+            .ok()
+            .flatten()
+            .is_some()
+    }
+
+    fn done_without_need_for_visibility(&self) -> bool {
+        self.matched_after_limit
     }
 }
 
-#[derive(Debug)]
-struct FirstMatchSink {
-    matched: bool,
+fn hunk_raw_range(
+    lines: &[mark_diff::DiffLine],
+) -> Option<(std::sync::Arc<[u8]>, std::ops::Range<usize>)> {
+    let (raw, first) = lines.first()?.text_span_range()?;
+    let (last_raw, last) = lines.last()?.text_span_range()?;
+    if !std::sync::Arc::ptr_eq(&raw, &last_raw) || first.start > last.end {
+        return None;
+    }
+    Some((raw, first.start..last.end))
 }
 
-impl Sink for FirstMatchSink {
-    type Error = io::Error;
-
-    fn matched(&mut self, _searcher: &Searcher, _mat: &SinkMatch<'_>) -> Result<bool, Self::Error> {
-        self.matched = true;
-        Ok(false)
-    }
+fn needs_terminal_text_for_search(text: &[u8]) -> bool {
+    text.iter()
+        .any(|byte| matches!(*byte, b'\t' | b'\r' | 0x00..=0x08 | 0x0b..=0x1f | 0x7f))
 }
 
 pub(crate) fn grep_match_rows(model: &UiModel, grep_matches: &[SearchLineRef]) -> Vec<ModelRow> {
@@ -468,43 +528,22 @@ pub(crate) fn grep_match_rows(model: &UiModel, grep_matches: &[SearchLineRef]) -
         return Vec::new();
     }
 
-    let matches = grep_matches.iter().copied().collect::<HashSet<_>>();
-    model
-        .rows
-        .iter()
-        .enumerate()
-        .filter_map(|(row_index, row)| {
-            row_matches_grep_refs(*row, &matches).then_some(ModelRow::new(row_index))
-        })
-        .collect()
-}
-
-fn row_matches_grep_refs(row: UiRow, matches: &HashSet<SearchLineRef>) -> bool {
-    match row {
-        UiRow::FileSeparator
-        | UiRow::FileHeader(_)
-        | UiRow::Collapsed { .. }
-        | UiRow::ContextLine { .. }
-        | UiRow::ContextHide { .. } => false,
-        UiRow::FileBodyNotice(file) => matches.contains(&SearchLineRef::file_body(file)),
-        UiRow::HunkHeader { file, hunk } => {
-            matches.contains(&SearchLineRef::hunk_header(file, hunk))
-        }
-        UiRow::UnifiedLine { file, hunk, line } | UiRow::MetaLine { file, hunk, line } => {
-            matches.contains(&SearchLineRef::diff_line(file, hunk, line))
-        }
-        UiRow::SplitLine {
-            file,
-            hunk,
-            left,
-            right,
-        } => {
-            left.is_some_and(|line| matches.contains(&SearchLineRef::diff_line(file, hunk, line)))
-                || right.is_some_and(|line| {
-                    matches.contains(&SearchLineRef::diff_line(file, hunk, line))
-                })
+    let mut rows = Vec::with_capacity(grep_matches.len());
+    let mut seen = HashSet::new();
+    for line_ref in grep_matches.iter().copied() {
+        let row = match line_ref {
+            SearchLineRef::FileBody { file } => model.file_body_notice_row(file),
+            SearchLineRef::HunkHeader { file, hunk } => model.typed_hunk_start_row(file, hunk),
+            SearchLineRef::DiffLine { file, hunk, line } => model.diff_line_row(file, hunk, line),
+        };
+        if let Some(row) = row
+            && seen.insert(row)
+        {
+            rows.push(row);
         }
     }
+    rows.sort_unstable();
+    rows
 }
 
 #[cfg(test)]
@@ -527,9 +566,9 @@ mod tests {
 
     #[test]
     fn grep_search_uses_normalized_hunk_header_text() {
-        let index =
-            DiffSearchIndex::new(&changeset_with_hunk_header("@@ -1 +1 @@     def\tneedle"));
-        let result = index.search("", "@@ -1 +1 @@ def    needle");
+        let changeset = changeset_with_hunk_header("@@ -1 +1 @@     def\tneedle");
+        let index = DiffSearchIndex::new(&changeset);
+        let result = index.search(&changeset, "", "@@ -1 +1 @@ def    needle");
 
         assert_eq!(result.visible_files, vec![FileIndex::new(0)]);
         assert_eq!(
@@ -543,13 +582,14 @@ mod tests {
 
     #[test]
     fn grep_search_uses_terminal_text_for_diff_lines() {
-        let index = DiffSearchIndex::new(&changeset_with_diff_line("before\tmiddle\rneedle"));
+        let changeset = changeset_with_diff_line("before\tmiddle\rneedle");
+        let index = DiffSearchIndex::new(&changeset);
 
-        let raw_result = index.search("", "before\tmiddle\rneedle");
+        let raw_result = index.search(&changeset, "", "before\tmiddle\rneedle");
         assert!(raw_result.visible_files.is_empty());
         assert!(raw_result.grep_matches.is_empty());
 
-        let visible_result = index.search("", "before    middle\\rneedle");
+        let visible_result = index.search(&changeset, "", "before    middle\\rneedle");
         assert_eq!(visible_result.visible_files, vec![FileIndex::new(0)]);
         assert_eq!(
             visible_result.grep_matches,
@@ -585,7 +625,7 @@ mod tests {
                     }],
                 },
             }],
-            raw_patch: Vec::new(),
+            raw_patch: mark_diff::Changeset::empty_raw_patch(),
         }
     }
 }

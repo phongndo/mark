@@ -132,14 +132,14 @@ impl DiffApp {
     }
 
     pub(crate) fn expand_context_for_key(&mut self, file: usize, hunk: usize) -> bool {
-        let Some(row_index) = self.document.model.rows.iter().position(|row| {
+        let Some(row_index) = (0..self.document.model.len()).find(|row_index| {
             matches!(
-                row,
-                UiRow::Collapsed {
+                self.document.model.row(*row_index),
+                Some(UiRow::Collapsed {
                     file: row_file,
                     hunk: row_hunk,
                     ..
-                } if row_file.get() == file && row_hunk.get() == hunk
+                }) if row_file.get() == file && row_hunk.get() == hunk
             )
         }) else {
             return false;
@@ -173,7 +173,9 @@ impl DiffApp {
             (DiffSide::Old, false) => old_start.saturating_sub(expanded),
             (DiffSide::New, true) => new_start,
             (DiffSide::New, false) => new_start.saturating_sub(expanded),
-        };
+        } as usize;
+        let total = total as usize;
+        let expanded = expanded as usize;
         let available = available_context_lines(source_start, total, source_lines.len());
         let current = expanded.min(available);
         let remaining = available.saturating_sub(current);
@@ -225,6 +227,7 @@ impl DiffApp {
 
     pub(super) fn rebuild_model_after_context_visibility_change(&mut self) {
         let search_result = self.document.search_index.search_with_grep_match_limit(
+            &self.document.changeset,
             &self.filters.file_filter,
             &self.filters.grep_filter,
             MAX_LIVE_GREP_MATCHES,

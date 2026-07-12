@@ -1,6 +1,7 @@
 use mark_syntax::HighlightedLine;
 
 use super::{
+    SyntaxPriority,
     runtime::SyntaxRuntime,
     source::SyntaxJobFailure,
     types::{
@@ -27,9 +28,20 @@ impl SyntaxRuntime {
                 continue;
             }
 
+            record_latency(
+                &mut self.stats,
+                &result.language,
+                result.source_kind,
+                result.priority,
+                result.queue_latency_micros,
+                result.run_latency_micros,
+            );
+
             match result.side {
                 Ok(success) => {
-                    self.cache.insert(result.key, success.side);
+                    let memory_bytes = success.side.memory_bytes();
+                    self.cache
+                        .insert_with_weight(result.key, success.side, memory_bytes);
                     self.stats.jobs_completed = self.stats.jobs_completed.saturating_add(1);
                     if let Some(source_bytes) = success.source_bytes {
                         self.stats.source_bytes_queued =
@@ -142,5 +154,56 @@ impl SyntaxRuntime {
             self.stats.cache_misses = self.stats.cache_misses.saturating_add(1);
         }
         highlighted
+    }
+}
+
+fn record_latency(
+    stats: &mut crate::theme::SyntaxBenchmarkReport,
+    language: &str,
+    source_kind: SyntaxSourceKind,
+    priority: SyntaxPriority,
+    queue_latency_micros: u128,
+    run_latency_micros: u128,
+) {
+    let first_visible_latency = queue_latency_micros.saturating_add(run_latency_micros);
+    if priority == SyntaxPriority::Visible && stats.first_visible_latency_micros.is_none() {
+        stats.first_visible_latency_micros = Some(first_visible_latency);
+    }
+
+    let source_kind = source_kind_label(source_kind);
+    if let Some(bucket) = stats
+        .latency_buckets
+        .iter_mut()
+        .find(|bucket| bucket.language == language && bucket.source_kind == source_kind)
+    {
+        bucket.jobs = bucket.jobs.saturating_add(1);
+        bucket.queue_latency_total_micros = bucket
+            .queue_latency_total_micros
+            .saturating_add(queue_latency_micros);
+        bucket.queue_latency_max_micros = bucket.queue_latency_max_micros.max(queue_latency_micros);
+        bucket.run_latency_total_micros = bucket
+            .run_latency_total_micros
+            .saturating_add(run_latency_micros);
+        bucket.run_latency_max_micros = bucket.run_latency_max_micros.max(run_latency_micros);
+        return;
+    }
+
+    stats
+        .latency_buckets
+        .push(crate::theme::SyntaxLatencyBucket {
+            language: language.to_owned(),
+            source_kind: source_kind.to_owned(),
+            jobs: 1,
+            queue_latency_total_micros: queue_latency_micros,
+            queue_latency_max_micros: queue_latency_micros,
+            run_latency_total_micros: run_latency_micros,
+            run_latency_max_micros: run_latency_micros,
+        });
+}
+
+fn source_kind_label(kind: SyntaxSourceKind) -> &'static str {
+    match kind {
+        SyntaxSourceKind::HunkSide { .. } => "hunk",
+        SyntaxSourceKind::FullFile => "full_file",
     }
 }

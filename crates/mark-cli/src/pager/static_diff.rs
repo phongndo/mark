@@ -16,10 +16,17 @@ use super::{
 
 const DEFAULT_STATIC_WIDTH: usize = 120;
 const MIN_STATIC_WIDTH: usize = 20;
+const DEFAULT_STATIC_RAW_FALLBACK_BYTES: usize = 128 * 1024 * 1024;
 
 pub(super) fn write_static_diff(input: &[u8], args: &PagerArgs, color: bool) -> CliResult<()> {
     let patch = normalized_patch_input(input);
     let (prelude, patch) = split_patch_prelude(&patch);
+    if patch.len() > static_raw_fallback_bytes() {
+        write_stderr(format_args!(
+            "mark: static pager input is too large for formatted rendering; falling back to raw diff\n"
+        ))?;
+        return write_stdout_bytes(&sanitized_terminal_bytes(input));
+    }
     let options = patch_options(patch.to_vec());
     let changeset = match mark_diff::load_review_ref(&options) {
         Ok(changeset) => changeset,
@@ -127,6 +134,14 @@ fn static_terminal_width() -> usize {
         .filter(|columns| *columns > 0)
         .unwrap_or(DEFAULT_STATIC_WIDTH)
         .max(MIN_STATIC_WIDTH)
+}
+
+fn static_raw_fallback_bytes() -> usize {
+    std::env::var("MARK_STATIC_RAW_FALLBACK_BYTES")
+        .ok()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_STATIC_RAW_FALLBACK_BYTES)
 }
 
 fn patch_options(patch: Vec<u8>) -> mark_command::DiffOptions {

@@ -125,17 +125,23 @@ pub(crate) fn render_split_line_wrapped_with_focus(
     let right_line = right.and_then(|index| lines.get(index));
     let left_content_width = split_cell_content_width(left_width);
     let right_content_width = split_cell_content_width(right_width);
-    let left_scrolls = left_line
-        .map(|line| wrapped_line_start_columns(line.text(), left_content_width))
+    let left_text = left_line.map(DiffLine::text_lossy);
+    let right_text = right_line.map(DiffLine::text_lossy);
+    let left_scrolls = left_text
+        .as_ref()
+        .map(|text| wrapped_line_start_columns(text, left_content_width))
         .unwrap_or_else(|| vec![0]);
-    let right_scrolls = right_line
-        .map(|line| wrapped_line_start_columns(line.text(), right_content_width))
+    let right_scrolls = right_text
+        .as_ref()
+        .map(|text| wrapped_line_start_columns(text, right_content_width))
         .unwrap_or_else(|| vec![0]);
-    let left_text_width = left_line
-        .map(|line| display_width(line.text()))
+    let left_text_width = left_text
+        .as_ref()
+        .map(|text| display_width(text))
         .unwrap_or(0);
-    let right_text_width = right_line
-        .map(|line| display_width(line.text()))
+    let right_text_width = right_text
+        .as_ref()
+        .map(|text| display_width(text))
         .unwrap_or(0);
     let rows = left_scrolls.len().max(right_scrolls.len()).max(1);
     let visual_row_start = app.wrapped_visual_scroll_for_model_row(row_index);
@@ -375,8 +381,9 @@ pub(super) fn split_cell_spans_at_scroll_with_focus_and_continuation(
             theme,
         ));
     }
+    let text = line.text_lossy();
     spans.extend(content_spans_at_scroll(
-        line.text(),
+        &text,
         syntax,
         inline,
         line.kind(),

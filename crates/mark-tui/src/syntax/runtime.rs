@@ -30,7 +30,7 @@ pub(crate) struct SyntaxRuntime {
     pub(crate) unavailable_full_files: HashSet<SyntaxKey>,
     pub(crate) failed: HashSet<SyntaxKey>,
     pub(crate) stats: SyntaxBenchmarkReport,
-    pub(crate) worker: Option<thread::JoinHandle<()>>,
+    pub(crate) workers: Vec<thread::JoinHandle<()>>,
 }
 
 impl SyntaxRuntime {
@@ -48,16 +48,24 @@ impl SyntaxRuntime {
         }
 
         let (result_tx, result_rx) = mpsc::channel(limits.queue_entries.max(1));
-        let queue = SyntaxWorkerQueue::new(limits.queue_entries, 0);
-        let worker_queue = queue.clone();
-        let worker = thread::spawn(move || run_syntax_worker(worker_queue, result_tx));
+        let queue = SyntaxWorkerQueue::new(limits.queue_entries, 0, limits.queue_bytes);
+        let worker_count = limits.worker_threads.max(1);
+        let mut workers = Vec::with_capacity(worker_count);
+        for _ in 0..worker_count {
+            let worker_queue = queue.clone();
+            let result_tx = result_tx.clone();
+            workers.push(thread::spawn(move || {
+                run_syntax_worker(worker_queue, result_tx)
+            }));
+        }
+        drop(result_tx);
 
         Some(Self {
             languages,
             limits,
             result_rx,
             queue,
-            cache: LruCache::new(limits.cache_entries),
+            cache: LruCache::new_weighted(limits.cache_entries, limits.cache_bytes),
             pending: HashSet::new(),
             source_keys: HashMap::new(),
             position_keys: HashMap::new(),
@@ -67,7 +75,7 @@ impl SyntaxRuntime {
             unavailable_full_files: HashSet::new(),
             failed: HashSet::new(),
             stats: SyntaxBenchmarkReport::default(),
-            worker: Some(worker),
+            workers,
         })
     }
 
@@ -101,7 +109,7 @@ impl SyntaxRuntime {
     }
 
     pub(crate) fn estimated_memory_bytes(&self) -> usize {
-        self.cache.values().map(HighlightedSide::memory_bytes).sum()
+        self.cache.total_weight()
     }
 }
 
@@ -110,7 +118,7 @@ impl Drop for SyntaxRuntime {
         self.result_rx.close();
         while self.result_rx.try_recv().is_ok() {}
         self.queue.close();
-        if let Some(worker) = self.worker.take() {
+        for worker in self.workers.drain(..) {
             let _ = worker.join();
         }
     }

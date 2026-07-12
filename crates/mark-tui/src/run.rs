@@ -15,7 +15,7 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 
 use crate::{
     app::{
-        DiffApp, LiveUpdatesState, PostFilterNavigation, SyntaxStartupMode,
+        DiffApp, LiveUpdatesState, MAX_LIVE_GREP_MATCHES, PostFilterNavigation, SyntaxStartupMode,
         max_scroll_for_viewport, run_loop, sync_live_diff,
     },
     controls::{DiffLayoutMode, default_layout_for_width, filtered_file_indices},
@@ -158,9 +158,15 @@ pub fn benchmark_diff_view(
     let open_micros = open_start.elapsed().as_micros();
     let row_count = app.document.model.len();
     let syntax_enabled = app.config.syntax.is_some();
+    let changeset_estimated_memory_bytes = app.document.changeset.estimated_model_bytes();
+    let ui_model_estimated_memory_bytes = app.document.model.estimated_memory_bytes();
+    let search_index_estimated_memory_bytes = app.document.search_index.estimated_memory_bytes();
 
     let file_filter_start = Instant::now();
-    let _ = app.document.search_index.search("src", "");
+    let _ = app
+        .document
+        .search_index
+        .search(&app.document.changeset, "src", "");
     let file_filter_micros = file_filter_start.elapsed().as_micros();
 
     let legacy_file_filter_start = Instant::now();
@@ -168,7 +174,12 @@ pub fn benchmark_diff_view(
     let legacy_file_filter_micros = legacy_file_filter_start.elapsed().as_micros();
 
     let grep_filter_start = Instant::now();
-    let _ = app.document.search_index.search("", "line");
+    let _ = app.document.search_index.search_with_grep_match_limit(
+        &app.document.changeset,
+        "",
+        "line",
+        MAX_LIVE_GREP_MATCHES,
+    );
     let grep_filter_micros = grep_filter_start.elapsed().as_micros();
 
     let legacy_grep_filter_start = Instant::now();
@@ -215,13 +226,32 @@ pub fn benchmark_diff_view(
     let before_warm_stats = app.syntax_stats();
     let (warm_scroll_total_micros, warm_scroll_max_micros) =
         benchmark_scroll_pass(&mut app, &positions, options.width);
+    let random_positions = benchmark_random_scroll_positions(
+        app.document.model.len(),
+        options.viewport_rows,
+        options.max_scroll_steps,
+    );
+    let (random_scroll_total_micros, random_scroll_max_micros) =
+        benchmark_scroll_pass(&mut app, &random_positions, options.width);
     let after_warm_stats = app.syntax_stats();
+    let syntax_cache_estimated_memory_bytes = app
+        .config
+        .syntax
+        .as_ref()
+        .map(SyntaxRuntime::estimated_memory_bytes)
+        .unwrap_or_default();
 
     DiffBenchmarkReport {
         syntax_enabled,
         row_count,
         file_count,
         hunk_count,
+        changeset_estimated_memory_bytes,
+        ui_model_estimated_memory_bytes,
+        search_index_estimated_memory_bytes,
+        inline_cache_entries: app.document.inline_cache.len(),
+        diff_cache_entries: app.jobs.diff_cache.len(),
+        syntax_cache_estimated_memory_bytes,
         open_micros,
         file_filter_micros,
         legacy_file_filter_micros,
@@ -240,6 +270,9 @@ pub fn benchmark_diff_view(
         warm_scroll_steps: positions.len(),
         warm_scroll_total_micros,
         warm_scroll_max_micros,
+        random_scroll_steps: random_positions.len(),
+        random_scroll_total_micros,
+        random_scroll_max_micros,
         warm_cache_hits: after_warm_stats
             .cache_hits
             .saturating_sub(before_warm_stats.cache_hits),
@@ -325,6 +358,27 @@ pub(crate) fn benchmark_scroll_positions(
         position = position.saturating_add(scroll_step).min(max_scroll);
     }
 
+    positions
+}
+
+pub(crate) fn benchmark_random_scroll_positions(
+    row_count: usize,
+    viewport_rows: usize,
+    max_steps: usize,
+) -> Vec<usize> {
+    let max_scroll = max_scroll_for_viewport(row_count, viewport_rows);
+    if max_scroll == 0 {
+        return vec![0];
+    }
+    let mut positions = Vec::with_capacity(max_steps.min(256).saturating_add(2));
+    positions.push(max_scroll);
+    let mut state = row_count as u64 ^ ((viewport_rows as u64) << 32) ^ 0x9e37_79b9_7f4a_7c15;
+    while positions.len() < max_steps {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        positions.push((state as usize) % (max_scroll + 1));
+    }
     positions
 }
 

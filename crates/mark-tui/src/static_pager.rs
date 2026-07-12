@@ -15,6 +15,7 @@ use crate::{
 const DEFAULT_STATIC_WIDTH: usize = 120;
 const MIN_STATIC_WIDTH: usize = 20;
 const STATIC_SYNTAX_SETTLE_TIMEOUT: Duration = Duration::from_millis(1500);
+const MAX_STATIC_SYNTAX_ROWS: usize = 200_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StaticPagerLayout {
@@ -173,6 +174,14 @@ fn static_width_for_layout(width: usize) -> u16 {
 
 fn settle_static_syntax(app: &mut DiffApp, timeout: Duration) {
     if app.config.syntax.is_none() {
+        return;
+    }
+    if app.document.model.len() > MAX_STATIC_SYNTAX_ROWS {
+        // Static output is a single pass over the diff; on very large inputs,
+        // queueing every row would turn syntax highlighting into whole-diff
+        // work and can starve the caller. Keep the interactive invariant here:
+        // syntax work is bounded and oversized static diffs render plainly.
+        app.config.syntax = None;
         return;
     }
 
@@ -443,7 +452,7 @@ mod tests {
 
     #[test]
     fn static_pager_syntax_settle_queues_bundled_languages() {
-        let queue = SyntaxWorkerQueue::new(8, 0);
+        let queue = SyntaxWorkerQueue::new(8, 0, usize::MAX);
         let mut app = DiffApp::new_with_syntax(
             DiffOptions::default(),
             wrapping_static_changeset(),
@@ -638,7 +647,7 @@ mod tests {
         Changeset {
             repo: std::path::PathBuf::new().into(),
             title: "test".to_owned(),
-            raw_patch: Vec::new(),
+            raw_patch: mark_diff::Changeset::empty_raw_patch(),
             files: vec![DiffFile {
                 change: FileChange::from_status(
                     FileStatus::Modified,
@@ -688,7 +697,7 @@ mod tests {
             unavailable_full_files: HashSet::new(),
             failed: HashSet::new(),
             stats: SyntaxBenchmarkReport::default(),
-            worker: None,
+            workers: Vec::new(),
         }
     }
 

@@ -246,8 +246,8 @@ impl NixUriMatcher {
             while run_start > from && is_nix_uri_scheme_byte(bytes[run_start - 1]) {
                 run_start -= 1;
             }
-            for start in run_start..found {
-                if is_ascii_alpha(bytes[start])
+            for (start, byte) in bytes.iter().enumerate().take(found).skip(run_start) {
+                if is_ascii_alpha(*byte)
                     && line.is_char_boundary(start)
                     && let Some(result) = self.match_at(line, start)
                 {
@@ -409,12 +409,9 @@ impl WordSetMatcher {
         let bytes = line.as_bytes();
         let mut position = from;
         while position < bytes.len() {
-            let Some(offset) = bytes[position..]
+            let offset = bytes[position..]
                 .iter()
-                .position(|byte| is_ascii_word_byte(*byte))
-            else {
-                return None;
-            };
+                .position(|byte| is_ascii_word_byte(*byte))?;
             position += offset;
             if previous_char(line, position).is_some_and(is_word_char) {
                 position = ascii_word_end(bytes, position);

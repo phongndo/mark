@@ -1,6 +1,11 @@
+use std::collections::HashMap;
+
 use mark_diff::{DiffLine, DiffLineKind};
 
 use crate::theme::{MAX_INLINE_DIFF_LINE_BYTES, MAX_INLINE_DIFF_TOKENS};
+
+const MAX_INLINE_EAGER_HUNK_LINES: usize = 2_048;
+const MAX_INLINE_CHANGED_BLOCK_LINES: usize = 2_048;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct InlineHunkKey {
@@ -22,11 +27,12 @@ pub(crate) struct InlineLineEmphasis {
 
 #[derive(Debug)]
 pub(crate) struct InlineHunkEmphasisCache {
-    pub(crate) lines: Vec<Option<InlineLineEmphasis>>,
+    pub(crate) lines: HashMap<usize, InlineLineEmphasis>,
     pub(crate) blocks: Vec<InlineChangedBlock>,
+    line_count: usize,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct InlineChangedBlock {
     pub(crate) start: usize,
     pub(crate) end: usize,
@@ -36,6 +42,14 @@ pub(crate) struct InlineChangedBlock {
 
 impl InlineHunkEmphasisCache {
     pub(crate) fn new(lines: &[DiffLine]) -> Self {
+        if lines.len() > MAX_INLINE_EAGER_HUNK_LINES {
+            return Self {
+                lines: HashMap::new(),
+                blocks: Vec::new(),
+                line_count: lines.len(),
+            };
+        }
+
         let mut blocks = Vec::new();
         let mut index = 0usize;
 
@@ -73,20 +87,20 @@ impl InlineHunkEmphasisCache {
         }
 
         Self {
-            lines: vec![None; lines.len()],
+            lines: HashMap::new(),
             blocks,
+            line_count: lines.len(),
         }
     }
 
     pub(crate) fn ranges_for_line(&mut self, lines: &[DiffLine], line: usize) -> Vec<InlineRange> {
-        if let Some(Some(emphasis)) = self.lines.get(line) {
+        if let Some(emphasis) = self.lines.get(&line) {
             return emphasis.ranges.clone();
         }
 
         self.compute_line(lines, line);
         self.lines
-            .get(line)
-            .and_then(|emphasis| emphasis.as_ref())
+            .get(&line)
             .map(|emphasis| emphasis.ranges.clone())
             .unwrap_or_default()
     }
@@ -103,20 +117,20 @@ impl InlineHunkEmphasisCache {
             return;
         }
 
-        let Some(block) = self
+        let block = self
             .blocks
             .iter()
             .find(|block| line >= block.start && line < block.end)
-        else {
+            .cloned()
+            .or_else(|| inline_changed_block_around(lines, line));
+
+        let Some(block) = block else {
             self.set_emphasis(line, Vec::new());
             return;
         };
 
         if block.deletions.is_empty() || block.additions.is_empty() {
-            let (start, end) = (block.start, block.end);
-            for line in start..end {
-                self.set_emphasis(line, Vec::new());
-            }
+            self.set_emphasis(line, Vec::new());
             return;
         }
 
@@ -146,17 +160,74 @@ impl InlineHunkEmphasisCache {
             DiffLineKind::Context | DiffLineKind::Meta => unreachable!(),
         };
 
-        let (old_ranges, new_ranges) =
-            changed_token_ranges(lines[old_index].text(), lines[new_index].text());
+        let old_text = lines[old_index].text_lossy();
+        let new_text = lines[new_index].text_lossy();
+        let (old_ranges, new_ranges) = changed_token_ranges(&old_text, &new_text);
         self.set_emphasis(old_index, old_ranges);
         self.set_emphasis(new_index, new_ranges);
     }
 
     pub(crate) fn set_emphasis(&mut self, line: usize, ranges: Vec<InlineRange>) {
-        if let Some(emphasis) = self.lines.get_mut(line) {
-            *emphasis = Some(InlineLineEmphasis { ranges });
+        if line < self.line_count {
+            self.lines.insert(line, InlineLineEmphasis { ranges });
         }
     }
+}
+
+fn inline_changed_block_around(lines: &[DiffLine], line: usize) -> Option<InlineChangedBlock> {
+    let diff_line = lines.get(line)?;
+    if !matches!(
+        diff_line.kind(),
+        DiffLineKind::Deletion | DiffLineKind::Addition
+    ) {
+        return None;
+    }
+
+    let mut start = line;
+    let mut scanned = 0usize;
+    while start > 0
+        && matches!(
+            lines[start - 1].kind(),
+            DiffLineKind::Deletion | DiffLineKind::Addition
+        )
+    {
+        start -= 1;
+        scanned += 1;
+        if scanned > MAX_INLINE_CHANGED_BLOCK_LINES {
+            return None;
+        }
+    }
+
+    let mut end = line.saturating_add(1);
+    while end < lines.len()
+        && matches!(
+            lines[end].kind(),
+            DiffLineKind::Deletion | DiffLineKind::Addition
+        )
+    {
+        end += 1;
+        scanned += 1;
+        if scanned > MAX_INLINE_CHANGED_BLOCK_LINES {
+            return None;
+        }
+    }
+
+    let mut deletions = Vec::new();
+    let mut additions = Vec::new();
+    for (offset, diff_line) in lines[start..end].iter().enumerate() {
+        match diff_line.kind() {
+            DiffLineKind::Deletion => deletions.push(start + offset),
+            DiffLineKind::Addition => additions.push(start + offset),
+            DiffLineKind::Context | DiffLineKind::Meta => {}
+        }
+    }
+
+    Some(InlineChangedBlock {
+        start,
+        end,
+        deletions,
+        additions,
+    })
 }
 
 #[cfg(test)]
@@ -202,8 +273,9 @@ pub(crate) fn compute_changed_block_inline_emphasis(
     for pair_index in 0..paired_rows {
         match (deletions.get(pair_index), additions.get(pair_index)) {
             (Some(deletion), Some(addition)) => {
-                let (old_ranges, new_ranges) =
-                    changed_token_ranges(lines[*deletion].text(), lines[*addition].text());
+                let old_text = lines[*deletion].text_lossy();
+                let new_text = lines[*addition].text_lossy();
+                let (old_ranges, new_ranges) = changed_token_ranges(&old_text, &new_text);
                 emphasis[*deletion].ranges = old_ranges;
                 emphasis[*addition].ranges = new_ranges;
             }
@@ -410,4 +482,55 @@ pub(crate) fn inline_ranges_from_tokens(
         });
     }
     ranges
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inline_cache_for_large_hunk_is_sparse_but_keeps_visible_pair() {
+        let mut lines = Vec::new();
+        for index in 0..MAX_INLINE_EAGER_HUNK_LINES + 16 {
+            lines.push(DiffLine::context(index + 1, index + 1, "same"));
+        }
+        let deletion = MAX_INLINE_EAGER_HUNK_LINES + 4;
+        lines[deletion] = DiffLine::deletion(deletion + 1, "let value = old_name;");
+        lines[deletion + 1] = DiffLine::addition(deletion + 1, "let value = new_name;");
+
+        let mut cache = InlineHunkEmphasisCache::new(&lines);
+        assert!(
+            cache.blocks.is_empty(),
+            "large hunks should not pre-index blocks"
+        );
+
+        let ranges = cache.ranges_for_line(&lines, deletion);
+        assert!(
+            !ranges.is_empty(),
+            "visible local pair should still be emphasized"
+        );
+        assert!(
+            cache.lines.len() <= 2,
+            "cache should remain viewport-line sparse"
+        );
+    }
+
+    #[test]
+    fn inline_cache_skips_oversized_changed_block() {
+        let mut lines = Vec::new();
+        for index in 0..MAX_INLINE_CHANGED_BLOCK_LINES + 2 {
+            lines.push(DiffLine::deletion(index + 1, "old"));
+        }
+        for index in 0..MAX_INLINE_CHANGED_BLOCK_LINES + 2 {
+            lines.push(DiffLine::addition(index + 1, "new"));
+        }
+
+        let mut cache = InlineHunkEmphasisCache::new(&lines);
+        let ranges = cache.ranges_for_line(&lines, 0);
+        assert!(
+            ranges.is_empty(),
+            "oversized changed blocks degrade to line style"
+        );
+        assert!(cache.lines.len() <= 1);
+    }
 }

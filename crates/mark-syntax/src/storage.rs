@@ -239,10 +239,13 @@ pub(crate) fn limits_from_stored(stored: StoredSyntaxLimits) -> SyntaxLimits {
         max_source_bytes: kib_or_default(stored.max_source_kib, defaults.max_source_bytes),
         max_line_bytes: kib_or_default(stored.max_line_kib, defaults.max_line_bytes),
         cache_entries: non_zero_or_default(stored.cache_entries, defaults.cache_entries),
+        cache_bytes: kib_or_default(stored.cache_kib, defaults.cache_bytes),
         queue_entries: non_zero_or_default(stored.queue_entries, defaults.queue_entries),
+        queue_bytes: kib_or_default(stored.queue_kib, defaults.queue_bytes),
         prefetch_viewports: stored
             .prefetch_viewports
             .unwrap_or(defaults.prefetch_viewports),
+        worker_threads: non_zero_or_default(stored.worker_threads, defaults.worker_threads),
     }
 }
 

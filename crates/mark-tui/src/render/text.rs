@@ -294,8 +294,20 @@ pub(crate) fn for_display_width_units(text: &str, mut visit: impl FnMut(usize, b
 }
 
 pub(crate) fn terminal_text(text: &str) -> String {
+    terminal_text_cow(text).into_owned()
+}
+
+pub(crate) fn terminal_text_cow(text: &str) -> Cow<'_, str> {
+    if text.is_ascii()
+        && !text
+            .as_bytes()
+            .iter()
+            .any(|byte| *byte == b'\t' || *byte < 0x20 || *byte == 0x7f)
+    {
+        return Cow::Borrowed(text);
+    }
     if !text.chars().any(display_char_supports_partial_render) {
-        return text.to_owned();
+        return Cow::Borrowed(text);
     }
 
     let mut out = String::with_capacity(display_width(text));
@@ -307,7 +319,7 @@ pub(crate) fn terminal_text(text: &str) -> String {
             }
         }
     }
-    out
+    Cow::Owned(out)
 }
 
 #[derive(Clone, Copy, Debug)]

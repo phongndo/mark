@@ -278,7 +278,7 @@ pub(crate) fn hunk_grep_text_matches(hunk: &mark_diff::DiffHunk, matcher: &TextM
 }
 
 pub(crate) fn diff_line_grep_text_matches(line: &DiffLine, matcher: &TextMatcher) -> bool {
-    matcher.matches_prefixed(diff_line_grep_prefix(line.kind()), line.text())
+    matcher.matches_prefixed(diff_line_grep_prefix(line.kind()), &line.text_lossy())
 }
 
 pub(crate) fn diff_line_grep_prefix(kind: DiffLineKind) -> char {

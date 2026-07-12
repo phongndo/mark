@@ -99,6 +99,11 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
       - name: Check
         run: cargo check --workspace --all-targets --all-features --locked
 
@@ -111,6 +116,9 @@ jobs:
       - name: Test
         run: cargo test --workspace --all-targets --all-features --locked
 
+      - name: Golden oracle check
+        run: node tools/generate-goldens.mjs --check
+
       - name: Benchmark smoke
         run: |
           cargo run -p mark-bench --locked -- fixtures \
@@ -121,6 +129,32 @@ jobs:
             --fixtures "$RUNNER_TEMP/mark-bench" \
             --scenario many-small-files \
             --json
+
+      - name: Mega-diff RSS smoke
+        run: |
+          cargo run -p mark-bench --locked -- fixtures \
+            --out "$RUNNER_TEMP/mark-bench-mega" \
+            --scenario mega-diff-1m \
+            --force
+          cargo run -p mark-bench --locked -- measure \
+            --fixtures "$RUNNER_TEMP/mark-bench-mega" \
+            --scenario mega-diff-1m \
+            --max-scroll-steps 20 \
+            --assert-max-rss-ratio 3.0 \
+            --json
+
+      - name: Bundle latency smoke
+        run: cargo run -p mark-syntax --locked --release --example bundle-measure -- --assert-max-core-cold-us 50000
+
+      - name: TextMate engine throughput smoke
+        run: |
+          cargo run -p mark-syntax --locked --release --example profile-cold -- \
+            --mode process-cold \
+            --assets assets/tm-grammars/languages \
+            --scope source.rust \
+            --assert-min-mb-s 0.05 \
+            crates/mark-syntax/tests/fixtures/textmate/rust/stress.rs \
+            1
 
       - name: Build
         run: cargo build --workspace --all-targets --all-features --locked

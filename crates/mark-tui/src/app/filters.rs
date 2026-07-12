@@ -108,6 +108,7 @@ impl DiffApp {
             self.relative_scroll_from_file_start(self.sidebar.selected_file.get());
 
         let search_result = self.document.search_index.search_with_grep_match_limit(
+            &self.document.changeset,
             &self.filters.file_filter,
             &self.filters.grep_filter,
             MAX_LIVE_GREP_MATCHES,
@@ -173,9 +174,11 @@ impl DiffApp {
         let worker_file_filter = file_filter.clone();
         let worker_grep_filter = grep_filter.clone();
         let search_index = Arc::clone(&self.document.search_index);
+        let changeset = self.document.changeset.clone();
         let (tx, rx) = oneshot::channel();
         runtime::spawn_detached_blocking(move || {
             let result = search_index.search_with_grep_match_limit(
+                &changeset,
                 &worker_file_filter,
                 &worker_grep_filter,
                 MAX_LIVE_GREP_MATCHES,

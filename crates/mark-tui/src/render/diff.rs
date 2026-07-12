@@ -326,8 +326,8 @@ pub(crate) fn render_row_wrapped_with_focus(
             SplitLineRender {
                 file: file.get(),
                 hunk: hunk.get(),
-                left: left.map(|line| line.get()),
-                right: right.map(|line| line.get()),
+                left: left.get().map(|line| line.get()),
+                right: right.get().map(|line| line.get()),
                 row_index,
                 width,
                 focused: hunk_focused,
@@ -379,7 +379,7 @@ pub(crate) fn render_row_with_focus(
             expanded,
             ..
         } => context_show_line(
-            lines,
+            lines as usize,
             expanded > 0,
             context_expand_marker_for_theme(hunk.get(), theme),
             width,
@@ -442,8 +442,8 @@ pub(crate) fn render_row_with_focus(
             SplitLineRender {
                 file: file.get(),
                 hunk: hunk.get(),
-                left: left.map(|line| line.get()),
-                right: right.map(|line| line.get()),
+                left: left.get().map(|line| line.get()),
+                right: right.get().map(|line| line.get()),
                 row_index,
                 width,
                 focused: hunk_focused,

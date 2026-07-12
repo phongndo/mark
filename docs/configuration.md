@@ -54,8 +54,11 @@ sign_style = "bold"
 max_source_kib = 1024
 max_line_kib = 8
 cache_entries = 512
+cache_kib = 65536
 queue_entries = 512
+queue_kib = 65536
 prefetch_viewports = 1
+worker_threads = 4
 
 [keymap.global]
 help = "?"
@@ -211,6 +214,9 @@ background panes instead of ASCII-art replacements. `empty_fill` is enabled by
 default for fancy mode and suppressed by minimal mode.
 `MARK_DECORATIONS=minimal` and `MARK_ASCII=1` also request minimal decorations
 for one process.
+For captured/static pager output, `MARK_STATIC_RAW_FALLBACK_BYTES` controls the
+patch-size threshold where Mark skips formatted static rendering and prints the
+sanitized raw diff instead. The default is 128 MiB.
 The settings menu can change the decoration mode for the current session;
 `empty_fill` is config/CLI-controlled, and `no_borders` is config-only.
 Only Colorscheme changes are written back to config.
@@ -263,8 +269,34 @@ Large files and very long lines are intentionally bounded:
 max_source_kib = 1024
 max_line_kib = 8
 cache_entries = 512
+cache_kib = 65536
 queue_entries = 512
+queue_kib = 65536
 prefetch_viewports = 1
+worker_threads = 4
+```
+
+`worker_threads` defaults to half of available CPUs, capped at 4. Each worker
+owns its own highlighter cache; queue and cache byte budgets still apply.
+
+Diff input safety limits can be set per process with environment variables.
+When set, Mark stops loading and reports the exceeded limit instead of trying to
+materialize an unbounded diff:
+
+```sh
+MARK_MAX_PATCH_BYTES=1073741824
+MARK_MAX_DIFF_ROWS=10000000
+MARK_MAX_DIFF_FILES=100000
+MARK_MAX_DIFF_HUNKS=100000
+MARK_MAX_DIFF_LINE_BYTES=1048576
+```
+
+Large patch parsing is sequential by default. A bounded worker pool for
+independent `diff --git` sections is available for benchmarking/concurrency
+experiments with:
+
+```sh
+MARK_DIFF_PARSE_THREADS=4   # capped at 8; set 1 to force sequential parsing
 ```
 
 ## Keybindings

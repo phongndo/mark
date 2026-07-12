@@ -9,3 +9,5 @@ repository.workspace = true
 [dependencies]
 mark-core.workspace = true
 mark-git.workspace = true
+memchr.workspace = true
+rayon.workspace = true

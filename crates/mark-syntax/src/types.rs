@@ -141,6 +141,8 @@ pub const DEFAULT_MAX_HIGHLIGHT_SOURCE_BYTES: usize = 1024 * 1024;
 pub const DEFAULT_MAX_HIGHLIGHT_LINE_BYTES: usize = 8 * 1024;
 pub const DEFAULT_HIGHLIGHT_CACHE_ENTRIES: usize = 512;
 pub const DEFAULT_HIGHLIGHT_QUEUE_ENTRIES: usize = 512;
+pub const DEFAULT_HIGHLIGHT_CACHE_BYTES: usize = 64 * 1024 * 1024;
+pub const DEFAULT_HIGHLIGHT_QUEUE_BYTES: usize = 64 * 1024 * 1024;
 pub const DEFAULT_HIGHLIGHT_PREFETCH_VIEWPORTS: usize = 1;
 pub const MAX_NOTIFICATION_TIMEOUT_MS: u64 = 10_000;
 
@@ -367,8 +369,11 @@ pub(crate) struct StoredSyntaxLimits {
     pub(crate) max_source_kib: Option<usize>,
     pub(crate) max_line_kib: Option<usize>,
     pub(crate) cache_entries: Option<usize>,
+    pub(crate) cache_kib: Option<usize>,
     pub(crate) queue_entries: Option<usize>,
+    pub(crate) queue_kib: Option<usize>,
     pub(crate) prefetch_viewports: Option<usize>,
+    pub(crate) worker_threads: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -742,8 +747,11 @@ pub struct SyntaxLimits {
     pub max_source_bytes: usize,
     pub max_line_bytes: usize,
     pub cache_entries: usize,
+    pub cache_bytes: usize,
     pub queue_entries: usize,
+    pub queue_bytes: usize,
     pub prefetch_viewports: usize,
+    pub worker_threads: usize,
 }
 
 impl Default for SyntaxLimits {
@@ -752,10 +760,19 @@ impl Default for SyntaxLimits {
             max_source_bytes: DEFAULT_MAX_HIGHLIGHT_SOURCE_BYTES,
             max_line_bytes: DEFAULT_MAX_HIGHLIGHT_LINE_BYTES,
             cache_entries: DEFAULT_HIGHLIGHT_CACHE_ENTRIES,
+            cache_bytes: DEFAULT_HIGHLIGHT_CACHE_BYTES,
             queue_entries: DEFAULT_HIGHLIGHT_QUEUE_ENTRIES,
+            queue_bytes: DEFAULT_HIGHLIGHT_QUEUE_BYTES,
             prefetch_viewports: DEFAULT_HIGHLIGHT_PREFETCH_VIEWPORTS,
+            worker_threads: default_highlight_worker_threads(),
         }
     }
+}
+
+pub fn default_highlight_worker_threads() -> usize {
+    std::thread::available_parallelism()
+        .map(|cores| (cores.get() / 2).clamp(1, 4))
+        .unwrap_or(1)
 }
 
 impl SyntaxLimits {

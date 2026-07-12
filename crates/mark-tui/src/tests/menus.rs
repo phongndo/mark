@@ -1462,6 +1462,7 @@ fn options_menu_toggles_syntax_highlighting() {
     app.config.syntax = Some(syntax_runtime_with_queue(SyntaxWorkerQueue::new(
         1,
         app.document.generation,
+        usize::MAX,
     )));
 
     app.open_options_menu();
@@ -1647,6 +1648,7 @@ fn options_menu_clamps_selection_after_toggle_leaves_filter() {
     app.config.syntax = Some(syntax_runtime_with_queue(SyntaxWorkerQueue::new(
         1,
         app.document.generation,
+        usize::MAX,
     )));
 
     app.open_options_menu();

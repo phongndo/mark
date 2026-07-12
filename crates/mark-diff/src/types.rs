@@ -1,4 +1,4 @@
-use std::{num::NonZeroU64, path::PathBuf, sync::Arc};
+use std::{borrow::Cow, num::NonZeroU64, ops::Range, path::PathBuf, sync::Arc};
 
 macro_rules! string_newtype {
     ($name:ident) => {
@@ -193,15 +193,15 @@ impl std::ops::Deref for RepoRoot {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct OldLineNumber(usize);
+pub struct OldLineNumber(u32);
 
 impl OldLineNumber {
     pub fn new(line: usize) -> Self {
-        Self(line)
+        Self(u32::try_from(line).unwrap_or(u32::MAX))
     }
 
     pub fn get(self) -> usize {
-        self.0
+        self.0 as usize
     }
 }
 
@@ -212,15 +212,15 @@ impl From<usize> for OldLineNumber {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct NewLineNumber(usize);
+pub struct NewLineNumber(u32);
 
 impl NewLineNumber {
     pub fn new(line: usize) -> Self {
-        Self(line)
+        Self(u32::try_from(line).unwrap_or(u32::MAX))
     }
 
     pub fn get(self) -> usize {
-        self.0
+        self.0 as usize
     }
 }
 
@@ -302,6 +302,67 @@ pub struct DiffOptions {
     pub output: DiffOutput,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DiffLimits {
+    pub max_patch_bytes: Option<usize>,
+    pub max_diff_rows: Option<usize>,
+    pub max_files: Option<usize>,
+    pub max_hunks: Option<usize>,
+    pub max_line_bytes: Option<usize>,
+}
+
+impl DiffLimits {
+    pub fn from_env() -> Self {
+        Self {
+            max_patch_bytes: env_usize("MARK_MAX_PATCH_BYTES"),
+            max_diff_rows: env_usize("MARK_MAX_DIFF_ROWS"),
+            max_files: env_usize("MARK_MAX_DIFF_FILES"),
+            max_hunks: env_usize("MARK_MAX_DIFF_HUNKS"),
+            max_line_bytes: env_usize("MARK_MAX_DIFF_LINE_BYTES"),
+        }
+    }
+
+    pub fn is_unlimited(self) -> bool {
+        self.max_patch_bytes.is_none()
+            && self.max_diff_rows.is_none()
+            && self.max_files.is_none()
+            && self.max_hunks.is_none()
+            && self.max_line_bytes.is_none()
+    }
+}
+
+fn env_usize(name: &str) -> Option<usize> {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|value| *value > 0)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiffLimitExceeded {
+    pub limit: &'static str,
+    pub max: usize,
+    pub actual: usize,
+}
+
+impl DiffLimitExceeded {
+    pub(crate) fn new(limit: &'static str, max: usize, actual: usize) -> Self {
+        Self { limit, max, actual }
+    }
+}
+
+impl std::fmt::Display for DiffLimitExceeded {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "diff exceeds {} limit: {} > {}",
+            self.limit, self.actual, self.max
+        )
+    }
+}
+
+impl std::error::Error for DiffLimitExceeded {}
+
 impl Default for DiffOptions {
     fn default() -> Self {
         Self {
@@ -328,10 +389,14 @@ pub struct Changeset {
     pub repo: RepoRoot,
     pub title: String,
     pub files: Vec<DiffFile>,
-    pub raw_patch: Vec<u8>,
+    pub raw_patch: Arc<[u8]>,
 }
 
 impl Changeset {
+    pub fn empty_raw_patch() -> Arc<[u8]> {
+        Arc::<[u8]>::from(Vec::<u8>::new())
+    }
+
     pub fn stats(&self) -> DiffStats {
         let mut stats = DiffStats {
             files: self.files.len(),
@@ -345,6 +410,25 @@ impl Changeset {
             }
         }
         stats
+    }
+
+    pub fn estimated_model_bytes(&self) -> usize {
+        let retained_patch_bytes = self
+            .files
+            .iter()
+            .flat_map(|file| file.hunks())
+            .flat_map(|hunk| &hunk.lines)
+            .find_map(DiffLine::backing_patch_bytes)
+            .unwrap_or(self.raw_patch.len());
+        std::mem::size_of::<Self>()
+            .saturating_add(retained_patch_bytes)
+            .saturating_add(self.files.len() * std::mem::size_of::<DiffFile>())
+            .saturating_add(
+                self.files
+                    .iter()
+                    .map(DiffFile::estimated_model_bytes)
+                    .sum::<usize>(),
+            )
     }
 }
 
@@ -410,6 +494,21 @@ impl DiffFile {
             DiffFileBody::Binary => panic!("binary diff files do not have text hunks"),
             DiffFileBody::NoTextualChanges => unreachable!(),
         }
+    }
+
+    pub fn estimated_model_bytes(&self) -> usize {
+        self.change
+            .estimated_model_bytes()
+            .saturating_add(match &self.body {
+                DiffFileBody::Text { hunks } => {
+                    hunks.len() * std::mem::size_of::<DiffHunk>()
+                        + hunks
+                            .iter()
+                            .map(DiffHunk::estimated_model_bytes)
+                            .sum::<usize>()
+                }
+                DiffFileBody::Binary | DiffFileBody::NoTextualChanges => 0,
+            })
     }
 }
 
@@ -543,6 +642,26 @@ impl FileChange {
             Self::Unknown { .. } => FileStatus::Unknown,
         }
     }
+
+    pub fn estimated_model_bytes(&self) -> usize {
+        fn path_bytes(path: &DiffPath) -> usize {
+            path.as_str().len()
+        }
+        match self {
+            Self::Modified { old_path, new_path }
+            | Self::Renamed { old_path, new_path }
+            | Self::Copied { old_path, new_path }
+            | Self::TypeChanged { old_path, new_path } => {
+                path_bytes(old_path) + path_bytes(new_path)
+            }
+            Self::Added { path } | Self::Deleted { path } => path_bytes(path),
+            Self::Unknown { old_path, new_path } => old_path
+                .as_ref()
+                .map(path_bytes)
+                .unwrap_or_default()
+                .saturating_add(new_path.as_ref().map(path_bytes).unwrap_or_default()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -605,6 +724,12 @@ impl DiffHunk {
 
     pub fn new_count(&self) -> usize {
         self.ranges.new_count()
+    }
+
+    pub fn estimated_model_bytes(&self) -> usize {
+        self.header
+            .len()
+            .saturating_add(self.lines.len() * std::mem::size_of::<DiffLine>())
     }
 }
 
@@ -672,19 +797,136 @@ pub enum DiffLine {
     Context {
         old_line: OldLineNumber,
         new_line: NewLineNumber,
-        text: String,
+        text: DiffLineText,
     },
     Addition {
         new_line: NewLineNumber,
-        text: String,
+        text: DiffLineText,
     },
     Deletion {
         old_line: OldLineNumber,
-        text: String,
+        text: DiffLineText,
     },
     Meta {
-        text: String,
+        text: DiffLineText,
     },
+}
+
+#[derive(Debug, Clone)]
+pub struct DiffLineText {
+    storage: DiffLineTextStorage,
+}
+
+#[derive(Debug, Clone)]
+enum DiffLineTextStorage {
+    Owned(String),
+    Span {
+        raw: Arc<[u8]>,
+        offset: u32,
+        len: u32,
+    },
+}
+
+impl PartialEq for DiffLineText {
+    fn eq(&self, other: &Self) -> bool {
+        match (&self.storage, &other.storage) {
+            (DiffLineTextStorage::Owned(left), DiffLineTextStorage::Owned(right)) => left == right,
+            (
+                DiffLineTextStorage::Span {
+                    raw: left_raw,
+                    offset: left_offset,
+                    len: left_len,
+                },
+                DiffLineTextStorage::Span {
+                    raw: right_raw,
+                    offset: right_offset,
+                    len: right_len,
+                },
+            ) if left_offset == right_offset
+                && left_len == right_len
+                && Arc::ptr_eq(left_raw, right_raw) =>
+            {
+                true
+            }
+            _ => self.as_bytes() == other.as_bytes(),
+        }
+    }
+}
+
+impl Eq for DiffLineText {}
+
+impl DiffLineText {
+    pub fn owned(text: impl Into<String>) -> Self {
+        Self {
+            storage: DiffLineTextStorage::Owned(text.into()),
+        }
+    }
+
+    pub fn span(raw: Arc<[u8]>, offset: usize, len: usize) -> Self {
+        Self {
+            storage: DiffLineTextStorage::Span {
+                raw,
+                offset: u32::try_from(offset).unwrap_or(u32::MAX),
+                len: u32::try_from(len).unwrap_or(u32::MAX),
+            },
+        }
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        match &self.storage {
+            DiffLineTextStorage::Owned(text) => text.as_bytes(),
+            DiffLineTextStorage::Span { raw, offset, len } => {
+                let start = *offset as usize;
+                let end = start.saturating_add(*len as usize).min(raw.len());
+                raw.get(start..end).unwrap_or_default()
+            }
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        match &self.storage {
+            DiffLineTextStorage::Owned(text) => text.as_str(),
+            DiffLineTextStorage::Span { .. } => {
+                std::str::from_utf8(self.as_bytes()).unwrap_or("\u{FFFD}")
+            }
+        }
+    }
+
+    pub fn to_string_lossy(&self) -> Cow<'_, str> {
+        match &self.storage {
+            DiffLineTextStorage::Owned(text) => Cow::Borrowed(text.as_str()),
+            DiffLineTextStorage::Span { .. } => String::from_utf8_lossy(self.as_bytes()),
+        }
+    }
+
+    pub fn as_mut_string(&mut self) -> &mut String {
+        if !matches!(self.storage, DiffLineTextStorage::Owned(_)) {
+            let text = String::from_utf8_lossy(self.as_bytes()).into_owned();
+            self.storage = DiffLineTextStorage::Owned(text);
+        }
+        match &mut self.storage {
+            DiffLineTextStorage::Owned(text) => text,
+            DiffLineTextStorage::Span { .. } => unreachable!(),
+        }
+    }
+
+    fn backing_patch_bytes(&self) -> Option<usize> {
+        match &self.storage {
+            DiffLineTextStorage::Owned(_) => None,
+            DiffLineTextStorage::Span { raw, .. } => Some(raw.len()),
+        }
+    }
+
+    fn span_range(&self) -> Option<(Arc<[u8]>, Range<usize>)> {
+        match &self.storage {
+            DiffLineTextStorage::Owned(_) => None,
+            DiffLineTextStorage::Span { raw, offset, len } => {
+                let start = *offset as usize;
+                let end = start.saturating_add(*len as usize).min(raw.len());
+                Some((Arc::clone(raw), start..end))
+            }
+        }
+    }
 }
 
 impl DiffLine {
@@ -692,26 +934,72 @@ impl DiffLine {
         Self::Context {
             old_line: OldLineNumber::new(old_line),
             new_line: NewLineNumber::new(new_line),
-            text: text.into(),
+            text: DiffLineText::owned(text),
         }
     }
 
     pub fn addition(new_line: usize, text: impl Into<String>) -> Self {
         Self::Addition {
             new_line: NewLineNumber::new(new_line),
-            text: text.into(),
+            text: DiffLineText::owned(text),
         }
     }
 
     pub fn deletion(old_line: usize, text: impl Into<String>) -> Self {
         Self::Deletion {
             old_line: OldLineNumber::new(old_line),
-            text: text.into(),
+            text: DiffLineText::owned(text),
         }
     }
 
     pub fn meta(text: impl Into<String>) -> Self {
-        Self::Meta { text: text.into() }
+        Self::Meta {
+            text: DiffLineText::owned(text),
+        }
+    }
+
+    pub(crate) fn context_span(
+        old_line: usize,
+        new_line: usize,
+        raw: Arc<[u8]>,
+        offset: usize,
+        len: usize,
+    ) -> Self {
+        Self::Context {
+            old_line: OldLineNumber::new(old_line),
+            new_line: NewLineNumber::new(new_line),
+            text: DiffLineText::span(raw, offset, len),
+        }
+    }
+
+    pub(crate) fn addition_span(
+        new_line: usize,
+        raw: Arc<[u8]>,
+        offset: usize,
+        len: usize,
+    ) -> Self {
+        Self::Addition {
+            new_line: NewLineNumber::new(new_line),
+            text: DiffLineText::span(raw, offset, len),
+        }
+    }
+
+    pub(crate) fn deletion_span(
+        old_line: usize,
+        raw: Arc<[u8]>,
+        offset: usize,
+        len: usize,
+    ) -> Self {
+        Self::Deletion {
+            old_line: OldLineNumber::new(old_line),
+            text: DiffLineText::span(raw, offset, len),
+        }
+    }
+
+    pub(crate) fn meta_span(raw: Arc<[u8]>, offset: usize, len: usize) -> Self {
+        Self::Meta {
+            text: DiffLineText::span(raw, offset, len),
+        }
     }
 
     pub fn kind(&self) -> DiffLineKind {
@@ -746,7 +1034,43 @@ impl DiffLine {
             Self::Context { text, .. }
             | Self::Addition { text, .. }
             | Self::Deletion { text, .. }
-            | Self::Meta { text } => text,
+            | Self::Meta { text } => text.as_str(),
+        }
+    }
+
+    pub fn text_lossy(&self) -> Cow<'_, str> {
+        match self {
+            Self::Context { text, .. }
+            | Self::Addition { text, .. }
+            | Self::Deletion { text, .. }
+            | Self::Meta { text } => text.to_string_lossy(),
+        }
+    }
+
+    pub fn text_bytes(&self) -> &[u8] {
+        match self {
+            Self::Context { text, .. }
+            | Self::Addition { text, .. }
+            | Self::Deletion { text, .. }
+            | Self::Meta { text } => text.as_bytes(),
+        }
+    }
+
+    pub fn text_span_range(&self) -> Option<(Arc<[u8]>, Range<usize>)> {
+        match self {
+            Self::Context { text, .. }
+            | Self::Addition { text, .. }
+            | Self::Deletion { text, .. }
+            | Self::Meta { text } => text.span_range(),
+        }
+    }
+
+    pub fn backing_patch_bytes(&self) -> Option<usize> {
+        match self {
+            Self::Context { text, .. }
+            | Self::Addition { text, .. }
+            | Self::Deletion { text, .. }
+            | Self::Meta { text } => text.backing_patch_bytes(),
         }
     }
 
@@ -755,11 +1079,12 @@ impl DiffLine {
             Self::Context { text, .. }
             | Self::Addition { text, .. }
             | Self::Deletion { text, .. }
-            | Self::Meta { text } => text,
+            | Self::Meta { text } => text.as_mut_string(),
         }
     }
 }
 
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiffLineKind {
     Context,
@@ -785,59 +1110,98 @@ pub enum DiffRowRef {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiffViewModel {
-    rows: Vec<DiffRowRef>,
+    len: usize,
     file_start_rows: Vec<usize>,
     hunk_start_rows: Vec<usize>,
+    hunk_rows: Vec<DiffViewHunkRow>,
+    file_body_notice_rows: Vec<Option<usize>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DiffViewHunkRow {
+    file: usize,
+    hunk: usize,
+    line_count: usize,
 }
 
 impl DiffViewModel {
     pub fn new(changeset: &Changeset) -> Self {
-        let mut rows = Vec::new();
+        let mut len = 0usize;
         let mut file_start_rows = Vec::with_capacity(changeset.files.len());
         let mut hunk_start_rows = Vec::new();
+        let mut hunk_rows = Vec::new();
+        let mut file_body_notice_rows = Vec::with_capacity(changeset.files.len());
 
         for (file_index, file) in changeset.files.iter().enumerate() {
-            file_start_rows.push(rows.len());
-            rows.push(DiffRowRef::FileHeader(file_index));
+            file_start_rows.push(len);
+            file_body_notice_rows.push(None);
+            len = len.saturating_add(1);
 
             if file.is_binary() || file.has_no_textual_changes() {
-                rows.push(DiffRowRef::FileBodyNotice(file_index));
+                file_body_notice_rows[file_index] = Some(len);
+                len = len.saturating_add(1);
                 continue;
             }
 
             for (hunk_index, hunk) in file.hunks().iter().enumerate() {
-                hunk_start_rows.push(rows.len());
-                rows.push(DiffRowRef::HunkHeader {
+                hunk_start_rows.push(len);
+                hunk_rows.push(DiffViewHunkRow {
                     file: file_index,
                     hunk: hunk_index,
+                    line_count: hunk.lines.len(),
                 });
-                for line_index in 0..hunk.lines.len() {
-                    rows.push(DiffRowRef::Line {
-                        file: file_index,
-                        hunk: hunk_index,
-                        line: line_index,
-                    });
-                }
+                len = len.saturating_add(1).saturating_add(hunk.lines.len());
             }
         }
 
         Self {
-            rows,
+            len,
             file_start_rows,
             hunk_start_rows,
+            hunk_rows,
+            file_body_notice_rows,
         }
     }
 
     pub fn len(&self) -> usize {
-        self.rows.len()
+        self.len
     }
 
     pub fn is_empty(&self) -> bool {
-        self.rows.is_empty()
+        self.len == 0
     }
 
     pub fn row(&self, index: usize) -> Option<DiffRowRef> {
-        self.rows.get(index).copied()
+        if index >= self.len {
+            return None;
+        }
+        if let Ok(file) = self.file_start_rows.binary_search(&index) {
+            return Some(DiffRowRef::FileHeader(file));
+        }
+        if let Some(file) = self.file_at_row(index)
+            && self.file_body_notice_rows.get(file).copied().flatten() == Some(index)
+        {
+            return Some(DiffRowRef::FileBodyNotice(file));
+        }
+
+        let hunk_index = self
+            .hunk_start_rows
+            .partition_point(|start| *start <= index);
+        let hunk_index = hunk_index.checked_sub(1)?;
+        let start = *self.hunk_start_rows.get(hunk_index)?;
+        let hunk = *self.hunk_rows.get(hunk_index)?;
+        if index == start {
+            return Some(DiffRowRef::HunkHeader {
+                file: hunk.file,
+                hunk: hunk.hunk,
+            });
+        }
+        let line = index.saturating_sub(start).saturating_sub(1);
+        (line < hunk.line_count).then_some(DiffRowRef::Line {
+            file: hunk.file,
+            hunk: hunk.hunk,
+            line,
+        })
     }
 
     pub fn file_start_row(&self, file: usize) -> Option<usize> {

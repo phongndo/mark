@@ -746,8 +746,11 @@ transparent_background = true
 max_source_kib = 64
 max_line_kib = 4
 cache_entries = 128
+cache_kib = 8192
 queue_entries = 256
+queue_kib = 4096
 prefetch_viewports = 2
+worker_threads = 3
 
 [diff]
 line_background = "subtle"
@@ -767,8 +770,11 @@ context_expand = 42
     assert_eq!(settings.limits.max_source_bytes, 64 * 1024);
     assert_eq!(settings.limits.max_line_bytes, 4 * 1024);
     assert_eq!(settings.limits.cache_entries, 128);
+    assert_eq!(settings.limits.cache_bytes, 8192 * 1024);
     assert_eq!(settings.limits.queue_entries, 256);
+    assert_eq!(settings.limits.queue_bytes, 4096 * 1024);
     assert_eq!(settings.limits.prefetch_viewports, 2);
+    assert_eq!(settings.limits.worker_threads, 3);
     assert_eq!(settings.diff.line_background, DiffBackground::Subtle);
     assert_eq!(settings.diff.gutter_background, DiffGutterBackground::Delta);
     assert_eq!(settings.diff.inline_background, DiffBackground::Strong);

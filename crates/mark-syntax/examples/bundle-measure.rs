@@ -20,11 +20,25 @@ const CORE: &[&str] = &[
     "go",
     "c",
     "cpp",
-    "bash",
+    "shellscript",
     "zig",
 ];
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut assert_max_core_cold_us = None;
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--assert-max-core-cold-us" => {
+                let value = args
+                    .next()
+                    .ok_or("--assert-max-core-cold-us requires a value")?;
+                assert_max_core_cold_us = Some(value.parse::<u128>()?);
+            }
+            _ => return Err(format!("unexpected argument: {arg}").into()),
+        }
+    }
+
     let bytes = embedded_bundle_bytes();
     let parse_start = Instant::now();
     let bundle = Bundle::parse(bytes).map_err(|error| format!("bundle parse failed: {error:?}"))?;
@@ -70,5 +84,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!("  }}");
     println!("}}");
+
+    if let Some(max_us) = assert_max_core_cold_us
+        && let Some((language, us)) = cold.iter().max_by_key(|(_, us)| *us)
+        && *us > max_us
+    {
+        return Err(format!(
+            "core cold decode assertion failed for {language}: {us}us > {max_us}us"
+        )
+        .into());
+    }
     Ok(())
 }

@@ -69,7 +69,7 @@ impl AnnotationKey {
                 };
                 let lines = &hunk.lines;
                 let mut candidates = Vec::with_capacity(1);
-                if let Some(index) = right {
+                if let Some(index) = right.get() {
                     // Prefer the right/current side when a split row has both sides;
                     // unpaired left-only rows remain old-side deletion marks.
                     if let Some(line) = lines.get(index.get()).and_then(|line| line.new_line()) {
@@ -77,7 +77,7 @@ impl AnnotationKey {
                     }
                     return candidates;
                 }
-                if let Some(index) = left {
+                if let Some(index) = left.get() {
                     Self::push_unpaired_deletion_candidate(
                         &mut candidates,
                         file,

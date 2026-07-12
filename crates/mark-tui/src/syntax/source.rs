@@ -5,6 +5,7 @@ use std::{
     panic::{self, AssertUnwindSafe},
     path::{Component, Path, PathBuf},
     process::Command,
+    time::Instant,
 };
 
 use mark_diff::{
@@ -13,7 +14,10 @@ use mark_diff::{
 use mark_syntax::{SyntaxHighlighter, SyntaxLimits};
 use tokio::sync::mpsc::Sender;
 
-use super::{DiffSide, HighlightedSide, SyntaxKey, SyntaxSkipReason, SyntaxWorkerQueue};
+use super::{
+    DiffSide, HighlightedSide, SyntaxKey, SyntaxPriority, SyntaxSkipReason, SyntaxWorkerQueue,
+    types::SyntaxSourceKind,
+};
 
 #[derive(Debug)]
 pub(crate) struct SyntaxJob {
@@ -21,11 +25,19 @@ pub(crate) struct SyntaxJob {
     pub(crate) language: String,
     pub(crate) source: SyntaxJobSource,
     pub(crate) limits: SyntaxLimits,
+    pub(crate) queued_source_bytes: u64,
+    pub(crate) priority: SyntaxPriority,
+    pub(crate) queued_at: Instant,
 }
 
 #[derive(Debug)]
 pub(crate) struct SyntaxResult {
     pub(crate) key: SyntaxKey,
+    pub(crate) language: String,
+    pub(crate) source_kind: SyntaxSourceKind,
+    pub(crate) priority: SyntaxPriority,
+    pub(crate) queue_latency_micros: u128,
+    pub(crate) run_latency_micros: u128,
     pub(crate) side: Result<SyntaxSuccess, SyntaxJobFailure>,
 }
 
@@ -59,6 +71,9 @@ impl SyntaxJobSource {
     pub(crate) fn known_bytes(&self) -> Option<u64> {
         match self {
             Self::Hunk(source) => Some(source.text.len() as u64),
+            // Full-file source sizes may require git subprocesses. Those checks
+            // are deliberately performed inside the syntax worker so viewport
+            // scrolling never blocks on filesystem/git I/O while queueing jobs.
             Self::FullFile(_) => None,
         }
     }
@@ -96,10 +111,18 @@ pub(crate) enum FullFileSourceKind {
 pub(crate) fn run_syntax_worker(queue: SyntaxWorkerQueue, result_tx: Sender<SyntaxResult>) {
     let mut highlighter = SyntaxHighlighter::new();
     while let Some(job) = queue.pop() {
+        let queue_latency_micros = job.queued_at.elapsed().as_micros();
+        let run_start = Instant::now();
+        let key = job.key;
+        let language = job.language;
+        let source_kind = key.source.kind;
+        let priority = job.priority;
+        let limits = job.limits;
+        let source = job.source;
         let side = panic::catch_unwind(AssertUnwindSafe(|| {
-            let (source, source_bytes, source_lines) = load_job_source(job.source, job.limits)?;
+            let (source, source_bytes, source_lines) = load_job_source(source, limits)?;
             highlighter
-                .highlight(&job.language, &source)
+                .highlight(&language, &source)
                 .map(|highlighted| SyntaxSuccess {
                     side: HighlightedSide {
                         lines: highlighted.lines,
@@ -110,8 +133,17 @@ pub(crate) fn run_syntax_worker(queue: SyntaxWorkerQueue, result_tx: Sender<Synt
                 .map_err(|_| SyntaxJobFailure::HighlightError)
         }))
         .unwrap_or(Err(SyntaxJobFailure::HighlightError));
+        let run_latency_micros = run_start.elapsed().as_micros();
         if result_tx
-            .blocking_send(SyntaxResult { key: job.key, side })
+            .blocking_send(SyntaxResult {
+                key,
+                language,
+                source_kind,
+                priority,
+                queue_latency_micros,
+                run_latency_micros,
+                side,
+            })
             .is_err()
         {
             break;
@@ -126,9 +158,16 @@ pub(crate) fn load_job_source(
     match source {
         SyntaxJobSource::Hunk(source) => Ok((source.text, None, None)),
         SyntaxJobSource::FullFile(source) => {
+            let source_bytes =
+                full_file_source_size(&source).map_err(|_| SyntaxJobFailure::Unavailable)?;
+            if usize::try_from(source_bytes)
+                .ok()
+                .is_some_and(|bytes| bytes > limits.max_source_bytes)
+            {
+                return Err(SyntaxJobFailure::Unavailable);
+            }
             let text = load_full_file_source(&source).map_err(|_| SyntaxJobFailure::Unavailable)?;
             validate_highlight_source(&text, limits).map_err(|_| SyntaxJobFailure::Unavailable)?;
-            let source_bytes = text.len() as u64;
             let source_lines = source_line_count(&text) as u64;
             Ok((text, Some(source_bytes), Some(source_lines)))
         }
@@ -155,13 +194,14 @@ pub(crate) fn build_hunk_source(
         if !line_belongs_to_side(line.kind(), side) {
             continue;
         }
-        if line.text().len() > limits.max_line_bytes {
+        let line_text = line.text_lossy();
+        if line_text.len() > limits.max_line_bytes {
             return Err(SyntaxSkipReason::TooLarge);
         }
         if source_lines > 0 {
             text.push('\n');
         }
-        text.push_str(line.text());
+        text.push_str(&line_text);
         if text.len() > limits.max_source_bytes {
             return Err(SyntaxSkipReason::TooLarge);
         }
@@ -295,6 +335,28 @@ pub(crate) fn load_full_file_source(source: &FullFileSource) -> Result<String, S
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
+pub(crate) fn full_file_source_size(source: &FullFileSource) -> Result<u64, SyntaxSkipReason> {
+    match &source.kind {
+        FullFileSourceKind::Worktree { path } => worktree_file_size(&source.repo, path),
+        FullFileSourceKind::GitRevision { rev, path } => {
+            git_blob_size(&source.repo, &format!("{rev}:{path}"))
+        }
+        FullFileSourceKind::GitMergeBase { base, head, path } => {
+            let rev = git_merge_base(&source.repo, base, head)?;
+            git_blob_size(&source.repo, &format!("{rev}:{path}"))
+        }
+    }
+}
+
+pub(crate) fn worktree_file_size(repo: &Path, path: &str) -> Result<u64, SyntaxSkipReason> {
+    let path = safe_repo_join(repo, path).ok_or(SyntaxSkipReason::NoPath)?;
+    let metadata = fs::symlink_metadata(&path).map_err(|_| SyntaxSkipReason::NoSource)?;
+    if !metadata.file_type().is_file() {
+        return Err(SyntaxSkipReason::NoSource);
+    }
+    Ok(metadata.len())
+}
+
 pub(crate) fn read_worktree_file(repo: &Path, path: &str) -> Result<Vec<u8>, SyntaxSkipReason> {
     let path = safe_repo_join(repo, path).ok_or(SyntaxSkipReason::NoPath)?;
     let metadata = fs::symlink_metadata(&path).map_err(|_| SyntaxSkipReason::NoSource)?;
@@ -338,6 +400,22 @@ pub(crate) fn git_blob(repo: &Path, object: &str) -> Result<Vec<u8>, SyntaxSkipR
         return Err(SyntaxSkipReason::NoSource);
     }
     Ok(output.stdout)
+}
+
+pub(crate) fn git_blob_size(repo: &Path, object: &str) -> Result<u64, SyntaxSkipReason> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["cat-file", "-s", object])
+        .output()
+        .map_err(|_| SyntaxSkipReason::NoSource)?;
+    if !output.status.success() {
+        return Err(SyntaxSkipReason::NoSource);
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse::<u64>()
+        .map_err(|_| SyntaxSkipReason::NoSource)
 }
 
 pub(crate) fn git_merge_base(

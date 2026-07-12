@@ -126,6 +126,7 @@ impl DiffApp {
 
         self.viewport.layout = layout;
         let search_result = self.document.search_index.search_with_grep_match_limit(
+            &self.document.changeset,
             &self.filters.file_filter,
             &self.filters.grep_filter,
             MAX_LIVE_GREP_MATCHES,

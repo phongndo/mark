@@ -111,17 +111,18 @@ pub(crate) fn grep_highlight_targets_for_row(
             let left_width = width / 2;
             let right_width = width.saturating_sub(left_width);
             let mut targets = Vec::with_capacity(2);
-            if let Some(target) =
-                left.and_then(|index| hunk.lines.get(index.get()))
-                    .and_then(|diff_line| {
-                        split_diff_line_grep_highlight_target(
-                            diff_line,
-                            &line.spans,
-                            0,
-                            left_width,
-                            app.viewport.horizontal_scroll,
-                        )
-                    })
+            if let Some(target) = left
+                .get()
+                .and_then(|index| hunk.lines.get(index.get()))
+                .and_then(|diff_line| {
+                    split_diff_line_grep_highlight_target(
+                        diff_line,
+                        &line.spans,
+                        0,
+                        left_width,
+                        app.viewport.horizontal_scroll,
+                    )
+                })
             {
                 targets.push(target);
             }
@@ -179,9 +180,10 @@ pub(crate) fn split_content_start_column(width: usize) -> usize {
 }
 
 pub(crate) fn diff_line_grep_highlight_text(line: &DiffLine) -> String {
-    let mut text = String::with_capacity(line.text().len().saturating_add(1));
+    let line_text = line.text_lossy();
+    let mut text = String::with_capacity(line_text.len().saturating_add(1));
     text.push(diff_line_grep_prefix(line.kind()));
-    text.push_str(&terminal_text(line.text()));
+    text.push_str(&terminal_text(&line_text));
     text
 }
 
@@ -189,7 +191,7 @@ pub(crate) fn diff_line_grep_rendered_text_byte_start(
     line: &DiffLine,
     horizontal_scroll: usize,
 ) -> usize {
-    1 + scrolled_text_byte_start(line.text(), horizontal_scroll)
+    1 + scrolled_text_byte_start(&line.text_lossy(), horizontal_scroll)
 }
 
 pub(crate) fn scrolled_text_byte_start(text: &str, horizontal_scroll: usize) -> usize {

@@ -1,6 +1,11 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, ops::Range, sync::Arc};
 
-use crate::{DiffFile, DiffFileBody, DiffHunk, DiffLine, FileChange, FileStatus, HunkLineRanges};
+use rayon::prelude::*;
+
+use crate::{
+    DiffFile, DiffFileBody, DiffHunk, DiffLimitExceeded, DiffLimits, DiffLine, FileChange,
+    FileStatus, HunkLineRanges,
+};
 
 pub fn parse_patch(patch: &str) -> Vec<DiffFile> {
     let mut files = Vec::new();
@@ -62,6 +67,220 @@ pub fn parse_patch(patch: &str) -> Vec<DiffFile> {
     files
 }
 
+pub fn parse_patch_bytes(raw: Arc<[u8]>) -> Vec<DiffFile> {
+    parse_patch_bytes_limited(raw, DiffLimits::default())
+        .expect("unlimited patch parsing cannot exceed limits")
+}
+
+pub fn parse_patch_bytes_limited(
+    raw: Arc<[u8]>,
+    limits: DiffLimits,
+) -> Result<Vec<DiffFile>, DiffLimitExceeded> {
+    if let Some(files) = parse_patch_bytes_parallel(Arc::clone(&raw), limits)? {
+        return Ok(files);
+    }
+
+    parse_patch_bytes_range_limited(raw, 0..usize::MAX, limits)
+}
+
+#[cfg(not(test))]
+const PARALLEL_PARSE_MIN_BYTES: usize = 8 * 1024 * 1024;
+#[cfg(test)]
+const PARALLEL_PARSE_MIN_BYTES: usize = 512;
+
+fn parse_patch_bytes_parallel(
+    raw: Arc<[u8]>,
+    limits: DiffLimits,
+) -> Result<Option<Vec<DiffFile>>, DiffLimitExceeded> {
+    if raw.len() < PARALLEL_PARSE_MIN_BYTES {
+        return Ok(None);
+    }
+    let sections = diff_git_sections(raw.as_ref());
+    if sections.len() < 2 {
+        return Ok(None);
+    }
+    let threads = parallel_parse_threads();
+    if threads <= 1 {
+        return Ok(None);
+    }
+
+    let section_limits = DiffLimits {
+        max_patch_bytes: None,
+        max_diff_rows: None,
+        max_files: None,
+        max_hunks: None,
+        max_line_bytes: limits.max_line_bytes,
+    };
+    let pool = match rayon::ThreadPoolBuilder::new().num_threads(threads).build() {
+        Ok(pool) => pool,
+        Err(_) => return Ok(None),
+    };
+    let parsed = pool.install(|| {
+        sections
+            .par_iter()
+            .map(|section| {
+                parse_patch_bytes_range_limited(Arc::clone(&raw), section.clone(), section_limits)
+            })
+            .collect::<Vec<_>>()
+    });
+
+    let mut files = Vec::new();
+    for result in parsed {
+        files.extend(result?);
+    }
+    check_parsed_limits(&files, limits)?;
+    Ok(Some(files))
+}
+
+fn parallel_parse_threads() -> usize {
+    if let Ok(value) = std::env::var("MARK_DIFF_PARSE_THREADS")
+        && let Ok(threads) = value.trim().parse::<usize>()
+    {
+        return threads.min(8);
+    }
+    1
+}
+
+fn diff_git_sections(raw: &[u8]) -> Vec<Range<usize>> {
+    let mut starts = Vec::new();
+    let mut search_start = 0usize;
+    while search_start < raw.len() {
+        let Some(relative) = memchr::memmem::find(&raw[search_start..], b"diff --git ") else {
+            break;
+        };
+        let start = search_start + relative;
+        if start == 0 || raw.get(start - 1) == Some(&b'\n') {
+            starts.push(start);
+        }
+        search_start = start.saturating_add(1);
+    }
+
+    if starts.first().copied() != Some(0) {
+        return Vec::new();
+    }
+
+    starts
+        .iter()
+        .copied()
+        .zip(
+            starts
+                .iter()
+                .copied()
+                .skip(1)
+                .chain(std::iter::once(raw.len())),
+        )
+        .map(|(start, end)| start..end)
+        .collect()
+}
+
+fn parse_patch_bytes_range_limited(
+    raw: Arc<[u8]>,
+    range: Range<usize>,
+    limits: DiffLimits,
+) -> Result<Vec<DiffFile>, DiffLimitExceeded> {
+    let mut files = Vec::new();
+    let mut current: Option<DiffFileBuilder> = None;
+    let mut current_hunk: Option<DiffHunkBuilder> = None;
+    let start = range.start.min(raw.len());
+    let end = range.end.min(raw.len());
+    let mut lines = patch_byte_lines(&raw[start..end]).peekable();
+    let mut diff_rows = 0usize;
+    let mut hunks = 0usize;
+
+    while let Some(line) = lines.next() {
+        let line_start = start.saturating_add(line.start);
+        let header_bytes = patch_header_bytes(line.bytes);
+        if header_bytes.starts_with(b"diff --git ") {
+            finish_hunk(&mut current, &mut current_hunk);
+            finish_file(&mut files, &mut current);
+            check_limit("files", limits.max_files, files.len())?;
+            let header_line = String::from_utf8_lossy(header_bytes);
+            current = Some(DiffFileBuilder::from_diff_git(&header_line));
+            continue;
+        }
+
+        if header_bytes.starts_with(b"--- ")
+            && (current.is_none()
+                || current_hunk
+                    .as_ref()
+                    .is_some_and(DiffHunkBuilder::is_complete))
+            && let Some(new_header_bytes) = lines
+                .peek()
+                .map(|line| patch_header_bytes(line.bytes))
+                .filter(|line| line.starts_with(b"+++ "))
+        {
+            finish_hunk(&mut current, &mut current_hunk);
+            finish_file(&mut files, &mut current);
+            check_limit("files", limits.max_files, files.len())?;
+            let old_header = String::from_utf8_lossy(header_bytes);
+            let new_header = String::from_utf8_lossy(new_header_bytes).into_owned();
+            let _ = lines.next();
+            current = Some(DiffFileBuilder::from_unified_headers(
+                &old_header,
+                &new_header,
+            ));
+            continue;
+        }
+
+        let Some(file) = current.as_mut() else {
+            continue;
+        };
+
+        if header_bytes.starts_with(b"@@ ") {
+            finish_hunk(&mut current, &mut current_hunk);
+            hunks = hunks.saturating_add(1);
+            check_limit("hunks", limits.max_hunks, hunks)?;
+            let header_line = String::from_utf8_lossy(header_bytes);
+            current_hunk = Some(DiffHunkBuilder::from_header(&header_line));
+            continue;
+        }
+
+        if let Some(hunk) = current_hunk.as_mut() {
+            check_limit("line bytes", limits.max_line_bytes, line.bytes.len())?;
+            diff_rows = diff_rows.saturating_add(1);
+            check_limit("diff rows", limits.max_diff_rows, diff_rows)?;
+            hunk.push_line_span(Arc::clone(&raw), line_start, line.bytes);
+            continue;
+        }
+
+        let header_line = String::from_utf8_lossy(header_bytes);
+        file.apply_header(&header_line);
+    }
+
+    finish_hunk(&mut current, &mut current_hunk);
+    finish_file(&mut files, &mut current);
+    check_parsed_limits(&files, limits)?;
+    Ok(files)
+}
+
+fn check_parsed_limits(files: &[DiffFile], limits: DiffLimits) -> Result<(), DiffLimitExceeded> {
+    check_limit("files", limits.max_files, files.len())?;
+    let mut diff_rows = 0usize;
+    let mut hunks = 0usize;
+    for file in files {
+        hunks = hunks.saturating_add(file.hunks().len());
+        for hunk in file.hunks() {
+            diff_rows = diff_rows.saturating_add(hunk.lines.len());
+        }
+    }
+    check_limit("hunks", limits.max_hunks, hunks)?;
+    check_limit("diff rows", limits.max_diff_rows, diff_rows)?;
+    Ok(())
+}
+
+fn check_limit(
+    limit: &'static str,
+    max: Option<usize>,
+    actual: usize,
+) -> Result<(), DiffLimitExceeded> {
+    if let Some(max) = max
+        && actual > max
+    {
+        return Err(DiffLimitExceeded::new(limit, max, actual));
+    }
+    Ok(())
+}
+
 fn patch_lines(patch: &str) -> impl Iterator<Item = &str> {
     patch
         .split_inclusive('\n')
@@ -70,6 +289,33 @@ fn patch_lines(patch: &str) -> impl Iterator<Item = &str> {
 
 fn patch_header_line(line: &str) -> &str {
     line.strip_suffix('\r').unwrap_or(line)
+}
+
+fn patch_header_bytes(line: &[u8]) -> &[u8] {
+    line.strip_suffix(b"\r").unwrap_or(line)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PatchByteLine<'a> {
+    start: usize,
+    bytes: &'a [u8],
+}
+
+fn patch_byte_lines(patch: &[u8]) -> impl Iterator<Item = PatchByteLine<'_>> {
+    let mut start = 0usize;
+    std::iter::from_fn(move || {
+        if start >= patch.len() {
+            return None;
+        }
+        let line_start = start;
+        let relative_end = memchr::memchr(b'\n', &patch[line_start..]);
+        let line_end = relative_end.map_or(patch.len(), |offset| line_start + offset);
+        start = line_end.saturating_add(usize::from(relative_end.is_some()));
+        Some(PatchByteLine {
+            start: line_start,
+            bytes: &patch[line_start..line_end],
+        })
+    })
 }
 
 fn is_diff_no_newline_marker(raw: &str) -> bool {
@@ -389,6 +635,50 @@ impl DiffHunkBuilder {
         }
     }
 
+    fn push_line_span(&mut self, raw_patch: Arc<[u8]>, line_start: usize, raw: &[u8]) {
+        let Some(prefix) = raw.first().copied() else {
+            self.push_context_span(raw_patch, line_start, 0);
+            return;
+        };
+
+        match prefix {
+            b'+' => {
+                let new_line = self.new_line;
+                self.new_line += 1;
+                self.additions += 1;
+                self.lines.push(DiffLine::addition_span(
+                    new_line,
+                    raw_patch,
+                    line_start.saturating_add(1),
+                    raw.len().saturating_sub(1),
+                ));
+            }
+            b'-' => {
+                let old_line = self.old_line;
+                self.old_line += 1;
+                self.deletions += 1;
+                self.lines.push(DiffLine::deletion_span(
+                    old_line,
+                    raw_patch,
+                    line_start.saturating_add(1),
+                    raw.len().saturating_sub(1),
+                ));
+            }
+            b' ' => self.push_context_span(
+                raw_patch,
+                line_start.saturating_add(1),
+                raw.len().saturating_sub(1),
+            ),
+            b'\\' => {
+                if !is_diff_no_newline_marker_bytes(raw) {
+                    self.lines
+                        .push(DiffLine::meta_span(raw_patch, line_start, raw.len()));
+                }
+            }
+            _ => self.push_context_span(raw_patch, line_start, raw.len()),
+        }
+    }
+
     fn is_complete(&self) -> bool {
         self.old_line.saturating_sub(self.ranges.old_start()) >= self.ranges.old_count()
             && self.new_line.saturating_sub(self.ranges.new_start()) >= self.ranges.new_count()
@@ -406,6 +696,15 @@ impl DiffHunkBuilder {
         self.lines.push(DiffLine::context(old_line, new_line, text));
     }
 
+    fn push_context_span(&mut self, raw: Arc<[u8]>, offset: usize, len: usize) {
+        let old_line = self.old_line;
+        let new_line = self.new_line;
+        self.old_line += 1;
+        self.new_line += 1;
+        self.lines
+            .push(DiffLine::context_span(old_line, new_line, raw, offset, len));
+    }
+
     fn finish(self) -> DiffHunk {
         DiffHunk {
             header: self.header,
@@ -413,6 +712,10 @@ impl DiffHunkBuilder {
             lines: self.lines,
         }
     }
+}
+
+fn is_diff_no_newline_marker_bytes(raw: &[u8]) -> bool {
+    raw.starts_with(b"\\ No newline at end of file")
 }
 
 pub(super) fn parse_hunk_header(header: &str) -> (usize, usize, usize, usize) {

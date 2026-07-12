@@ -47,6 +47,10 @@ pub struct EngineCounters {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PatternHotspot {
     pub root_scope: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grammar_id: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern_id: Option<u32>,
     pub engine: String,
     pub pattern: String,
     pub attempts: u64,

@@ -274,7 +274,7 @@ fn ui_model_expands_context_before_hunk_from_nearest_lines() {
             old_start: 1,
             new_start: 1,
             lines: 29,
-            expanded: step,
+            expanded: step as u32,
         })
     );
     assert_eq!(
@@ -1532,7 +1532,7 @@ fn split_wrapped_empty_cells_follow_visual_rows() {
                 }],
             },
         }],
-        raw_patch: Vec::new(),
+        raw_patch: mark_diff::Changeset::empty_raw_patch(),
     };
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Split);
     app.config.theme.decorations.empty_fill = true;
@@ -1964,10 +1964,10 @@ fn annotation_pairing_spans_no_newline_meta_line() {
             matches!(
                 row,
                 UiRow::SplitLine {
-                    left: Some(LINE_0),
-                    right: None,
+                    left,
+                    right,
                     ..
-                }
+                } if left.get() == Some(LINE_0) && right.get().is_none()
             )
         })
         .expect("split deletion row");

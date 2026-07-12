@@ -1521,7 +1521,7 @@ fn inline_emphasis_marks_changed_tokens_in_paired_lines() {
 
 #[test]
 fn closed_queue_marks_full_file_source_skipped() {
-    let queue = SyntaxWorkerQueue::new(8, 0);
+    let queue = SyntaxWorkerQueue::new(8, 0, usize::MAX);
     queue.close();
     let mut syntax = syntax_runtime_with_queue(queue);
     let source_id = SyntaxSourceId {

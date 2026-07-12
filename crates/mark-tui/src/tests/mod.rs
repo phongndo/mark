@@ -159,7 +159,7 @@ fn changeset_with_context_lines_at(repo: PathBuf, start: usize, line_count: usiz
                 }],
             },
         }],
-        raw_patch: Vec::new(),
+        raw_patch: mark_diff::Changeset::empty_raw_patch(),
     }
 }
 
@@ -193,7 +193,7 @@ fn changeset_with_line_texts(texts: &[&str]) -> Changeset {
                 }],
             },
         }],
-        raw_patch: Vec::new(),
+        raw_patch: mark_diff::Changeset::empty_raw_patch(),
     }
 }
 
@@ -220,7 +220,7 @@ fn changeset_with_replacement_pair() -> Changeset {
                 }],
             },
         }],
-        raw_patch: Vec::new(),
+        raw_patch: mark_diff::Changeset::empty_raw_patch(),
     }
 }
 
@@ -281,7 +281,7 @@ fn changeset_with_hunks_at(repo: PathBuf, line_numbers: &[usize]) -> Changeset {
             deletions: 0,
             body: mark_diff::DiffFileBody::Text { hunks },
         }],
-        raw_patch: Vec::new(),
+        raw_patch: mark_diff::Changeset::empty_raw_patch(),
     }
 }
 
@@ -316,7 +316,7 @@ fn changeset_with_hunk_line_counts(repo: PathBuf, hunks: &[(usize, usize)]) -> C
             deletions: 0,
             body: mark_diff::DiffFileBody::Text { hunks },
         }],
-        raw_patch: Vec::new(),
+        raw_patch: mark_diff::Changeset::empty_raw_patch(),
     }
 }
 
@@ -346,7 +346,7 @@ fn changeset_with_files(paths: &[&str]) -> Changeset {
         repo: PathBuf::from("/repo").into(),
         title: "test".to_owned(),
         files,
-        raw_patch: Vec::new(),
+        raw_patch: mark_diff::Changeset::empty_raw_patch(),
     }
 }
 
@@ -395,6 +395,9 @@ fn syntax_job(key: SyntaxKey) -> SyntaxJob {
             source_lines: 1,
         }),
         limits: SyntaxLimits::default(),
+        queued_source_bytes: 12,
+        priority: SyntaxPriority::Visible,
+        queued_at: std::time::Instant::now(),
     }
 }
 
@@ -424,7 +427,7 @@ fn syntax_runtime_with_queue(queue: SyntaxWorkerQueue) -> SyntaxRuntime {
         unavailable_full_files: HashSet::new(),
         failed: HashSet::new(),
         stats: SyntaxBenchmarkReport::default(),
-        worker: None,
+        workers: Vec::new(),
     }
 }
 

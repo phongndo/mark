@@ -10,6 +10,8 @@ use crate::{
     syntax::DiffSide,
 };
 
+const MAX_EAGER_WRAPPED_ROWS: usize = 200_000;
+
 impl DiffApp {
     pub(in crate::app) fn invalidate_wrapped_visual_layout(&self) {
         self.viewport.wrapped_visual_layout.borrow_mut().take();
@@ -71,8 +73,9 @@ impl DiffApp {
                 .map(|text| self.wrapped_visual_height_for_text(text))
                 .unwrap_or(1),
             UiRow::UnifiedLine { file, hunk, line } | UiRow::MetaLine { file, hunk, line } => {
-                let text = &self.document.changeset.files[file].hunks()[hunk].lines[line].text();
-                wrapped_line_count(text, unified_content_width(self.viewport.viewport_width))
+                let text =
+                    self.document.changeset.files[file].hunks()[hunk].lines[line].text_lossy();
+                wrapped_line_count(&text, unified_content_width(self.viewport.viewport_width))
             }
             UiRow::SplitLine {
                 file,
@@ -87,11 +90,11 @@ impl DiffApp {
                 let right_content_width = split_cell_content_width(right_width);
                 let left_rows = left
                     .and_then(|index| lines.get(index.get()))
-                    .map(|line| wrapped_line_count(line.text(), left_content_width))
+                    .map(|line| wrapped_line_count(&line.text_lossy(), left_content_width))
                     .unwrap_or(1);
                 let right_rows = right
                     .and_then(|index| lines.get(index.get()))
-                    .map(|line| wrapped_line_count(line.text(), right_content_width))
+                    .map(|line| wrapped_line_count(&line.text_lossy(), right_content_width))
                     .unwrap_or(1);
                 left_rows.max(right_rows).max(1)
             }
@@ -115,6 +118,18 @@ impl DiffApp {
             return;
         }
 
+        if self.document.model.len() > MAX_EAGER_WRAPPED_ROWS {
+            *self.viewport.wrapped_visual_layout.borrow_mut() = Some(WrappedVisualLayout {
+                layout: self.viewport.layout,
+                viewport_width: self.viewport.viewport_width,
+                model_rows: self.document.model.len(),
+                model_rows_ptr: self.document.model.cache_key(),
+                row_starts: Vec::new(),
+                total_rows: self.document.model.len(),
+            });
+            return;
+        }
+
         let mut row_starts = Vec::with_capacity(self.document.model.len().saturating_add(1));
         row_starts.push(0);
         let mut total_rows = 0usize;
@@ -134,7 +149,7 @@ impl DiffApp {
             layout: self.viewport.layout,
             viewport_width: self.viewport.viewport_width,
             model_rows: self.document.model.len(),
-            model_rows_ptr: self.document.model.rows.as_ptr() as usize,
+            model_rows_ptr: self.document.model.cache_key(),
             row_starts,
             total_rows,
         });
@@ -156,8 +171,15 @@ impl DiffApp {
             .wrapped_visual_layout
             .borrow()
             .as_ref()
-            .and_then(|layout| layout.row_starts.get(row_index.min(layout.model_rows)))
-            .copied()
+            .and_then(|layout| {
+                if layout.row_starts.is_empty() {
+                    return Some(row_index.min(layout.model_rows));
+                }
+                layout
+                    .row_starts
+                    .get(row_index.min(layout.model_rows))
+                    .copied()
+            })
             .unwrap_or_default()
     }
 
@@ -168,6 +190,13 @@ impl DiffApp {
             .borrow()
             .as_ref()
             .and_then(|layout| {
+                if layout.row_starts.is_empty() {
+                    return self
+                        .document
+                        .model
+                        .row(row_index)
+                        .map(|row| self.wrapped_visual_height_for_row(row).max(1));
+                }
                 let row_index = row_index.min(layout.model_rows);
                 let start = layout.row_starts.get(row_index)?;
                 let end = layout.row_starts.get(row_index.saturating_add(1))?;
@@ -186,6 +215,9 @@ impl DiffApp {
         let layout = layout.as_ref()?;
         if scroll >= layout.total_rows {
             return None;
+        }
+        if layout.row_starts.is_empty() {
+            return self.document.model.row(scroll).map(|_| (scroll, 0));
         }
 
         let row_index = layout

@@ -509,21 +509,11 @@ fn interned_frame_stack_scope_data(
 // equality is the interned stack id maintained on each frame.
 const LINKED_FRAME_CHUNK: usize = 32;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct FrameStack {
     tail: Option<Arc<FrameChunk>>,
     len: usize,
     interned_id: InternedFrameStackId,
-}
-
-impl Default for FrameStack {
-    fn default() -> Self {
-        Self {
-            tail: None,
-            len: 0,
-            interned_id: InternedFrameStackId::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -1460,6 +1450,7 @@ impl TextMateTokenizer {
     fn record_pattern_hotspot(
         &mut self,
         pattern: &str,
+        pattern_id: Option<(GrammarId, PatternId)>,
         engine: &'static str,
         elapsed_micros: u64,
         matched: bool,
@@ -1470,8 +1461,12 @@ impl TextMateTokenizer {
         if !self.counters_enabled || !self.hot_counters_enabled {
             return;
         }
+        let grammar_id = pattern_id.map(|(grammar_id, _)| grammar_id.0);
+        let pattern_id = pattern_id.map(|(_, pattern_id)| pattern_id.0);
         let key = PatternHotspotKey {
             root_scope: self.root_scope_key.clone(),
+            grammar_id,
+            pattern_id,
             engine: engine.to_owned(),
             pattern: pattern.to_owned(),
         };
@@ -1480,6 +1475,8 @@ impl TextMateTokenizer {
             .entry(key)
             .or_insert_with(|| PatternHotspot {
                 root_scope: self.root_scope_key.clone(),
+                grammar_id,
+                pattern_id,
                 engine: engine.to_owned(),
                 pattern: pattern.to_owned(),
                 ..PatternHotspot::default()
@@ -2360,6 +2357,7 @@ impl TextMateTokenizer {
                 }
                 let pattern = self.find_cached_pattern_selection_report(
                     &candidate.pattern,
+                    candidate.pattern_id,
                     candidate_set.matchers[index].matcher(),
                     line,
                     from,
@@ -2490,34 +2488,38 @@ impl TextMateTokenizer {
             Some((grammar_id, pattern_id)) => self.cached_matcher(grammar_id, pattern_id, pattern),
             None => self.cached_dynamic_matcher(pattern),
         };
-        self.find_cached_pattern_report(pattern, matcher.matcher(), line, from, ctx)
+        self.find_cached_pattern_report(pattern, pattern_id, matcher.matcher(), line, from, ctx)
     }
 
     fn find_cached_pattern_report(
         &mut self,
         pattern: &str,
+        pattern_id: Option<(GrammarId, PatternId)>,
         matcher: &RegexMatcher,
         line: &str,
         from: usize,
         ctx: AnchorContext,
     ) -> PatternSearchResult {
-        self.find_cached_pattern_report_impl(pattern, matcher, line, from, ctx, false)
+        self.find_cached_pattern_report_impl(pattern, pattern_id, matcher, line, from, ctx, false)
     }
 
     fn find_cached_pattern_selection_report(
         &mut self,
         pattern: &str,
+        pattern_id: Option<(GrammarId, PatternId)>,
         matcher: &RegexMatcher,
         line: &str,
         from: usize,
         ctx: AnchorContext,
     ) -> PatternSearchResult {
-        self.find_cached_pattern_report_impl(pattern, matcher, line, from, ctx, true)
+        self.find_cached_pattern_report_impl(pattern, pattern_id, matcher, line, from, ctx, true)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn find_cached_pattern_report_impl(
         &mut self,
         pattern: &str,
+        pattern_id: Option<(GrammarId, PatternId)>,
         matcher: &RegexMatcher,
         line: &str,
         from: usize,
@@ -2561,6 +2563,7 @@ impl TextMateTokenizer {
                 }
                 self.record_pattern_hotspot(
                     pattern,
+                    pattern_id,
                     engine,
                     elapsed_micros,
                     matched,
@@ -2581,6 +2584,7 @@ impl TextMateTokenizer {
                 }
                 self.record_pattern_hotspot(
                     pattern,
+                    pattern_id,
                     engine,
                     elapsed_micros,
                     false,
@@ -2597,6 +2601,7 @@ impl TextMateTokenizer {
             Err(FallbackError::InvalidStart { .. }) => {
                 self.record_pattern_hotspot(
                     pattern,
+                    pattern_id,
                     engine,
                     elapsed_micros,
                     false,
@@ -3529,6 +3534,8 @@ struct InlineCandidateCacheKey {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct PatternHotspotKey {
     root_scope: String,
+    grammar_id: Option<u16>,
+    pattern_id: Option<u32>,
     engine: String,
     pattern: String,
 }

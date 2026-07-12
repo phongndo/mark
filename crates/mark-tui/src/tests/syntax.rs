@@ -29,7 +29,7 @@ fn syntax_runtime_start_error_disables_syntax_with_visible_diagnostic() {
 
 #[test]
 fn highlight_queue_runs_visible_jobs_before_prefetch_jobs() {
-    let queue = SyntaxWorkerQueue::new(8, 0);
+    let queue = SyntaxWorkerQueue::new(8, 0, usize::MAX);
     let prefetch = syntax_key(1);
     let visible = syntax_key(2);
 
@@ -46,7 +46,7 @@ fn highlight_queue_runs_visible_jobs_before_prefetch_jobs() {
 
 #[test]
 fn visible_highlight_job_can_evict_prefetch_when_queue_is_full() {
-    let queue = SyntaxWorkerQueue::new(1, 0);
+    let queue = SyntaxWorkerQueue::new(1, 0, usize::MAX);
     let prefetch = syntax_key(1);
     let visible = syntax_key(2);
 
@@ -64,7 +64,7 @@ fn visible_highlight_job_can_evict_prefetch_when_queue_is_full() {
 
 #[test]
 fn stale_highlight_jobs_are_dropped_on_generation_change() {
-    let queue = SyntaxWorkerQueue::new(8, 0);
+    let queue = SyntaxWorkerQueue::new(8, 0, usize::MAX);
 
     queue
         .try_push(syntax_job(syntax_key(1)), SyntaxPriority::Prefetch)

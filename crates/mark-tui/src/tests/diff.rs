@@ -565,7 +565,7 @@ fn ui_model_expands_context_after_previous_hunk_downward() {
             old_start: 71,
             new_start: 71,
             lines: 29,
-            expanded: step,
+            expanded: step as u32,
         })
     );
     assert_eq!(

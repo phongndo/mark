@@ -68,6 +68,21 @@ fn parse_patch_stats_counts_non_utf8_hunk_lines() {
 }
 
 #[test]
+fn parse_patch_bytes_keeps_non_utf8_payloads_as_line_spans() {
+    let patch = Arc::<[u8]>::from(
+        b"diff --git a/bytes.txt b/bytes.txt\n--- a/bytes.txt\n+++ b/bytes.txt\n@@ -1 +1 @@\n-\xff\n+ok\n"
+            .to_vec(),
+    );
+
+    let files = parse_patch_bytes(patch);
+
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].hunks()[0].lines[0].text_bytes(), b"\xff");
+    assert_eq!(files[0].hunks()[0].lines[0].text_lossy(), "\u{fffd}");
+    assert_eq!(files[0].hunks()[0].lines[1].text(), "ok");
+}
+
+#[test]
 fn render_bytes_stat_matches_full_changeset_stat_for_patch() {
     let patch = Arc::<[u8]>::from(
             b"--- a/a.txt\n+++ b/a.txt\n@@ -1 +1,2 @@\n-old\n+new\n+next\n--- a/b.txt\n+++ b/b.txt\n@@ -2 +2 @@\n-left\n+right\n"
@@ -224,6 +239,48 @@ fn parse_patch_preserves_binary_paths_with_spaces() {
 }
 
 #[test]
+fn parse_patch_bytes_reports_explicit_limits() {
+    let patch = Arc::<[u8]>::from(
+        b"diff --git a/a.txt b/a.txt
+--- a/a.txt
++++ b/a.txt
+@@ -1,2 +1,2 @@
+-old
++new
+"
+        .as_slice(),
+    );
+
+    let error = parse_patch_bytes_limited(
+        patch,
+        DiffLimits {
+            max_diff_rows: Some(1),
+            ..DiffLimits::default()
+        },
+    )
+    .expect_err("two diff rows should exceed the limit");
+
+    assert_eq!(error.limit, "diff rows");
+    assert_eq!(error.max, 1);
+    assert_eq!(error.actual, 2);
+}
+
+#[test]
+fn parse_patch_bytes_parallel_sections_match_order_and_spans() {
+    let padding = "x".repeat(600);
+    let patch = format!(
+        "diff --git a/a.txt b/a.txt\nindex {padding}\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old a\n+new a\ndiff --git a/b.txt b/b.txt\n--- a/b.txt\n+++ b/b.txt\n@@ -2 +2 @@\n-old b\n+new b\n"
+    );
+    let files = parse_patch_bytes(Arc::from(patch.into_bytes().into_boxed_slice()));
+
+    assert_eq!(files.len(), 2);
+    assert_eq!(files[0].display_path(), "a.txt");
+    assert_eq!(files[1].display_path(), "b.txt");
+    assert_eq!(files[0].hunks()[0].lines[1].text(), "new a");
+    assert_eq!(files[1].hunks()[0].lines[1].text(), "new b");
+}
+
+#[test]
 fn rename_or_copy_status_wins_over_later_mode_headers() {
     let renamed = parse_patch(
         "diff --git a/old.txt b/new.txt\nrename from old.txt\nrename to new.txt\nold mode 100644\nnew mode 100755\n",
@@ -244,7 +301,7 @@ fn view_model_indexes_file_and_hunk_rows() {
         files: parse_patch(
             "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n",
         ),
-        raw_patch: Vec::new(),
+        raw_patch: Changeset::empty_raw_patch(),
     };
     let model = DiffViewModel::new(&changeset);
 
