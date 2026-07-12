@@ -1,4 +1,6 @@
 use std::{
+    cell::RefCell,
+    collections::BTreeMap,
     collections::HashMap,
     collections::HashSet,
     fs::OpenOptions,
@@ -16,7 +18,7 @@ use super::checkpoint::CheckpointTable;
 use super::counters::{EngineCounters, PatternHotspot};
 use super::grammar::{
     CaptureSpec, CompiledGrammar, GrammarLoadError, GrammarValidationError, InjectionPriority,
-    RuleBody, RuleRef, load_dev_grammar_from_str,
+    RuleBody, RuleRef, load_dev_grammar_from_str, normalize_injection_selectors,
 };
 use super::hashing::{self, FastMap};
 use super::line::{LineChunks, next_char_boundary};
@@ -982,6 +984,8 @@ pub struct TextMateTokenizer {
     injection_outcomes: InjectionOutcomeInterner,
     injection_outcome_cache: FastMap<ScopeStackId, (InjectionOutcomeId, Arc<InjectionOutcome>)>,
     inline_candidate_cache: FastMap<InlineCandidateCacheKey, Arc<CandidateSet>>,
+    include_availability_cache: RefCell<HashMap<IncludeAvailabilityNode, bool>>,
+    rule_repository_contexts: HashMap<(GrammarId, RuleId), Arc<RepositoryBindings>>,
     /// Per-tokenizer mirror of the global frame-stack intern table's edges so
     /// repeat pushes of a known (parent stack, frame) transition skip the
     /// global mutex. Values are authoritative global ids and never invalidate.
@@ -999,13 +1003,22 @@ pub struct TextMateTokenizer {
     hot_counters_enabled: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum IncludeAvailabilityNode {
+    Rule(GrammarId, GrammarId, RuleId),
+    Repository(GrammarId, GrammarId, String),
+    TopLevel(GrammarId, GrammarId),
+}
+
 impl TextMateTokenizer {
     pub fn new(grammars: GrammarSet, root: GrammarId) -> Self {
         let root_scope_key = grammars
             .grammar(root)
             .map(|grammar| grammar.scope_name.clone())
             .unwrap_or_else(|| format!("grammar:{}", root.0));
-        let injection_selectors = compile_injection_selectors(&grammars);
+        let injection_selectors = compile_injection_selectors(&grammars, root);
+        let rule_repository_contexts =
+            compile_rule_repository_contexts(&grammars, root, &injection_selectors);
         Self {
             grammars,
             root,
@@ -1026,6 +1039,8 @@ impl TextMateTokenizer {
             injection_outcomes: InjectionOutcomeInterner::default(),
             injection_outcome_cache: hashing::fast_map(),
             inline_candidate_cache: hashing::fast_map(),
+            include_availability_cache: RefCell::new(HashMap::new()),
+            rule_repository_contexts,
             frame_edge_cache: hashing::fast_map(),
             frame_node_cache: hashing::fast_map(),
             regex_scratch: super::regex::bytecode::BytecodeScratch::default(),
@@ -1247,6 +1262,7 @@ impl TextMateTokenizer {
         let line_entry_depth = state.depth();
         let mut frame_anchor_positions = Vec::new();
         let mut loop_candidates = None;
+        let mut zero_width_states = HashSet::new();
         // End rules such as `$` are zero-width at the logical line end. Keep
         // evaluating while frames remain so line-scoped rules close even when
         // callers pass a line without its terminating newline.
@@ -1306,6 +1322,14 @@ impl TextMateTokenizer {
             }
 
             let depth_before = state.depth();
+            let stack_before = state.frames.interned_id();
+            let zero_width_state_before =
+                (result.start == result.end && state_changes).then(|| state.clone());
+            let zero_width_match_rule = result.start == result.end
+                && matches!(
+                    &candidates.candidates[candidate_index].kind,
+                    CandidateKind::Match { .. }
+                );
             let next_cursor = self.apply_candidate(
                 parse_text,
                 &mut state,
@@ -1318,7 +1342,36 @@ impl TextMateTokenizer {
                 candidates.active_stack_id,
                 candidates.end_stack_id,
             );
-            cursor = if next_cursor == result.start && state.depth() != depth_before {
+            if zero_width_match_rule {
+                // vscode-textmate stops the current line when an ordinary
+                // MatchRule wins without consuming input. Advancing one scalar
+                // would let lower-priority rules color text that the oracle
+                // leaves in the active scope (and can skip byte zero entirely).
+                let stack = self.current_scope_stack_id(&state, true, None);
+                self.push_token(&mut tokens, result.start..parse_text.len(), stack);
+                cursor = parse_text.len();
+                break;
+            }
+            let zero_width_state_change =
+                next_cursor == result.start && state.depth() != depth_before;
+            if zero_width_state_change {
+                zero_width_states.insert((result.start, stack_before));
+                if !zero_width_states.insert((result.start, state.frames.interned_id())) {
+                    // A zero-width begin/end pair can return to an already
+                    // visited state without consuming input. vscode-textmate
+                    // stops on the state before the operation that completed
+                    // the cycle (for an immediate zero-width end, that means
+                    // retaining the frame it just tried to pop).
+                    if let Some(previous_state) = zero_width_state_before {
+                        state = previous_state;
+                    }
+                    let stack = self.current_scope_stack_id(&state, true, None);
+                    self.push_token(&mut tokens, result.start..parse_text.len(), stack);
+                    cursor = parse_text.len();
+                    break;
+                }
+            }
+            cursor = if zero_width_state_change {
                 next_cursor
             } else if next_cursor <= result.start {
                 next_char_boundary(parse_text, result.start)
@@ -1381,6 +1434,10 @@ impl TextMateTokenizer {
             .grammar(root)
             .map(|grammar| grammar.scope_name.clone())
             .unwrap_or_else(|| format!("grammar:{}", root.0));
+        self.injection_selectors = compile_injection_selectors(&self.grammars, root);
+        self.include_availability_cache.borrow_mut().clear();
+        self.rule_repository_contexts =
+            compile_rule_repository_contexts(&self.grammars, root, &self.injection_selectors);
         self.current_scope_stack_cache.clear();
         self.clear_line_cache();
         self.clear_candidate_cache();
@@ -1864,6 +1921,10 @@ impl TextMateTokenizer {
                     let Some(rule) = grammar.rule(*rule_id) else {
                         continue;
                     };
+                    let repository_context = self
+                        .rule_repository_contexts
+                        .get(&(grammar_id, *rule_id))
+                        .map(Arc::as_ref);
                     match &rule.body {
                         RuleBody::Match {
                             pattern,
@@ -1882,7 +1943,10 @@ impl TextMateTokenizer {
                                         grammar_id,
                                         name: scope_name(grammar, *name),
                                         name_template: None,
-                                        captures: captures.clone(),
+                                        captures: contextualize_capture_spec(
+                                            captures,
+                                            repository_context,
+                                        ),
                                     },
                                 });
                                 *order += 1;
@@ -1898,7 +1962,12 @@ impl TextMateTokenizer {
                             apply_end_pattern_last,
                             patterns,
                         } => {
-                            if self.only_unavailable_external_includes(grammar, patterns) {
+                            let patterns = contextualize_refs(patterns, repository_context);
+                            if self.only_unavailable_includes(
+                                grammar_id,
+                                base_grammar_id,
+                                &patterns,
+                            ) {
                                 continue;
                             }
                             let begin_pattern_id = *begin;
@@ -1917,12 +1986,18 @@ impl TextMateTokenizer {
                                         grammar_id,
                                         rule_id: rule.id,
                                         end: *end,
-                                        begin_captures: begin_captures.clone(),
-                                        end_captures: Arc::new(end_captures.clone()),
+                                        begin_captures: contextualize_capture_spec(
+                                            begin_captures,
+                                            repository_context,
+                                        ),
+                                        end_captures: Arc::new(contextualize_capture_spec(
+                                            end_captures,
+                                            repository_context,
+                                        )),
                                         name: scope_name(grammar, *name).map(Arc::from),
                                         content_name: scope_name(grammar, *content_name)
                                             .map(Arc::from),
-                                        patterns: patterns.clone().into(),
+                                        patterns: patterns.into(),
                                         apply_end_pattern_last: *apply_end_pattern_last,
                                         end_static,
                                         push_cache: [OnceLock::new(), OnceLock::new()],
@@ -1940,7 +2015,12 @@ impl TextMateTokenizer {
                             content_name,
                             patterns,
                         } => {
-                            if self.only_unavailable_external_includes(grammar, patterns) {
+                            let patterns = contextualize_refs(patterns, repository_context);
+                            if self.only_unavailable_includes(
+                                grammar_id,
+                                base_grammar_id,
+                                &patterns,
+                            ) {
                                 continue;
                             }
                             let begin_pattern_id = *begin;
@@ -1959,12 +2039,18 @@ impl TextMateTokenizer {
                                         grammar_id,
                                         rule_id: rule.id,
                                         while_pattern: *while_pattern,
-                                        begin_captures: begin_captures.clone(),
-                                        while_captures: Arc::new(while_captures.clone()),
+                                        begin_captures: contextualize_capture_spec(
+                                            begin_captures,
+                                            repository_context,
+                                        ),
+                                        while_captures: Arc::new(contextualize_capture_spec(
+                                            while_captures,
+                                            repository_context,
+                                        )),
                                         name: scope_name(grammar, *name).map(Arc::from),
                                         content_name: scope_name(grammar, *content_name)
                                             .map(Arc::from),
-                                        patterns: patterns.clone().into(),
+                                        patterns: patterns.into(),
                                         while_static,
                                         push_cache: [OnceLock::new(), OnceLock::new()],
                                     },
@@ -1972,15 +2058,18 @@ impl TextMateTokenizer {
                                 *order += 1;
                             }
                         }
-                        RuleBody::IncludeOnly { patterns } => self.flatten_refs(
-                            grammar_id,
-                            base_grammar_id,
-                            patterns,
-                            scope_prefix.clone(),
-                            out,
-                            order,
-                            depth + 1,
-                        ),
+                        RuleBody::IncludeOnly { patterns } => {
+                            let patterns = contextualize_refs(patterns, repository_context);
+                            self.flatten_refs(
+                                grammar_id,
+                                base_grammar_id,
+                                &patterns,
+                                scope_prefix.clone(),
+                                out,
+                                order,
+                                depth + 1,
+                            )
+                        }
                     }
                 }
                 RuleRef::Repository(name) => {
@@ -2059,20 +2148,179 @@ impl TextMateTokenizer {
         }
     }
 
-    fn only_unavailable_external_includes(
+    fn only_unavailable_includes(
         &self,
-        grammar: &CompiledGrammar,
+        grammar_id: GrammarId,
+        base_grammar_id: GrammarId,
         refs: &[RuleRef],
     ) -> bool {
         !refs.is_empty()
-            && refs.iter().all(|rule_ref| {
-                let RuleRef::External { scope, .. } = rule_ref else {
-                    return false;
-                };
-                grammar
-                    .scope(*scope)
-                    .is_none_or(|scope| self.grammars.grammar_id_by_scope(scope).is_none())
-            })
+            && !self.refs_have_available_rule(
+                grammar_id,
+                base_grammar_id,
+                refs,
+                &mut HashSet::new(),
+                0,
+            )
+    }
+
+    fn refs_have_available_rule(
+        &self,
+        grammar_id: GrammarId,
+        base_grammar_id: GrammarId,
+        refs: &[RuleRef],
+        visiting: &mut HashSet<IncludeAvailabilityNode>,
+        depth: usize,
+    ) -> bool {
+        if depth >= MAX_INCLUDE_DEPTH {
+            return false;
+        }
+        let Some(grammar) = self.grammars.grammar(grammar_id) else {
+            return false;
+        };
+        refs.iter().any(|rule_ref| match rule_ref {
+            RuleRef::Rule(rule_id) => {
+                let key = IncludeAvailabilityNode::Rule(grammar_id, base_grammar_id, *rule_id);
+                let cached = self.include_availability_cache.borrow().get(&key).copied();
+                if let Some(available) = cached {
+                    available
+                } else if !visiting.insert(key.clone()) {
+                    true
+                } else {
+                    let available = grammar.rule(*rule_id).is_some_and(|rule| match &rule.body {
+                        RuleBody::Match { .. } => true,
+                        RuleBody::BeginEnd { patterns, .. }
+                        | RuleBody::BeginWhile { patterns, .. }
+                        | RuleBody::IncludeOnly { patterns } => {
+                            let repository_context = self
+                                .rule_repository_contexts
+                                .get(&(grammar_id, *rule_id))
+                                .map(Arc::as_ref);
+                            let patterns = contextualize_refs(patterns, repository_context);
+                            // vscode-textmate drops a compiled container only when
+                            // it had raw children but every child was omitted from
+                            // the compiled pattern list. A genuinely empty
+                            // container is retained.
+                            patterns.is_empty()
+                                || self.refs_have_available_rule(
+                                    grammar_id,
+                                    base_grammar_id,
+                                    &patterns,
+                                    visiting,
+                                    depth + 1,
+                                )
+                        }
+                    });
+                    visiting.remove(&key);
+                    self.include_availability_cache
+                        .borrow_mut()
+                        .insert(key, available);
+                    available
+                }
+            }
+            RuleRef::Repository(name) => self.repository_has_available_rule(
+                grammar_id,
+                base_grammar_id,
+                name,
+                visiting,
+                depth + 1,
+            ),
+            RuleRef::SelfRef => {
+                self.top_level_has_available_rule(grammar_id, base_grammar_id, visiting, depth + 1)
+            }
+            RuleRef::BaseRef => self.top_level_has_available_rule(
+                base_grammar_id,
+                base_grammar_id,
+                visiting,
+                depth + 1,
+            ),
+            RuleRef::External { scope, repository } => grammar
+                .scope(*scope)
+                .and_then(|scope| self.grammars.grammar_id_by_scope(scope))
+                .and_then(|external_id| self.grammars.grammar(external_id).map(|_| external_id))
+                .is_some_and(|external_id| match repository {
+                    Some(repository) => self.repository_has_available_rule(
+                        external_id,
+                        base_grammar_id,
+                        repository,
+                        visiting,
+                        depth + 1,
+                    ),
+                    None => self.top_level_has_available_rule(
+                        external_id,
+                        base_grammar_id,
+                        visiting,
+                        depth + 1,
+                    ),
+                }),
+        })
+    }
+
+    fn repository_has_available_rule(
+        &self,
+        grammar_id: GrammarId,
+        base_grammar_id: GrammarId,
+        repository: &str,
+        visiting: &mut HashSet<IncludeAvailabilityNode>,
+        depth: usize,
+    ) -> bool {
+        let key =
+            IncludeAvailabilityNode::Repository(grammar_id, base_grammar_id, repository.to_owned());
+        if let Some(available) = self.include_availability_cache.borrow().get(&key) {
+            return *available;
+        }
+        if !visiting.insert(key.clone()) {
+            return true;
+        }
+        let available = self
+            .grammars
+            .grammar(grammar_id)
+            .and_then(|grammar| grammar.repository.get(repository))
+            .is_some_and(|rule_ref| {
+                self.refs_have_available_rule(
+                    grammar_id,
+                    base_grammar_id,
+                    std::slice::from_ref(rule_ref),
+                    visiting,
+                    depth,
+                )
+            });
+        visiting.remove(&key);
+        self.include_availability_cache
+            .borrow_mut()
+            .insert(key, available);
+        available
+    }
+
+    fn top_level_has_available_rule(
+        &self,
+        grammar_id: GrammarId,
+        base_grammar_id: GrammarId,
+        visiting: &mut HashSet<IncludeAvailabilityNode>,
+        depth: usize,
+    ) -> bool {
+        let key = IncludeAvailabilityNode::TopLevel(grammar_id, base_grammar_id);
+        if let Some(available) = self.include_availability_cache.borrow().get(&key) {
+            return *available;
+        }
+        if !visiting.insert(key.clone()) {
+            return true;
+        }
+        let available = self.grammars.grammar(grammar_id).is_some_and(|grammar| {
+            grammar.top_level.is_empty()
+                || self.refs_have_available_rule(
+                    grammar_id,
+                    base_grammar_id,
+                    &grammar.top_level,
+                    visiting,
+                    depth,
+                )
+        });
+        visiting.remove(&key);
+        self.include_availability_cache
+            .borrow_mut()
+            .insert(key, available);
+        available
     }
 
     fn injection_outcome(
@@ -2738,7 +2986,7 @@ impl TextMateTokenizer {
                     *name_template,
                     captures,
                 );
-                advance_zero_width(line, &(result.start..consumed_end))
+                consumed_end
             }
             CandidateKind::BeginEnd {
                 grammar_id,
@@ -2776,9 +3024,15 @@ impl TextMateTokenizer {
                 );
                 let (end_pattern, end_pattern_id, static_frame) =
                     if let Some(end_static) = end_static {
-                        (Some(Arc::clone(end_static)), Some(*end), names_static)
+                        if is_non_matching_end_sentinel(end_static) {
+                            (None, None, names_static)
+                        } else {
+                            (Some(Arc::clone(end_static)), Some(*end), names_static)
+                        }
                     } else {
-                        let end_pattern = self.substituted_pattern(*grammar_id, *end, line, result);
+                        let end_pattern = self
+                            .substituted_pattern(*grammar_id, *end, line, result)
+                            .filter(|(pattern, _)| !is_non_matching_end_sentinel(pattern));
                         let end_pattern_id = end_pattern
                             .as_ref()
                             .and_then(|(_, is_static)| is_static.then_some(*end));
@@ -3230,6 +3484,7 @@ impl TextMateTokenizer {
         let mut fallback_steps = 0u64;
         let mut anchor_pos = Some(range.start);
         let mut frame_anchor_positions = Vec::new();
+        let mut zero_width_states = HashSet::new();
         // Capture retokenization is bounded by the capture. Let lookbehind see
         // the original prefix, but do not let a greedy child consume text
         // after the capture (for example the closing `]` after a TOML key).
@@ -3326,6 +3581,8 @@ impl TextMateTokenizer {
                 self.push_token(tokens, cursor..result.start, candidate_set.active_stack_id);
             }
             let candidate = &candidate_set.candidates[candidate_index];
+            let zero_width_match_rule = result.start == result.end
+                && matches!(&candidate.kind, CandidateKind::Match { .. });
             if !compound_patterns
                 && state.is_initial()
                 && !matches!(candidate.kind, CandidateKind::Match { .. })
@@ -3335,6 +3592,10 @@ impl TextMateTokenizer {
                 continue;
             }
             let depth_before = state.depth();
+            let stack_before = state.frames.interned_id();
+            let zero_width_state_before = (result.start == result.end
+                && !matches!(candidate.kind, CandidateKind::Match { .. }))
+            .then(|| state.clone());
             let next_cursor = self.apply_candidate(
                 scan_line,
                 &mut state,
@@ -3347,13 +3608,38 @@ impl TextMateTokenizer {
                 candidate_set.active_stack_id,
                 candidate_set.end_stack_id,
             );
-            cursor = if next_cursor == result.start && state.depth() != depth_before {
+            if zero_width_match_rule {
+                self.push_token(
+                    tokens,
+                    result.start..range.end,
+                    candidate_set.active_stack_id,
+                );
+                return;
+            }
+            let zero_width_state_change =
+                next_cursor == result.start && state.depth() != depth_before;
+            if zero_width_state_change {
+                zero_width_states.insert((result.start, stack_before));
+                if !zero_width_states.insert((result.start, state.frames.interned_id())) {
+                    if let Some(previous_state) = zero_width_state_before {
+                        state = previous_state;
+                    }
+                    let stack = self.current_scope_stack_id(&state, true, Some(base_stack_id));
+                    self.push_token(tokens, result.start..range.end, stack);
+                    return;
+                }
+            }
+            cursor = if zero_width_state_change {
                 next_cursor
             } else if next_cursor <= result.start {
                 next_char_boundary(scan_line, result.start)
             } else {
                 next_cursor
             };
+        }
+        if cursor < range.end {
+            let stack = self.current_scope_stack_id(&state, true, Some(base_stack_id));
+            self.push_token(tokens, cursor..range.end, stack);
         }
     }
 
@@ -3935,6 +4221,359 @@ struct CandidateSearchResult {
     fallback_steps: u64,
 }
 
+type RepositoryBindings = BTreeMap<String, String>;
+
+fn resolve_repository_in_context<'a>(
+    grammar: &'a CompiledGrammar,
+    name: &'a str,
+    context: &RepositoryBindings,
+) -> Option<&'a RuleRef> {
+    let bound_name = context.get(name).map_or(name, String::as_str);
+    grammar.repository.get(bound_name)
+}
+
+fn contextualize_refs(refs: &[RuleRef], context: Option<&RepositoryBindings>) -> Vec<RuleRef> {
+    let Some(context) = context.filter(|context| !context.is_empty()) else {
+        return refs.to_vec();
+    };
+    refs.iter()
+        .map(|rule_ref| match rule_ref {
+            RuleRef::Repository(name) => context
+                .get(name)
+                .map(|bound_name| RuleRef::Repository(bound_name.clone()))
+                .unwrap_or_else(|| rule_ref.clone()),
+            _ => rule_ref.clone(),
+        })
+        .collect()
+}
+
+fn contextualize_capture_spec(
+    captures: &CaptureSpec,
+    context: Option<&RepositoryBindings>,
+) -> CaptureSpec {
+    let Some(context) = context else {
+        return captures.clone();
+    };
+    let mut captures = captures.clone();
+    for entry in captures.entries.values_mut() {
+        entry.patterns = contextualize_refs(&entry.patterns, Some(context));
+    }
+    captures
+}
+
+/// Simulate vscode-textmate's lazy `RuleFactory.getCompiledRuleId` walk.
+///
+/// Raw rules receive an id the first time they are reached. That first walk's
+/// repository object remains captured by the compiled rule, even if a shared
+/// root rule is reached later through a different repository. The native
+/// loader assigns ids ahead of time, so retain the first repository context in
+/// a side table and apply it when candidates/capture rules are materialized.
+fn compile_rule_repository_contexts(
+    grammars: &GrammarSet,
+    root: GrammarId,
+    injections: &[CompiledInjectionSelector],
+) -> HashMap<(GrammarId, RuleId), Arc<RepositoryBindings>> {
+    // Keep the recursive walk's grammar identity and three independent cycle/
+    // memo tables explicit; bundling them would obscure which state is shared
+    // across recursive edges.
+    #[allow(clippy::too_many_arguments)]
+    fn visit_captures(
+        grammars: &GrammarSet,
+        grammar_id: GrammarId,
+        base_grammar_id: GrammarId,
+        captures: &CaptureSpec,
+        context: &Arc<RepositoryBindings>,
+        compiled: &mut HashMap<(GrammarId, RuleId), Arc<RepositoryBindings>>,
+        compiled_top_levels: &mut HashSet<GrammarId>,
+        visiting_repositories: &mut HashSet<(GrammarId, String, RepositoryBindings)>,
+    ) {
+        for entry in captures.entries.values() {
+            visit_refs(
+                grammars,
+                grammar_id,
+                base_grammar_id,
+                &entry.patterns,
+                context,
+                compiled,
+                compiled_top_levels,
+                visiting_repositories,
+            );
+        }
+    }
+
+    fn visit_top_level(
+        grammars: &GrammarSet,
+        grammar_id: GrammarId,
+        base_grammar_id: GrammarId,
+        context: &Arc<RepositoryBindings>,
+        compiled: &mut HashMap<(GrammarId, RuleId), Arc<RepositoryBindings>>,
+        compiled_top_levels: &mut HashSet<GrammarId>,
+        visiting_repositories: &mut HashSet<(GrammarId, String, RepositoryBindings)>,
+    ) {
+        if !compiled_top_levels.insert(grammar_id) {
+            return;
+        }
+        if let Some(grammar) = grammars.grammar(grammar_id) {
+            visit_refs(
+                grammars,
+                grammar_id,
+                base_grammar_id,
+                &grammar.top_level,
+                context,
+                compiled,
+                compiled_top_levels,
+                visiting_repositories,
+            );
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn visit_refs(
+        grammars: &GrammarSet,
+        grammar_id: GrammarId,
+        base_grammar_id: GrammarId,
+        refs: &[RuleRef],
+        context: &Arc<RepositoryBindings>,
+        compiled: &mut HashMap<(GrammarId, RuleId), Arc<RepositoryBindings>>,
+        compiled_top_levels: &mut HashSet<GrammarId>,
+        visiting_repositories: &mut HashSet<(GrammarId, String, RepositoryBindings)>,
+    ) {
+        let Some(grammar) = grammars.grammar(grammar_id) else {
+            return;
+        };
+        let empty_context = Arc::new(RepositoryBindings::new());
+        for rule_ref in refs {
+            match rule_ref {
+                RuleRef::Rule(rule_id) => {
+                    let key = (grammar_id, *rule_id);
+                    if compiled.contains_key(&key) {
+                        continue;
+                    }
+                    let Some(rule) = grammar.rule(*rule_id) else {
+                        continue;
+                    };
+                    // RuleFactory merges a raw rule's repository over the
+                    // repository passed by its first caller. Register that
+                    // merged context before walking children, just as
+                    // getCompiledRuleId registers the raw rule before its
+                    // constructor recursively compiles patterns.
+                    let merged_context;
+                    let context = if rule.local_repository.is_empty() {
+                        context
+                    } else {
+                        let mut bindings = context.as_ref().clone();
+                        bindings.extend(rule.local_repository.clone());
+                        merged_context = Arc::new(bindings);
+                        &merged_context
+                    };
+                    compiled.insert(key, Arc::clone(context));
+                    match &rule.body {
+                        RuleBody::Match { captures, .. } => visit_captures(
+                            grammars,
+                            grammar_id,
+                            base_grammar_id,
+                            captures,
+                            context,
+                            compiled,
+                            compiled_top_levels,
+                            visiting_repositories,
+                        ),
+                        RuleBody::BeginEnd {
+                            begin_captures,
+                            end_captures,
+                            patterns,
+                            ..
+                        } => {
+                            visit_captures(
+                                grammars,
+                                grammar_id,
+                                base_grammar_id,
+                                begin_captures,
+                                context,
+                                compiled,
+                                compiled_top_levels,
+                                visiting_repositories,
+                            );
+                            visit_captures(
+                                grammars,
+                                grammar_id,
+                                base_grammar_id,
+                                end_captures,
+                                context,
+                                compiled,
+                                compiled_top_levels,
+                                visiting_repositories,
+                            );
+                            visit_refs(
+                                grammars,
+                                grammar_id,
+                                base_grammar_id,
+                                patterns,
+                                context,
+                                compiled,
+                                compiled_top_levels,
+                                visiting_repositories,
+                            );
+                        }
+                        RuleBody::BeginWhile {
+                            begin_captures,
+                            while_captures,
+                            patterns,
+                            ..
+                        } => {
+                            visit_captures(
+                                grammars,
+                                grammar_id,
+                                base_grammar_id,
+                                begin_captures,
+                                context,
+                                compiled,
+                                compiled_top_levels,
+                                visiting_repositories,
+                            );
+                            visit_captures(
+                                grammars,
+                                grammar_id,
+                                base_grammar_id,
+                                while_captures,
+                                context,
+                                compiled,
+                                compiled_top_levels,
+                                visiting_repositories,
+                            );
+                            visit_refs(
+                                grammars,
+                                grammar_id,
+                                base_grammar_id,
+                                patterns,
+                                context,
+                                compiled,
+                                compiled_top_levels,
+                                visiting_repositories,
+                            );
+                        }
+                        RuleBody::IncludeOnly { patterns } => visit_refs(
+                            grammars,
+                            grammar_id,
+                            base_grammar_id,
+                            patterns,
+                            context,
+                            compiled,
+                            compiled_top_levels,
+                            visiting_repositories,
+                        ),
+                    }
+                }
+                RuleRef::Repository(name) => {
+                    let bound_name = context.get(name).cloned().unwrap_or_else(|| name.clone());
+                    let repository_key = (grammar_id, bound_name, context.as_ref().clone());
+                    if !visiting_repositories.insert(repository_key.clone()) {
+                        continue;
+                    }
+                    if let Some(target) = resolve_repository_in_context(grammar, name, context) {
+                        visit_refs(
+                            grammars,
+                            grammar_id,
+                            base_grammar_id,
+                            std::slice::from_ref(target),
+                            context,
+                            compiled,
+                            compiled_top_levels,
+                            visiting_repositories,
+                        );
+                    }
+                    visiting_repositories.remove(&repository_key);
+                }
+                RuleRef::SelfRef => visit_top_level(
+                    grammars,
+                    grammar_id,
+                    base_grammar_id,
+                    context,
+                    compiled,
+                    compiled_top_levels,
+                    visiting_repositories,
+                ),
+                RuleRef::BaseRef => {
+                    visit_top_level(
+                        grammars,
+                        base_grammar_id,
+                        base_grammar_id,
+                        &empty_context,
+                        compiled,
+                        compiled_top_levels,
+                        visiting_repositories,
+                    );
+                }
+                RuleRef::External { scope, repository } => {
+                    let Some(external_id) = grammar
+                        .scope(*scope)
+                        .and_then(|scope| grammars.grammar_id_by_scope(scope))
+                    else {
+                        continue;
+                    };
+                    let Some(external) = grammars.grammar(external_id) else {
+                        continue;
+                    };
+                    if let Some(repository) = repository {
+                        if let Some(target) = external.repository.get(repository) {
+                            visit_refs(
+                                grammars,
+                                external_id,
+                                base_grammar_id,
+                                std::slice::from_ref(target),
+                                &empty_context,
+                                compiled,
+                                compiled_top_levels,
+                                visiting_repositories,
+                            );
+                        }
+                    } else {
+                        visit_top_level(
+                            grammars,
+                            external_id,
+                            base_grammar_id,
+                            &empty_context,
+                            compiled,
+                            compiled_top_levels,
+                            visiting_repositories,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    let mut compiled = HashMap::new();
+    let mut compiled_top_levels = HashSet::new();
+    let mut visiting_repositories = HashSet::new();
+    let empty_context = Arc::new(RepositoryBindings::new());
+    visit_top_level(
+        grammars,
+        root,
+        root,
+        &empty_context,
+        &mut compiled,
+        &mut compiled_top_levels,
+        &mut visiting_repositories,
+    );
+    // vscode-textmate compiles the root before lazily collecting injections.
+    // Preserve selector order so a raw rule shared with an injection is still
+    // bound to the repository from its first compilation path.
+    for injection in injections {
+        visit_refs(
+            grammars,
+            injection.grammar_id,
+            root,
+            &injection.patterns,
+            &empty_context,
+            &mut compiled,
+            &mut compiled_top_levels,
+            &mut visiting_repositories,
+        );
+    }
+    compiled
+}
+
 #[derive(Debug, Clone)]
 struct PatternSearchResult {
     result: Option<MatchResult>,
@@ -4069,6 +4708,13 @@ fn pattern_has_backreference(pattern: &str) -> bool {
         }
     }
     false
+}
+
+fn is_non_matching_end_sentinel(pattern: &str) -> bool {
+    // Missing and explicitly empty ends are persistent-frame sentinels. A
+    // real `\z` remains matchable on the final logical line, whose parse text
+    // has no synthetic trailing newline.
+    pattern.is_empty()
 }
 
 fn shared_empty_capture_spec() -> Arc<CaptureSpec> {
@@ -4302,22 +4948,56 @@ fn clamp_range(range: Range<usize>, parent: Range<usize>) -> Range<usize> {
     range.start.max(parent.start)..range.end.min(parent.end)
 }
 
-fn compile_injection_selectors(grammars: &GrammarSet) -> Vec<CompiledInjectionSelector> {
-    grammars
-        .grammars()
+fn compile_injection_selectors(
+    grammars: &GrammarSet,
+    root: GrammarId,
+) -> Vec<CompiledInjectionSelector> {
+    // vscode-textmate has two separate injection sources:
+    //
+    // * the root grammar's `injections` map; and
+    // * standalone grammars registered for the root scope through `injectTo`
+    //   and `injectionSelector`, whose ordinary top-level patterns are used.
+    //
+    // Inline injections on include dependencies are not global registrations.
+    // Treating them as such makes unrelated embedded grammars preempt the root
+    // (notably the large dependency sets used by Astro and Svelte).
+    let Some(root_grammar) = grammars.grammar(root) else {
+        return Vec::new();
+    };
+    let mut compiled = root_grammar
+        .injections
         .iter()
-        .flat_map(|grammar| {
-            grammar
-                .injections
-                .iter()
-                .map(|injection| CompiledInjectionSelector {
-                    grammar_id: grammar.id,
-                    priority: injection.priority,
-                    patterns: injection.patterns.clone(),
-                    selector_tokens: tokenize_selector(&injection.selector_body).into(),
-                })
+        .map(|injection| CompiledInjectionSelector {
+            grammar_id: root_grammar.id,
+            priority: injection.priority,
+            patterns: injection.patterns.clone(),
+            selector_tokens: tokenize_selector(&injection.selector_body).into(),
         })
-        .collect()
+        .collect::<Vec<_>>();
+
+    for grammar in grammars.grammars() {
+        if grammar.id == root
+            || !grammar
+                .metadata
+                .inject_to
+                .iter()
+                .any(|scope| scope == &root_grammar.scope_name)
+        {
+            continue;
+        }
+        let Some(selector) = grammar.metadata.injection_selector.as_deref() else {
+            continue;
+        };
+        compiled.extend(normalize_injection_selectors(selector).into_iter().map(
+            |(priority, selector_body)| CompiledInjectionSelector {
+                grammar_id: grammar.id,
+                priority,
+                patterns: grammar.top_level.clone(),
+                selector_tokens: tokenize_selector(&selector_body).into(),
+            },
+        ));
+    }
+    compiled
 }
 
 #[cfg(test)]
@@ -4344,6 +5024,7 @@ enum SelectorToken {
     LeftParen,
     RightParen,
     Or,
+    And,
     Not,
 }
 
@@ -4352,7 +5033,17 @@ fn tokenize_selector(selector: &str) -> Vec<SelectorToken> {
     let mut word = String::new();
     let flush_word = |word: &mut String, tokens: &mut Vec<SelectorToken>| {
         if !word.is_empty() {
-            tokens.push(SelectorToken::Word(std::mem::take(word)));
+            let word = std::mem::take(word);
+            // Whitespace between scope identifiers is the descendant-path
+            // operator, not an unordered boolean AND. Keep the whole path in
+            // one primary so `meta source` does not match a stack where
+            // `source` is an ancestor of `meta`.
+            if let Some(SelectorToken::Word(path)) = tokens.last_mut() {
+                path.push(' ');
+                path.push_str(&word);
+            } else {
+                tokens.push(SelectorToken::Word(word));
+            }
         }
     };
     for ch in selector.chars() {
@@ -4369,7 +5060,10 @@ fn tokenize_selector(selector: &str) -> Vec<SelectorToken> {
                 flush_word(&mut word, &mut tokens);
                 tokens.push(SelectorToken::Or);
             }
-            '&' => flush_word(&mut word, &mut tokens),
+            '&' => {
+                flush_word(&mut word, &mut tokens);
+                tokens.push(SelectorToken::And);
+            }
             '-' if word.is_empty() => {
                 flush_word(&mut word, &mut tokens);
                 tokens.push(SelectorToken::Not);
@@ -4405,6 +5099,10 @@ impl SelectorParser<'_> {
         let mut saw_term = false;
         let mut value = true;
         while self.index < self.tokens.len() {
+            if matches!(self.tokens[self.index], SelectorToken::And) {
+                self.index += 1;
+                continue;
+            }
             if matches!(
                 self.tokens[self.index],
                 SelectorToken::Or | SelectorToken::RightParen
@@ -4439,7 +5137,9 @@ impl SelectorParser<'_> {
                 }
                 value
             }
-            Some(SelectorToken::RightParen | SelectorToken::Or) | None => false,
+            Some(SelectorToken::RightParen | SelectorToken::Or | SelectorToken::And) | None => {
+                false
+            }
             Some(SelectorToken::Not) => unreachable!("parse_unary handles negation"),
         }
     }
@@ -5103,6 +5803,448 @@ mod tests {
     }
 
     #[test]
+    fn embedded_grammar_inline_injections_do_not_leak_into_root() {
+        let root = r##"{
+            "scopeName": "source.injection-host",
+            "patterns": [{"match":"x", "name":"plain.injection-host"}]
+        }"##;
+        let dependency = r##"{
+            "scopeName": "source.injection-dependency",
+            "injections": {
+                "L:source.injection-host": {
+                    "match":"x", "name":"leaked.injection-dependency"
+                }
+            }
+        }"##;
+        let mut set = GrammarSet::new();
+        let root = set.load_and_add(root).unwrap();
+        set.load_and_add(dependency).unwrap();
+        let mut tokenizer = TextMateTokenizer::new(set, root);
+
+        let line = tokenizer.tokenize_line_scopes("x", TokenizerState::default());
+        assert!(line_has_scope(&line, "plain.injection-host"), "{line:#?}");
+        assert!(
+            !line_has_scope(&line, "leaked.injection-dependency"),
+            "{line:#?}"
+        );
+    }
+
+    #[test]
+    fn standalone_injection_activates_only_for_registered_root_scope() {
+        let host = r##"{
+            "scopeName": "source.standalone-host",
+            "patterns": [{"match":"x", "name":"plain.standalone-host"}]
+        }"##;
+        let registered = r##"{
+            "scopeName": "source.standalone-injection",
+            "injectionSelector": "L:source.standalone-host",
+            "injectTo": ["source.standalone-host"],
+            "patterns": [{"match":"x", "name":"injected.standalone-host"}]
+        }"##;
+        let unrelated = r##"{
+            "scopeName": "source.unrelated-standalone-injection",
+            "injectionSelector": "L:source.standalone-host",
+            "injectTo": ["source.some-other-host"],
+            "patterns": [{"match":"x", "name":"leaked.unrelated-standalone"}]
+        }"##;
+        let mut set = GrammarSet::new();
+        let root = set.load_and_add(host).unwrap();
+        set.load_and_add(registered).unwrap();
+        set.load_and_add(unrelated).unwrap();
+        let mut tokenizer = TextMateTokenizer::new(set, root);
+
+        let line = tokenizer.tokenize_line_scopes("x", TokenizerState::default());
+        assert!(
+            line_has_scope(&line, "injected.standalone-host"),
+            "{line:#?}"
+        );
+        assert!(!line_has_scope(&line, "plain.standalone-host"), "{line:#?}");
+        assert!(
+            !line_has_scope(&line, "leaked.unrelated-standalone"),
+            "{line:#?}"
+        );
+    }
+
+    #[test]
+    fn standalone_injection_grammar_patterns_remain_normal_when_it_is_root() {
+        let grammar = r##"{
+            "scopeName": "source.standalone-root",
+            "injectionSelector": "L:source.other-host",
+            "injectTo": ["source.other-host"],
+            "patterns": [{"match":"x", "name":"keyword.standalone-root"}]
+        }"##;
+        let mut tokenizer = TextMateTokenizer::from_grammar(grammar).unwrap();
+
+        let line = tokenizer.tokenize_line_scopes("x", TokenizerState::default());
+        assert!(
+            line_has_scope(&line, "keyword.standalone-root"),
+            "{line:#?}"
+        );
+    }
+
+    #[test]
+    fn changing_root_recomputes_standalone_injection_registrations() {
+        let first_host = r##"{
+            "scopeName": "source.first-host",
+            "patterns": [{"match":"x", "name":"plain.first-host"}]
+        }"##;
+        let second_host = r##"{
+            "scopeName": "source.second-host",
+            "patterns": [{"match":"x", "name":"plain.second-host"}]
+        }"##;
+        let injection = r##"{
+            "scopeName": "source.second-host-injection",
+            "injectionSelector": "L:source.second-host",
+            "injectTo": ["source.second-host"],
+            "patterns": [{"match":"x", "name":"injected.second-host"}]
+        }"##;
+        let mut set = GrammarSet::new();
+        let first = set.load_and_add(first_host).unwrap();
+        let second = set.load_and_add(second_host).unwrap();
+        set.load_and_add(injection).unwrap();
+        let mut tokenizer = TextMateTokenizer::new(set, first);
+
+        let first_line = tokenizer.tokenize_line_scopes("x", TokenizerState::default());
+        assert!(line_has_scope(&first_line, "plain.first-host"));
+        assert!(!line_has_scope(&first_line, "injected.second-host"));
+
+        tokenizer.set_root(second);
+        let second_line = tokenizer.tokenize_line_scopes("x", TokenizerState::default());
+        assert!(
+            line_has_scope(&second_line, "injected.second-host"),
+            "{second_line:#?}"
+        );
+        assert!(!line_has_scope(&second_line, "plain.second-host"));
+    }
+
+    #[test]
+    fn shared_rule_keeps_first_lazy_repository_binding() {
+        // vscode-textmate assigns a raw rule its id on first traversal. Here
+        // `shared` is first reached from `nested`'s local repository, so its
+        // later `#value` include remains bound to the local value even when
+        // the same shared rule is also included directly from the root.
+        let grammar = r##"{
+            "scopeName": "source.lazy-repository",
+            "patterns": [
+                {"include":"#valid"},
+                {"include":"#shared"},
+                {"include":"#shared-container"},
+                {"include":"#shared-capture"}
+            ],
+            "repository": {
+                "valid": {"patterns":[{"include":"#nested"}]},
+                "nested": {
+                    "repository": {
+                        "value": {
+                            "match":"x",
+                            "name":"local.value.lazy-repository"
+                        },
+                        "container-value": {
+                            "match":"y",
+                            "name":"local.container-value.lazy-repository"
+                        },
+                        "capture-value": {
+                            "match":"z",
+                            "name":"local.capture-value.lazy-repository"
+                        },
+                        "walk": {"patterns":[
+                            {"include":"#shared"},
+                            {"include":"#shared-container"},
+                            {"include":"#shared-capture"}
+                        ]}
+                    },
+                    "patterns":[{"include":"#walk"}]
+                },
+                "shared": {
+                    "begin":"<",
+                    "end":">",
+                    "name":"meta.shared.lazy-repository",
+                    "patterns":[{"include":"#value"}]
+                },
+                "value": {
+                    "match":"x",
+                    "name":"root.value.lazy-repository"
+                },
+                "shared-container": {
+                    "patterns":[{"include":"#container-value"}]
+                },
+                "container-value": {
+                    "match":"y",
+                    "name":"root.container-value.lazy-repository"
+                },
+                "shared-capture": {
+                    "match":"(z)",
+                    "captures":{"1":{"patterns":[{"include":"#capture-value"}]}}
+                },
+                "capture-value": {
+                    "match":"z",
+                    "name":"root.capture-value.lazy-repository"
+                }
+            }
+        }"##;
+        let mut tokenizer = TextMateTokenizer::from_grammar(grammar).unwrap();
+        let line = tokenizer.tokenize_line_scopes("<x> y z", TokenizerState::default());
+
+        for scope in [
+            "local.value.lazy-repository",
+            "local.container-value.lazy-repository",
+            "local.capture-value.lazy-repository",
+        ] {
+            assert!(line_has_scope(&line, scope), "missing {scope}: {line:#?}");
+        }
+        assert!(
+            line.tokens
+                .iter()
+                .flat_map(|token| &token.scopes)
+                .all(|scope| !scope.starts_with("root.")),
+            "{line:#?}"
+        );
+    }
+
+    #[test]
+    fn shared_rule_does_not_rebind_after_root_first_compilation() {
+        let grammar = r##"{
+            "scopeName": "source.lazy-repository-root-first",
+            "patterns": [
+                {"include":"#shared"},
+                {"include":"#nested"}
+            ],
+            "repository": {
+                "shared": {
+                    "begin":"<", "end":">",
+                    "patterns":[{"include":"#value"}]
+                },
+                "value": {"match":"x", "name":"root.value.lazy-root-first"},
+                "nested": {
+                    "repository": {
+                        "value": {"match":"x", "name":"local.value.lazy-root-first"}
+                    },
+                    "patterns":[{"include":"#shared"}]
+                }
+            }
+        }"##;
+        let mut tokenizer = TextMateTokenizer::from_grammar(grammar).unwrap();
+        let line = tokenizer.tokenize_line_scopes("<x>", TokenizerState::default());
+
+        assert!(
+            line_has_scope(&line, "root.value.lazy-root-first"),
+            "{line:#?}"
+        );
+        assert!(
+            !line_has_scope(&line, "local.value.lazy-root-first"),
+            "{line:#?}"
+        );
+    }
+
+    #[test]
+    fn begin_rule_with_transitively_missing_local_include_is_not_entered() {
+        // vscode-textmate drops a begin/end rule when its non-empty pattern
+        // closure contains no resolvable rule. Keeping the empty frame would
+        // hide all host patterns until `end` (real grammars commonly contain
+        // stale repository includes in grouping rules).
+        let grammar = r##"{
+            "scopeName": "source.missing-local-closure",
+            "patterns": [
+                {"include":"#stale-group"},
+                {"match":"\\b(?:int|string)\\b", "name":"support.type.test"},
+                {"match":"(?<=^|[(,])\\s*([_a-z][0-9_a-z]*)\\s*(:)",
+                 "captures":{"1":{"name":"variable.parameter.test"},"2":{"name":"punctuation.colon.test"}}},
+                {"match":"[+=]", "name":"keyword.operator.test"},
+                {"begin":"\"", "end":"\"", "name":"string.quoted.test"}
+            ],
+            "repository": {
+                "stale-group": {
+                    "begin":"\\(", "end":"\\)",
+                    "patterns":[{"include":"#stale-chain"}]
+                },
+                "stale-chain": {
+                    "patterns":[{"include":"#absent"}]
+                }
+            }
+        }"##;
+        let mut tokenizer = TextMateTokenizer::from_grammar(grammar).unwrap();
+        let line = tokenizer.tokenize_line_scopes(
+            "(int value = call(name: \"ok\"))",
+            TokenizerState::default(),
+        );
+
+        for scope in [
+            "support.type.test",
+            "variable.parameter.test",
+            "punctuation.colon.test",
+            "keyword.operator.test",
+            "string.quoted.test",
+        ] {
+            assert!(line_has_scope(&line, scope), "missing {scope}: {line:#?}");
+        }
+        assert!(line.state.is_initial(), "stale group must not be entered");
+    }
+
+    #[test]
+    fn missing_external_repository_include_drops_only_empty_parent_patterns() {
+        let root = r##"{
+            "scopeName": "source.missing-external-repository",
+            "patterns": [
+                {
+                    "begin":"\"", "end":"\"", "name":"string.dropped.test",
+                    "patterns":[{"include":"source.dependency#absent"}]
+                },
+                {
+                    "begin":"'", "end":"'", "name":"string.retained.test",
+                    "patterns":[
+                        {"include":"source.dependency#absent"},
+                        {"match":"\\\\.", "name":"constant.character.escape.test"}
+                    ]
+                },
+                {"match":"ok", "name":"keyword.control.test"}
+            ]
+        }"##;
+        let dependency = r##"{
+            "scopeName": "source.dependency",
+            "patterns":[{"match":"dependency", "name":"support.dependency.test"}]
+        }"##;
+        let mut set = GrammarSet::new();
+        let root = set.load_and_add(root).unwrap();
+        set.load_and_add(dependency).unwrap();
+        let mut tokenizer = TextMateTokenizer::new(set, root);
+
+        let line = tokenizer.tokenize_line_scopes("\"plain\" 'kept' ok", TokenizerState::default());
+        assert!(!line_has_scope(&line, "string.dropped.test"), "{line:#?}");
+        assert!(line_has_scope(&line, "string.retained.test"), "{line:#?}");
+        assert!(line_has_scope(&line, "keyword.control.test"), "{line:#?}");
+    }
+
+    #[test]
+    fn empty_and_cyclic_containers_are_not_treated_as_missing_patterns() {
+        // An empty compiled child is not necessarily a missing child.
+        // vscode-textmate retains both genuinely empty containers and
+        // resolved include cycles; only unresolved children set
+        // `hasMissingPatterns`.
+        let grammar = r##"{
+            "scopeName": "source.resolved-empty-containers",
+            "patterns": [
+                {
+                    "begin":"\"", "end":"\"", "name":"string.empty-child.test",
+                    "patterns":[{}]
+                },
+                {
+                    "begin":"'", "end":"'", "name":"string.cyclic-child.test",
+                    "patterns":[{"include":"#cycle"}]
+                },
+                {
+                    "begin":"`", "end":"`", "name":"string.alias-cycle.test",
+                    "patterns":[{"include":"#alias-a"}]
+                }
+            ],
+            "repository": {
+                "cycle": {"patterns":[{"include":"#cycle"}]},
+                "alias-a": {"include":"#alias-b"},
+                "alias-b": {"include":"#alias-a"}
+            }
+        }"##;
+        let mut tokenizer = TextMateTokenizer::from_grammar(grammar).unwrap();
+        let line =
+            tokenizer.tokenize_line_scopes("\"empty\" 'cycle' `alias`", TokenizerState::default());
+
+        assert!(
+            line_has_scope(&line, "string.empty-child.test"),
+            "{line:#?}"
+        );
+        assert!(
+            line_has_scope(&line, "string.cyclic-child.test"),
+            "{line:#?}"
+        );
+        assert!(
+            line_has_scope(&line, "string.alias-cycle.test"),
+            "{line:#?}"
+        );
+        assert!(line.state.is_initial(), "{:#?}", line.state);
+    }
+
+    #[test]
+    fn zero_width_begin_end_cycle_stops_without_degrading_line() {
+        let grammar = r##"{
+            "scopeName": "source.zero-width-cycle",
+            "patterns": [{
+                "begin":"(?<=x)", "end":"(?=$)",
+                "name":"meta.zero-width-cycle"
+            }]
+        }"##;
+        let mut tokenizer = TextMateTokenizer::from_grammar(grammar).unwrap();
+        tokenizer.set_counters_enabled(true);
+        let line = tokenizer.tokenize_line_scopes("x\n", TokenizerState::default());
+
+        assert!(line.tokens.iter().all(|token| {
+            token.range.start <= token.range.end
+                && token.range.end <= 2
+                && "x\n".is_char_boundary(token.range.start)
+                && "x\n".is_char_boundary(token.range.end)
+        }));
+        assert_eq!(line.state.depth(), 1, "oracle retains the entered frame");
+        assert_eq!(tokenizer.counters().degraded_lines, 0);
+        assert!(tokenizer.counters().candidate_searches < 10);
+
+        let next = tokenizer.tokenize_line_scopes("next\n", line.state);
+        assert!(line_has_scope(&next, "meta.zero-width-cycle"), "{next:#?}");
+        assert!(next.state.is_initial(), "end should close on the next line");
+    }
+
+    #[test]
+    fn empty_end_pattern_is_a_non_matching_sentinel() {
+        // vscode-textmate does not compile an empty `end` as a zero-width
+        // match. Some real grammars rely on that behavior for a frame that
+        // remains open while its child patterns continue to tokenize.
+        let grammar = r##"{
+            "scopeName": "source.empty-end",
+            "patterns": [{
+                "begin":"@(?=[A-Za-z])", "end":"",
+                "name":"meta.decorator.empty-end",
+                "patterns":[{
+                    "begin":"[A-Za-z]+\\(", "end":"\\)",
+                    "name":"meta.call.empty-end"
+                }]
+            }]
+        }"##;
+        let mut tokenizer = TextMateTokenizer::from_grammar(grammar).unwrap();
+        let first =
+            tokenizer.tokenize_line_scopes("@description(value)", TokenizerState::default());
+
+        assert!(
+            line_has_scope(&first, "meta.decorator.empty-end"),
+            "{first:#?}"
+        );
+        assert!(line_has_scope(&first, "meta.call.empty-end"), "{first:#?}");
+        assert_eq!(
+            first.state.depth(),
+            1,
+            "empty end must leave its frame open"
+        );
+
+        let second = tokenizer.tokenize_line_scopes("next", first.state);
+        assert!(
+            line_has_scope(&second, "meta.decorator.empty-end"),
+            "{second:#?}"
+        );
+        assert_eq!(second.state.depth(), 1);
+    }
+
+    #[test]
+    fn text_end_pattern_closes_on_final_unterminated_line() {
+        let grammar = r##"{
+            "scopeName": "source.text-end",
+            "patterns": [{
+                "begin": "BEGIN", "end": "\\z", "name": "meta.text-end"
+            }]
+        }"##;
+        let mut tokenizer = TextMateTokenizer::from_grammar(grammar).unwrap();
+        let first = tokenizer.tokenize_line_scopes("BEGIN\n", TokenizerState::default());
+        assert_eq!(first.state.depth(), 1);
+
+        let final_line = tokenizer.tokenize_line_scopes("tail", first.state);
+        assert!(final_line.state.is_initial(), "{:#?}", final_line.state);
+    }
+
+    #[test]
     fn candidate_sets_reuse_compiled_patterns() {
         let grammar = r##"{
             "scopeName": "source.compiled-candidates",
@@ -5400,6 +6542,35 @@ mod tests {
     }
 
     #[test]
+    fn unicode_word_tokens_preserve_utf8_boundaries_around_astral_emoji() {
+        let grammar = r##"{
+            "scopeName": "source.astral-word",
+            "patterns": [{"match":"\\w", "name":"meta.word.astral-word"}]
+        }"##;
+        let mut tokenizer = TextMateTokenizer::from_grammar(grammar).unwrap();
+        let line = "a🛰️‿z";
+        let tokenized = tokenizer.tokenize_line_scopes(line, TokenizerState::default());
+        let word_ranges = tokenized
+            .tokens
+            .iter()
+            .filter(|token| {
+                token
+                    .scopes
+                    .iter()
+                    .any(|scope| scope == "meta.word.astral-word")
+            })
+            .map(|token| token.range.clone())
+            .collect::<Vec<_>>();
+
+        // The symbol itself is not a word character. The following variation
+        // selector is, and starts at UTF-8 byte 5 (UTF-16 offset 3).
+        assert_eq!(word_ranges, [0..1, 5..12]);
+        assert!(tokenized.tokens.iter().all(|token| {
+            line.is_char_boundary(token.range.start) && line.is_char_boundary(token.range.end)
+        }));
+    }
+
+    #[test]
     fn retokenized_capture_does_not_inherit_overlapping_capture_scope() {
         let grammar = r##"{
             "scopeName": "source.capture-order",
@@ -5631,6 +6802,11 @@ mod tests {
             "text.html - (meta.tag.*.*.html)",
             &html_stack
         ));
+
+        let ordered_stack = vec!["source.astro".to_owned(), "meta.style.astro".to_owned()];
+        assert!(selector_matches("source meta", &ordered_stack));
+        assert!(!selector_matches("meta source", &ordered_stack));
+        assert!(selector_matches("meta & source", &ordered_stack));
     }
 
     #[test]

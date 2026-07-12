@@ -1,240 +1,220 @@
-// item 1 café
-const value_1: i32 = 1;
-// item 2 café
-const value_2: i32 = 2;
-// item 3 café
-const value_3: i32 = 3;
-// item 4 café
-const value_4: i32 = 4;
-// item 5 café
-const value_5: i32 = 5;
-// item 6 café
-const value_6: i32 = 6;
-// item 7 café
-const value_7: i32 = 7;
-// item 8 café
-const value_8: i32 = 8;
-// item 9 café
-const value_9: i32 = 9;
-// item 10 café
-const value_10: i32 = 10;
-// item 11 café
-const value_11: i32 = 11;
-// item 12 café
-const value_12: i32 = 12;
-// item 13 café
-const value_13: i32 = 13;
-// item 14 café
-const value_14: i32 = 14;
-// item 15 café
-const value_15: i32 = 15;
-// item 16 café
-const value_16: i32 = 16;
-// item 17 café
-const value_17: i32 = 17;
-// item 18 café
-const value_18: i32 = 18;
-// item 19 café
-const value_19: i32 = 19;
-// item 20 café
-const value_20: i32 = 20;
-// item 21 café
-const value_21: i32 = 21;
-// item 22 café
-const value_22: i32 = 22;
-// item 23 café
-const value_23: i32 = 23;
-// item 24 café
-const value_24: i32 = 24;
-// item 25 café
-const value_25: i32 = 25;
-// item 26 café
-const value_26: i32 = 26;
-// item 27 café
-const value_27: i32 = 27;
-// item 28 café
-const value_28: i32 = 28;
-// item 29 café
-const value_29: i32 = 29;
-// item 30 café
-const value_30: i32 = 30;
-// item 31 café
-const value_31: i32 = 31;
-// item 32 café
-const value_32: i32 = 32;
-// item 33 café
-const value_33: i32 = 33;
-// item 34 café
-const value_34: i32 = 34;
-// item 35 café
-const value_35: i32 = 35;
-// item 36 café
-const value_36: i32 = 36;
-// item 37 café
-const value_37: i32 = 37;
-// item 38 café
-const value_38: i32 = 38;
-// item 39 café
-const value_39: i32 = 39;
-// item 40 café
-const value_40: i32 = 40;
-// item 41 café
-const value_41: i32 = 41;
-// item 42 café
-const value_42: i32 = 42;
-// item 43 café
-const value_43: i32 = 43;
-// item 44 café
-const value_44: i32 = 44;
-// item 45 café
-const value_45: i32 = 45;
-// item 46 café
-const value_46: i32 = 46;
-// item 47 café
-const value_47: i32 = 47;
-// item 48 café
-const value_48: i32 = 48;
-// item 49 café
-const value_49: i32 = 49;
-// item 50 café
-const value_50: i32 = 50;
-// item 51 café
-const value_51: i32 = 51;
-// item 52 café
-const value_52: i32 = 52;
-// item 53 café
-const value_53: i32 = 53;
-// item 54 café
-const value_54: i32 = 54;
-// item 55 café
-const value_55: i32 = 55;
-// item 56 café
-const value_56: i32 = 56;
-// item 57 café
-const value_57: i32 = 57;
-// item 58 café
-const value_58: i32 = 58;
-// item 59 café
-const value_59: i32 = 59;
-// item 60 café
-const value_60: i32 = 60;
-// item 61 café
-const value_61: i32 = 61;
-// item 62 café
-const value_62: i32 = 62;
-// item 63 café
-const value_63: i32 = 63;
-// item 64 café
-const value_64: i32 = 64;
-// item 65 café
-const value_65: i32 = 65;
-// item 66 café
-const value_66: i32 = 66;
-// item 67 café
-const value_67: i32 = 67;
-// item 68 café
-const value_68: i32 = 68;
-// item 69 café
-const value_69: i32 = 69;
-// item 70 café
-const value_70: i32 = 70;
-// item 71 café
-const value_71: i32 = 71;
-// item 72 café
-const value_72: i32 = 72;
-// item 73 café
-const value_73: i32 = 73;
-// item 74 café
-const value_74: i32 = 74;
-// item 75 café
-const value_75: i32 = 75;
-// item 76 café
-const value_76: i32 = 76;
-// item 77 café
-const value_77: i32 = 77;
-// item 78 café
-const value_78: i32 = 78;
-// item 79 café
-const value_79: i32 = 79;
-// item 80 café
-const value_80: i32 = 80;
-// item 81 café
-const value_81: i32 = 81;
-// item 82 café
-const value_82: i32 = 82;
-// item 83 café
-const value_83: i32 = 83;
-// item 84 café
-const value_84: i32 = 84;
-// item 85 café
-const value_85: i32 = 85;
-// item 86 café
-const value_86: i32 = 86;
-// item 87 café
-const value_87: i32 = 87;
-// item 88 café
-const value_88: i32 = 88;
-// item 89 café
-const value_89: i32 = 89;
-// item 90 café
-const value_90: i32 = 90;
-// item 91 café
-const value_91: i32 = 91;
-// item 92 café
-const value_92: i32 = 92;
-// item 93 café
-const value_93: i32 = 93;
-// item 94 café
-const value_94: i32 = 94;
-// item 95 café
-const value_95: i32 = 95;
-// item 96 café
-const value_96: i32 = 96;
-// item 97 café
-const value_97: i32 = 97;
-// item 98 café
-const value_98: i32 = 98;
-// item 99 café
-const value_99: i32 = 99;
-// item 100 café
-const value_100: i32 = 100;
-// item 101 café
-const value_101: i32 = 101;
-// item 102 café
-const value_102: i32 = 102;
-// item 103 café
-const value_103: i32 = 103;
-// item 104 café
-const value_104: i32 = 104;
-// item 105 café
-const value_105: i32 = 105;
-// item 106 café
-const value_106: i32 = 106;
-// item 107 café
-const value_107: i32 = 107;
-// item 108 café
-const value_108: i32 = 108;
-// item 109 café
-const value_109: i32 = 109;
-// item 110 café
-const value_110: i32 = 110;
-// item 111 café
-const value_111: i32 = 111;
-// item 112 café
-const value_112: i32 = 112;
-// item 113 café
-const value_113: i32 = 113;
-// item 114 café
-const value_114: i32 = 114;
-// item 115 café
-const value_115: i32 = 115;
-// item 116 café
-const value_116: i32 = 116;
-// item 117 café
-const value_117: i32 = 117;
-// item 118 café
-const value_118: i32 = 118;
-// item 119 café
-const value_119: i32 = 119;
-// item 120 café
-const value_120: i32 = 120;
+//! Orbital telemetry decoder used as a broad Zig grammar fixture.
+//! It models a small ground-station pipeline, not a list of token samples.
+//! Unicode station note: Tromsø, 東京, and the relay 🛰️ are online.
+
+const std = @import("std");
+const builtin = @import("builtin");
+const Allocator = std.mem.Allocator;
+pub const protocol_version: u16 = 0x02_1a;
+const sync_word: [4:0]u8 = .{ 0x53, 0x41, 0x54, 0x01 };
+const default_port = 0o17_520;
+const feature_mask = 0b1010_0110;
+const light_speed_km_s: f64 = 2.997_924_58e5;
+const circular_ratio: f64 = 0x1.921f_b6p+1;
+const no_data: u8 = 255;
+threadlocal var packets_seen: usize = 0;
+comptime {
+    @setEvalBranchQuota(20_000);
+    if (@sizeOf(Header) != 8) @compileError("wire header must remain eight bytes");
+}
+const usage =
+    \\orbit-monitor --device PATH [--verbose]
+    \\  Decodes café-station telemetry and prints a compact report.
+    \\  Escape examples in ordinary strings: \"quote\", tab=\t, lambda=\u{03bb}.
+;
+/// Errors that can cross the packet-decoding boundary.
+pub const DecodeError = error{
+    BadSync,
+    Truncated,
+    InvalidKind,
+    InvalidUtf8,
+    ChecksumMismatch,
+};
+pub const LinkState = enum(u8) {
+    acquiring = 1,
+    locked = 2,
+    degraded = 0xff,
+
+    pub fn isUsable(self: LinkState) bool {
+        return self == .locked or self == .degraded;
+    }
+};
+const Flags = packed struct(u8) {
+    encrypted: bool,
+    compressed: bool,
+    priority: u2,
+    reserved: u4 = 0,
+};
+const Header = extern struct {
+    kind: u8,
+    flags: Flags,
+    sequence: u16,
+    payload_len: u32 align(4),
+};
+const Sample = union(enum) {
+    temperature: f32,
+    voltage_mv: u16,
+    state: LinkState,
+    message: []const u8,
+};
+const DriverToken = opaque {};
+const CDescriptor = extern struct {
+    name: [*:0]const u8,
+    context: ?*anyopaque,
+    registers: [*c]volatile u32,
+};
+extern fn station_open(desc: *const CDescriptor) callconv(.C) ?*DriverToken;
+extern fn station_close(token: *DriverToken) callconv(.C) void;
+fn RingBuffer(comptime T: type, comptime capacity: usize) type {
+    return struct {
+        const Self = @This();
+        items: [capacity]T = undefined,
+        read_index: usize = 0,
+        write_index: usize = 0,
+        full: bool = false,
+        fn push(self: *Self, value: T) ?T {
+            const displaced = if (self.full) self.items[self.write_index] else null;
+            self.items[self.write_index] = value;
+            self.write_index = (self.write_index + 1) % capacity;
+            if (self.full) self.read_index = self.write_index;
+            self.full = self.write_index == self.read_index;
+            return displaced;
+        }
+        fn pop(self: *Self) ?T {
+            if (!self.full and self.read_index == self.write_index) return null;
+            const value = self.items[self.read_index];
+            self.read_index = (self.read_index + 1) % capacity;
+            self.full = false;
+            return value;
+        }
+    };
+}
+const SampleQueue = RingBuffer(Sample, 16);
+fn readInteger(comptime T: type, bytes: []const u8) DecodeError!T {
+    if (bytes.len < @sizeOf(T)) return error.Truncated;
+    return std.mem.readInt(T, bytes[0..@sizeOf(T)], .little);
+}
+fn checksum(bytes: []const u8) u16 {
+    var sum: u16 = 0;
+    for (bytes, 0..) |byte, index| {
+        sum +%= @as(u16, byte) ^ @as(u16, @truncate(index));
+    }
+    return sum;
+}
+fn parseHeader(packet: []const u8) DecodeError!Header {
+    if (packet.len < sync_word.len + @sizeOf(Header)) return error.Truncated;
+    if (!std.mem.eql(u8, packet[0..sync_word.len], &sync_word)) return error.BadSync;
+    const wire = packet[sync_word.len..][0..@sizeOf(Header)];
+    return @bitCast(wire.*);
+}
+fn decodeSample(allocator: Allocator, header: Header, payload: []const u8) !Sample {
+    errdefer std.log.err("discarding sequence {d}", .{header.sequence});
+    return switch (header.kind) {
+        1 => .{ .temperature = @bitCast(try readInteger(u32, payload)) },
+        2 => .{ .voltage_mv = try readInteger(u16, payload) },
+        3 => .{ .state = std.meta.intToEnum(LinkState, payload[0]) catch error.InvalidKind },
+        4 => message: {
+            if (!std.unicode.utf8ValidateSlice(payload)) return error.InvalidUtf8;
+            break :message .{ .message = try allocator.dupe(u8, payload) };
+        },
+        else => error.InvalidKind,
+    };
+}
+fn describe(sample: Sample, writer: anytype) !void {
+    switch (sample) {
+        .temperature => |celsius| try writer.print("temperature={d:.2}°C", .{celsius}),
+        .voltage_mv => |mv| try writer.print("supply={d}mV", .{mv}),
+        .state => |state| try writer.print("link={s}", .{@tagName(state)}),
+        .message => |text| try writer.print("message=\"{s}\"", .{text}),
+    }
+}
+fn consumeFields(line: []const u8) usize {
+    var fields = std.mem.splitScalar(u8, line, ',');
+    var accepted: usize = 0;
+    while (fields.next()) |field| : (accepted += 1) {
+        if (field.len == 0) continue;
+        if (field[0] == '#') break;
+    }
+    return accepted;
+}
+fn calibrated(raw: ?f64, gain: f64) f64 {
+    const value = raw orelse return -0.0;
+    return if (value >= 0.0 and gain != 0.0) value * gain else 0.0;
+}
+noinline fn copyPayload(noalias dest: []u8, source: []const u8) void {
+    const count = @min(dest.len, source.len);
+    @memcpy(dest[0..count], source[0..count]);
+    if (count < dest.len) @memset(dest[count..], no_data);
+}
+inline fn clamp(comptime T: type, value: T, low: T, high: T) T {
+    return @max(low, @min(value, high));
+}
+fn processPacket(allocator: Allocator, queue: *SampleQueue, packet: []const u8) !void {
+    const header = try parseHeader(packet);
+    const start = sync_word.len + @sizeOf(Header);
+    const end = start + header.payload_len;
+    if (end + 2 > packet.len) return error.Truncated;
+    const expected = try readInteger(u16, packet[end..]);
+    if (checksum(packet[0..end]) != expected) return error.ChecksumMismatch;
+    const sample = try decodeSample(allocator, header, packet[start..end]);
+    if (queue.push(sample)) |old| {
+        if (old == .message) allocator.free(old.message);
+    }
+    packets_seen += 1;
+}
+fn drain(queue: *SampleQueue, writer: anytype) !void {
+    while (queue.pop()) |sample| {
+        defer if (sample == .message) std.heap.page_allocator.free(sample.message);
+        try describe(sample, writer);
+        try writer.writeByte('\n');
+    } else {
+        std.log.debug("queue drained", .{});
+    }
+}
+const Reactor = struct {
+    waiter: ?anyframe->void = null,
+    fn wait(self: *Reactor) void {
+        suspend {
+            self.waiter = @frame();
+        }
+    }
+    fn wake(self: *Reactor) void {
+        if (self.waiter) |frame| resume frame;
+        self.waiter = null;
+    }
+};
+fn exerciseAsync(reactor: *Reactor) void {
+    const frame = async reactor.wait();
+    reactor.wake();
+    nosuspend resume frame;
+}
+export fn telemetry_register(base: usize) callconv(.C) *allowzero volatile u32 {
+    return @ptrFromInt(base);
+}
+pub fn main() !void {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    var queue = SampleQueue{};
+    const stdout = std.io.getStdOut().writer();
+    const greeting: [:0]const u8 = "λ station 🛰️ ready";
+    const markers = [_]u21{ 'A', '\n', '\x7f', '\u{03bb}', '界' };
+    _ = .{ builtin.mode, usage, greeting, markers, circular_ratio, light_speed_km_s };
+    const demo = [_]u8{ 0x53, 0x41, 0x54, 0x01, 2, 0, 7, 0, 2, 0, 0, 0, 0xe4, 0x0c };
+    processPacket(arena.allocator(), &queue, &demo) catch |err| switch (err) {
+        error.BadSync, error.ChecksumMismatch => std.log.warn("radio noise: {s}", .{@errorName(err)}),
+        else => return err,
+    };
+    try drain(&queue, stdout);
+}
+test "ring buffer preserves insertion order" {
+    var queue = RingBuffer(u8, 3){};
+    try std.testing.expect(queue.push(10) == null);
+    try std.testing.expect(queue.push(20) == null);
+    try std.testing.expectEqual(@as(?u8, 10), queue.pop());
+}
+test "numeric helpers and optional fallback" {
+    try std.testing.expectEqual(@as(f64, 6.0), calibrated(3.0, 2.0));
+    try std.testing.expectEqual(@as(f64, -0.0), calibrated(null, 4.0));
+    try std.testing.expectEqual(@as(u8, 9), clamp(u8, 12, 1, 9));
+    try std.testing.expect(consumeFields("azimuth,elevation,#note") == 2);
+}

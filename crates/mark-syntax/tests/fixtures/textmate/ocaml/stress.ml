@@ -1,240 +1,221 @@
-(* binding 1 *)
-let value_1 = 1
-(* binding 2 *)
-let value_2 = 2
-(* binding 3 *)
-let value_3 = 3
-(* binding 4 *)
-let value_4 = 4
-(* binding 5 *)
-let value_5 = 5
-(* binding 6 *)
-let value_6 = 6
-(* binding 7 *)
-let value_7 = 7
-(* binding 8 *)
-let value_8 = 8
-(* binding 9 *)
-let value_9 = 9
-(* binding 10 *)
-let value_10 = 10
-(* binding 11 *)
-let value_11 = 11
-(* binding 12 *)
-let value_12 = 12
-(* binding 13 *)
-let value_13 = 13
-(* binding 14 *)
-let value_14 = 14
-(* binding 15 *)
-let value_15 = 15
-(* binding 16 *)
-let value_16 = 16
-(* binding 17 *)
-let value_17 = 17
-(* binding 18 *)
-let value_18 = 18
-(* binding 19 *)
-let value_19 = 19
-(* binding 20 *)
-let value_20 = 20
-(* binding 21 *)
-let value_21 = 21
-(* binding 22 *)
-let value_22 = 22
-(* binding 23 *)
-let value_23 = 23
-(* binding 24 *)
-let value_24 = 24
-(* binding 25 *)
-let value_25 = 25
-(* binding 26 *)
-let value_26 = 26
-(* binding 27 *)
-let value_27 = 27
-(* binding 28 *)
-let value_28 = 28
-(* binding 29 *)
-let value_29 = 29
-(* binding 30 *)
-let value_30 = 30
-(* binding 31 *)
-let value_31 = 31
-(* binding 32 *)
-let value_32 = 32
-(* binding 33 *)
-let value_33 = 33
-(* binding 34 *)
-let value_34 = 34
-(* binding 35 *)
-let value_35 = 35
-(* binding 36 *)
-let value_36 = 36
-(* binding 37 *)
-let value_37 = 37
-(* binding 38 *)
-let value_38 = 38
-(* binding 39 *)
-let value_39 = 39
-(* binding 40 *)
-let value_40 = 40
-(* binding 41 *)
-let value_41 = 41
-(* binding 42 *)
-let value_42 = 42
-(* binding 43 *)
-let value_43 = 43
-(* binding 44 *)
-let value_44 = 44
-(* binding 45 *)
-let value_45 = 45
-(* binding 46 *)
-let value_46 = 46
-(* binding 47 *)
-let value_47 = 47
-(* binding 48 *)
-let value_48 = 48
-(* binding 49 *)
-let value_49 = 49
-(* binding 50 *)
-let value_50 = 50
-(* binding 51 *)
-let value_51 = 51
-(* binding 52 *)
-let value_52 = 52
-(* binding 53 *)
-let value_53 = 53
-(* binding 54 *)
-let value_54 = 54
-(* binding 55 *)
-let value_55 = 55
-(* binding 56 *)
-let value_56 = 56
-(* binding 57 *)
-let value_57 = 57
-(* binding 58 *)
-let value_58 = 58
-(* binding 59 *)
-let value_59 = 59
-(* binding 60 *)
-let value_60 = 60
-(* binding 61 *)
-let value_61 = 61
-(* binding 62 *)
-let value_62 = 62
-(* binding 63 *)
-let value_63 = 63
-(* binding 64 *)
-let value_64 = 64
-(* binding 65 *)
-let value_65 = 65
-(* binding 66 *)
-let value_66 = 66
-(* binding 67 *)
-let value_67 = 67
-(* binding 68 *)
-let value_68 = 68
-(* binding 69 *)
-let value_69 = 69
-(* binding 70 *)
-let value_70 = 70
-(* binding 71 *)
-let value_71 = 71
-(* binding 72 *)
-let value_72 = 72
-(* binding 73 *)
-let value_73 = 73
-(* binding 74 *)
-let value_74 = 74
-(* binding 75 *)
-let value_75 = 75
-(* binding 76 *)
-let value_76 = 76
-(* binding 77 *)
-let value_77 = 77
-(* binding 78 *)
-let value_78 = 78
-(* binding 79 *)
-let value_79 = 79
-(* binding 80 *)
-let value_80 = 80
-(* binding 81 *)
-let value_81 = 81
-(* binding 82 *)
-let value_82 = 82
-(* binding 83 *)
-let value_83 = 83
-(* binding 84 *)
-let value_84 = 84
-(* binding 85 *)
-let value_85 = 85
-(* binding 86 *)
-let value_86 = 86
-(* binding 87 *)
-let value_87 = 87
-(* binding 88 *)
-let value_88 = 88
-(* binding 89 *)
-let value_89 = 89
-(* binding 90 *)
-let value_90 = 90
-(* binding 91 *)
-let value_91 = 91
-(* binding 92 *)
-let value_92 = 92
-(* binding 93 *)
-let value_93 = 93
-(* binding 94 *)
-let value_94 = 94
-(* binding 95 *)
-let value_95 = 95
-(* binding 96 *)
-let value_96 = 96
-(* binding 97 *)
-let value_97 = 97
-(* binding 98 *)
-let value_98 = 98
-(* binding 99 *)
-let value_99 = 99
-(* binding 100 *)
-let value_100 = 100
-(* binding 101 *)
-let value_101 = 101
-(* binding 102 *)
-let value_102 = 102
-(* binding 103 *)
-let value_103 = 103
-(* binding 104 *)
-let value_104 = 104
-(* binding 105 *)
-let value_105 = 105
-(* binding 106 *)
-let value_106 = 106
-(* binding 107 *)
-let value_107 = 107
-(* binding 108 *)
-let value_108 = 108
-(* binding 109 *)
-let value_109 = 109
-(* binding 110 *)
-let value_110 = 110
-(* binding 111 *)
-let value_111 = 111
-(* binding 112 *)
-let value_112 = 112
-(* binding 113 *)
-let value_113 = 113
-(* binding 114 *)
-let value_114 = 114
-(* binding 115 *)
-let value_115 = 115
-(* binding 116 *)
-let value_116 = 116
-(* binding 117 *)
-let value_117 = 117
-(* binding 118 *)
-let value_118 = 118
-(* binding 119 *)
-let value_119 = 119
-(* binding 120 *)
-let value_120 = 120
+# 1 "mission_telemetry.ml"
+
+[@@@warning "-32"]
+
+(** Mission telemetry simulator for the café ground station.
+    It exercises ordinary OCaml forms rather than generated snippets. *)
+(* A nested note remains one comment:
+   (* packets may contain λ, 東京, and an uplink emoji 🛰️ *)
+   every delimiter in this fixture is deliberately balanced. *)
+
+type severity =
+  | Debug
+  | Info
+  | Warning of string
+  | Critical of { code : int; recoverable : bool }
+type coordinate = {
+  latitude : float;
+  longitude : float;
+  mutable altitude_m : int;
+}
+type status =
+  | Nominal
+  | Degraded of string list
+  | Offline
+and packet = {
+  sequence : int64;
+  source : string;
+  position : coordinate option;
+  status : status;
+  tags : (string * string) list;
+}
+type 'a sample =
+  { captured_at : float; value : 'a }
+  [@@deriving show]
+type _ field =
+  | Callsign : string field
+  | Battery : float field
+  | Last_packet : packet option field
+type event = ..
+type event += Packet of packet | Alarm of severity
+type response = [ `Accepted of int64 | `Retry_after of float | `Rejected ]
+type ('key, 'value) cache = ('key * 'value) list
+exception Link_down of string
+exception Invalid_packet of int64 * string
+external monotonic_now : unit -> float = "caml_sys_time_include_children"
+
+module Mission_clock = struct
+  let now () = Sys.time ()
+end
+module Default_config = struct
+  let callsign = "Aster-7"
+  let retry_limit = 0x3
+  type transport = Radio | Optical
+  let transport = Optical
+end
+module List_buffer = struct
+  type 'a t = 'a list
+  let empty = []
+  let push item items = item :: items
+  let pop = function
+    | [] -> None
+    | head :: tail -> Some (head, tail)
+end
+module Shared_buffer = List_buffer
+
+module Monitor = struct
+  let seen = ref 0
+  let history = Array.make 8 None
+  let remember packet =
+    let slot = !seen mod Array.length history in
+    history.(slot) <- Some { captured_at = Mission_clock.now (); value = packet };
+    incr seen
+  let classify { status; position; _ } =
+    match status, position with
+    | Offline, _ -> `Rejected
+    | Degraded reasons, _ when List.length reasons > Default_config.retry_limit ->
+        `Retry_after 2.5
+    | (Nominal | Degraded _), Some { altitude_m; _ } when altitude_m < 0 ->
+        `Rejected
+    | _ -> `Accepted (Int64.of_int !seen)
+end
+module B = List_buffer
+
+open Printf
+let ( let* ) option f =
+  match option with
+  | Some value -> f value
+  | None -> None
+let ( ++ ) left right = left ^ " · " ^ right
+let clamp ~low ~high value = max low (min high value)
+
+let format_position ?(units = `Metric) ~prefix coordinate =
+  let altitude =
+    match units with
+    | `Metric -> float coordinate.altitude_m
+    | `Imperial -> float coordinate.altitude_m *. 3.28084
+  in
+  sprintf "%s %.4f, %.4f at %.1f" prefix
+    coordinate.latitude coordinate.longitude altitude
+let find_tag ~name packet = List.assoc_opt name packet.tags
+let packet_name packet =
+  let* mission = find_tag ~name:"mission" packet in
+  Some (packet.source ++ mission)
+
+let describe_severity = function
+  | Debug -> "debug"
+  | Info -> "information"
+  | Warning message -> "warning: " ^ message
+  | Critical { code = (0 | 1); recoverable = true } ->
+      sprintf "recoverable critical %d" code
+  | Critical { code; recoverable } ->
+      sprintf "critical %04d (recoverable=%b)" code recoverable
+let decode_field : type a. a field -> packet -> a =
+  fun field packet ->
+    match field with
+    | Callsign -> packet.source
+    | Battery ->
+        Option.value ~default:nan
+          (find_tag ~name:"battery" packet |> Option.map float_of_string)
+    | Last_packet -> Some packet
+let parse_altitude text =
+  try int_of_string text with
+  | Failure _ -> raise (Invalid_packet (Int64.minus_one, text))
+  | Sys_error message as error ->
+      eprintf "system error: %s\n%!" message;
+      raise error
+let update_position ({ altitude_m; _ } as coordinate) delta =
+  coordinate.altitude_m <- clamp ~low:(-500) ~high:100_000 (altitude_m + delta)
+let make_packet ?position ?(status = Nominal) ~sequence ~source tags =
+  { sequence; source; position; status; tags }
+let force_sample (lazy sample) = sample
+
+let unpack_triplet = function
+  | [| first; second; third |] -> Some (first, second, third)
+  | [| |] -> None
+  | _ -> invalid_arg "expected exactly three readings"
+let summarize packet =
+  match packet with
+  | { source = ("Aster-7" | "Relay-2") as source;
+      position = Some ({ altitude_m; _ } as coordinate); _ }
+    when altitude_m >= 1_000 ->
+      format_position ~prefix:source coordinate
+  | { status = Degraded (reason :: _); _ } -> "degraded: " ^ reason
+  | { status = Degraded []; _ } -> "degraded"
+  | { status = Offline; source; _ } -> source ^ " is offline"
+  | { position = None; _ } -> "no position"
+  | _ -> "low altitude"
+
+class virtual reporter name = object (self)
+  val mutable delivered = 0
+  method name = name
+  method count = delivered
+  method private mark = delivered <- delivered + 1
+  method virtual emit : event -> unit
+  method summary = sprintf "%s delivered %d events" self#name self#count
+  initializer if name = "" then invalid_arg "empty reporter name"
+end
+class console_reporter ?(channel = stdout) name = object
+  inherit reporter name as super
+  method emit event =
+    super#mark;
+    match event with
+    | Packet packet -> fprintf channel "packet: %s\n%!" (summarize packet)
+    | Alarm severity -> fprintf channel "alarm: %s\n%!" (describe_severity severity)
+    | _ -> fprintf channel "unknown extension event\n%!"
+end
+let quiet_reporter = object
+  val mutable messages = ([] : string list)
+  method emit text = messages <- text :: messages
+  method messages = List.rev messages
+end
+
+let banner =
+  {mission|
+Mission Control — café shift
+Uplink: 東京 / λ-sector / 🛰️
+Operators may type "abort", but this quoted string is raw.
+|mission}
+let escaped = "line one\nline two\t\x41\o101\\\""
+let character_samples = [ 'Z'; '\n'; '\065'; '\x42'; '\o103' ]
+let numeric_samples =
+  [ 42.; 1_000.25; 6.022e23; 0x1.fp3; float_of_int 0b101010; float_of_int 0o52 ]
+let extension_example value = [%identity (value : int)]
+
+let run_simulation () =
+  let origin = { latitude = 48.8566; longitude = 2.3522; altitude_m = 35 } in
+  let packet =
+    make_packet ~position:origin ~sequence:0x2aL ~source:Default_config.callsign
+      [ "mission", "Étoile"; "battery", "87.5" ]
+  in
+  let reporter = new console_reporter "primary" in
+  let queue = B.empty |> B.push (Packet packet) |> B.push (Alarm Info) in
+  let queue_ref = ref queue in
+  let attempts = ref 0 in
+  while !attempts < Default_config.retry_limit do
+    incr attempts;
+    update_position origin 125
+  done;
+  for index = 0 to Array.length numeric_samples - 1 do
+    if index land 1 = 0 then quiet_reporter#emit (string_of_float numeric_samples.(index))
+  done;
+  for countdown = 2 downto 0 do
+    printf "T-%d\n%!" countdown
+  done;
+  begin
+    match B.pop !queue_ref with
+    | Some (event, rest) ->
+        queue_ref := rest;
+        reporter#emit event
+    | None -> raise (Link_down "empty telemetry queue")
+  end;
+  Monitor.remember packet;
+  assert (reporter#count = 1);
+  (reporter#summary, packet_name packet)
+
+let () =
+  print_endline banner;
+  match run_simulation () with
+  | summary, Some name -> printf "%s from %s\n" summary name
+  | summary, None -> print_endline summary
+  | exception Link_down reason -> eprintf "link down: %s\n" reason

@@ -119,8 +119,9 @@ Supported values:
 - `enabled` - languages explicitly selected with `mark syntax add`, plus installed core languages.
 - `all` - currently equivalent to `builtin`; kept for config compatibility.
 
-The bundled pack currently provides 30 highlight-ready languages. See
-`mark syntax available --installed` for the exact catalog.
+<!-- BEGIN GENERATED: language-counts -->
+The bundled native backend supports **254 public language IDs**. **254 are validated** by the complete generated contract; **0 more are supported** by real bundled grammars and the catalog-wide smoke/budget gate. See [`language-status.md`](language-status.md) for the generated per-language ledger, or run `mark syntax available --installed` for the runtime catalog.
+<!-- END GENERATED: language-counts -->
 
 Use `mark --no-syntax`, `mark diff --no-syntax`, `mark show --no-syntax`, or
 `mark patch --no-syntax changes.diff` to disable syntax highlighting for one run.

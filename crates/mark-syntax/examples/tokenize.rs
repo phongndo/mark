@@ -25,23 +25,40 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let grammar_path = take_value(&mut args, "--grammar").map(PathBuf::from);
     let assets = take_value(&mut args, "--assets").map(PathBuf::from);
     let scope = take_value(&mut args, "--scope");
-    let classes = take_flag(&mut args, "--classes");
-    let file = args
-        .first()
+    let embedded = take_values(&mut args, "--embedded")
+        .into_iter()
         .map(PathBuf::from)
-        .ok_or("missing source file")?;
+        .collect::<Vec<_>>();
+    let counters_path = take_value(&mut args, "--counters").map(PathBuf::from);
+    let classes = take_flag(&mut args, "--classes");
+    if args.len() != 1 {
+        return Err(if args.is_empty() {
+            "missing source file".into()
+        } else {
+            format!("unexpected arguments: {}", args.join(" ")).into()
+        });
+    }
+    let file = PathBuf::from(&args[0]);
 
     let (set, root) = if let Some(assets) = assets {
+        if !embedded.is_empty() {
+            return Err("--embedded cannot be combined with --assets".into());
+        }
         load_assets(&assets, grammar_path.as_ref(), scope.as_deref())?
     } else {
         let grammar_path = grammar_path.ok_or("--grammar is required without --assets")?;
         let contents = fs::read_to_string(grammar_path)?;
         let mut set = GrammarSet::new();
         let root = set.load_and_add(&contents)?;
+        for embedded_path in embedded {
+            let contents = fs::read_to_string(embedded_path)?;
+            set.load_and_add(&contents)?;
+        }
         (set, root)
     };
 
     let source = fs::read_to_string(&file)?;
+    let counters_set = counters_path.as_ref().map(|_| set.clone());
     let mut tokenizer = TextMateTokenizer::new(set, root);
     let mut state = TokenizerState::default();
     for (line_number, line) in split_lines_like_engine(&source).into_iter().enumerate() {
@@ -86,6 +103,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 })
             );
         }
+    }
+    if let (Some(counters_path), Some(set)) = (counters_path, counters_set) {
+        let mut tokenizer = TextMateTokenizer::new(set, root);
+        tokenizer.set_counters_enabled(true);
+        let _ = tokenizer.tokenize_source(&source);
+        fs::write(
+            counters_path,
+            format!(
+                "{}\n",
+                serde_json::to_string_pretty(&tokenizer.take_counters())?
+            ),
+        )?;
     }
     Ok(())
 }
@@ -183,8 +212,16 @@ fn take_value(args: &mut Vec<String>, flag: &str) -> Option<String> {
     }
 }
 
+fn take_values(args: &mut Vec<String>, flag: &str) -> Vec<String> {
+    let mut values = Vec::new();
+    while let Some(value) = take_value(args, flag) {
+        values.push(value);
+    }
+    values
+}
+
 fn usage() {
     eprintln!(
-        "usage: cargo run -p mark-syntax --example tokenize -- [--classes] [--assets assets/tm-grammars/languages --scope source.json | --grammar path.tmLanguage.json] <file>"
+        "usage: cargo run -p mark-syntax --example tokenize -- [--classes] [--counters counters.json] [--assets assets/tm-grammars/languages --scope source.json | --grammar path.tmLanguage.json [--embedded path.tmLanguage.json]...] <file>"
     );
 }

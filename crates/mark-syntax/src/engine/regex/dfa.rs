@@ -1,11 +1,12 @@
 use std::{collections::HashSet, fmt, sync::Arc};
 
-use super::ast::{AnchorKind, Ast, ClassAtom, PerlClassKind, RegexFlags};
-use super::backtrack::FallbackMatcher;
+use super::ast::{AnchorKind, Ast, ClassAtom, LookKind, PerlClassKind, RegexFlags};
+use super::backtrack::{FallbackMatcher, is_line_end_position};
 use super::prefilter::{LiteralSet, Prefilter};
 use super::scanner::Scanner;
 use super::translate::{AnchorStrategy, Translation, translate};
-use super::{AnchorContext, MatchResult, Matcher};
+use super::{AnchorContext, MatchResult, Matcher, is_unicode_word_char};
+use crate::engine::hashing::{FastMap, fast_map};
 
 /// Build error for the native fast-path matcher. Kept as a distinct type so
 /// call sites that previously handled regex-automata compile failures continue
@@ -206,9 +207,452 @@ fn pure_literal_body(ast: &Ast) -> Option<String> {
 enum NativeEngine {
     Simple(SimpleMatcher),
     WordSet(WordSetMatcher),
+    SymbolSet(SymbolSetMatcher),
+    DelimitedFields(DelimitedFieldsMatcher),
     NixUri(NixUriMatcher),
     /// General native VM for DFA-routable (and best-effort) patterns.
     Vm(FallbackMatcher),
+}
+
+#[derive(Debug, Clone)]
+struct SymbolSetMatcher {
+    buckets: Vec<SymbolBucket>,
+    start_bytes: Vec<u8>,
+    start_bitmap: [u64; 4],
+    left: Separator,
+    right: Separator,
+    leading_word_boundary: bool,
+    trailing_word_boundary: bool,
+    capture_group: Option<u32>,
+    capture_count: usize,
+}
+
+#[derive(Debug, Clone)]
+struct SymbolBucket {
+    len: usize,
+    symbols: FastMap<Vec<u8>, usize>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct Separator {
+    chars: Vec<char>,
+    whitespace: bool,
+    line_boundary: bool,
+}
+
+impl SymbolSetMatcher {
+    fn try_from_translation(translation: &Translation) -> Option<Self> {
+        if !matches!(
+            translation.anchor_strategy,
+            AnchorStrategy::Fallback | AnchorStrategy::None
+        ) || translation.parsed.flags != RegexFlags::default()
+        {
+            return None;
+        }
+        let Ast::Concat(nodes) = &translation.parsed.ast else {
+            return None;
+        };
+        let nodes = nodes
+            .iter()
+            .filter(|node| !matches!(node, Ast::Empty))
+            .collect::<Vec<_>>();
+        let mut cursor = 0;
+        let leading_word_boundary = nodes
+            .get(cursor)
+            .is_some_and(|node| matches!(node, Ast::Anchor(AnchorKind::WordBoundary)));
+        cursor += usize::from(leading_word_boundary);
+        let left = separator_look(nodes.get(cursor).copied()?, LookKind::Behind)?;
+        cursor += 1;
+        let body = nodes.get(cursor).copied()?;
+        let (capture_group, child) = match body {
+            Ast::Group {
+                index,
+                name: None,
+                child,
+            } => (*index, child.as_ref()),
+            Ast::Alternation(_) => (None, body),
+            _ if translation.parsed.capture_count == 0 => (None, body),
+            _ => return None,
+        };
+        cursor += 1;
+        let right = separator_look(nodes.get(cursor).copied()?, LookKind::Ahead)?;
+        cursor += 1;
+        let trailing_word_boundary = nodes
+            .get(cursor)
+            .is_some_and(|node| matches!(node, Ast::Anchor(AnchorKind::WordBoundary)));
+        cursor += usize::from(trailing_word_boundary);
+        if cursor != nodes.len() {
+            return None;
+        }
+
+        let variants = symbol_variants(child, 131_072)?;
+        if variants.len() < 32 || variants.iter().any(String::is_empty) {
+            return None;
+        }
+        let mut buckets = Vec::<SymbolBucket>::new();
+        let mut start_bitmap = [0u64; 4];
+        for (order, symbol) in variants.into_iter().enumerate() {
+            let bytes = symbol.into_bytes();
+            if let Some(first) = bytes.first().copied() {
+                start_bitmap[first as usize >> 6] |= 1u64 << (first & 63);
+            }
+            let len = bytes.len();
+            match buckets.binary_search_by_key(&len, |bucket| bucket.len) {
+                Ok(index) => {
+                    buckets[index].symbols.entry(bytes).or_insert(order);
+                }
+                Err(index) => {
+                    let mut symbols = fast_map();
+                    symbols.insert(bytes, order);
+                    buckets.insert(index, SymbolBucket { len, symbols });
+                }
+            }
+        }
+        Some(Self {
+            buckets,
+            start_bytes: (0u8..=u8::MAX)
+                .filter(|byte| start_bitmap[*byte as usize >> 6] & (1u64 << (*byte & 63)) != 0)
+                .collect(),
+            start_bitmap,
+            left,
+            right,
+            leading_word_boundary,
+            trailing_word_boundary,
+            capture_group,
+            capture_count: translation.parsed.capture_count as usize + 1,
+        })
+    }
+
+    fn match_at(&self, line: &str, start: usize) -> Option<MatchResult> {
+        if !line.is_char_boundary(start)
+            || !self.left.matches_before(line, start)
+            || (self.leading_word_boundary && !word_boundary_at(line, start))
+        {
+            return None;
+        }
+        let bytes = line.as_bytes();
+        let mut selected = None;
+        for bucket in &self.buckets {
+            let end = start.checked_add(bucket.len)?;
+            let Some(candidate) = bytes.get(start..end) else {
+                continue;
+            };
+            let Some(&order) = bucket.symbols.get(candidate) else {
+                continue;
+            };
+            if line.is_char_boundary(end)
+                && self.right.matches_after(line, end)
+                && (!self.trailing_word_boundary || word_boundary_at(line, end))
+                && selected.is_none_or(|(best, _)| order < best)
+            {
+                selected = Some((order, end));
+            }
+        }
+        let (_, end) = selected?;
+        let mut captures = vec![None; self.capture_count];
+        captures[0] = Some(start..end);
+        if let Some(capture_group) = self.capture_group {
+            captures[capture_group as usize] = Some(start..end);
+        }
+        Some(MatchResult {
+            start,
+            end,
+            captures,
+        })
+    }
+
+    fn find(&self, line: &str, from: usize) -> Option<MatchResult> {
+        if !line.is_char_boundary(from) {
+            return None;
+        }
+        let bytes = line.as_bytes();
+        let mut start = from;
+        while start < bytes.len() {
+            let offset = bytes[start..].iter().position(|byte| {
+                self.start_bitmap[*byte as usize >> 6] & (1u64 << (*byte & 63)) != 0
+            })?;
+            start += offset;
+            if let Some(result) = self.match_at(line, start) {
+                return Some(result);
+            }
+            start += 1;
+            while start < bytes.len() && !line.is_char_boundary(start) {
+                start += 1;
+            }
+        }
+        None
+    }
+}
+
+impl Separator {
+    fn matches_before(&self, line: &str, position: usize) -> bool {
+        (position == 0 && self.line_boundary)
+            || previous_char(line, position).is_some_and(|ch| self.matches_char(ch))
+    }
+
+    fn matches_after(&self, line: &str, position: usize) -> bool {
+        (self.line_boundary && is_line_end_position(line, position))
+            || char_at(line, position).is_some_and(|(ch, _)| self.matches_char(ch))
+    }
+
+    fn matches_char(&self, ch: char) -> bool {
+        self.chars.contains(&ch) || (self.whitespace && ch.is_whitespace())
+    }
+}
+
+fn separator_look(ast: &Ast, expected: LookKind) -> Option<Separator> {
+    let Ast::Look { kind, child } = ast else {
+        return None;
+    };
+    if *kind != expected {
+        return None;
+    }
+    let branches = match child.as_ref() {
+        Ast::Alternation(branches) => branches.as_slice(),
+        branch => std::slice::from_ref(branch),
+    };
+    let mut separator = Separator::default();
+    for branch in branches {
+        match branch {
+            Ast::Anchor(
+                AnchorKind::LineStart
+                | AnchorKind::TextStart
+                | AnchorKind::LineEnd
+                | AnchorKind::TextEnd
+                | AnchorKind::TextEndOrFinalNewline,
+            ) => separator.line_boundary = true,
+            Ast::Class(class) if !class.negated && class.intersections.is_empty() => {
+                for atom in &class.atoms {
+                    match atom {
+                        ClassAtom::Char(ch) => separator.chars.push(*ch),
+                        ClassAtom::Perl(PerlClassKind::Space) => separator.whitespace = true,
+                        _ => return None,
+                    }
+                }
+            }
+            _ => return None,
+        }
+    }
+    Some(separator)
+}
+
+fn symbol_variants(ast: &Ast, limit: usize) -> Option<Vec<String>> {
+    match ast {
+        Ast::Empty => Some(vec![String::new()]),
+        Ast::Literal(literal) => Some(vec![literal.clone()]),
+        Ast::Group {
+            child, name: None, ..
+        }
+        | Ast::Flags { child, .. } => symbol_variants(child, limit),
+        Ast::Class(class) if !class.negated && class.intersections.is_empty() => class
+            .atoms
+            .iter()
+            .map(|atom| match atom {
+                ClassAtom::Char(ch) => Some(ch.to_string()),
+                ClassAtom::Range(start, end) if start.is_ascii() && end.is_ascii() => Some(
+                    ((*start as u8)..=(*end as u8))
+                        .map(char::from)
+                        .collect::<String>(),
+                ),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>()
+            .map(|parts| parts.concat().chars().map(|ch| ch.to_string()).collect()),
+        Ast::Alternation(branches) => {
+            let mut variants = Vec::new();
+            for branch in branches {
+                variants.extend(symbol_variants(branch, limit)?);
+                if variants.len() > limit {
+                    return None;
+                }
+            }
+            Some(variants)
+        }
+        Ast::Concat(nodes) => {
+            let mut variants = vec![String::new()];
+            for node in nodes {
+                let part = symbol_variants(node, limit)?;
+                if variants.len().saturating_mul(part.len()) > limit {
+                    return None;
+                }
+                let mut next = Vec::with_capacity(variants.len() * part.len());
+                for prefix in &variants {
+                    for suffix in &part {
+                        let mut combined = prefix.clone();
+                        combined.push_str(suffix);
+                        next.push(combined);
+                    }
+                }
+                variants = next;
+            }
+            Some(variants)
+        }
+        Ast::Repeat {
+            node,
+            min,
+            max: Some(max),
+            possessive: false,
+            atomic: false,
+            ..
+        } if max.saturating_sub(*min) <= 2 && *max <= 3 => {
+            let atoms = symbol_variants(node, limit)?;
+            let mut variants = Vec::new();
+            for count in *min..=*max {
+                let mut repeated = vec![String::new()];
+                for _ in 0..count {
+                    if repeated.len().saturating_mul(atoms.len()) > limit {
+                        return None;
+                    }
+                    repeated = repeated
+                        .iter()
+                        .flat_map(|prefix| {
+                            atoms.iter().map(move |suffix| {
+                                let mut value = prefix.clone();
+                                value.push_str(suffix);
+                                value
+                            })
+                        })
+                        .collect();
+                }
+                variants.extend(repeated);
+            }
+            (variants.len() <= limit).then_some(variants)
+        }
+        _ => None,
+    }
+}
+
+fn word_boundary_at(line: &str, position: usize) -> bool {
+    previous_char(line, position).is_some_and(is_word_char)
+        != char_at(line, position).is_some_and(|(ch, _)| is_word_char(ch))
+}
+
+/// Specialized matcher for fixed-width delimiter grammars such as TSV's
+/// `([^\t]*\t?)([^\t]*\t?)...`.  A chain of nullable greedy fields has an
+/// exponential number of equivalent VM paths when later fields may also be
+/// empty.  Oniguruma handles that shape efficiently, but exploring those
+/// paths in the general bounded VM can consume the whole per-call budget.
+///
+/// Recognizing the AST (rather than a particular source spelling) makes this
+/// reusable for CSV-like TextMate grammars while preserving each field's
+/// capture, including its optional trailing delimiter.
+#[derive(Debug, Clone, Copy)]
+struct DelimitedFieldsMatcher {
+    delimiter: u8,
+    fields: usize,
+    capture_count: usize,
+}
+
+impl DelimitedFieldsMatcher {
+    fn try_from_translation(translation: &Translation) -> Option<Self> {
+        if !matches!(translation.anchor_strategy, AnchorStrategy::None)
+            || translation.parsed.flags != RegexFlags::default()
+        {
+            return None;
+        }
+        let Ast::Concat(fields) = &translation.parsed.ast else {
+            return None;
+        };
+        if fields.len() < 2 {
+            return None;
+        }
+        let mut delimiter = None;
+        for (offset, field) in fields.iter().enumerate() {
+            let Ast::Group {
+                index: Some(index),
+                name: None,
+                child,
+            } = field
+            else {
+                return None;
+            };
+            if usize::try_from(*index).ok()? != offset + 1 {
+                return None;
+            }
+            let Ast::Concat(parts) = child.as_ref() else {
+                return None;
+            };
+            let [body, suffix] = parts.as_slice() else {
+                return None;
+            };
+            let Ast::Repeat {
+                node: body,
+                min: 0,
+                max: None,
+                greedy: true,
+                possessive: false,
+                atomic: false,
+            } = body
+            else {
+                return None;
+            };
+            let Ast::Class(class) = body.as_ref() else {
+                return None;
+            };
+            let [ClassAtom::Char(excluded)] = class.atoms.as_slice() else {
+                return None;
+            };
+            if !class.negated || !class.intersections.is_empty() || !excluded.is_ascii() {
+                return None;
+            }
+            let Ast::Repeat {
+                node: suffix,
+                min: 0,
+                max: Some(1),
+                greedy: true,
+                possessive: false,
+                atomic: false,
+            } = suffix
+            else {
+                return None;
+            };
+            let Ast::Literal(literal) = suffix.as_ref() else {
+                return None;
+            };
+            let bytes = literal.as_bytes();
+            if bytes.len() != 1 || bytes[0] != *excluded as u8 {
+                return None;
+            }
+            if delimiter
+                .replace(bytes[0])
+                .is_some_and(|seen| seen != bytes[0])
+            {
+                return None;
+            }
+        }
+        Some(Self {
+            delimiter: delimiter?,
+            fields: fields.len(),
+            capture_count: translation.parsed.capture_count as usize + 1,
+        })
+    }
+
+    fn match_at(&self, line: &str, start: usize) -> Option<MatchResult> {
+        if !line.is_char_boundary(start) {
+            return None;
+        }
+        let bytes = line.as_bytes();
+        let mut position = start;
+        let mut captures = vec![None; self.capture_count];
+        for capture in captures.iter_mut().take(self.fields + 1).skip(1) {
+            let field_start = position;
+            position += memchr::memchr(self.delimiter, &bytes[position..])
+                .map_or(bytes.len() - position, |offset| offset + 1);
+            *capture = Some(field_start..position);
+        }
+        captures[0] = Some(start..position);
+        Some(MatchResult {
+            start,
+            end: position,
+            captures,
+        })
+    }
+
+    fn find(&self, line: &str, from: usize) -> Option<MatchResult> {
+        // Every recognized field is nullable, so the leftmost match is always
+        // exactly `from`.
+        self.match_at(line, from)
+    }
 }
 
 /// Native matcher for the Nix unquoted URI production
@@ -339,7 +783,7 @@ impl WordSetMatcher {
             return None;
         }
         let spec = word_set_spec(&translation.parsed.ast, translation.parsed.flags)?;
-        if !spec.case_insensitive || spec.words.len() < word_set_min_words() {
+        if spec.words.len() < word_set_min_words() {
             return None;
         }
         Some(Self::new(
@@ -516,7 +960,26 @@ fn word_set_spec(ast: &Ast, flags: RegexFlags) -> Option<WordSetSpec> {
             flags: scoped_flags,
             child,
         } => word_set_spec(child, *scoped_flags),
-        Ast::Concat(nodes) => word_set_spec_from_concat(nodes, flags),
+        Ast::Concat(nodes) => {
+            // A bare option switch scopes the remainder of its enclosing
+            // subexpression. `\b(?i)(foo|bar)\b` therefore has a default
+            // boundary prefix followed by one insensitive remainder node.
+            if let [
+                prefix,
+                Ast::Flags {
+                    flags: scoped,
+                    child,
+                },
+            ] = nodes.as_slice()
+                && let Ast::Concat(remainder) = child.as_ref()
+            {
+                let mut flattened = Vec::with_capacity(remainder.len() + 1);
+                flattened.push(prefix.clone());
+                flattened.extend(remainder.iter().cloned());
+                return word_set_spec_from_concat(&flattened, *scoped);
+            }
+            word_set_spec_from_concat(nodes, flags)
+        }
         _ => None,
     }
 }
@@ -529,14 +992,20 @@ fn word_set_spec_from_concat(nodes: &[Ast], flags: RegexFlags) -> Option<WordSet
     if significant.len() < 3 {
         return None;
     }
-    if !matches!(significant[0], Ast::Anchor(AnchorKind::WordBoundary)) {
+    let mut effective_flags = snapshot_flags(significant[0]).unwrap_or(flags);
+    if !matches!(
+        unwrap_snapshot(significant[0]),
+        Ast::Anchor(AnchorKind::WordBoundary)
+    ) {
         return None;
     }
-    if !matches!(significant[2], Ast::Anchor(AnchorKind::WordBoundary)) {
+    if !matches!(
+        unwrap_snapshot(significant[2]),
+        Ast::Anchor(AnchorKind::WordBoundary)
+    ) {
         return None;
     }
-    let mut effective_flags = flags;
-    let mut body = significant[1];
+    let mut body = unwrap_snapshot(significant[1]);
     if let Ast::Flags {
         flags: scoped_flags,
         child,
@@ -544,6 +1013,13 @@ fn word_set_spec_from_concat(nodes: &[Ast], flags: RegexFlags) -> Option<WordSet
     {
         effective_flags = *scoped_flags;
         body = child.as_ref();
+    } else if let Some(scoped_flags) = uniform_snapshot_flags(body) {
+        if snapshot_flags(significant[0]).is_some() && effective_flags != scoped_flags {
+            return None;
+        }
+        effective_flags = scoped_flags;
+    } else if contains_snapshot(body) {
+        return None;
     }
     let suffix = word_set_suffix(&significant[3..])?;
     let (alternation, capture_group) = match body {
@@ -559,26 +1035,14 @@ fn word_set_spec_from_concat(nodes: &[Ast], flags: RegexFlags) -> Option<WordSet
         return None;
     };
     let mut words = Vec::with_capacity(branches.len());
-    let mut unsupported_branches = 0usize;
     for branch in branches {
-        let Some(variants) = word_variants(branch) else {
-            unsupported_branches += 1;
-            continue;
-        };
-        let mut accepted = false;
+        let variants = word_variants(branch)?;
         for word in variants {
             if word.is_empty() || !word.bytes().all(is_ascii_word_byte) {
-                continue;
+                return None;
             }
-            accepted = true;
             words.push(word);
         }
-        if !accepted {
-            unsupported_branches += 1;
-        }
-    }
-    if words.len() != branches.len() && (words.len() < 32 || unsupported_branches > 16) {
-        return None;
     }
     Some(WordSetSpec {
         words,
@@ -588,8 +1052,60 @@ fn word_set_spec_from_concat(nodes: &[Ast], flags: RegexFlags) -> Option<WordSet
     })
 }
 
+fn uniform_snapshot_flags(ast: &Ast) -> Option<RegexFlags> {
+    match ast {
+        Ast::Flags { flags, .. } => Some(*flags),
+        Ast::Alternation(nodes) | Ast::Concat(nodes) => {
+            let mut flags = None;
+            for node in nodes {
+                let node_flags = uniform_snapshot_flags(node)?;
+                if flags.is_some_and(|flags| flags != node_flags) {
+                    return None;
+                }
+                flags = Some(node_flags);
+            }
+            flags
+        }
+        Ast::Group { child, .. } => uniform_snapshot_flags(child),
+        _ => None,
+    }
+}
+
+fn snapshot_flags(ast: &Ast) -> Option<RegexFlags> {
+    let Ast::Flags { flags, .. } = ast else {
+        return None;
+    };
+    Some(*flags)
+}
+
+fn unwrap_snapshot(ast: &Ast) -> &Ast {
+    if let Ast::Flags { child, .. } = ast {
+        child
+    } else {
+        ast
+    }
+}
+
+fn contains_snapshot(ast: &Ast) -> bool {
+    match ast {
+        Ast::Flags { .. } => true,
+        Ast::Concat(nodes) | Ast::Alternation(nodes) => nodes.iter().any(contains_snapshot),
+        Ast::Repeat { node, .. }
+        | Ast::Group { child: node, .. }
+        | Ast::Look { child: node, .. } => contains_snapshot(node),
+        Ast::Conditional {
+            matched, unmatched, ..
+        } => contains_snapshot(matched) || contains_snapshot(unmatched),
+        _ => false,
+    }
+}
+
 fn word_set_suffix(nodes: &[&Ast]) -> Option<WordSetSuffix> {
-    match nodes {
+    let nodes = nodes
+        .iter()
+        .map(|node| unwrap_snapshot(node))
+        .collect::<Vec<_>>();
+    match nodes.as_slice() {
         [] => Some(WordSetSuffix::None),
         [
             Ast::Repeat {
@@ -600,7 +1116,7 @@ fn word_set_suffix(nodes: &[&Ast]) -> Option<WordSetSuffix> {
                 ..
             },
             Ast::Literal(literal),
-        ] if literal == "(" && is_perl_space_class(node) => {
+        ] if literal == "(" && is_perl_space_class(unwrap_snapshot(node)) => {
             Some(WordSetSuffix::OpenParenAfterOptionalSpace)
         }
         _ => None,
@@ -612,6 +1128,7 @@ fn is_perl_space_class(ast: &Ast) -> bool {
         return false;
     };
     !class.negated
+        && class.intersections.is_empty()
         && matches!(
             class.atoms.as_slice(),
             [ClassAtom::Perl(PerlClassKind::Space)]
@@ -625,6 +1142,7 @@ fn word_variants(ast: &Ast) -> Option<Vec<String>> {
         Ast::Group {
             child, name: None, ..
         } => word_variants(child),
+        Ast::Flags { child, .. } => word_variants(child),
         Ast::Concat(nodes) => {
             let mut variants = vec![String::new()];
             for node in nodes {
@@ -682,7 +1200,7 @@ fn previous_char(line: &str, pos: usize) -> Option<char> {
 }
 
 fn is_word_char(ch: char) -> bool {
-    ch == '_' || ch.is_alphanumeric()
+    is_unicode_word_char(ch)
 }
 
 /// Native "fast path" matcher. Previously backed by regex-automata; now uses
@@ -702,25 +1220,40 @@ impl AutomataMatcher {
     }
 
     pub fn from_translation(translation: Translation) -> Result<Self, AutomataBuildError> {
-        let prefilter = Prefilter::from_regex(&translation.parsed);
-        let engine = if let Some(simple) = SimpleMatcher::try_from_translation(&translation) {
-            NativeEngine::Simple(simple)
-        } else if let Some(word_set) = WordSetMatcher::try_from_translation(&translation) {
-            NativeEngine::WordSet(word_set)
-        } else if let Some(uri) = NixUriMatcher::try_from_translation(&translation) {
-            NativeEngine::NixUri(uri)
-        } else {
+        let engine = specialized_engine(&translation).unwrap_or_else(|| {
             // Match against the original Oniguruma pattern so anchors/classes
             // keep AST semantics (the translated spelling is diagnostic-only).
             NativeEngine::Vm(FallbackMatcher::from_parsed(
                 Arc::clone(&translation.parsed),
                 super::backtrack::DEFAULT_STEP_BUDGET,
             ))
+        });
+        // Native specializations already carry an exact literal/start-byte
+        // search. Building the generic required-literal prefilter as well is
+        // redundant, and is particularly expensive for the large symbol
+        // inventories used by Emacs Lisp and other grammar definitions.
+        let prefilter = if matches!(&engine, NativeEngine::Vm(_)) {
+            Prefilter::from_regex(&translation.parsed)
+        } else {
+            Prefilter::None
         };
         Ok(Self {
             engine,
             translation,
             prefilter,
+        })
+    }
+
+    /// Build only when a bounded native specialization recognizes the AST.
+    /// This lets fallback-routed patterns (notably fixed-width separator
+    /// lookarounds around huge symbol inventories) bypass the general VM
+    /// without relabeling every fallback expression as an automata matcher.
+    pub(crate) fn from_specialized_translation(translation: Translation) -> Option<Self> {
+        let engine = specialized_engine(&translation)?;
+        Some(Self {
+            engine,
+            translation,
+            prefilter: Prefilter::None,
         })
     }
 
@@ -740,6 +1273,8 @@ impl AutomataMatcher {
         match &self.engine {
             NativeEngine::Simple(matcher) => matcher.unanchored_literal(),
             NativeEngine::WordSet(_) => None,
+            NativeEngine::SymbolSet(_) => None,
+            NativeEngine::DelimitedFields(_) => None,
             NativeEngine::NixUri(_) => None,
             NativeEngine::Vm(_) => None,
         }
@@ -752,6 +1287,8 @@ impl AutomataMatcher {
                 .and_then(|literal| literal.as_bytes().first().copied())
                 .map(|byte| vec![byte]),
             NativeEngine::WordSet(matcher) => Some(matcher.start_bytes.clone()),
+            NativeEngine::SymbolSet(matcher) => Some(matcher.start_bytes.clone()),
+            NativeEngine::DelimitedFields(_) => None,
             NativeEngine::NixUri(_) => Some((b'A'..=b'Z').chain(b'a'..=b'z').collect()),
             NativeEngine::Vm(matcher) => matcher.restricted_start_bytes(),
         }
@@ -772,6 +1309,8 @@ impl AutomataMatcher {
         match &self.engine {
             NativeEngine::Simple(matcher) => Ok((matcher.find(line, from, ctx), None)),
             NativeEngine::WordSet(matcher) => Ok((matcher.find(line, from), None)),
+            NativeEngine::SymbolSet(matcher) => Ok((matcher.find(line, from), None)),
+            NativeEngine::DelimitedFields(matcher) => Ok((matcher.find(line, from), None)),
             NativeEngine::NixUri(matcher) => Ok((matcher.find(line, from), None)),
             NativeEngine::Vm(matcher) => {
                 if !anchor_permits_search(self.translation.anchor_strategy, from, ctx, line) {
@@ -796,6 +1335,8 @@ impl AutomataMatcher {
         match &self.engine {
             NativeEngine::Simple(matcher) => Ok((matcher.match_at(line, start), None)),
             NativeEngine::WordSet(matcher) => Ok((matcher.match_at(line, start), None)),
+            NativeEngine::SymbolSet(matcher) => Ok((matcher.match_at(line, start), None)),
+            NativeEngine::DelimitedFields(matcher) => Ok((matcher.match_at(line, start), None)),
             NativeEngine::NixUri(matcher) => Ok((matcher.match_at(line, start), None)),
             NativeEngine::Vm(matcher) => matcher
                 .try_find_at(line, start, ctx)
@@ -816,6 +1357,8 @@ impl AutomataMatcher {
         match &self.engine {
             NativeEngine::Simple(matcher) => Ok(matcher.match_at(line, start)),
             NativeEngine::WordSet(matcher) => Ok(matcher.match_at(line, start)),
+            NativeEngine::SymbolSet(matcher) => Ok(matcher.match_at(line, start)),
+            NativeEngine::DelimitedFields(matcher) => Ok(matcher.match_at(line, start)),
             NativeEngine::NixUri(matcher) => Ok(matcher.match_at(line, start)),
             NativeEngine::Vm(matcher) => matcher
                 .try_find_at_without_captures_with_scratch(line, start, ctx, scratch)
@@ -824,11 +1367,27 @@ impl AutomataMatcher {
     }
 }
 
+fn specialized_engine(translation: &Translation) -> Option<NativeEngine> {
+    if let Some(simple) = SimpleMatcher::try_from_translation(translation) {
+        Some(NativeEngine::Simple(simple))
+    } else if let Some(word_set) = WordSetMatcher::try_from_translation(translation) {
+        Some(NativeEngine::WordSet(word_set))
+    } else if let Some(symbol_set) = SymbolSetMatcher::try_from_translation(translation) {
+        Some(NativeEngine::SymbolSet(symbol_set))
+    } else if let Some(fields) = DelimitedFieldsMatcher::try_from_translation(translation) {
+        Some(NativeEngine::DelimitedFields(fields))
+    } else {
+        NixUriMatcher::try_from_translation(translation).map(NativeEngine::NixUri)
+    }
+}
+
 impl Matcher for AutomataMatcher {
     fn find(&self, line: &str, from: usize, ctx: AnchorContext) -> Option<MatchResult> {
         match &self.engine {
             NativeEngine::Simple(matcher) => matcher.find(line, from, ctx),
             NativeEngine::WordSet(matcher) => matcher.find(line, from),
+            NativeEngine::SymbolSet(matcher) => matcher.find(line, from),
+            NativeEngine::DelimitedFields(matcher) => matcher.find(line, from),
             NativeEngine::NixUri(matcher) => matcher.find(line, from),
             NativeEngine::Vm(matcher) => {
                 // Anchor strategies previously enforced by regex-automata Input
@@ -1604,6 +2163,65 @@ mod tests {
     }
 
     #[test]
+    fn word_set_rejects_inventories_with_multiword_branches() {
+        let matcher = AutomataMatcher::new(concat!(
+            r"\b(?i:define|select|distinct|reduced|from|named|construct|ask|describe|where|",
+            r"graph|having|bind|as|filter|optional|union|order|by|group|limit|offset|values|",
+            r"insert data|delete data|with|delete|insert|clear|silent|default|all|create|drop|",
+            r"copy|move|add|to|using|service|not exists|exists|not in|in|minus|load)\b"
+        ))
+        .unwrap();
+        assert!(!matcher.is_word_set());
+        for phrase in ["NOT IN", "NOT EXISTS", "INSERT DATA", "DELETE DATA"] {
+            let matched = matcher.find(phrase, 0, ctx()).expect(phrase);
+            assert_eq!(matched.start..matched.end, 0..phrase.len());
+        }
+    }
+
+    #[test]
+    fn standalone_inline_flags_apply_from_their_position_only() {
+        let matcher = AutomataMatcher::new(
+            r"(?:(?i)\b(as|by|or|and|over|where|output|outputnew)|(?-i)\b(NOT|true|false))\b",
+        )
+        .unwrap();
+        for sample in ["AS", "By", "outputNEW", "NOT", "true"] {
+            assert!(matcher.find(sample, 0, ctx()).is_some(), "{sample}");
+        }
+        for sample in ["not", "TRUE", "False"] {
+            assert!(matcher.find(sample, 0, ctx()).is_none(), "{sample}");
+        }
+    }
+
+    #[test]
+    fn bare_inline_flags_scope_the_remaining_subexpression() {
+        let matcher = AutomataMatcher::new(r"a(?i)b|c").unwrap();
+        for sample in ["ab", "aB", "ac", "aC"] {
+            let matched = matcher.find(sample, 0, ctx()).expect(sample);
+            assert_eq!(matched.start..matched.end, 0..sample.len());
+        }
+        for sample in ["c", "C"] {
+            assert!(matcher.find(sample, 0, ctx()).is_none(), "{sample}");
+        }
+
+        let matcher = AutomataMatcher::new(r"(?:(?i)a|b)c").unwrap();
+        for sample in ["ac", "Ac", "bc", "Bc"] {
+            let matched = matcher.find(sample, 0, ctx()).expect(sample);
+            assert_eq!(matched.start..matched.end, 0..sample.len());
+        }
+        for sample in ["aC", "BC"] {
+            assert!(matcher.find(sample, 0, ctx()).is_none(), "{sample}");
+        }
+
+        let matcher = AutomataMatcher::new(r"(?i:foo(?-i:bar))").unwrap();
+        assert!(matcher.find("FOObar", 0, ctx()).is_some());
+        assert!(matcher.find("FOOBAR", 0, ctx()).is_none());
+
+        let matcher = AutomataMatcher::new(r"(?i)(?-i:foo)").unwrap();
+        assert!(matcher.find("foo", 0, ctx()).is_some());
+        assert!(matcher.find("FOO", 0, ctx()).is_none());
+    }
+
+    #[test]
     fn start_byte_prefilter_jumps_to_candidate_bytes() {
         let mut buckets = (0..=u8::MAX)
             .map(|_| Vec::<usize>::new())
@@ -1877,6 +2495,68 @@ mod tests {
                 .start,
             7
         );
+    }
+
+    #[test]
+    fn delimited_fields_specialization_preserves_captures_and_empty_fields() {
+        let matcher = AutomataMatcher::new(r"([^\t]*\t?)([^\t]*\t?)([^\t]*\t?)").unwrap();
+        assert!(matches!(matcher.engine, NativeEngine::DelimitedFields(_)));
+
+        let result = matcher.find("alpha\t\tγamma\n", 0, ctx()).unwrap();
+        assert_eq!(result.start..result.end, 0.."alpha\t\tγamma\n".len());
+        assert_eq!(
+            result.captures,
+            vec![
+                Some(0.."alpha\t\tγamma\n".len()),
+                Some(0..6),
+                Some(6..7),
+                Some(7.."alpha\t\tγamma\n".len()),
+            ]
+        );
+    }
+
+    #[test]
+    fn delimited_fields_specialization_stops_after_declared_columns() {
+        let matcher = AutomataMatcher::new(r"([^,]*,?)([^,]*,?)").unwrap();
+        let result = matcher.find("a,b,c", 0, ctx()).unwrap();
+        assert_eq!(result.start..result.end, 0..4);
+        assert_eq!(result.captures, vec![Some(0..4), Some(0..2), Some(2..4)]);
+    }
+
+    #[test]
+    fn separator_bounded_symbol_set_preserves_capture_and_boundaries() {
+        let symbols = (0..40)
+            .map(|index| format!("dashboard-command-{index}"))
+            .collect::<Vec<_>>()
+            .join("|");
+        let pattern = format!(r"(?<=[()\s]|^)({symbols})(?=[()\s]|$)");
+        let matcher = AutomataMatcher::new(&pattern).unwrap();
+        assert!(matches!(matcher.engine, NativeEngine::SymbolSet(_)));
+        assert_eq!(
+            matcher.prefilter_may_match("unrelated text", 0),
+            None,
+            "the exact symbol-set search must not build a redundant generic prefilter"
+        );
+
+        let line = "(dashboard-command-31) dashboard-command-310";
+        let result = matcher.find(line, 0, ctx()).unwrap();
+        assert_eq!(result.start..result.end, 1..21);
+        assert_eq!(result.captures, vec![Some(1..21), Some(1..21)]);
+        assert!(matcher.find(line, 21, ctx()).is_none());
+    }
+
+    #[test]
+    fn separator_bounded_noncapturing_symbol_set_uses_direct_alternation() {
+        let symbols = (0..40)
+            .map(|index| format!("dashboard-face-{index}"))
+            .collect::<Vec<_>>()
+            .join("|");
+        let pattern = format!(r"\b(?<=[()\s]|^)(?:{symbols})(?=[()\s]|$)\b");
+        let matcher = AutomataMatcher::new(&pattern).unwrap();
+        assert!(matches!(matcher.engine, NativeEngine::SymbolSet(_)));
+        let result = matcher.find(" dashboard-face-7 ", 0, ctx()).unwrap();
+        assert_eq!(result.start..result.end, 1..17);
+        assert_eq!(result.captures, vec![Some(1..17)]);
     }
 
     fn summarize_match((idx, result): (usize, MatchResult)) -> (usize, usize, usize) {

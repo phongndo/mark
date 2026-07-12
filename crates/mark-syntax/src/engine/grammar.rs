@@ -61,6 +61,12 @@ pub enum RuleRef {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rule {
     pub id: RuleId,
+    /// Repository entries declared directly on this raw include-only rule.
+    ///
+    /// TextMate overlays these entries on the repository inherited by the
+    /// rule at lazy-compilation time. The values are the collision-free names
+    /// used in `CompiledGrammar::repository`.
+    pub local_repository: BTreeMap<String, String>,
     pub body: RuleBody,
 }
 
@@ -84,6 +90,13 @@ pub struct GrammarMetadata {
     pub name: Option<String>,
     pub file_types: Vec<String>,
     pub first_line_match: Option<String>,
+    /// Selector used when this grammar is registered as a standalone
+    /// injection grammar. This is distinct from the grammar's inline
+    /// `injections` map.
+    pub injection_selector: Option<String>,
+    /// Root scopes for which the registry should activate this standalone
+    /// injection grammar.
+    pub inject_to: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -174,7 +187,10 @@ impl CompiledGrammar {
         }
         out.push_str("rules:\n");
         for rule in &self.rules {
-            out.push_str(&format!("  {:?}: {:?}\n", rule.id, rule.body));
+            out.push_str(&format!(
+                "  {:?} repository={:?}: {:?}\n",
+                rule.id, rule.local_repository, rule.body
+            ));
         }
         out
     }
@@ -376,6 +392,8 @@ struct RawGrammar {
     #[serde(default)]
     injection_selector: Option<String>,
     #[serde(default)]
+    inject_to: Vec<String>,
+    #[serde(default)]
     patterns: Vec<RawPattern>,
     #[serde(default)]
     repository: BTreeMap<String, RawRepositoryEntry>,
@@ -532,13 +550,8 @@ pub fn load_dev_grammar_from_path(
         compiler.repository.insert(name, rule_ref);
     }
     let mut injections = Vec::new();
-    if let Some(selector) = raw.injection_selector {
-        // Top-level injection selectors require registry-level `injectTo`
-        // activation to avoid making every bundled injection grammar globally
-        // active. Preserve the selector in the string table for diagnostics and
-        // future activation, but keep production injection candidates sourced
-        // from explicit grammar `injections` until injectTo metadata is wired.
-        compiler.string_id(&selector);
+    if let Some(selector) = raw.injection_selector.as_deref() {
+        compiler.string_id(selector);
     }
     for (selector, raw_rule) in raw.injections {
         compiler.string_id(&selector);
@@ -562,6 +575,8 @@ pub fn load_dev_grammar_from_path(
             name: raw.name,
             file_types: raw.file_types,
             first_line_match: raw.first_line_match,
+            injection_selector: raw.injection_selector,
+            inject_to: raw.inject_to,
         },
         string_names: compiler.string_names,
         patterns: compiler.patterns,
@@ -603,6 +618,7 @@ impl DevCompiler {
         let patterns = self.compile_patterns(patterns);
         self.rules.push(Rule {
             id,
+            local_repository: BTreeMap::new(),
             body: RuleBody::IncludeOnly { patterns },
         });
         RuleRef::Rule(id)
@@ -613,7 +629,16 @@ impl DevCompiler {
             return self.include_ref(include);
         }
 
-        let has_local_repository = self.push_local_repository(raw.repository);
+        // RuleFactory overlays `repository` only for include-only rules.
+        // Match and begin rules compile their captures/children against the
+        // repository inherited from their first compilation path.
+        let is_include_only = raw.match_pattern.is_none() && raw.begin.is_none();
+        let local_repository = if is_include_only {
+            self.push_local_repository(raw.repository)
+        } else {
+            BTreeMap::new()
+        };
+        let has_local_repository = !local_repository.is_empty();
 
         let id = RuleId(self.next_rule);
         self.next_rule += 1;
@@ -649,7 +674,11 @@ impl DevCompiler {
             } else {
                 RuleBody::BeginEnd {
                     begin: self.pattern_id(begin),
-                    end: self.pattern_id(raw.end.unwrap_or_else(|| "$^".to_owned())),
+                    // The tokenizer recognizes an empty end as TextMate's
+                    // non-matching sentinel. Keep it explicit rather than
+                    // substituting a source scalar that could match real
+                    // (albeit unusual) UTF-8 input.
+                    end: self.pattern_id(raw.end.unwrap_or_default()),
                     begin_captures: self.capture_spec(if raw.begin_captures.is_empty() {
                         captures_default.clone()
                     } else {
@@ -674,7 +703,11 @@ impl DevCompiler {
                 patterns: self.compile_patterns(raw.patterns),
             }
         };
-        self.rules.push(Rule { id, body });
+        self.rules.push(Rule {
+            id,
+            local_repository,
+            body,
+        });
         if has_local_repository {
             self.local_repository_scopes.pop();
         }
@@ -688,9 +721,12 @@ impl DevCompiler {
         }
     }
 
-    fn push_local_repository(&mut self, repository: BTreeMap<String, RawRepositoryEntry>) -> bool {
+    fn push_local_repository(
+        &mut self,
+        repository: BTreeMap<String, RawRepositoryEntry>,
+    ) -> BTreeMap<String, String> {
         if repository.is_empty() {
-            return false;
+            return BTreeMap::new();
         }
         let repository_id = self.next_local_repository;
         self.next_local_repository = self.next_local_repository.saturating_add(1);
@@ -708,7 +744,7 @@ impl DevCompiler {
             let rule_ref = self.compile_repository_entry(entry);
             self.repository.insert(alias, rule_ref);
         }
-        true
+        aliases
     }
 
     fn include_ref(&mut self, include: &str) -> RuleRef {
@@ -791,7 +827,7 @@ impl DevCompiler {
     }
 }
 
-fn normalize_injection_selectors(selector: &str) -> Vec<(InjectionPriority, String)> {
+pub(super) fn normalize_injection_selectors(selector: &str) -> Vec<(InjectionPriority, String)> {
     let mut left = Vec::new();
     let mut right = Vec::new();
     for alternative in split_selector_alternatives(selector) {
@@ -860,10 +896,12 @@ mod tests {
             rules: vec![
                 Rule {
                     id: RuleId(0),
+                    local_repository: BTreeMap::new(),
                     body: RuleBody::IncludeOnly { patterns: vec![] },
                 },
                 Rule {
                     id: RuleId(1),
+                    local_repository: BTreeMap::new(),
                     body: RuleBody::IncludeOnly { patterns: vec![] },
                 },
             ],
@@ -1052,17 +1090,26 @@ mod tests {
     }
 
     #[test]
-    fn dev_loader_records_top_level_injection_selector_without_global_activation() {
+    fn dev_loader_records_standalone_injection_registration() {
         let grammar = load_dev_grammar_from_str(
             GrammarId(0),
             r##"{
                 "scopeName": "source.injected",
                 "injectionSelector": "L:text.html - comment",
+                "injectTo": ["text.html", "text.html.markdown"],
                 "patterns": [{"match":"todo", "name":"keyword.todo.injected"}]
             }"##,
         )
         .unwrap();
         assert!(grammar.injections.is_empty());
+        assert_eq!(
+            grammar.metadata.injection_selector.as_deref(),
+            Some("L:text.html - comment")
+        );
+        assert_eq!(
+            grammar.metadata.inject_to,
+            ["text.html", "text.html.markdown"]
+        );
         assert!(
             grammar
                 .string_names

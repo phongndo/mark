@@ -294,10 +294,9 @@ pub(crate) fn bundled_highlight_language_set() -> BTreeSet<String> {
 }
 
 pub(crate) fn core_enabled_language_set() -> BTreeSet<String> {
-    let installed = installed_language_set();
     core_language_set()
-        .intersection(&installed)
-        .cloned()
+        .into_iter()
+        .filter(|language| crate::engine::SyntaxEngine::canonical_language(language).is_some())
         .collect()
 }
 
@@ -360,6 +359,12 @@ pub(crate) fn normalize_language_name(language: String) -> String {
 
 fn canonical_language_name(language: &str) -> String {
     let language = language_alias(language).unwrap_or(language);
+    // User-facing core ids are stable configuration vocabulary even when the
+    // underlying Shiki bundle uses a different canonical asset id (notably
+    // `bash` -> `shellscript`). Runtime lookup still resolves that alias.
+    if CORE_LANGUAGES.contains(&language) {
+        return language.to_owned();
+    }
     crate::engine::SyntaxEngine::canonical_language(language)
         .or_else(|| crate::engine::SyntaxEngine::detect_language_from_path(language))
         .unwrap_or_else(|| language.to_owned())

@@ -33,9 +33,17 @@ local piImpactGlobs = List(
 )
 
 local hygiene = new Mapping<String, Step | Group> {
-  ["merge-conflict"] = Builtins.check_merge_conflict
+  // TextMate grammar fixtures are arbitrary language text: RST section
+  // underlines and simple-table borders look like conflict markers.
+  ["merge-conflict"] = (Builtins.check_merge_conflict) {
+    exclude = List("crates/mark-syntax/tests/fixtures/**")
+  }
   ["private-key"] = Builtins.detect_private_key
-  ["large-file"] = Builtins.check_added_large_files
+  // Generated oracle goldens are large by nature and required checked-in
+  // by the 254/254 validation contract.
+  ["large-file"] = (Builtins.check_added_large_files) {
+    exclude = List("crates/mark-syntax/tests/fixtures/textmate/**/*.golden.jsonl")
+  }
   ["case-conflict"] = Builtins.check_case_conflict
   ["executable-shebang"] = Builtins.check_executables_have_shebangs
   ["symlinks"] = Builtins.check_symlinks

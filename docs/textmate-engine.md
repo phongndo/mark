@@ -80,6 +80,10 @@ so TUI queue/LRU layers do not need a redesign:
 
 ## Public language catalog
 
+<!-- BEGIN GENERATED: language-counts -->
+Completed generated coverage: **254 supported public language IDs**, **254 validated**, **254 oracle-covered**, and **254 in the catalog stress corpus**. The locked quality contract is 254/254 validated; the deterministic validation policy locks all four counts and the exact catalog identity (SHA-256 of the sorted public-ID list), so regeneration cannot make a lost public-ID basic/stress contract look complete or swap one language for another. See [`language-status.md`](language-status.md) for the generated ledger.
+<!-- END GENERATED: language-counts -->
+
 The native catalog is the full pinned Shiki language set plus the MLIR grammar
 imported from LLVM, vendored under `assets/tm-grammars/languages/`. The active
 public ids are listed in `assets/tm-grammars/coverage.toml`; private dependency
@@ -127,22 +131,62 @@ The first-class extended fixtures include `zig`, `llvm`, `riscv`, `mipsasm`,
 `odin`, `asm`, `mojo`, `ocaml`, and `mlir`; adding more coverage is an asset and
 fixture decision, not an engine fork.
 
+Path detection reads the checked-in
+`assets/tm-grammars/language-metadata.json` contract, generated
+deterministically from the pinned registration aliases and grammar
+`fileTypes`, then merges the curated mappings in `catalog.rs`. The contract
+covers all 254 public IDs (253 Shiki IDs plus `mlir`). Tests compare every
+alias, extension, and basename exactly with the built catalog and require all
+collisions to have explicit precedence or suppression; ambiguous entries are
+never skipped. Generic `.conf` files use `apache`, `.v` files use `verilog`,
+and `.js` files use `javascript`. Losing generated extensions are omitted,
+while language IDs themselves (such as `bird2`) remain available for explicit
+selection.
+
 ### Adding or updating a grammar (checklist)
 
 1. Vendor the compact JSON from the pinned package via
    `tools/vendor-shiki-grammars.mjs` (or `[[additional_sources]]` in
    `SOURCE.toml` for non-Shiki grammars like `mlir`), stable key order.
 2. `licenses.json` entry from the package's per-grammar license metadata.
-3. `coverage.toml` public entry; aliases/extensions merged into `catalog.rs`
-   with ids matching Shiki's `bundledLanguagesInfo`.
+3. `coverage.toml` public entry; regenerate `language-metadata.json`, then add
+   any intentional detection collision ownership to `catalog.rs`.
 4. `tools/grammar-stats.mjs` inventory first — any regex construct not in
    `tools/regex-conformance.mjs`'s proving set gets a conformance case
    **before** the grammar lands.
 5. Fixtures + oracle goldens (`stoppedEarly: false`), exact + coarse parity,
    `divergences.toml` stays empty, zero degraded lines.
-6. Perf: process-cold stress ≥ 2 MB/s floor per language; a floor breach
-   gets a counters audit + tracked issue, never a silent merge. Add a sweep
-   corpus member so the aggregate tracks the language forever.
+6. Perf: process-cold stress must meet the per-language floor in
+   `benchmarks/textmate/validation-policy.json`; a floor breach gets a counters
+   audit + tracked issue, never a silent merge. Add a sweep corpus member so
+   the aggregate tracks the language forever.
+
+The CI sweep reads that policy directly; do not duplicate the floor in the
+workflow. It prints a transient report but does not rewrite checked-in measured
+rates, because CI-runner variability is not documentation freshness. After an
+intentional, quiescent reference run, persist and publish the measurements with:
+
+```sh
+python3 tools/check-textmate-catalog-performance.py --write-report
+python3 tools/generate-language-status.py
+```
+
+The first command atomically writes
+`benchmarks/textmate/catalog-performance.json`. The status generator rejects a
+report whose catalog membership, corpus digest, or policy floor is stale. New
+validated languages also need an explicit ISO date in
+`benchmarks/textmate/language-promotions.json`; dates are never inferred from
+the current day. Every current entry is 2026-07-12 because all 254 promotions
+genuinely landed in that final batch, not because the generator assigned a
+global rollout date.
+
+Updating the `@shikijs/langs` pin is a full-catalog operation, not an isolated
+asset bump: update `SOURCE.toml` and the pinned oracle lockfile, run
+`tools/vendor-shiki-grammars.mjs`, regenerate `cases.toml` and every oracle
+golden, rebuild the catalog corpora/status ledger, then run the complete golden,
+counter, conformance-gap, latency, size, and per-language performance gates.
+Grammar and golden diffs are reviewed together; a pin update does not land with
+allowlisted or silently stale fixture output.
 
 ## Dependency policy
 
@@ -174,9 +218,10 @@ The package is `"private": true` and lives outside the Rust workspace.
 - Golden-token oracle tools and fixture corpus.
 - A divergence file that must stay empty while committed fixtures are exact.
 
-**Current state.** Full-catalog assets are vendored. Oracle tools and a
-full-language smoke/stress corpus exist. Production still does not depend on
-Node.
+**Current state.** Full-catalog assets are vendored. Oracle tools, a checked-in
+oracle corpus, and a separate catalog-wide literal smoke/budget gate exist.
+Production still does not depend on Node. Current counts are generated in the
+public-catalog section rather than repeated here.
 
 ### Phase 1 — grammar model and dev loader
 
@@ -345,14 +390,65 @@ Oracle record shape (one JSON object per source line):
 
 ## Fixture corpus policy
 
-| Kind | Languages | Engine comparison |
-| --- | --- | --- |
-| `basic` | json, rust, yaml, python | Exact + coarse |
-| `stress` | bash, c, cpp, css, go, html, javascript, json, markdown, python, rust, toml, tsx, typescript, yaml | Exact + coarse |
-| `smoke` | csharp, docker, java, jsx, kotlin, lua, make, nix, php, powershell, ruby, scss, sql, swift, terraform | Exact + coarse |
+Every manifest case is an exact scope-stack + coarse-class gate. `basic` and
+`stress` together satisfy the fixture portion of validation; `smoke` alone is
+oracle coverage, and additional named cases remain regression cases. The
+generated per-language kinds and current counts live in
+[`language-status.md`](language-status.md).
 
 Embedded grammars in the manifest (non-exhaustive): markdown→rust/js,
 html→js/css, scss→css, php→html/js/css/sql, cpp→cpp-macro.
+
+`bash` is the historical fixture name for the public `shellscript` grammar ID.
+There are no remaining validation-only public IDs: every public ID has both
+basic and stress exact-contract membership and belongs to the catalog sweep.
+`validation-policy.json` locks that completed membership independently of the
+generated case, corpus, and status outputs.
+
+## Golden harness scale policy
+
+L0.6 is a policy gate first; CI does not benchmark the full golden suite on
+every change. Build the test binary once, run one untimed warmup, then record
+wall-clock timings for the configured number of
+`cargo test -p mark-syntax --test textmate_golden --locked` runs on the
+documented reference runner. Commit the reviewed timing decision to
+`tools/textmate-golden-scale-policy.json` rather than silently changing CI.
+
+<!-- BEGIN GENERATED: golden-scale-policy -->
+Static gate: measure at **124 manifest cases**, after **1 warmup** and **5 timed runs**. Keep the suite unsharded at p95 ≤ **60 s**; above that, choose a reviewed count of at most **8 stable language-ID shards** whose maximum p95 is ≤ **45 s**. Final scale is at least **508 cases** for **254 public IDs**. Use nearest-rank p95 on **local development machine (L0.6 baseline)**. Current decision: **524 cases** measured at **63.33 s p95**, above the **60 s** trigger, so CI runs **4 shards**. Measured per-shard p95 (2026-07-12): shard 0 = 16.67 s, shard 1 = 20.56 s, shard 2 = 8.24 s, shard 3 = 13.29 s; maximum **20.56 s** ≤ the **45 s** shard target.
+<!-- END GENERATED: golden-scale-policy -->
+
+If sharding is required, assign all cases for one public language to the same
+shard: interpret `SHA-256(language_id)` as an unsigned big-endian integer and
+take it modulo the shard count. The language ID is derived from the root
+grammar asset (`bash` therefore uses its public `shellscript` ID). Candidate
+count timings can be recorded when they are available. CI must run every shard;
+the unfiltered `--test textmate_golden` command remains the full local/release
+gate, and degradation/budget assertions remain enabled in each shard. The
+status freshness check validates the decision rules and any recorded result
+without running the suite or inventing a measurement itself.
+
+The shard harness uses a zero-based index and requires both variables:
+
+```sh
+# One CI shard (index 0 of 4)
+MARK_TEXTMATE_SHARD_INDEX=0 MARK_TEXTMATE_SHARD_TOTAL=4 \
+  cargo test -p mark-syntax --test textmate_golden --locked
+
+# Full local/release gate (no shard variables)
+cargo test -p mark-syntax --test textmate_golden --locked
+```
+
+Partial, malformed, zero-total, and out-of-range configurations fail loudly.
+Run `python3 tools/check-language-docs.py --write` after regenerating
+`docs/language-status.md`; CI uses `python3 tools/check-language-docs.py
+--check`.
+
+The hard completion checks are `node tools/generate-textmate-cases.mjs
+--check`, `python3 tools/build-textmate-corpora.py --check`, and `python3
+tools/generate-language-status.py --check`. Regenerating all three cannot
+normalize a missing public-ID basic/stress pair into a passing state because
+each check reads the independent expected counts in `validation-policy.json`.
 
 Do not hand-edit `*.golden.jsonl`. Update sources, then regenerate.
 

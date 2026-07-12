@@ -15,7 +15,38 @@ use std::{
     },
 };
 
+use unicode_general_category::{GeneralCategory, get_general_category};
+
 static NEXT_COMPILED_PATTERN_ID: AtomicU64 = AtomicU64::new(1);
+
+/// Oniguruma's Unicode `word` character set.
+///
+/// TextMate regex offsets are exposed as UTF-16 indices, but matching happens
+/// on Unicode characters. Internally Mark keeps UTF-8 byte offsets, so all
+/// regex engines must agree on the character predicate while preserving byte
+/// boundaries. Rust's `char::is_alphanumeric` omits combining marks and
+/// connector punctuation (notably emoji variation selectors), both of which
+/// Oniguruma includes in `\w` and word-boundary checks.
+pub(crate) fn is_unicode_word_char(ch: char) -> bool {
+    if ch.is_ascii() {
+        return ch == '_' || ch.is_ascii_alphanumeric();
+    }
+    matches!(
+        get_general_category(ch),
+        GeneralCategory::LowercaseLetter
+            | GeneralCategory::ModifierLetter
+            | GeneralCategory::OtherLetter
+            | GeneralCategory::TitlecaseLetter
+            | GeneralCategory::UppercaseLetter
+            | GeneralCategory::EnclosingMark
+            | GeneralCategory::NonspacingMark
+            | GeneralCategory::SpacingMark
+            | GeneralCategory::DecimalNumber
+            | GeneralCategory::LetterNumber
+            | GeneralCategory::OtherNumber
+            | GeneralCategory::ConnectorPunctuation
+    )
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CompiledPatternId(u64);
@@ -90,15 +121,20 @@ impl RegexMatcher {
     }
 
     fn from_translation(pattern: &str, translation: Translation) -> Self {
-        match translation.route {
-            Route::Dfa => match AutomataMatcher::from_translation(translation) {
+        if matches!(&translation.route, Route::Dfa) {
+            match AutomataMatcher::from_translation(translation) {
                 Ok(matcher) => Self::Automata(Box::new(matcher)),
                 Err(_) => Self::Fallback(Box::new(FallbackMatcher::new(pattern))),
-            },
-            Route::Fallback { .. } => Self::Fallback(Box::new(FallbackMatcher::from_parsed(
+            }
+        } else if let Some(matcher) =
+            AutomataMatcher::from_specialized_translation(translation.clone())
+        {
+            Self::Automata(Box::new(matcher))
+        } else {
+            Self::Fallback(Box::new(FallbackMatcher::from_parsed(
                 Arc::clone(&translation.parsed),
                 backtrack::DEFAULT_STEP_BUDGET,
-            ))),
+            )))
         }
     }
 
@@ -334,6 +370,31 @@ mod tests {
     fn routes_matcher() {
         assert_eq!(RegexMatcher::new("foo").engine_name(), "dfa");
         assert_eq!(RegexMatcher::new(r"foo(?=bar)").engine_name(), "fallback");
+    }
+
+    #[test]
+    fn oniguruma_word_captures_keep_utf8_ranges_after_astral_characters() {
+        let line = "🛰\u{fe0f}‿z";
+        let matched = RegexMatcher::new(r"(🛰)(\w+)")
+            .find(line, 0, AnchorContext::line_start())
+            .expect("variation selector, connector punctuation, and letter are word chars");
+
+        // vscode-oniguruma exposes these as UTF-16 0..2, 2..5. Mark's public
+        // tokenizer contract is UTF-8 bytes, including all capture ranges.
+        assert_eq!(matched.start..matched.end, 0..line.len());
+        assert_eq!(matched.captures[0], Some(0..line.len()));
+        assert_eq!(matched.captures[1], Some(0.."🛰".len()));
+        assert_eq!(matched.captures[2], Some("🛰".len()..line.len()));
+    }
+
+    #[test]
+    fn dfa_route_matches_nested_class_intersections() {
+        let matcher = RegexMatcher::new(r"[a-z&&[^aeiou]]+");
+        assert_eq!(matcher.engine_name(), "dfa");
+        let matched = matcher
+            .find("aei-bcdf", 0, AnchorContext::line_start())
+            .expect("consonants should match");
+        assert_eq!(matched.start..matched.end, 4..8);
     }
 
     #[test]

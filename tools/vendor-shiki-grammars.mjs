@@ -34,6 +34,7 @@ const sourcePath = path.join(assetsRoot, 'SOURCE.toml')
 const coveragePath = path.join(assetsRoot, 'coverage.toml')
 const fullCoveragePath = path.join(assetsRoot, 'coverage.full-shiki.toml')
 const licensesPath = path.join(assetsRoot, 'licenses.json')
+const languageMetadataPath = path.join(assetsRoot, 'language-metadata.json')
 
 const sourceToml = await fs.readFile(sourcePath, 'utf8')
 const sourcePathValue = tomlString(sourceToml, 'source_path')
@@ -153,12 +154,19 @@ const fullCoverage = renderFullCoverage({
   shikiNames,
   allAssetNames,
 })
+const languageMetadata = await renderLanguageMetadata({
+  coverage: currentCoverage,
+  generatedAssets,
+  languagesDir,
+  packageJson,
+})
 
 const outputs = new Map()
 for (const asset of generatedAssets) {
   outputs.set(path.join(root, asset.path), asset.json)
 }
 outputs.set(licensesPath, `${JSON.stringify(licenses, null, 2)}\n`)
+outputs.set(languageMetadataPath, languageMetadata)
 outputs.set(coveragePath, activeCoverage)
 outputs.set(fullCoveragePath, fullCoverage)
 
@@ -345,6 +353,52 @@ function renderFullCoverage({ shikiNames, allAssetNames }) {
     `${tomlArray('kept', shikiNames)}`
 }
 
+async function renderLanguageMetadata({ coverage, generatedAssets, languagesDir, packageJson }) {
+  const generatedByName = new Map(generatedAssets.map(asset => [asset.language, asset.grammar]))
+  const entries = []
+  const publicEntries = [
+    ...coverage.kept.map(id => ({ id, asset: id })),
+    ...coverage.remapped.map(({ language: id, asset }) => ({ id, asset })),
+  ].sort((left, right) => left.id.localeCompare(right.id))
+
+  for (const { id, asset } of publicEntries) {
+    let grammar = generatedByName.get(asset)
+    if (!grammar) {
+      const file = path.join(languagesDir, `${asset}.tmLanguage.json`)
+      grammar = JSON.parse(await fs.readFile(file, 'utf8'))
+    }
+    const aliases = sortedUnique((grammar.aliases ?? []).map(normalizeToken).filter(Boolean))
+    const extensions = []
+    const basenames = []
+    for (const rawFileType of grammar.fileTypes ?? []) {
+      const fileType = String(rawFileType).trim()
+      if (!fileType) continue
+      if (fileType.includes('.') && !fileType.startsWith('.')) {
+        basenames.push(fileType)
+      } else {
+        extensions.push(normalizeToken(fileType))
+      }
+    }
+    entries.push(cleanObject({
+      id,
+      asset: asset === id ? undefined : asset,
+      aliases,
+      extensions: sortedUnique(extensions.filter(Boolean)),
+      basenames: sortedUnique(basenames),
+    }))
+  }
+
+  return `${JSON.stringify({
+    schemaVersion: 1,
+    source: {
+      package: packageJson.name,
+      version: packageJson.version,
+      derivation: 'aliases and fileTypes from vendored grammar registrations',
+    },
+    languages: entries,
+  }, null, 2)}\n`
+}
+
 function tomlArray(name, values) {
   if (values.length === 0) return `${name} = []\n`
   return `${name} = [\n${values.map(value => `  ${JSON.stringify(value)},`).join('\n')}\n]\n`
@@ -372,6 +426,14 @@ function sortJsonValue(value) {
 
 function cleanObject(object) {
   return Object.fromEntries(Object.entries(object).filter(([, value]) => value !== undefined))
+}
+
+function normalizeToken(value) {
+  return String(value).trim().replace(/^\.+/, '').toLowerCase()
+}
+
+function sortedUnique(values) {
+  return [...new Set(values)].sort((left, right) => left.localeCompare(right))
 }
 
 function assertSameSet(left, right, leftName, rightName) {

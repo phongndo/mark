@@ -26,9 +26,27 @@ struct GrammarAsset {
     path: String,
     scope_name: String,
     first_line_pattern: Option<String>,
-    file_types: Vec<String>,
     bytes: Vec<u8>,
     scopes: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LanguageMetadataManifest {
+    languages: Vec<LanguageMetadata>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct LanguageMetadata {
+    id: String,
+    #[serde(default)]
+    asset: Option<String>,
+    #[serde(default)]
+    aliases: Vec<String>,
+    #[serde(default)]
+    extensions: Vec<String>,
+    #[serde(default)]
+    basenames: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -117,9 +135,18 @@ fn build_bundle(assets: &Path, input_hash: u64) -> Result<Vec<u8>, String> {
         fs::read_to_string(assets.join("coverage.toml")).map_err(|e| e.to_string())?;
     let licenses_text =
         fs::read_to_string(assets.join("licenses.json")).map_err(|e| e.to_string())?;
+    let metadata_text =
+        fs::read_to_string(assets.join("language-metadata.json")).map_err(|e| e.to_string())?;
     let coverage = toml::from_str::<toml::Value>(&coverage_text).map_err(|e| e.to_string())?;
     let licenses =
         serde_json::from_str::<serde_json::Value>(&licenses_text).map_err(|e| e.to_string())?;
+    let metadata = serde_json::from_str::<LanguageMetadataManifest>(&metadata_text)
+        .map_err(|e| e.to_string())?;
+    let metadata_by_language = metadata
+        .languages
+        .iter()
+        .map(|entry| (entry.id.as_str(), entry))
+        .collect::<BTreeMap<_, _>>();
     let source = licenses.get("source").and_then(|v| v.as_object());
     let upstream_url = source
         .and_then(|s| s.get("repository"))
@@ -223,6 +250,7 @@ fn build_bundle(assets: &Path, input_hash: u64) -> Result<Vec<u8>, String> {
                 &language,
                 &language,
                 &grammar_by_language,
+                &metadata_by_language,
                 &mut seen,
             )?);
         }
@@ -245,6 +273,7 @@ fn build_bundle(assets: &Path, input_hash: u64) -> Result<Vec<u8>, String> {
                 language,
                 asset,
                 &grammar_by_language,
+                &metadata_by_language,
                 &mut seen,
             )?);
         }
@@ -255,6 +284,7 @@ fn build_bundle(assets: &Path, input_hash: u64) -> Result<Vec<u8>, String> {
     source_hash_input.extend_from_slice(source_text.as_bytes());
     source_hash_input.extend_from_slice(coverage_text.as_bytes());
     source_hash_input.extend_from_slice(licenses_text.as_bytes());
+    source_hash_input.extend_from_slice(metadata_text.as_bytes());
     source_hash_input.extend_from_slice(&input_hash.to_le_bytes());
 
     Ok(bundle_to_bytes(
@@ -295,13 +325,6 @@ fn collect_grammars(assets: &Path) -> Result<Vec<GrammarAsset>, String> {
             .get("firstLineMatch")
             .and_then(|v| v.as_str())
             .map(str::to_owned);
-        let file_types = json
-            .get("fileTypes")
-            .and_then(|v| v.as_array())
-            .into_iter()
-            .flatten()
-            .filter_map(|v| v.as_str().map(str::to_owned))
-            .collect::<Vec<_>>();
         let language = path
             .file_name()
             .and_then(|name| name.to_str())
@@ -315,7 +338,6 @@ fn collect_grammars(assets: &Path) -> Result<Vec<GrammarAsset>, String> {
             path: normalize_path(&path),
             scope_name,
             first_line_pattern,
-            file_types,
             bytes,
             scopes: scopes.into_iter().collect(),
         });
@@ -327,6 +349,7 @@ fn language_entry(
     language: &str,
     asset: &str,
     grammar_by_language: &BTreeMap<&str, (u32, &GrammarAsset)>,
+    metadata_by_language: &BTreeMap<&str, &LanguageMetadata>,
     seen: &mut BTreeSet<String>,
 ) -> Result<LanguageEntry, String> {
     if !seen.insert(language.to_owned()) {
@@ -335,10 +358,25 @@ fn language_entry(
     let (grammar_blob, grammar) = grammar_by_language
         .get(asset)
         .ok_or_else(|| format!("coverage maps {language} to missing grammar asset {asset}"))?;
+    let metadata = metadata_by_language
+        .get(language)
+        .ok_or_else(|| format!("language metadata is missing public id {language}"))?;
+    if metadata.asset.as_deref().unwrap_or(language) != asset {
+        return Err(format!(
+            "language metadata maps {language} to the wrong asset"
+        ));
+    }
     let mut aliases = catalog::aliases_for_language(language)
         .into_iter()
         .filter(|alias| alias != language)
         .collect::<BTreeSet<_>>();
+    aliases.extend(
+        metadata
+            .aliases
+            .iter()
+            .map(|alias| catalog::normalize_language_token(alias))
+            .filter(|alias| !alias.is_empty() && alias != language),
+    );
     if asset != language {
         aliases.insert(catalog::normalize_language_token(asset));
     }
@@ -350,17 +388,14 @@ fn language_entry(
         .into_iter()
         .filter(|s| !s.is_empty())
         .collect::<BTreeSet<_>>();
-    for file_type in &grammar.file_types {
-        let value = file_type.trim();
-        if value.is_empty() {
-            continue;
-        }
-        if value.contains('.') && !value.starts_with('.') {
-            basenames.insert(value.to_owned());
-        } else {
-            extensions.insert(value.trim_start_matches('.').to_ascii_lowercase());
-        }
-    }
+    extensions.extend(
+        metadata
+            .extensions
+            .iter()
+            .filter(|extension| catalog::extension_is_allowed(extension, language))
+            .cloned(),
+    );
+    basenames.extend(metadata.basenames.iter().cloned());
     if language == "tsx" {
         aliases.insert("typescriptreact".to_owned());
         extensions.insert("tsx".to_owned());

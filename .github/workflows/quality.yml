@@ -88,6 +88,8 @@ jobs:
     name: Formatter, linter, tests, and build
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      MARK_TEXTMATE_STRICT: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -104,6 +106,9 @@ jobs:
         with:
           node-version: "24"
 
+      - name: Install pinned TextMate oracle
+        run: npm ci --prefix tools/golden-oracle
+
       - name: Check
         run: cargo check --workspace --all-targets --all-features --locked
 
@@ -114,10 +119,26 @@ jobs:
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
       - name: Test
-        run: cargo test --workspace --all-targets --all-features --locked
+        # The two catalog-wide loops run in the shard matrix below. Keep the
+        # remaining unit, integration, and TextMate regression tests here.
+        run: |
+          cargo test --workspace --all-targets --all-features --locked -- \
+            --skip manifest_golden_cases_match_or_are_allowlisted \
+            --skip manifest_golden_cases_have_no_budget_degradation
 
       - name: Architecture boundaries
         run: scripts/check-architecture
+
+      - name: Python tool tests
+        run: python3 -m unittest discover -s tools -p 'test_*.py'
+
+      - name: Locked TextMate 254/254 contract
+        run: |
+          node tools/vendor-shiki-grammars.mjs --check
+          node --test tools/test-generate-textmate-cases.mjs
+          node tools/generate-textmate-cases.mjs --check
+          python3 tools/build-textmate-corpora.py --check
+          python3 tools/generate-language-status.py --check
 
       - name: Startup latency
         run: |
@@ -125,7 +146,15 @@ jobs:
           scripts/check-startup target/release/mark 2.0
 
       - name: Golden oracle check
-        run: node tools/generate-goldens.mjs --check
+        run: |
+          node tools/generate-goldens.mjs --check
+          node tools/regex-conformance.mjs
+          node --test tools/test-grammar-stats.mjs
+          node tools/grammar-stats.mjs --fail-on-gaps --examples 0 > /tmp/grammar-gaps.json
+          python3 tools/check-language-docs.py --check
+
+      - name: TextMate catalog performance floor
+        run: python3 tools/check-textmate-catalog-performance.py
 
       - name: Benchmark smoke
         run: |
@@ -152,7 +181,11 @@ jobs:
             --json
 
       - name: Bundle latency smoke
-        run: cargo run -p mark-syntax --locked --release --example bundle-measure -- --assert-max-core-cold-us 50000
+        run: |
+          cargo run -p mark-syntax --locked --release --example bundle-measure -- \
+            --assert-max-core-cold-us 50000 \
+            --assert-max-catalog-first-line-us 75000 \
+            --assert-max-bundle-bytes 9000000
 
       - name: TextMate engine throughput smoke
         run: |
@@ -169,6 +202,30 @@ jobs:
 
       - name: Smoke installer and update
         run: scripts/smoke-installer-update
+
+  textmate-golden:
+    name: TextMate golden shard ${{ matrix.shard }}/4
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    env:
+      MARK_TEXTMATE_STRICT: "1"
+      MARK_TEXTMATE_SHARD_INDEX: ${{ matrix.shard }}
+      MARK_TEXTMATE_SHARD_TOTAL: "4"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run golden shard
+        run: cargo test -p mark-syntax --test textmate_golden --locked manifest_golden_cases_
 
   pi-mark:
     name: pi-mark package quality
