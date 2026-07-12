@@ -1,3 +1,7 @@
+// Match the shipped `mark` binary's allocator so measurements stay honest.
+#[global_allocator]
+static GLOBAL_ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use std::{
     collections::{BTreeSet, HashSet},
     error::Error,

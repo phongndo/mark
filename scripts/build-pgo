@@ -1,0 +1,76 @@
+#!/bin/sh
+# Profile-guided release build for the `mark` binary.
+#
+# Instruments the workspace, trains on the committed engine corpora (via the
+# profile-cold example) and the mega-diff bench fixtures (via mark-bench),
+# merges the profiles, and rebuilds `mark` with profile-use. Engine sweep
+# gains over a plain release build measured at +5-35% per corpus
+# (docs/performance-reports/2026-07-12-engine-optimization.md).
+#
+# usage: scripts/build-pgo [target-dir]
+set -eu
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+target_dir=${1:-"$root/target/pgo"}
+profile_dir="$target_dir/pgo-profiles"
+toolchain_bin=$(dirname "$(rustup which rustc)")
+profdata="$toolchain_bin/../lib/rustlib/$(rustc -vV | sed -n 's/^host: //p')/bin/llvm-profdata"
+
+if [ ! -x "$profdata" ]; then
+    echo "llvm-profdata not found; run: rustup component add llvm-tools" >&2
+    exit 1
+fi
+
+assets="$root/assets/tm-grammars/languages"
+corpora="$root/target/textmate-performance/corpora/core-repeated"
+if [ ! -d "$corpora" ]; then
+    echo "building training corpora (tools/build-textmate-corpora.py)..."
+    python3 "$root/tools/build-textmate-corpora.py"
+fi
+
+fixtures="$root/target/syntax-fixtures"
+if [ ! -d "$fixtures/huge-mixed-stress" ]; then
+    cargo build --release -p mark-bench --locked
+    "$root/target/release/mark-bench" fixtures --out "$fixtures" \
+        --scenario huge-mixed-stress --force
+fi
+
+rm -rf "$profile_dir"
+mkdir -p "$profile_dir"
+
+echo "== building instrumented binaries =="
+RUSTFLAGS="-Cprofile-generate=$profile_dir" cargo build --release --locked \
+    -p mark-cli -p mark-bench -p mark-syntax --example profile-cold \
+    --target-dir "$target_dir/instrumented"
+
+pc="$target_dir/instrumented/release/examples/profile-cold"
+bench="$target_dir/instrumented/release/mark-bench"
+
+echo "== training: engine corpora =="
+for entry in \
+    "source.nix $corpora/nix/smoke.nix" \
+    "source.php $corpora/php/smoke.php" \
+    "source.cpp $corpora/cpp/stress.cpp" \
+    "text.html.markdown $corpora/markdown/stress.md" \
+    "source.ts $corpora/typescript/stress.ts" \
+    "source.rust $corpora/rust/stress.rs" \
+    "source.python $corpora/python/stress.py" \
+    "source.go $corpora/go/stress.go"; do
+    scope=${entry%% *}
+    file=${entry#* }
+    [ -f "$file" ] && "$pc" --mode process-cold --assets "$assets" \
+        --scope "$scope" "$file" 4 > /dev/null 2>&1 || true
+done
+
+echo "== training: whole-binary bench =="
+"$bench" measure --fixtures "$fixtures" --scenario huge-mixed-stress \
+    --json > /dev/null 2>&1 || true
+
+echo "== merging profiles =="
+"$profdata" merge -o "$profile_dir/merged.profdata" "$profile_dir"
+
+echo "== building profile-guided mark =="
+RUSTFLAGS="-Cprofile-use=$profile_dir/merged.profdata" cargo build --release \
+    --locked -p mark-cli --target-dir "$target_dir/optimized"
+
+echo "profile-guided binary: $target_dir/optimized/release/mark"

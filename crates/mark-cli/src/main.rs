@@ -1,3 +1,8 @@
+// mimalloc measurably outperforms the system allocator on the tokenizer and
+// diff-model hot paths (engine sweep +5-20% per corpus, 2026-07-12 report).
+#[global_allocator]
+static GLOBAL_ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 mod args;
 mod config;
 mod dispatch;
