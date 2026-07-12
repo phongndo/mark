@@ -1,5 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
+use super::hashing::{self, FastMap};
+
 use crate::SyntaxClass;
 
 use super::state::{ScopeId, ScopeStackId};
@@ -134,9 +136,9 @@ pub struct ScopeStackNode {
 #[derive(Debug, Clone)]
 pub struct ScopeStackInterner {
     nodes: Vec<ScopeStackNode>,
-    edges: HashMap<(ScopeStackId, ScopeId), ScopeStackId>,
-    template_edges: HashMap<(ScopeStackId, ScopeTemplateId), ScopeStackId>,
-    template_once_edges: HashMap<(ScopeStackId, ScopeTemplateId), ScopeStackId>,
+    edges: FastMap<(ScopeStackId, ScopeId), ScopeStackId>,
+    template_edges: FastMap<(ScopeStackId, ScopeTemplateId), ScopeStackId>,
+    template_once_edges: FastMap<(ScopeStackId, ScopeTemplateId), ScopeStackId>,
 }
 
 impl Default for ScopeStackInterner {
@@ -148,9 +150,9 @@ impl Default for ScopeStackInterner {
                 class: None,
                 hash: 0xcbf2_9ce4_8422_2325,
             }],
-            edges: HashMap::new(),
-            template_edges: HashMap::new(),
-            template_once_edges: HashMap::new(),
+            edges: hashing::fast_map(),
+            template_edges: hashing::fast_map(),
+            template_once_edges: hashing::fast_map(),
         }
     }
 }

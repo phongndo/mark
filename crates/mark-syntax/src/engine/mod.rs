@@ -4,6 +4,7 @@ pub mod cache;
 pub mod checkpoint;
 pub mod counters;
 pub mod grammar;
+pub(crate) mod hashing;
 pub mod line;
 pub mod regex;
 pub mod scopes;
