@@ -8,7 +8,7 @@ use crate::runtime;
 use crate::search::{DiffSearchResult, SearchMatchIndex, grep_match_rows};
 use crate::text_input::TextInputKeyResult;
 use crossterm::event::{KeyCode, KeyEvent};
-use std::sync::Arc;
+use std::sync::{Arc, atomic::Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::oneshot;
 
@@ -147,6 +147,9 @@ impl DiffApp {
         #[cfg(not(test))]
         {
             self.jobs.filter_generation = self.jobs.filter_generation.wrapping_add(1);
+            self.jobs
+                .filter_generation_token
+                .store(self.jobs.filter_generation, Ordering::Release);
             self.jobs.pending_filter_apply = Some(PendingFilterApply {
                 generation: self.jobs.filter_generation,
                 due_at: Instant::now() + debounce,
@@ -175,16 +178,18 @@ impl DiffApp {
         let worker_grep_filter = grep_filter.clone();
         let search_index = Arc::clone(&self.document.search_index);
         let changeset = self.document.changeset.clone();
+        let generation_token = Arc::clone(&self.jobs.filter_generation_token);
         let (tx, rx) = oneshot::channel();
-        runtime::spawn_detached_blocking(move || {
-            let result = search_index.search_with_grep_match_limit(
+        drop(runtime::spawn_blocking(move || {
+            let result = search_index.search_with_grep_match_limit_cancelable(
                 &changeset,
                 &worker_file_filter,
                 &worker_grep_filter,
                 MAX_LIVE_GREP_MATCHES,
+                || generation_token.load(Ordering::Acquire) != generation,
             );
             let _ = tx.send(result);
-        });
+        }));
 
         self.jobs.filter_worker = Some(FilterWorker {
             generation,

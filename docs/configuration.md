@@ -291,12 +291,12 @@ MARK_MAX_DIFF_HUNKS=100000
 MARK_MAX_DIFF_LINE_BYTES=1048576
 ```
 
-Large patch parsing is sequential by default. A bounded worker pool for
-independent `diff --git` sections is available for benchmarking/concurrency
-experiments with:
+Large multi-file patches are parsed on the lazy process-wide CPU pool. The
+default pool size is the physical-core count capped at eight. Override the
+shared parse/search pool for benchmarking or force serial work with:
 
 ```sh
-MARK_DIFF_PARSE_THREADS=4   # capped at 8; set 1 to force sequential parsing
+MARK_CPU_THREADS=4   # capped at 8; set 0 or 1 to force sequential work
 ```
 
 ## Keybindings

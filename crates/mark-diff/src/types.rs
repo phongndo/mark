@@ -817,11 +817,30 @@ pub struct DiffLineText {
     storage: DiffLineTextStorage,
 }
 
+/// A task-local reference-count root for line spans into one raw patch.
+///
+/// The extra Arc layer keeps the hot per-line clone counter local to one parser
+/// task. Parallel parsers therefore do not contend on the raw patch's single
+/// atomic reference count, and the sized inner Arc also makes each stored
+/// backing pointer thin.
+#[derive(Debug, Clone)]
+pub(crate) struct DiffLineTextBacking(Arc<Arc<[u8]>>);
+
+impl DiffLineTextBacking {
+    pub(crate) fn new(raw: Arc<[u8]>) -> Self {
+        Self(Arc::new(raw))
+    }
+
+    fn raw(&self) -> &Arc<[u8]> {
+        self.0.as_ref()
+    }
+}
+
 #[derive(Debug, Clone)]
 enum DiffLineTextStorage {
     Owned(String),
     Span {
-        raw: Arc<[u8]>,
+        backing: DiffLineTextBacking,
         offset: u32,
         len: u32,
     },
@@ -833,18 +852,18 @@ impl PartialEq for DiffLineText {
             (DiffLineTextStorage::Owned(left), DiffLineTextStorage::Owned(right)) => left == right,
             (
                 DiffLineTextStorage::Span {
-                    raw: left_raw,
+                    backing: left_backing,
                     offset: left_offset,
                     len: left_len,
                 },
                 DiffLineTextStorage::Span {
-                    raw: right_raw,
+                    backing: right_backing,
                     offset: right_offset,
                     len: right_len,
                 },
             ) if left_offset == right_offset
                 && left_len == right_len
-                && Arc::ptr_eq(left_raw, right_raw) =>
+                && Arc::ptr_eq(left_backing.raw(), right_backing.raw()) =>
             {
                 true
             }
@@ -862,10 +881,10 @@ impl DiffLineText {
         }
     }
 
-    pub fn span(raw: Arc<[u8]>, offset: usize, len: usize) -> Self {
+    pub(crate) fn span(backing: DiffLineTextBacking, offset: usize, len: usize) -> Self {
         Self {
             storage: DiffLineTextStorage::Span {
-                raw,
+                backing,
                 offset: u32::try_from(offset).unwrap_or(u32::MAX),
                 len: u32::try_from(len).unwrap_or(u32::MAX),
             },
@@ -875,8 +894,13 @@ impl DiffLineText {
     pub fn as_bytes(&self) -> &[u8] {
         match &self.storage {
             DiffLineTextStorage::Owned(text) => text.as_bytes(),
-            DiffLineTextStorage::Span { raw, offset, len } => {
+            DiffLineTextStorage::Span {
+                backing,
+                offset,
+                len,
+            } => {
                 let start = *offset as usize;
+                let raw = backing.raw();
                 let end = start.saturating_add(*len as usize).min(raw.len());
                 raw.get(start..end).unwrap_or_default()
             }
@@ -913,15 +937,20 @@ impl DiffLineText {
     fn backing_patch_bytes(&self) -> Option<usize> {
         match &self.storage {
             DiffLineTextStorage::Owned(_) => None,
-            DiffLineTextStorage::Span { raw, .. } => Some(raw.len()),
+            DiffLineTextStorage::Span { backing, .. } => Some(backing.raw().len()),
         }
     }
 
     fn span_range(&self) -> Option<(Arc<[u8]>, Range<usize>)> {
         match &self.storage {
             DiffLineTextStorage::Owned(_) => None,
-            DiffLineTextStorage::Span { raw, offset, len } => {
+            DiffLineTextStorage::Span {
+                backing,
+                offset,
+                len,
+            } => {
                 let start = *offset as usize;
+                let raw = backing.raw();
                 let end = start.saturating_add(*len as usize).min(raw.len());
                 Some((Arc::clone(raw), start..end))
             }
@@ -961,44 +990,44 @@ impl DiffLine {
     pub(crate) fn context_span(
         old_line: usize,
         new_line: usize,
-        raw: Arc<[u8]>,
+        backing: DiffLineTextBacking,
         offset: usize,
         len: usize,
     ) -> Self {
         Self::Context {
             old_line: OldLineNumber::new(old_line),
             new_line: NewLineNumber::new(new_line),
-            text: DiffLineText::span(raw, offset, len),
+            text: DiffLineText::span(backing, offset, len),
         }
     }
 
     pub(crate) fn addition_span(
         new_line: usize,
-        raw: Arc<[u8]>,
+        backing: DiffLineTextBacking,
         offset: usize,
         len: usize,
     ) -> Self {
         Self::Addition {
             new_line: NewLineNumber::new(new_line),
-            text: DiffLineText::span(raw, offset, len),
+            text: DiffLineText::span(backing, offset, len),
         }
     }
 
     pub(crate) fn deletion_span(
         old_line: usize,
-        raw: Arc<[u8]>,
+        backing: DiffLineTextBacking,
         offset: usize,
         len: usize,
     ) -> Self {
         Self::Deletion {
             old_line: OldLineNumber::new(old_line),
-            text: DiffLineText::span(raw, offset, len),
+            text: DiffLineText::span(backing, offset, len),
         }
     }
 
-    pub(crate) fn meta_span(raw: Arc<[u8]>, offset: usize, len: usize) -> Self {
+    pub(crate) fn meta_span(backing: DiffLineTextBacking, offset: usize, len: usize) -> Self {
         Self::Meta {
-            text: DiffLineText::span(raw, offset, len),
+            text: DiffLineText::span(backing, offset, len),
         }
     }
 

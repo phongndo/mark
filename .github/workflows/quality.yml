@@ -116,6 +116,14 @@ jobs:
       - name: Test
         run: cargo test --workspace --all-targets --all-features --locked
 
+      - name: Architecture boundaries
+        run: scripts/check-architecture
+
+      - name: Startup latency
+        run: |
+          cargo build -p mark-cli --release --locked
+          scripts/check-startup target/release/mark 2.0
+
       - name: Golden oracle check
         run: node tools/generate-goldens.mjs --check
 

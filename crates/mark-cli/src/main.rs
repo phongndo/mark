@@ -20,6 +20,13 @@ use mark_core::{MarkError, MarkResult};
 use crate::{args::Cli, dispatch::run_cli};
 
 fn main() -> ExitCode {
+    if version_only_requested() {
+        return match write_stdout(format_args!("mark {}\n", version::CLI_VERSION)) {
+            Ok(()) | Err(CliError::StdoutBrokenPipe) => ExitCode::SUCCESS,
+            Err(_) => ExitCode::from(1),
+        };
+    }
+
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) if is_clean_exit_error(&error) => ExitCode::SUCCESS,
@@ -36,6 +43,15 @@ fn main() -> ExitCode {
             ExitCode::from(1)
         }
     }
+}
+
+fn version_only_requested() -> bool {
+    let mut args = std::env::args_os();
+    let _program = args.next();
+    matches!(
+        (args.next().as_deref(), args.next()),
+        (Some(argument), None) if argument == "--version" || argument == "-V"
+    )
 }
 
 fn styled_error_prefix(color: bool) -> &'static str {

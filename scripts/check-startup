@@ -1,0 +1,40 @@
+#!/usr/bin/env python3
+"""Assert median `mark --version` process latency stays within its budget."""
+
+import statistics
+import subprocess
+import sys
+import time
+import shutil
+
+binary = sys.argv[1] if len(sys.argv) > 1 else "target/release/mark"
+budget_ms = float(sys.argv[2]) if len(sys.argv) > 2 else 2.0
+
+reference = shutil.which("true")
+if reference is None:
+    raise SystemExit("startup check requires the `true` executable")
+
+for _ in range(5):
+    subprocess.run([reference], stdout=subprocess.DEVNULL, check=True)
+    subprocess.run([binary, "--version"], stdout=subprocess.DEVNULL, check=True)
+
+samples = []
+reference_samples = []
+for _ in range(25):
+    started = time.perf_counter_ns()
+    subprocess.run([reference], stdout=subprocess.DEVNULL, check=True)
+    reference_samples.append((time.perf_counter_ns() - started) / 1_000_000)
+    started = time.perf_counter_ns()
+    subprocess.run([binary, "--version"], stdout=subprocess.DEVNULL, check=True)
+    samples.append((time.perf_counter_ns() - started) / 1_000_000)
+
+raw_median_ms = statistics.median(samples)
+runner_overhead_ms = statistics.median(reference_samples)
+median_ms = max(0.0, raw_median_ms - runner_overhead_ms)
+print(
+    f"mark --version adjusted median: {median_ms:.3f} ms "
+    f"(raw {raw_median_ms:.3f} ms, runner {runner_overhead_ms:.3f} ms, "
+    f"budget {budget_ms:.3f} ms)"
+)
+if median_ms > budget_ms:
+    raise SystemExit(f"startup latency regression: {median_ms:.3f} ms > {budget_ms:.3f} ms")

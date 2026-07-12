@@ -34,8 +34,8 @@ RSS/component-memory reporting; repeated-sample JSON stats; CI smoke coverage;
 and the current TextMate hot-path work already represented in the engine
 baseline below.
 
-The follow-up implementation pass also added opt-in capped rayon diff-section parsing
-(`MARK_DIFF_PARSE_THREADS`, max 8), multi-worker syntax highlighting via
+The follow-up implementation pass also added default-on shared-pool rayon
+diff-section parsing (`MARK_CPU_THREADS`, max 8), multi-worker syntax highlighting via
 `[limits] worker_threads`, per-language/per-source-kind syntax latency buckets
 and first-visible latency reporting, stage timing rows in `mark-bench`, sparse
 inline hunk-emphasis storage with local block caps, a non-O(n) large-model

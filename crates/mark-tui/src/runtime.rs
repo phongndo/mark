@@ -1,13 +1,23 @@
-use std::{future::Future, io, sync::OnceLock, thread, time::Duration};
+use std::{
+    future::Future,
+    io,
+    sync::{
+        OnceLock,
+        atomic::{AtomicU64, Ordering},
+    },
+    thread,
+    time::Duration,
+};
 
 use tokio::{
     runtime::{Builder, Handle, Runtime},
-    sync::{mpsc, oneshot},
+    sync::mpsc,
 };
 
 const RUNTIME_WORKER_THREADS: usize = 2;
-const RUNTIME_MAX_BLOCKING_THREADS: usize = 4;
+const RUNTIME_MAX_BLOCKING_THREADS: usize = 8;
 const CHANNEL_SEND_TIMEOUT: Duration = Duration::from_millis(10);
+static CHANNEL_SEND_TIMEOUTS: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) fn build_runtime() -> io::Result<Runtime> {
     Builder::new_multi_thread()
@@ -26,17 +36,13 @@ where
     if Handle::try_current().is_ok() {
         let handle = thread::Builder::new()
             .name("mark-runtime".to_owned())
-            .spawn(move || {
-                let runtime = build_runtime()?;
-                Ok(runtime.block_on(future))
-            })?;
+            .spawn(move || Ok(global_runtime().block_on(future)))?;
         return handle
             .join()
             .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
     }
 
-    let runtime = build_runtime()?;
-    Ok(runtime.block_on(future))
+    Ok(global_runtime().block_on(future))
 }
 
 pub(crate) fn spawn<F>(future: F) -> tokio::task::JoinHandle<F::Output>
@@ -63,28 +69,12 @@ where
     }
 }
 
-pub(crate) fn spawn_detached_blocking<F>(function: F)
-where
-    F: FnOnce() + Send + 'static,
-{
-    drop(
-        thread::Builder::new()
-            .name("mark-detached-blocking".to_owned())
-            .spawn(function)
-            .expect("detached blocking thread should start"),
-    );
-}
-
-pub(crate) async fn run_detached_blocking<F, R>(function: F) -> Result<R, oneshot::error::RecvError>
+pub(crate) async fn run_blocking<F, R>(function: F) -> Result<R, tokio::task::JoinError>
 where
     F: FnOnce() -> R + Send + 'static,
     R: Send + 'static,
 {
-    let (tx, rx) = oneshot::channel();
-    spawn_detached_blocking(move || {
-        let _ = tx.send(function());
-    });
-    rx.await
+    spawn_blocking(function).await
 }
 
 pub(crate) fn send_with_timeout<T>(sender: &mpsc::Sender<T>, mut value: T) -> bool {
@@ -97,6 +87,7 @@ pub(crate) fn send_with_timeout<T>(sender: &mpsc::Sender<T>, mut value: T) -> bo
     let start = std::time::Instant::now();
     loop {
         if start.elapsed() >= CHANNEL_SEND_TIMEOUT {
+            CHANNEL_SEND_TIMEOUTS.fetch_add(1, Ordering::Relaxed);
             return false;
         }
 
@@ -109,7 +100,13 @@ pub(crate) fn send_with_timeout<T>(sender: &mpsc::Sender<T>, mut value: T) -> bo
     }
 }
 
+pub(crate) fn channel_send_timeout_count() -> u64 {
+    CHANNEL_SEND_TIMEOUTS.load(Ordering::Relaxed)
+}
+
 fn global_runtime() -> &'static Runtime {
+    // This runtime intentionally lives for the process lifetime. Static values are not dropped at
+    // process exit, so blocked `spawn_blocking` work cannot delay CLI shutdown.
     static RUNTIME: OnceLock<Runtime> = OnceLock::new();
     RUNTIME.get_or_init(|| build_runtime().expect("tokio runtime should start"))
 }
@@ -137,33 +134,42 @@ mod tests {
     }
 
     #[test]
-    fn detached_blocking_does_not_hold_current_runtime_open() {
+    fn shutdown_timeout_does_not_wait_for_blocked_worker() {
         let (started_tx, started_rx) = std_mpsc::channel();
         let (release_tx, release_rx) = std_mpsc::channel();
-        let (dropped_tx, dropped_rx) = std_mpsc::channel();
-
-        let runner = thread::spawn(move || {
-            let runtime = build_runtime().expect("runtime should start");
-            runtime.block_on(async move {
-                spawn_detached_blocking(move || {
-                    started_tx.send(()).expect("start signal should send");
-                    let _ = release_rx.recv();
-                });
-            });
-            drop(runtime);
-            dropped_tx.send(()).expect("drop signal should send");
+        let (stopped_tx, stopped_rx) = std_mpsc::channel();
+        let runtime = build_runtime().expect("runtime should start");
+        runtime.spawn_blocking(move || {
+            started_tx.send(()).expect("start signal should send");
+            let _ = release_rx.recv();
+            stopped_tx.send(()).expect("stop signal should send");
         });
 
         started_rx
             .recv_timeout(Duration::from_secs(1))
-            .expect("detached worker should start");
-        if let Err(error) = dropped_rx.recv_timeout(Duration::from_secs(1)) {
-            let _ = release_tx.send(());
-            let _ = runner.join();
-            panic!("runtime waited for detached blocking worker: {error}");
-        }
+            .expect("blocking worker should start");
+
+        let shutdown_started = std::time::Instant::now();
+        runtime.shutdown_timeout(Duration::from_millis(250));
+        assert!(
+            shutdown_started.elapsed() <= Duration::from_millis(300),
+            "runtime shutdown exceeded the 300 ms exit budget"
+        );
 
         let _ = release_tx.send(());
-        runner.join().expect("runtime thread should finish");
+        stopped_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("blocking worker should stop after release");
+    }
+
+    #[test]
+    fn send_timeout_is_counted() {
+        let (tx, _rx) = mpsc::channel(1);
+        tx.try_send(1)
+            .expect("channel should have initial capacity");
+        let before = channel_send_timeout_count();
+
+        assert!(!send_with_timeout(&tx, 2));
+        assert!(channel_send_timeout_count() > before);
     }
 }

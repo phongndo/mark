@@ -256,10 +256,10 @@ impl DiffApp {
         let path = request.path;
         let pathspecs = request.pathspecs;
         let (tx, rx) = oneshot::channel();
-        runtime::spawn_detached_blocking(move || {
+        drop(runtime::spawn_blocking(move || {
             let changeset = mark_diff::load_review_ref_paths(&options, &pathspecs);
             let _ = tx.send(EditorScopedReload { path, changeset });
-        });
+        }));
         self.jobs.editor_reload = Some(EditorReloadWorker {
             generation: self.document.generation,
             job: AsyncJob::new(rx),

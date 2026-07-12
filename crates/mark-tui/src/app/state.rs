@@ -24,7 +24,7 @@ use mark_syntax::{ColorOverrides, SyntaxLimits, SyntaxSettings};
 use ratatui::layout::Rect;
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
-use std::sync::Arc;
+use std::sync::{Arc, atomic::AtomicU64};
 use std::time::{Duration, Instant};
 
 #[cfg(test)]
@@ -524,6 +524,7 @@ pub(crate) struct JobState {
     pub(crate) diff_prefetch_queue: VecDeque<DiffOptions>,
     pub(crate) diff_prefetch_started: bool,
     pub(crate) filter_generation: u64,
+    pub(crate) filter_generation_token: Arc<AtomicU64>,
     pub(crate) pending_filter_apply: Option<PendingFilterApply>,
     pub(crate) filter_worker: Option<FilterWorker>,
     pub(crate) filter_searching: bool,

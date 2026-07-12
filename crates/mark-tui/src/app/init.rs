@@ -27,7 +27,7 @@ use mark_syntax::SyntaxSettings;
 use ratatui::layout::Rect;
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
-use std::sync::Arc;
+use std::sync::{Arc, atomic::AtomicU64};
 
 pub(crate) fn load_syntax_settings_for_diff(
     load_user_settings: bool,
@@ -469,6 +469,7 @@ impl DiffApp {
                 diff_prefetch_queue: VecDeque::new(),
                 diff_prefetch_started: false,
                 filter_generation: 0,
+                filter_generation_token: Arc::new(AtomicU64::new(0)),
                 pending_filter_apply: None,
                 filter_worker: None,
                 filter_searching: false,

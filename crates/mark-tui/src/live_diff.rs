@@ -402,7 +402,7 @@ pub(crate) fn spawn_live_diff_worker(
                 break;
             }
             let load_options = options.clone();
-            let changeset = match runtime::run_detached_blocking(move || {
+            let changeset = match runtime::run_blocking(move || {
                 mark_diff::load_review_ref(&load_options)
             })
             .await

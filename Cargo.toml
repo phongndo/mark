@@ -19,6 +19,7 @@ fff-grep = "0.9.5-nightly.ec57eb0"
 memchr = "2.7"
 miniz_oxide = "0.9.1"
 notify = "8"
+num_cpus = "1.17"
 ratatui = "0.29"
 rayon = "1.10"
 rustix = { version = "0.38.44", default-features = false, features = ["std", "stdio", "termios"] }
@@ -36,6 +37,7 @@ mark-core = { path = "crates/mark-core" }
 mark-command = { path = "crates/mark-command" }
 mark-diff = { path = "crates/mark-diff" }
 mark-git = { path = "crates/mark-git" }
+mark-runtime = { path = "crates/mark-runtime" }
 mark-syntax = { path = "crates/mark-syntax" }
 mark-tui = { path = "crates/mark-tui" }
 

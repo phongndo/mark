@@ -1,5 +1,5 @@
 [package]
-name = "mark-diff"
+name = "mark-runtime"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -7,8 +7,6 @@ rust-version.workspace = true
 repository.workspace = true
 
 [dependencies]
-mark-core.workspace = true
-mark-git.workspace = true
-mark-runtime.workspace = true
-memchr.workspace = true
+num_cpus.workspace = true
 rayon.workspace = true
+tokio.workspace = true

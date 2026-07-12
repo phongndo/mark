@@ -11,14 +11,14 @@ impl DiffApp {
         let target = target.trim().to_owned();
         let repo = Self::review_load_repo_for_target(&self.document.changeset.repo, &target);
         let worker_target = target;
-        runtime::spawn_detached_blocking(move || {
+        drop(runtime::spawn_blocking(move || {
             let result = mark_command::review_diff_options(repo, &worker_target, false).and_then(
                 |options| {
                     mark_diff::load_review_ref(&options).map(|changeset| (options, changeset))
                 },
             );
             let _ = tx.send(result);
-        });
+        }));
 
         self.jobs.pending_review_load = Some(PendingReviewLoad {
             error_prefix: "review unavailable".to_owned(),

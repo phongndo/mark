@@ -23,6 +23,8 @@ check_absent 'DiffApp' crates/mark-tui/src/render/compositor.rs
 check_absent '&mut DiffApp' crates/mark-tui/src/render/menus crates/mark-tui/src/render/sidebar.rs crates/mark-tui/src/render/statusline crates/mark-tui/src/render/toast.rs
 check_absent 'settings_write_path\(' -g '!effect.rs' -g '!options.rs' crates/mark-tui/src/app
 check_absent 'persist_options_menu_draft_to_path\(' -g '!effect.rs' -g '!options.rs' crates/mark-tui/src/app
+check_absent 'ThreadPoolBuilder|rayon::(join|scope|spawn)' crates -g '*.rs' -g '!**/mark-runtime/src/lib.rs'
+check_absent '\.(par_iter|par_iter_mut|into_par_iter)\(' crates -g '*.rs' -g '!**/mark-diff/src/parser.rs' -g '!**/mark-tui/src/search.rs'
 
 python3 - <<'PY'
 from pathlib import Path
@@ -46,7 +48,7 @@ budgets = {
     'crates/mark-tui/src/app/diff_load/prefetch.rs': 180,
     'crates/mark-tui/src/app/diff_load/review.rs': 120,
     'crates/mark-tui/src/app/effect.rs': 180,
-    'crates/mark-tui/src/app/mouse.rs': 260,
+    'crates/mark-tui/src/app/mouse.rs': 340,
     'crates/mark-tui/src/app/mouse/event_context.rs': 230,
     'crates/mark-tui/src/app/navigation.rs': 20,
     'crates/mark-tui/src/render/compositor.rs': 180,

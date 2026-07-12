@@ -1,8 +1,9 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, ops::Range};
 
 use fff_grep::{LineTerminator, Match, Matcher, NoError};
 use mark_diff::Changeset;
 use memchr::{memchr, memchr2, memmem};
+use rayon::prelude::*;
 
 use crate::{
     controls::diff_line_grep_prefix,
@@ -14,6 +15,10 @@ use crate::{
 };
 
 const MAX_EAGER_SEARCH_WIDTH_LINES: usize = 200_000;
+#[cfg(not(test))]
+const PARALLEL_SEARCH_MIN_LINES: usize = 200_000;
+#[cfg(test)]
+const PARALLEL_SEARCH_MIN_LINES: usize = 16;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum SearchLineRef {
@@ -68,6 +73,7 @@ impl SearchMatchIndex {
 #[derive(Debug, Clone)]
 pub(crate) struct DiffSearchIndex {
     files: Vec<FileSearchIndex>,
+    diff_lines: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,17 +84,20 @@ struct FileSearchIndex {
 
 impl DiffSearchIndex {
     pub(crate) fn empty() -> Self {
-        Self { files: Vec::new() }
+        Self {
+            files: Vec::new(),
+            diff_lines: 0,
+        }
     }
 
     pub(crate) fn new(changeset: &Changeset) -> Self {
-        let compute_widths = changeset
+        let diff_lines = changeset
             .files
             .iter()
             .flat_map(|file| file.hunks())
             .map(|hunk| hunk.lines.len())
-            .sum::<usize>()
-            <= MAX_EAGER_SEARCH_WIDTH_LINES;
+            .sum::<usize>();
+        let compute_widths = diff_lines <= MAX_EAGER_SEARCH_WIDTH_LINES;
         let files = changeset
             .files
             .iter()
@@ -126,7 +135,7 @@ impl DiffSearchIndex {
             })
             .collect();
 
-        Self { files }
+        Self { files, diff_lines }
     }
 
     pub(crate) fn search(
@@ -145,15 +154,106 @@ impl DiffSearchIndex {
         grep_filter: &str,
         max_grep_matches: usize,
     ) -> DiffSearchResult {
+        self.search_with_grep_match_limit_cancelable(
+            changeset,
+            file_filter,
+            grep_filter,
+            max_grep_matches,
+            || false,
+        )
+    }
+
+    pub(crate) fn search_with_grep_match_limit_cancelable(
+        &self,
+        changeset: &Changeset,
+        file_filter: &str,
+        grep_filter: &str,
+        max_grep_matches: usize,
+        cancelled: impl Fn() -> bool + Sync,
+    ) -> DiffSearchResult {
         let file_query = file_filter.trim().to_ascii_lowercase();
         let grep_matcher = GrepMatcher::new(grep_filter);
+        let Some(grep_matcher) = grep_matcher.as_ref() else {
+            return self.search_range(
+                changeset,
+                &file_query,
+                None,
+                max_grep_matches,
+                0..self.files.len(),
+                &cancelled,
+            );
+        };
+
+        if self.diff_lines < PARALLEL_SEARCH_MIN_LINES || self.files.len() < 2 {
+            return self.search_range(
+                changeset,
+                &file_query,
+                Some(grep_matcher),
+                max_grep_matches,
+                0..self.files.len(),
+                &cancelled,
+            );
+        }
+
+        let pool = mark_runtime::cpu_pool();
+        let section_count = pool.current_num_threads().min(self.files.len());
+        if section_count <= 1 {
+            return self.search_range(
+                changeset,
+                &file_query,
+                Some(grep_matcher),
+                max_grep_matches,
+                0..self.files.len(),
+                &cancelled,
+            );
+        }
+
+        let section_len = self.files.len().div_ceil(section_count);
+        let sections = (0..self.files.len())
+            .step_by(section_len)
+            .map(|start| start..(start + section_len).min(self.files.len()))
+            .collect::<Vec<_>>();
+        let results = pool.install(|| {
+            sections
+                .par_iter()
+                .map(|range| {
+                    self.search_range(
+                        changeset,
+                        &file_query,
+                        Some(grep_matcher),
+                        max_grep_matches,
+                        range.clone(),
+                        &cancelled,
+                    )
+                })
+                .collect::<Vec<_>>()
+        });
+
+        merge_search_sections(results, max_grep_matches)
+    }
+
+    fn search_range(
+        &self,
+        changeset: &Changeset,
+        file_query: &str,
+        grep_matcher: Option<&GrepMatcher>,
+        max_grep_matches: usize,
+        range: Range<usize>,
+        cancelled: &(impl Fn() -> bool + Sync),
+    ) -> DiffSearchResult {
         let mut visible_files = Vec::new();
         let mut grep_matches = Vec::new();
         let mut grep_matches_truncated = false;
 
-        for (file_index, file) in self.files.iter().enumerate() {
+        for file_index in range {
+            if cancelled() {
+                break;
+            }
+            let Some(file) = self.files.get(file_index) else {
+                continue;
+            };
             let file_index = FileIndex::new(file_index);
-            if !file.matches_file_filter(&file_query) {
+            if !file.matches_file_filter(file_query) {
                 continue;
             }
 
@@ -215,6 +315,38 @@ impl DiffSearchIndex {
                     .map(FileSearchIndex::estimated_memory_bytes)
                     .sum::<usize>(),
             )
+    }
+}
+
+fn merge_search_sections(
+    sections: Vec<DiffSearchResult>,
+    max_grep_matches: usize,
+) -> DiffSearchResult {
+    let visible_capacity = sections
+        .iter()
+        .map(|section| section.visible_files.len())
+        .sum();
+    let match_capacity = sections
+        .iter()
+        .map(|section| section.grep_matches.len())
+        .sum::<usize>()
+        .min(max_grep_matches);
+    let mut visible_files = Vec::with_capacity(visible_capacity);
+    let mut grep_matches = Vec::with_capacity(match_capacity);
+    let mut grep_matches_truncated = false;
+
+    for section in sections {
+        visible_files.extend(section.visible_files);
+        let remaining = max_grep_matches.saturating_sub(grep_matches.len());
+        grep_matches_truncated |=
+            section.grep_matches_truncated || section.grep_matches.len() >= remaining;
+        grep_matches.extend(section.grep_matches.into_iter().take(remaining));
+    }
+
+    DiffSearchResult {
+        visible_files,
+        grep_matches,
+        grep_matches_truncated,
     }
 }
 
@@ -599,6 +731,55 @@ mod tests {
                 DiffLineIndex::new(0)
             )]
         );
+    }
+
+    #[test]
+    fn parallel_grep_matches_serial_order_and_limit() {
+        let mut changeset = changeset_with_hunk(
+            "@@ -1,8 +1,8 @@",
+            (0..8)
+                .map(|line| DiffLine::context(line + 1, line + 1, "needle"))
+                .collect(),
+        );
+        let template = changeset.files[0].clone();
+        changeset.files = (0..4)
+            .map(|file| {
+                let mut diff = template.clone();
+                diff.change = FileChange::modified(format!("src/{file}.rs"));
+                diff
+            })
+            .collect();
+        let index = DiffSearchIndex::new(&changeset);
+        let matcher = super::GrepMatcher::new("needle").expect("query should create matcher");
+        let serial = index.search_range(
+            &changeset,
+            "",
+            Some(&matcher),
+            5,
+            0..changeset.files.len(),
+            &|| false,
+        );
+
+        assert_eq!(
+            index.search_with_grep_match_limit(&changeset, "", "needle", 5),
+            serial
+        );
+    }
+
+    #[test]
+    fn grep_search_can_cancel_between_files() {
+        let changeset = changeset_with_diff_line("needle");
+        let index = DiffSearchIndex::new(&changeset);
+        let result = index.search_with_grep_match_limit_cancelable(
+            &changeset,
+            "",
+            "needle",
+            usize::MAX,
+            || true,
+        );
+
+        assert!(result.visible_files.is_empty());
+        assert!(result.grep_matches.is_empty());
     }
 
     fn changeset_with_hunk_header(header: &str) -> Changeset {

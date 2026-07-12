@@ -2,6 +2,7 @@ use super::*;
 use crate::{
     difftool::rewrite_difftool_patch_paths,
     git_io::{StderrCapture, parse_numstat, temp_index_path},
+    parser::parse_patch_bytes_serial_limited,
 };
 use std::{
     env, fs,

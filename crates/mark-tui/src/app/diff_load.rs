@@ -80,9 +80,9 @@ impl DiffApp {
 
         let (tx, rx) = oneshot::channel();
         let load_options = options.clone();
-        runtime::spawn_detached_blocking(move || {
+        drop(runtime::spawn_blocking(move || {
             let _ = tx.send(mark_diff::load_review_ref(&load_options));
-        });
+        }));
 
         self.jobs.pending_diff_load = Some(PendingDiffLoad {
             options,

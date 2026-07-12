@@ -271,8 +271,11 @@ fn parse_patch_bytes_parallel_sections_match_order_and_spans() {
     let patch = format!(
         "diff --git a/a.txt b/a.txt\nindex {padding}\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old a\n+new a\ndiff --git a/b.txt b/b.txt\n--- a/b.txt\n+++ b/b.txt\n@@ -2 +2 @@\n-old b\n+new b\n"
     );
-    let files = parse_patch_bytes(Arc::from(patch.into_bytes().into_boxed_slice()));
-
+    let patch = Arc::from(patch.into_bytes().into_boxed_slice());
+    let serial =
+        parse_patch_bytes_serial_limited(Arc::clone(&patch), DiffLimits::default()).unwrap();
+    let files = parse_patch_bytes(patch);
+    assert_eq!(files, serial);
     assert_eq!(files.len(), 2);
     assert_eq!(files[0].display_path(), "a.txt");
     assert_eq!(files[1].display_path(), "b.txt");

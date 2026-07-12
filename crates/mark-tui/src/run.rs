@@ -279,6 +279,7 @@ pub fn benchmark_diff_view(
         warm_cache_misses: after_warm_stats
             .cache_misses
             .saturating_sub(before_warm_stats.cache_misses),
+        channel_send_timeouts: runtime::channel_send_timeout_count(),
         syntax: after_warm_stats,
     }
 }

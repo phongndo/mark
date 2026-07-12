@@ -90,6 +90,19 @@ fn load_changeset_with_patch_bytes_limited(
     limits: DiffLimits,
 ) -> MarkResult<(Changeset, u64)> {
     let title = diff_title(options);
+    if let DiffSource::Patch(PatchSource::File(path)) = &options.source {
+        validate_options(options)?;
+        let repo = options
+            .repo
+            .clone()
+            .map(RepoArg::into_path_buf)
+            .unwrap_or_default();
+        let patch = read_file_arc(path)?;
+        let patch_bytes = u64::try_from(patch.len()).unwrap_or(u64::MAX);
+        let changeset =
+            changeset_from_shared_patch_limited(repo, title, patch, keep_raw_patch, limits)?;
+        return Ok((changeset, patch_bytes));
+    }
     let (repo, patch) = diff_patch_bytes(options)?;
     let patch_bytes = u64::try_from(patch.len()).unwrap_or(u64::MAX);
     let changeset = changeset_from_patch_limited(repo, title, patch, keep_raw_patch, limits)?;
@@ -119,6 +132,20 @@ fn changeset_from_patch_limited(
     keep_raw_patch: bool,
     limits: DiffLimits,
 ) -> MarkResult<Changeset> {
+    let patch: Arc<[u8]> = match patch {
+        Cow::Borrowed(bytes) => Arc::from(bytes),
+        Cow::Owned(bytes) => Arc::from(bytes),
+    };
+    changeset_from_shared_patch_limited(repo, title, patch, keep_raw_patch, limits)
+}
+
+fn changeset_from_shared_patch_limited(
+    repo: PathBuf,
+    title: String,
+    patch: Arc<[u8]>,
+    keep_raw_patch: bool,
+    limits: DiffLimits,
+) -> MarkResult<Changeset> {
     if let Some(max_patch_bytes) = limits.max_patch_bytes
         && patch.len() > max_patch_bytes
     {
@@ -126,10 +153,6 @@ fn changeset_from_patch_limited(
             DiffLimitExceeded::new("patch bytes", max_patch_bytes, patch.len()).to_string(),
         ));
     }
-    let patch: Arc<[u8]> = match patch {
-        Cow::Borrowed(bytes) => Arc::from(bytes),
-        Cow::Owned(bytes) => Arc::from(bytes),
-    };
     let files = parse_patch_bytes_limited(Arc::clone(&patch), limits)
         .map_err(|error| MarkError::Usage(error.to_string()))?;
     let raw_patch = if keep_raw_patch {
@@ -144,6 +167,26 @@ fn changeset_from_patch_limited(
         files,
         raw_patch,
     })
+}
+
+fn read_file_arc(path: &Path) -> io::Result<Arc<[u8]>> {
+    let mut file = fs::File::open(path)?;
+    let len = usize::try_from(file.metadata()?.len())
+        .map_err(|_| io::Error::other("patch file is too large for this platform"))?;
+    let mut raw = Arc::<[u8]>::new_uninit_slice(len);
+    let uninit = Arc::get_mut(&mut raw).expect("new Arc should be uniquely owned");
+    // SAFETY: the slice covers the same allocation as `uninit`; `read_exact`
+    // initializes every byte before `assume_init` below.
+    let bytes = unsafe { std::slice::from_raw_parts_mut(uninit.as_mut_ptr().cast::<u8>(), len) };
+    file.read_exact(bytes)?;
+    let mut extra = [0u8; 1];
+    if file.read(&mut extra)? != 0 {
+        // The file grew after metadata was read. Preserve fs::read semantics
+        // on this rare race rather than returning a truncated patch.
+        return Ok(Arc::from(fs::read(path)?));
+    }
+    // SAFETY: `read_exact` succeeded for the complete allocation.
+    Ok(unsafe { raw.assume_init() })
 }
 
 fn diff_patch_bytes_paths(

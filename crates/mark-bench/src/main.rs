@@ -7,6 +7,10 @@ use std::{
     time::Instant,
 };
 
+mod process_metrics;
+
+use process_metrics::PeakThreadSampler;
+
 use clap::{Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 
@@ -542,6 +546,7 @@ struct MeasureRunReport {
     rss_before_bytes: Option<u64>,
     rss_after_bytes: Option<u64>,
     rss_delta_bytes: Option<i128>,
+    peak_thread_count: Option<usize>,
     stage_timings: Vec<StageTimingReport>,
     tui: TuiMeasureReport,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -562,6 +567,7 @@ struct MeasureSampleStats {
     grep_filter_micros: U128Stats,
     random_scroll_max_micros: U128Stats,
     rss_delta_bytes_max: Option<i128>,
+    peak_thread_count_max: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -610,6 +616,7 @@ struct TuiMeasureReport {
     warm_cache_hits: u64,
     warm_cache_misses: u64,
     warm_cache_hit_rate: Option<f64>,
+    channel_send_timeouts: u64,
     syntax: SyntaxMeasureReport,
 }
 
@@ -1704,6 +1711,7 @@ fn measure_diff_options_run(
     patch_bytes_hint: Option<u64>,
     options: mark_tui::DiffBenchmarkOptions,
 ) -> BenchResult<MeasureRunReport> {
+    let thread_sampler = PeakThreadSampler::start();
     let load_start = Instant::now();
     let (changeset, patch_bytes) = load_benchmark_changeset(diff_options, patch_bytes_hint)?;
     let load_micros = load_start.elapsed().as_micros();
@@ -1715,6 +1723,7 @@ fn measure_diff_options_run(
         options,
     ));
     let rss_after = current_rss_bytes();
+    let peak_thread_count = thread_sampler.finish();
     let stage_timings = stage_timings(load_micros, &tui);
 
     Ok(MeasureRunReport {
@@ -1727,6 +1736,7 @@ fn measure_diff_options_run(
         rss_delta_bytes: rss_before
             .zip(rss_after)
             .map(|(before, after)| after as i128 - before as i128),
+        peak_thread_count,
         stage_timings,
         tui,
         samples: None,
@@ -1784,6 +1794,10 @@ fn sample_stats(reports: &[MeasureRunReport]) -> MeasureSampleStats {
         rss_delta_bytes_max: reports
             .iter()
             .filter_map(|report| report.rss_delta_bytes)
+            .max(),
+        peak_thread_count_max: reports
+            .iter()
+            .filter_map(|report| report.peak_thread_count)
             .max(),
     }
 }
@@ -1880,6 +1894,7 @@ fn tui_report(report: mark_tui::DiffBenchmarkReport) -> TuiMeasureReport {
         warm_cache_misses: report.warm_cache_misses,
         warm_cache_hit_rate: (warm_cache_total > 0)
             .then(|| report.warm_cache_hits as f64 / warm_cache_total as f64),
+        channel_send_timeouts: report.channel_send_timeouts,
         syntax: syntax_report(report.syntax),
     }
 }
@@ -1968,7 +1983,7 @@ fn current_rss_bytes() -> Option<u64> {
 
 fn print_measure_report(report: &MeasureSuiteReport) {
     println!(
-        "{:<24} {:<7} {:>7} {:>8} {:>8} {:>9} {:>9} {:>8} {:>9} {:>9} {:>8} {:>8} {:>8} {:>9} {:>8}",
+        "{:<24} {:<7} {:>7} {:>8} {:>8} {:>9} {:>9} {:>8} {:>9} {:>9} {:>8} {:>8} {:>8} {:>9} {:>8} {:>7}",
         "scenario",
         "mode",
         "rows",
@@ -1983,11 +1998,12 @@ fn print_measure_report(report: &MeasureSuiteReport) {
         "qpeak",
         "cache",
         "synmem",
-        "rssΔ"
+        "rssΔ",
+        "threads"
     );
     for run in &report.runs {
         println!(
-            "{:<24} {:<7} {:>7} {:>8} {:>8} {:>9} {:>9} {:>8} {:>9} {:>9} {:>8} {:>8} {:>8} {:>9} {:>8}",
+            "{:<24} {:<7} {:>7} {:>8} {:>8} {:>9} {:>9} {:>8} {:>9} {:>9} {:>8} {:>8} {:>8} {:>9} {:>8} {:>7}",
             run.scenario,
             run.mode,
             run.tui.row_count,
@@ -2004,6 +2020,9 @@ fn print_measure_report(report: &MeasureSuiteReport) {
             human_bytes(run.tui.syntax.estimated_memory_peak_bytes),
             run.rss_delta_bytes
                 .map(human_signed_bytes)
+                .unwrap_or_else(|| "n/a".to_owned()),
+            run.peak_thread_count
+                .map(|threads| threads.to_string())
                 .unwrap_or_else(|| "n/a".to_owned())
         );
     }

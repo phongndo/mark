@@ -12,6 +12,26 @@ This project keeps the terminal UI organized around a few explicit boundaries:
 
 Run `scripts/check-architecture` before submitting broad refactors.
 
+## Runtime and thread budget
+
+Runtime resources are process-wide and lazy. The non-TTY streaming path and
+`mark --version` do not construct either runtime pool.
+
+| Tier | Budget | Role |
+| --- | ---: | --- |
+| Tokio workers | 2 | Terminal events, timers, channels, and coordination. |
+| Tokio blocking | at most 8 | Synchronous Git, filesystem, reload, and filter work. |
+| Shared Rayon CPU pool | `min(physical cores, 8)` | Section-parallel parsing and grep; named `mark-cpu-N`. `MARK_CPU_THREADS=0` or `1` forces serial execution. |
+| Syntax workers | at most 4 | Priority-ordered syntax fetch/tokenize work. This remains a dedicated queue. |
+| Terminal event reader | 1 | Blocking terminal input. |
+
+Rayon pools must never be created per operation or stacked. CPU work from an
+async context enters the shared pool through `mark_runtime::run_cpu`; blocking
+callers may use `cpu_pool().install`. Tokio workers must not call `install`.
+The syntax queue remains dedicated because its visible/prefetch priority order
+does not benefit from work stealing. All persistent production threads have a
+`mark-*` name so process samples and thread censuses are attributable.
+
 ## Responsibility map
 
 `DiffApp` remains the composition root. It owns the state graph and wires together

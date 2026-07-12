@@ -52,6 +52,7 @@ pub struct DiffBenchmarkReport {
     pub random_scroll_max_micros: u128,
     pub warm_cache_hits: u64,
     pub warm_cache_misses: u64,
+    pub channel_send_timeouts: u64,
     pub syntax: SyntaxBenchmarkReport,
 }
 

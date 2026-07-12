@@ -1,10 +1,10 @@
 use std::{borrow::Cow, ops::Range, sync::Arc};
 
-use rayon::prelude::*;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
 use crate::{
     DiffFile, DiffFileBody, DiffHunk, DiffLimitExceeded, DiffLimits, DiffLine, FileChange,
-    FileStatus, HunkLineRanges,
+    FileStatus, HunkLineRanges, types::DiffLineTextBacking,
 };
 
 pub fn parse_patch(patch: &str) -> Vec<DiffFile> {
@@ -80,6 +80,13 @@ pub fn parse_patch_bytes_limited(
         return Ok(files);
     }
 
+    parse_patch_bytes_serial_limited(raw, limits)
+}
+
+pub(crate) fn parse_patch_bytes_serial_limited(
+    raw: Arc<[u8]>,
+    limits: DiffLimits,
+) -> Result<Vec<DiffFile>, DiffLimitExceeded> {
     parse_patch_bytes_range_limited(raw, 0..usize::MAX, limits)
 }
 
@@ -87,6 +94,7 @@ pub fn parse_patch_bytes_limited(
 const PARALLEL_PARSE_MIN_BYTES: usize = 8 * 1024 * 1024;
 #[cfg(test)]
 const PARALLEL_PARSE_MIN_BYTES: usize = 512;
+const PARALLEL_PARSE_MAX_TASKS: usize = 4;
 
 fn parse_patch_bytes_parallel(
     raw: Arc<[u8]>,
@@ -95,14 +103,32 @@ fn parse_patch_bytes_parallel(
     if raw.len() < PARALLEL_PARSE_MIN_BYTES {
         return Ok(None);
     }
-    let sections = diff_git_sections(raw.as_ref());
-    if sections.len() < 2 {
+    if !has_multiple_diff_git_sections(raw.as_ref()) {
         return Ok(None);
     }
-    let threads = parallel_parse_threads();
+    let pool = mark_runtime::cpu_pool();
+    let threads = pool.current_num_threads().min(PARALLEL_PARSE_MAX_TASKS);
     if threads <= 1 {
         return Ok(None);
     }
+    let sections = diff_git_sections_parallel(raw.as_ref(), pool);
+    let threads = threads.min(sections.len());
+
+    // Give each worker a contiguous run of files rather than scheduling one
+    // tiny Rayon task per file. Besides reducing scheduler overhead, this
+    // bounds staging to one Vec per worker and avoids allocator contention on
+    // patches containing thousands of small file sections.
+    let target_bytes = raw.len().div_ceil(threads);
+    let mut ranges = Vec::with_capacity(threads);
+    let mut task_start = sections[0].start;
+    for (index, section) in sections.iter().enumerate() {
+        let can_split = ranges.len() + 1 < threads && index + 1 < sections.len();
+        if can_split && section.end.saturating_sub(task_start) >= target_bytes {
+            ranges.push(task_start..section.end);
+            task_start = sections[index + 1].start;
+        }
+    }
+    ranges.push(task_start..sections.last().expect("sections are not empty").end);
 
     let section_limits = DiffLimits {
         max_patch_bytes: None,
@@ -111,12 +137,8 @@ fn parse_patch_bytes_parallel(
         max_hunks: None,
         max_line_bytes: limits.max_line_bytes,
     };
-    let pool = match rayon::ThreadPoolBuilder::new().num_threads(threads).build() {
-        Ok(pool) => pool,
-        Err(_) => return Ok(None),
-    };
     let parsed = pool.install(|| {
-        sections
+        ranges
             .par_iter()
             .map(|section| {
                 parse_patch_bytes_range_limited(Arc::clone(&raw), section.clone(), section_limits)
@@ -132,33 +154,62 @@ fn parse_patch_bytes_parallel(
     Ok(Some(files))
 }
 
-fn parallel_parse_threads() -> usize {
-    if let Ok(value) = std::env::var("MARK_DIFF_PARSE_THREADS")
-        && let Ok(threads) = value.trim().parse::<usize>()
-    {
-        return threads.min(8);
+fn has_multiple_diff_git_sections(raw: &[u8]) -> bool {
+    if !raw.starts_with(b"diff --git ") {
+        return false;
     }
-    1
-}
-
-fn diff_git_sections(raw: &[u8]) -> Vec<Range<usize>> {
-    let mut starts = Vec::new();
-    let mut search_start = 0usize;
+    let mut search_start = 1usize;
     while search_start < raw.len() {
         let Some(relative) = memchr::memmem::find(&raw[search_start..], b"diff --git ") else {
-            break;
+            return false;
         };
         let start = search_start + relative;
-        if start == 0 || raw.get(start - 1) == Some(&b'\n') {
-            starts.push(start);
+        if raw.get(start - 1) == Some(&b'\n') {
+            return true;
         }
         search_start = start.saturating_add(1);
     }
+    false
+}
 
-    if starts.first().copied() != Some(0) {
-        return Vec::new();
-    }
-
+fn diff_git_sections_parallel(raw: &[u8], pool: &rayon::ThreadPool) -> Vec<Range<usize>> {
+    let chunk_count = pool.current_num_threads().min(raw.len().max(1));
+    let chunk_len = raw.len().div_ceil(chunk_count);
+    let chunks = (0..raw.len())
+        .step_by(chunk_len)
+        .map(|start| start..(start + chunk_len).min(raw.len()))
+        .collect::<Vec<_>>();
+    let starts = pool.install(|| {
+        chunks
+            .par_iter()
+            .map(|chunk| {
+                const HEADER: &[u8] = b"diff --git ";
+                let mut starts = Vec::new();
+                let mut search_start = chunk.start;
+                let search_end = chunk
+                    .end
+                    .saturating_add(HEADER.len().saturating_sub(1))
+                    .min(raw.len());
+                while search_start < chunk.end {
+                    let Some(relative) =
+                        memchr::memmem::find(&raw[search_start..search_end], HEADER)
+                    else {
+                        break;
+                    };
+                    let start = search_start + relative;
+                    if start >= chunk.end {
+                        break;
+                    }
+                    if start == 0 || raw.get(start - 1) == Some(&b'\n') {
+                        starts.push(start);
+                    }
+                    search_start = start.saturating_add(1);
+                }
+                starts
+            })
+            .collect::<Vec<_>>()
+    });
+    let starts = starts.into_iter().flatten().collect::<Vec<_>>();
     starts
         .iter()
         .copied()
@@ -183,6 +234,7 @@ fn parse_patch_bytes_range_limited(
     let mut current_hunk: Option<DiffHunkBuilder> = None;
     let start = range.start.min(raw.len());
     let end = range.end.min(raw.len());
+    let line_backing = DiffLineTextBacking::new(Arc::clone(&raw));
     let mut lines = patch_byte_lines(&raw[start..end]).peekable();
     let mut diff_rows = 0usize;
     let mut hunks = 0usize;
@@ -239,7 +291,7 @@ fn parse_patch_bytes_range_limited(
             check_limit("line bytes", limits.max_line_bytes, line.bytes.len())?;
             diff_rows = diff_rows.saturating_add(1);
             check_limit("diff rows", limits.max_diff_rows, diff_rows)?;
-            hunk.push_line_span(Arc::clone(&raw), line_start, line.bytes);
+            hunk.push_line_span(line_backing.clone(), line_start, line.bytes);
             continue;
         }
 
@@ -635,9 +687,9 @@ impl DiffHunkBuilder {
         }
     }
 
-    fn push_line_span(&mut self, raw_patch: Arc<[u8]>, line_start: usize, raw: &[u8]) {
+    fn push_line_span(&mut self, line_backing: DiffLineTextBacking, line_start: usize, raw: &[u8]) {
         let Some(prefix) = raw.first().copied() else {
-            self.push_context_span(raw_patch, line_start, 0);
+            self.push_context_span(line_backing, line_start, 0);
             return;
         };
 
@@ -648,7 +700,7 @@ impl DiffHunkBuilder {
                 self.additions += 1;
                 self.lines.push(DiffLine::addition_span(
                     new_line,
-                    raw_patch,
+                    line_backing,
                     line_start.saturating_add(1),
                     raw.len().saturating_sub(1),
                 ));
@@ -659,23 +711,23 @@ impl DiffHunkBuilder {
                 self.deletions += 1;
                 self.lines.push(DiffLine::deletion_span(
                     old_line,
-                    raw_patch,
+                    line_backing,
                     line_start.saturating_add(1),
                     raw.len().saturating_sub(1),
                 ));
             }
             b' ' => self.push_context_span(
-                raw_patch,
+                line_backing,
                 line_start.saturating_add(1),
                 raw.len().saturating_sub(1),
             ),
             b'\\' => {
                 if !is_diff_no_newline_marker_bytes(raw) {
                     self.lines
-                        .push(DiffLine::meta_span(raw_patch, line_start, raw.len()));
+                        .push(DiffLine::meta_span(line_backing, line_start, raw.len()));
                 }
             }
-            _ => self.push_context_span(raw_patch, line_start, raw.len()),
+            _ => self.push_context_span(line_backing, line_start, raw.len()),
         }
     }
 
@@ -696,13 +748,14 @@ impl DiffHunkBuilder {
         self.lines.push(DiffLine::context(old_line, new_line, text));
     }
 
-    fn push_context_span(&mut self, raw: Arc<[u8]>, offset: usize, len: usize) {
+    fn push_context_span(&mut self, backing: DiffLineTextBacking, offset: usize, len: usize) {
         let old_line = self.old_line;
         let new_line = self.new_line;
         self.old_line += 1;
         self.new_line += 1;
-        self.lines
-            .push(DiffLine::context_span(old_line, new_line, raw, offset, len));
+        self.lines.push(DiffLine::context_span(
+            old_line, new_line, backing, offset, len,
+        ));
     }
 
     fn finish(self) -> DiffHunk {

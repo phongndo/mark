@@ -48,8 +48,18 @@ pub(crate) fn pager(args: PagerArgs) -> CliResult<()> {
             PagerAction::InteractiveDiff => run_interactive_diff(input, &args, static_color),
         },
         PagerInput::Streaming { prefix, action } => match action {
-            StreamingPagerAction::Passthrough => stream_to_stdout(&prefix, &mut stdin),
-            StreamingPagerAction::PlainTextPager => page_plain_text_stream(&prefix, &mut stdin),
+            StreamingPagerAction::Passthrough => {
+                let pool_started = mark_runtime::is_cpu_pool_started();
+                let result = stream_to_stdout(&prefix, &mut stdin);
+                debug_assert_eq!(pool_started, mark_runtime::is_cpu_pool_started());
+                result
+            }
+            StreamingPagerAction::PlainTextPager => {
+                let pool_started = mark_runtime::is_cpu_pool_started();
+                let result = page_plain_text_stream(&prefix, &mut stdin);
+                debug_assert_eq!(pool_started, mark_runtime::is_cpu_pool_started());
+                result
+            }
         },
     }
 }

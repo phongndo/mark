@@ -30,9 +30,12 @@ pub(crate) fn run_review(request: ReviewRequest) -> CliResult<()> {
 }
 
 fn stream_diff_to_stdout(options: mark_command::DiffOptions) -> CliResult<()> {
-    match mark_command::diff_to_writer(options, io::stdout().lock()) {
+    let pool_started = mark_runtime::is_cpu_pool_started();
+    let result = match mark_command::diff_to_writer(options, io::stdout().lock()) {
         Ok(()) => Ok(()),
         Err(MarkError::Io(error)) if error.kind() == io::ErrorKind::BrokenPipe => Ok(()),
         Err(error) => Err(error.into()),
-    }
+    };
+    debug_assert_eq!(pool_started, mark_runtime::is_cpu_pool_started());
+    result
 }
