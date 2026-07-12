@@ -18,6 +18,7 @@ use super::grammar::{
     CaptureSpec, CompiledGrammar, GrammarLoadError, GrammarValidationError, InjectionPriority,
     RuleBody, RuleRef, load_dev_grammar_from_str,
 };
+use super::hashing::{self, FastMap};
 use super::line::{LineChunks, next_char_boundary};
 use super::regex::captures::{capture_texts, substitute_end_pattern};
 use super::regex::{
@@ -38,6 +39,7 @@ const MAX_CANDIDATE_SETS: usize = 4096;
 const MAX_CANDIDATE_BLUEPRINTS: usize = 1024;
 const MAX_INJECTION_OUTCOMES: usize = 1024;
 const MAX_SCOPE_STACK_CACHE_ENTRIES: usize = 8192;
+const MAX_FRAME_NODE_CACHE_ENTRIES: usize = 16384;
 
 #[derive(Debug, Default)]
 pub struct Tokenizer;
@@ -146,31 +148,67 @@ impl TokenizerState {
     }
 
     /// Pushes a frame while maintaining the per-frame identity hash and the
-    /// cumulative stack hash in O(1), instead of re-hashing every frame on
+    /// cumulative state hash in O(1), instead of re-hashing every frame on
     /// each state change (quadratic for deeply nested sources).
-    fn push_frame(&mut self, mut frame: Frame) {
-        frame.identity_hash = frame.compute_identity_hash();
-        frame.stack_hash = fnv64_mix_u64(
-            self.frames
-                .last()
-                .map_or(0xcbf2_9ce4_8422_2325, |parent| parent.stack_hash),
-            frame.identity_hash,
-        );
-        let mut state_hash = self
+    #[cfg(test)]
+    fn push_frame(&mut self, frame: Frame) {
+        self.push_frame_cached(frame, None, None);
+    }
+
+    /// `cached` carries a precomputed identity for fully static frames so
+    /// repeat pushes skip string hashing and the global intern table;
+    /// `edge_cache` memoizes (parent stack, frame) → stack id per tokenizer
+    /// so repeat transitions skip the intern-table mutex entirely.
+    fn push_frame_cached(
+        &mut self,
+        mut frame: Frame,
+        cached: Option<StaticFrameIdentity>,
+        edge_cache: Option<
+            &mut FastMap<(InternedFrameStackId, InternedFrameId), InternedFrameStackId>,
+        >,
+    ) -> StaticFrameIdentity {
+        let (identity_hash, frame_id) = match cached {
+            Some(cached) => (cached.identity_hash, cached.frame_id),
+            None => {
+                let identity_hash = frame.compute_identity_hash();
+                frame.identity_hash = identity_hash;
+                (identity_hash, intern_frame_global(&frame))
+            }
+        };
+        frame.identity_hash = identity_hash;
+        let parent_state_hash = self
             .frames
             .last()
             .map_or(0x811c9dc5, |parent| parent.state_hash);
-        state_hash = fnv_mix(state_hash, u32::from(frame.grammar_id.0));
-        state_hash = fnv_mix(state_hash, u32::from(frame.base_grammar_id.0));
-        state_hash = fnv_mix(state_hash, frame.rule_id.0);
-        state_hash = fnv_mix_opt_str(state_hash, frame.scope_prefix.as_deref());
-        state_hash = fnv_mix_opt_str(state_hash, frame.name.as_deref());
-        state_hash = fnv_mix_opt_str(state_hash, frame.content_name.as_deref());
-        state_hash = fnv_mix_opt_str(state_hash, frame.end_pattern.as_deref());
-        state_hash = fnv_mix_opt_str(state_hash, frame.while_pattern.as_deref());
-        frame.state_hash = state_hash;
-        frame.interned_stack_id = intern_frame_stack_node(self.frames.interned_id(), &frame);
+        frame.state_hash = fnv_mix(
+            parent_state_hash,
+            (identity_hash ^ (identity_hash >> 32)) as u32,
+        );
+        let parent_id = self.frames.interned_id();
+        frame.interned_stack_id = match edge_cache {
+            Some(edge_cache) => {
+                let key = (parent_id, frame_id);
+                if let Some(stack_id) = edge_cache.get(&key) {
+                    *stack_id
+                } else {
+                    let stack_id = intern_frame_stack_edge(parent_id, frame_id);
+                    edge_cache.insert(key, stack_id);
+                    stack_id
+                }
+            }
+            None => intern_frame_stack_edge(parent_id, frame_id),
+        };
+        let identity = StaticFrameIdentity {
+            identity_hash,
+            frame_id,
+        };
         self.frames.push(frame);
+        self.refresh_interner_hash();
+        identity
+    }
+
+    fn push_frame_shared(&mut self, node: Arc<FrameNode>) {
+        self.frames.push_shared_node(node);
         self.refresh_interner_hash();
     }
 
@@ -216,17 +254,6 @@ fn fnv_mix(mut hash: u32, part: u32) -> u32 {
     hash
 }
 
-fn fnv_mix_opt_str(hash: u32, value: Option<&str>) -> u32 {
-    let mut hash = fnv_mix(hash, value.map_or(0, |value| value.len() as u32));
-    if let Some(value) = value {
-        for byte in value.as_bytes() {
-            hash ^= u32::from(*byte);
-            hash = hash.wrapping_mul(0x0100_0193);
-        }
-    }
-    hash
-}
-
 fn fnv64_mix(mut hash: u64, bytes: &[u8]) -> u64 {
     for byte in bytes {
         hash = (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3);
@@ -263,9 +290,6 @@ struct Frame {
     /// Cached hash of this frame's identity fields; maintained by
     /// `TokenizerState::push_frame`.
     identity_hash: u64,
-    /// Cumulative hash of the frame stack up to and including this frame.
-    /// Prefix truncations therefore keep valid hashes without re-hashing.
-    stack_hash: u64,
     /// Cumulative public `StateId` hash up to and including this frame.
     state_hash: u32,
     /// Exact hash-consed identity of the full frame stack ending at this
@@ -279,6 +303,15 @@ struct InternedFrameStackId(u32);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct InternedFrameId(u32);
+
+/// Precomputed identity of a fully static frame: the identity hash plus the
+/// globally interned frame id. Cached per candidate so repeat pushes of the
+/// same begin rule skip both string hashing and the intern-table mutex.
+#[derive(Debug, Clone, Copy)]
+struct StaticFrameIdentity {
+    identity_hash: u64,
+    frame_id: InternedFrameId,
+}
 
 impl Frame {
     fn compute_identity_hash(&self) -> u64 {
@@ -404,18 +437,18 @@ struct InternedFrameStackScopeData {
 
 #[derive(Debug)]
 struct FrameStackInternTable {
-    frame_ids_by_hash: HashMap<u64, Vec<InternedFrameId>>,
+    frame_ids_by_hash: FastMap<u64, Vec<InternedFrameId>>,
     frame_keys: Vec<FrameIdentityKey>,
-    stack_edges: HashMap<(InternedFrameStackId, InternedFrameId), InternedFrameStackId>,
+    stack_edges: FastMap<(InternedFrameStackId, InternedFrameId), InternedFrameStackId>,
     stack_nodes: Vec<InternedFrameStackNode>,
 }
 
 impl FrameStackInternTable {
     fn new() -> Self {
         Self {
-            frame_ids_by_hash: HashMap::new(),
+            frame_ids_by_hash: hashing::fast_map(),
             frame_keys: Vec::new(),
-            stack_edges: HashMap::new(),
+            stack_edges: hashing::fast_map(),
             stack_nodes: vec![InternedFrameStackNode {
                 parent: InternedFrameStackId::default(),
                 frame: None,
@@ -446,12 +479,11 @@ impl FrameStackInternTable {
         id
     }
 
-    fn intern_stack_node(
+    fn intern_stack_edge(
         &mut self,
         parent: InternedFrameStackId,
-        frame: &Frame,
+        frame_id: InternedFrameId,
     ) -> InternedFrameStackId {
-        let frame_id = self.intern_frame(frame);
         let edge = (parent, frame_id);
         if let Some(id) = self.stack_edges.get(&edge) {
             return *id;
@@ -488,11 +520,21 @@ fn frame_stack_intern_table() -> &'static Mutex<FrameStackInternTable> {
     TABLE.get_or_init(|| Mutex::new(FrameStackInternTable::new()))
 }
 
-fn intern_frame_stack_node(parent: InternedFrameStackId, frame: &Frame) -> InternedFrameStackId {
+fn intern_frame_global(frame: &Frame) -> InternedFrameId {
     frame_stack_intern_table()
         .lock()
         .expect("frame stack interner poisoned")
-        .intern_stack_node(parent, frame)
+        .intern_frame(frame)
+}
+
+fn intern_frame_stack_edge(
+    parent: InternedFrameStackId,
+    frame_id: InternedFrameId,
+) -> InternedFrameStackId {
+    frame_stack_intern_table()
+        .lock()
+        .expect("frame stack interner poisoned")
+        .intern_stack_edge(parent, frame_id)
 }
 
 fn interned_frame_stack_scope_data(
@@ -504,23 +546,28 @@ fn interned_frame_stack_scope_data(
         .scope_data(id)
 }
 
-// Continuation stacks are immutable parent-linked chunks. Push/pop clone at
-// most one small tail chunk and never clone the whole deep stack; exact
-// equality is the interned stack id maintained on each frame.
-const LINKED_FRAME_CHUNK: usize = 32;
-
+// Continuation stacks are immutable parent-linked nodes holding one frame
+// each. Push allocates exactly one node and pop is a parent-pointer step, so
+// neither ever clones frames — even when the stack is shared with interned
+// states, line-cache entries, and checkpoints. Exact equality is the interned
+// stack id maintained on each frame.
 #[derive(Debug, Clone, Default)]
 struct FrameStack {
-    tail: Option<Arc<FrameChunk>>,
+    tail: Option<Arc<FrameNode>>,
     len: usize,
     interned_id: InternedFrameStackId,
 }
 
-#[derive(Debug, Clone)]
-struct FrameChunk {
-    parent: Option<Arc<FrameChunk>>,
-    frames: Vec<Arc<Frame>>,
+#[derive(Debug)]
+struct FrameNode {
+    parent: Option<Arc<FrameNode>>,
+    frame: Frame,
     depth: usize,
+    /// Number of frames with a `while` pattern in the chain up to and
+    /// including this node. Lets the per-line while-continuation pass skip
+    /// the O(depth) stack walk entirely for grammars that never use `while`
+    /// (deep-stack sources otherwise pay the walk on every line).
+    while_frames: usize,
 }
 
 impl FrameStack {
@@ -536,18 +583,18 @@ impl FrameStack {
 
     #[inline]
     fn last(&self) -> Option<&Frame> {
-        self.tail.as_ref()?.frames.last().map(AsRef::as_ref)
+        self.tail.as_deref().map(|node| &node.frame)
     }
 
-    fn chunks_in_order(&self) -> Vec<&FrameChunk> {
-        let mut chunks = Vec::new();
+    fn nodes_in_order(&self) -> Vec<&FrameNode> {
+        let mut nodes = Vec::with_capacity(self.len);
         let mut cursor = self.tail.as_deref();
-        while let Some(chunk) = cursor {
-            chunks.push(chunk);
-            cursor = chunk.parent.as_deref();
+        while let Some(node) = cursor {
+            nodes.push(node);
+            cursor = node.parent.as_deref();
         }
-        chunks.reverse();
-        chunks
+        nodes.reverse();
+        nodes
     }
 
     fn get(&self, index: usize) -> Option<&Frame> {
@@ -555,68 +602,60 @@ impl FrameStack {
             return None;
         }
         let mut cursor = self.tail.as_deref();
-        while let Some(chunk) = cursor {
-            let start = chunk.depth - chunk.frames.len();
-            if index >= start {
-                return chunk.frames.get(index - start).map(AsRef::as_ref);
+        while let Some(node) = cursor {
+            if node.depth == index + 1 {
+                return Some(&node.frame);
             }
-            cursor = chunk.parent.as_deref();
+            cursor = node.parent.as_deref();
         }
         None
     }
 
     #[inline]
+    fn while_frame_count(&self) -> usize {
+        self.tail.as_deref().map_or(0, |node| node.while_frames)
+    }
+
+    #[inline]
     fn push(&mut self, frame: Frame) {
         let interned_id = frame.interned_stack_id;
-        let frame = Arc::new(frame);
-        if let Some(tail) = self.tail.as_mut()
-            && tail.frames.len() < LINKED_FRAME_CHUNK
-            && Arc::strong_count(tail) == 1
-        {
-            let tail = Arc::make_mut(tail);
-            tail.frames.push(frame);
-            tail.depth += 1;
-            self.len += 1;
-            self.interned_id = interned_id;
-            return;
-        }
-        let (parent, mut frames) = match self.tail.as_ref() {
-            Some(tail) if tail.frames.len() < LINKED_FRAME_CHUNK => {
-                (tail.parent.clone(), tail.frames.clone())
-            }
-            Some(tail) => (
-                Some(Arc::clone(tail)),
-                Vec::with_capacity(LINKED_FRAME_CHUNK),
-            ),
-            None => (None, Vec::with_capacity(LINKED_FRAME_CHUNK)),
-        };
-        frames.push(frame);
-        let depth = parent.as_ref().map_or(0, |p| p.depth) + frames.len();
-        self.tail = Some(Arc::new(FrameChunk {
-            parent,
-            frames,
-            depth,
+        let while_frames = self.while_frame_count() + usize::from(frame.while_pattern.is_some());
+        self.tail = Some(Arc::new(FrameNode {
+            parent: self.tail.take(),
+            frame,
+            depth: self.len + 1,
+            while_frames,
         }));
         self.len += 1;
         self.interned_id = interned_id;
     }
 
+    /// Reuses an immutable node from a previous identical (parent stack,
+    /// frame) transition. Sound because the node's parent chain is
+    /// value-equal to the current tail (same interned parent id) and every
+    /// reader goes through values, never pointer identity.
+    #[inline]
+    fn push_shared_node(&mut self, node: Arc<FrameNode>) {
+        debug_assert_eq!(node.depth, self.len + 1);
+        self.interned_id = node.frame.interned_stack_id;
+        self.len = node.depth;
+        if let Some(old) = self.tail.replace(node) {
+            drop_frame_node(old);
+        }
+    }
+
+    #[inline]
+    fn tail_node(&self) -> Option<&Arc<FrameNode>> {
+        self.tail.as_ref()
+    }
+
     #[inline]
     fn pop(&mut self) {
-        let Some(tail) = self.tail.as_ref() else {
+        let Some(tail) = self.tail.take() else {
             return;
         };
-        if tail.frames.len() == 1 {
-            self.tail = tail.parent.clone();
-        } else {
-            let mut frames = tail.frames.clone();
-            frames.pop();
-            self.tail = Some(Arc::new(FrameChunk {
-                parent: tail.parent.clone(),
-                frames,
-                depth: tail.depth - 1,
-            }));
-        }
+        self.tail = tail.parent.clone();
+        drop_frame_node(tail);
         self.len -= 1;
         self.refresh_interned_id_from_top();
     }
@@ -625,32 +664,17 @@ impl FrameStack {
         if len >= self.len {
             return;
         }
-        if len == 0 {
-            self.tail = None;
-            self.len = 0;
-            self.interned_id = InternedFrameStackId::default();
-            return;
-        }
-        let mut tail = self.tail.clone();
-        while let Some(chunk) = tail.as_ref() {
-            let parent_depth = chunk.parent.as_ref().map_or(0, |parent| parent.depth);
-            if len > parent_depth {
+        let mut cursor = self.tail.take();
+        while let Some(node) = cursor.take() {
+            if node.depth <= len {
+                cursor = Some(node);
                 break;
             }
-            tail = chunk.parent.clone();
+            let parent = node.parent.clone();
+            drop_frame_node(node);
+            cursor = parent;
         }
-        if let Some(chunk) = tail.as_ref() {
-            let parent_depth = chunk.parent.as_ref().map_or(0, |parent| parent.depth);
-            let keep = len - parent_depth;
-            if keep < chunk.frames.len() {
-                tail = Some(Arc::new(FrameChunk {
-                    parent: chunk.parent.clone(),
-                    frames: chunk.frames[..keep].to_vec(),
-                    depth: len,
-                }));
-            }
-        }
-        self.tail = tail;
+        self.tail = cursor;
         self.len = len;
         self.refresh_interned_id_from_top();
     }
@@ -676,23 +700,39 @@ impl FrameStack {
 
     #[cfg(test)]
     fn iter(&self) -> FrameStackIter<'_> {
-        let mut frames = Vec::with_capacity(self.len);
-        for chunk in self.chunks_in_order() {
-            for frame in &chunk.frames {
-                frames.push(frame.as_ref());
-            }
-        }
+        let frames = self
+            .nodes_in_order()
+            .into_iter()
+            .map(|node| &node.frame)
+            .collect();
         FrameStackIter { frames, index: 0 }
     }
 
     #[inline]
     fn for_each(&self, mut f: impl FnMut(usize, &Frame)) {
-        let mut index = 0usize;
-        for chunk in self.chunks_in_order() {
-            for frame in &chunk.frames {
-                f(index, frame);
-                index += 1;
-            }
+        for (index, node) in self.nodes_in_order().into_iter().enumerate() {
+            f(index, &node.frame);
+        }
+    }
+}
+
+impl Drop for FrameStack {
+    fn drop(&mut self) {
+        if let Some(tail) = self.tail.take() {
+            drop_frame_node(tail);
+        }
+    }
+}
+
+/// Drops a frame-node chain iteratively. Deep continuation stacks otherwise
+/// recurse once per frame through `Arc`/`FrameNode` drop glue, which can
+/// overflow the thread stack on adversarial nesting depths.
+fn drop_frame_node(node: Arc<FrameNode>) {
+    let mut cursor = Some(node);
+    while let Some(node) = cursor {
+        match Arc::try_unwrap(node) {
+            Ok(mut owned) => cursor = owned.parent.take(),
+            Err(_) => break,
         }
     }
 }
@@ -927,20 +967,28 @@ pub struct TextMateTokenizer {
     root: GrammarId,
     root_scope_key: String,
     injection_selectors: Vec<CompiledInjectionSelector>,
-    matcher_cache: HashMap<(GrammarId, PatternId), Arc<CompiledPattern>>,
-    dynamic_matcher_cache: HashMap<DynamicMatcherKey, Arc<CompiledPattern>>,
+    matcher_cache: FastMap<(GrammarId, PatternId), Arc<CompiledPattern>>,
+    dynamic_matcher_cache: FastMap<DynamicMatcherKey, Arc<CompiledPattern>>,
     scope_names: ScopeInterner,
     scope_templates: ScopeTemplateInterner,
     scope_stacks: ScopeStackInterner,
-    current_scope_stack_cache: HashMap<CurrentScopeStackKey, CachedCurrentScopeStackIds>,
-    resolved_scope_stack_cache: HashMap<ScopeStackId, Arc<[String]>>,
-    capture_scope_templates: HashMap<(GrammarId, ScopeId), ScopeTemplateId>,
+    current_scope_stack_cache: FastMap<CurrentScopeStackKey, CachedCurrentScopeStackIds>,
+    resolved_scope_stack_cache: FastMap<ScopeStackId, Arc<[String]>>,
+    capture_scope_templates: FastMap<(GrammarId, ScopeId), ScopeTemplateId>,
     state_interner: StateInterner,
     line_cache: LineCache<LineCacheKey, CachedLine>,
     candidate_cache: HashMap<StateId, Arc<CandidateSet>, BuildHasherDefault<StateIdentityHasher>>,
-    candidate_blueprint_cache: HashMap<CandidateBlueprintKey, Arc<CandidateBlueprint>>,
+    candidate_blueprint_cache: FastMap<CandidateBlueprintKey, Arc<CandidateBlueprint>>,
     injection_outcomes: InjectionOutcomeInterner,
-    inline_candidate_cache: HashMap<InlineCandidateCacheKey, Arc<CandidateSet>>,
+    inline_candidate_cache: FastMap<InlineCandidateCacheKey, Arc<CandidateSet>>,
+    /// Per-tokenizer mirror of the global frame-stack intern table's edges so
+    /// repeat pushes of a known (parent stack, frame) transition skip the
+    /// global mutex. Values are authoritative global ids and never invalidate.
+    frame_edge_cache: FastMap<(InternedFrameStackId, InternedFrameId), InternedFrameStackId>,
+    /// Immutable frame nodes from previous pushes, keyed by the same edge, so
+    /// a repeated transition reuses one shared allocation instead of
+    /// constructing and hashing a fresh `Frame`.
+    frame_node_cache: FastMap<(InternedFrameStackId, InternedFrameId), Arc<FrameNode>>,
     regex_scratch: super::regex::bytecode::BytecodeScratch,
     pattern_hotspots: HashMap<PatternHotspotKey, PatternHotspot>,
     max_line_bytes: Option<usize>,
@@ -962,20 +1010,22 @@ impl TextMateTokenizer {
             root,
             root_scope_key,
             injection_selectors,
-            matcher_cache: HashMap::new(),
-            dynamic_matcher_cache: HashMap::new(),
+            matcher_cache: hashing::fast_map(),
+            dynamic_matcher_cache: hashing::fast_map(),
             scope_names: ScopeInterner::default(),
             scope_templates: ScopeTemplateInterner::default(),
             scope_stacks: ScopeStackInterner::default(),
-            current_scope_stack_cache: HashMap::new(),
-            resolved_scope_stack_cache: HashMap::new(),
-            capture_scope_templates: HashMap::new(),
+            current_scope_stack_cache: hashing::fast_map(),
+            resolved_scope_stack_cache: hashing::fast_map(),
+            capture_scope_templates: hashing::fast_map(),
             state_interner: StateInterner::new(),
             line_cache: LineCache::new(0),
             candidate_cache: HashMap::with_hasher(BuildHasherDefault::default()),
-            candidate_blueprint_cache: HashMap::new(),
+            candidate_blueprint_cache: hashing::fast_map(),
             injection_outcomes: InjectionOutcomeInterner::default(),
-            inline_candidate_cache: HashMap::new(),
+            inline_candidate_cache: hashing::fast_map(),
+            frame_edge_cache: hashing::fast_map(),
+            frame_node_cache: hashing::fast_map(),
             regex_scratch: super::regex::bytecode::BytecodeScratch::default(),
             pattern_hotspots: HashMap::new(),
             max_line_bytes: None,
@@ -1125,7 +1175,7 @@ impl TextMateTokenizer {
         // Pointer/length identity alone is insufficient in that API pattern.
         self.regex_scratch.begin_line(parse_text);
         let parse_fingerprint = LineTextFingerprint::from_text(parse_text);
-        let entry_state_id = self.intern_state(state.clone());
+        let entry_state_id = self.intern_state(&state);
         if self.fallback_call_budget_remaining == Some(0) {
             self.record_line_skipped();
             self.record_degraded_line();
@@ -1287,7 +1337,7 @@ impl TextMateTokenizer {
             self.record_degraded_line();
         }
 
-        let exit_state_id = self.intern_state(state.clone());
+        let exit_state_id = self.intern_state(&state);
         let tokens = if self.line_cache.is_enabled() {
             let tokens: Arc<[CompactScopedToken]> = tokens.into();
             let evicted = self.line_cache.insert(
@@ -1334,7 +1384,7 @@ impl TextMateTokenizer {
         self.clear_candidate_cache();
     }
 
-    pub fn intern_state(&mut self, state: TokenizerState) -> StateId {
+    pub fn intern_state(&mut self, state: &TokenizerState) -> StateId {
         let (id, inserted) = self.state_interner.intern(state);
         if let Some(counters) = self.counters_mut() {
             if inserted {
@@ -1642,6 +1692,9 @@ impl TextMateTokenizer {
         cursor: &mut usize,
     ) -> HashSet<(GrammarId, RuleId)> {
         let mut suppressed = HashSet::new();
+        if state.frames.while_frame_count() == 0 {
+            return suppressed;
+        }
         let mut while_frames = Vec::new();
         state.frames.for_each(|index, frame| {
             if frame.while_pattern.is_some() {
@@ -1718,10 +1771,10 @@ impl TextMateTokenizer {
                     pattern_id: frame
                         .end_pattern_id
                         .map(|pattern_id| (frame.grammar_id, pattern_id)),
-                    scope_prefix: frame.scope_prefix.as_deref().map(str::to_owned),
+                    scope_prefix: frame.scope_prefix.clone(),
                     kind: CandidateKind::End {
                         grammar_id: frame.grammar_id,
-                        captures: frame.end_captures.as_ref().clone(),
+                        captures: Arc::clone(&frame.end_captures),
                     },
                 });
                 (
@@ -1791,7 +1844,7 @@ impl TextMateTokenizer {
         grammar_id: GrammarId,
         base_grammar_id: GrammarId,
         refs: &[RuleRef],
-        scope_prefix: Option<String>,
+        scope_prefix: Option<Arc<str>>,
         out: &mut Vec<Candidate>,
         order: &mut usize,
         depth: usize,
@@ -1847,6 +1900,10 @@ impl TextMateTokenizer {
                             }
                             let begin_pattern_id = *begin;
                             if let Some(begin) = grammar.pattern(*begin) {
+                                let end_static = grammar
+                                    .pattern(*end)
+                                    .filter(|pattern| !pattern_has_backreference(pattern))
+                                    .map(Arc::from);
                                 out.push(Candidate {
                                     order: *order,
                                     base_grammar_id,
@@ -1858,11 +1915,14 @@ impl TextMateTokenizer {
                                         rule_id: rule.id,
                                         end: *end,
                                         begin_captures: begin_captures.clone(),
-                                        end_captures: end_captures.clone(),
-                                        name: scope_name(grammar, *name),
-                                        content_name: scope_name(grammar, *content_name),
-                                        patterns: patterns.clone(),
+                                        end_captures: Arc::new(end_captures.clone()),
+                                        name: scope_name(grammar, *name).map(Arc::from),
+                                        content_name: scope_name(grammar, *content_name)
+                                            .map(Arc::from),
+                                        patterns: patterns.clone().into(),
                                         apply_end_pattern_last: *apply_end_pattern_last,
+                                        end_static,
+                                        push_cache: [OnceLock::new(), OnceLock::new()],
                                     },
                                 });
                                 *order += 1;
@@ -1882,6 +1942,10 @@ impl TextMateTokenizer {
                             }
                             let begin_pattern_id = *begin;
                             if let Some(begin) = grammar.pattern(*begin) {
+                                let while_static = grammar
+                                    .pattern(*while_pattern)
+                                    .filter(|pattern| !pattern_has_backreference(pattern))
+                                    .map(Arc::from);
                                 out.push(Candidate {
                                     order: *order,
                                     base_grammar_id,
@@ -1893,10 +1957,13 @@ impl TextMateTokenizer {
                                         rule_id: rule.id,
                                         while_pattern: *while_pattern,
                                         begin_captures: begin_captures.clone(),
-                                        while_captures: while_captures.clone(),
-                                        name: scope_name(grammar, *name),
-                                        content_name: scope_name(grammar, *content_name),
-                                        patterns: patterns.clone(),
+                                        while_captures: Arc::new(while_captures.clone()),
+                                        name: scope_name(grammar, *name).map(Arc::from),
+                                        content_name: scope_name(grammar, *content_name)
+                                            .map(Arc::from),
+                                        patterns: patterns.clone().into(),
+                                        while_static,
+                                        push_cache: [OnceLock::new(), OnceLock::new()],
                                     },
                                 });
                                 *order += 1;
@@ -2046,7 +2113,7 @@ impl TextMateTokenizer {
     }
 
     fn cached_candidates_for_state(&mut self, state: &TokenizerState) -> Arc<CandidateSet> {
-        let state_id = self.intern_state(state.clone());
+        let state_id = self.intern_state(state);
         if let Some(candidates) = self.candidate_cache.get(&state_id).cloned() {
             self.record_candidate_cache_hit();
             return candidates;
@@ -2341,9 +2408,9 @@ impl TextMateTokenizer {
             }
         } else {
             for (index, candidate) in candidate_set.candidates.iter().enumerate() {
-                if suppressed_begin_rules
-                    .is_some_and(|rules| candidate_is_suppressed(candidate, rules))
-                {
+                if suppressed_begin_rules.is_some_and(|rules| {
+                    !rules.is_empty() && candidate_is_suppressed(candidate, rules)
+                }) {
                     continue;
                 }
                 if let Some((best_index, best_result)) = &best
@@ -2666,14 +2733,16 @@ impl TextMateTokenizer {
                 content_name,
                 patterns,
                 apply_end_pattern_last,
+                end_static,
+                push_cache,
             } => {
                 let consumed_end = specified_outside_capture_end(result, begin_captures);
-                let name = name
-                    .as_ref()
-                    .map(|name| substitute_scope_text(name, line, &result.captures));
-                let content_name = content_name
-                    .as_ref()
-                    .map(|name| substitute_scope_text(name, line, &result.captures));
+                let names_static = !name.as_deref().is_some_and(|name| name.contains('$'))
+                    && !content_name
+                        .as_deref()
+                        .is_some_and(|name| name.contains('$'));
+                let name = frame_scope_text(name, line, &result.captures);
+                let content_name = frame_scope_text(content_name, line, &result.captures);
                 let mut stack = active_stack;
                 if let Some(prefix) = candidate.scope_prefix.clone() {
                     stack = self.push_scope_prefix_once_id(stack, &prefix);
@@ -2688,31 +2757,65 @@ impl TextMateTokenizer {
                     None,
                     begin_captures,
                 );
-                let end_pattern = self.substituted_pattern(*grammar_id, *end, line, result);
-                let end_pattern_id = end_pattern
-                    .as_ref()
-                    .and_then(|(_, is_static)| is_static.then_some(*end));
-                state.push_frame(Frame {
-                    grammar_id: *grammar_id,
-                    base_grammar_id: candidate.base_grammar_id,
-                    rule_id: *rule_id,
-                    scope_prefix: candidate.scope_prefix.clone().map(Arc::from),
-                    name: name.map(Arc::from),
-                    content_name: content_name.map(Arc::from),
-                    end_pattern: end_pattern.map(|(pattern, _)| Arc::from(pattern)),
-                    end_pattern_id,
-                    while_pattern: None,
-                    while_pattern_id: None,
-                    end_captures: Arc::new(end_captures.clone()),
-                    while_captures: Arc::new(CaptureSpec::default()),
-                    patterns: patterns.clone().into(),
-                    apply_end_pattern_last: *apply_end_pattern_last,
-                    begin_captured_eol: result.end == line.len() && line.ends_with('\n'),
-                    identity_hash: 0,
-                    stack_hash: 0,
-                    state_hash: 0,
-                    interned_stack_id: InternedFrameStackId::default(),
+                let (end_pattern, end_pattern_id, static_frame) =
+                    if let Some(end_static) = end_static {
+                        (Some(Arc::clone(end_static)), Some(*end), names_static)
+                    } else {
+                        let end_pattern = self.substituted_pattern(*grammar_id, *end, line, result);
+                        let end_pattern_id = end_pattern
+                            .as_ref()
+                            .and_then(|(_, is_static)| is_static.then_some(*end));
+                        (
+                            end_pattern.map(|(pattern, _)| Arc::<str>::from(pattern)),
+                            end_pattern_id,
+                            false,
+                        )
+                    };
+                let begin_captured_eol = result.end == line.len() && line.ends_with('\n');
+                let cache_slot = &push_cache[usize::from(begin_captured_eol)];
+                let cached = if static_frame {
+                    cache_slot.get().copied()
+                } else {
+                    None
+                };
+                let parent_id = state.frames.interned_id();
+                let shared_node = cached.and_then(|cached| {
+                    self.frame_node_cache
+                        .get(&(parent_id, cached.frame_id))
+                        .cloned()
                 });
+                if let Some(node) = shared_node {
+                    state.push_frame_shared(node);
+                } else {
+                    let identity = state.push_frame_cached(
+                        Frame {
+                            grammar_id: *grammar_id,
+                            base_grammar_id: candidate.base_grammar_id,
+                            rule_id: *rule_id,
+                            scope_prefix: candidate.scope_prefix.clone(),
+                            name,
+                            content_name,
+                            end_pattern,
+                            end_pattern_id,
+                            while_pattern: None,
+                            while_pattern_id: None,
+                            end_captures: Arc::clone(end_captures),
+                            while_captures: shared_empty_capture_spec(),
+                            patterns: Arc::clone(patterns),
+                            apply_end_pattern_last: *apply_end_pattern_last,
+                            begin_captured_eol,
+                            identity_hash: 0,
+                            state_hash: 0,
+                            interned_stack_id: InternedFrameStackId::default(),
+                        },
+                        cached,
+                        Some(&mut self.frame_edge_cache),
+                    );
+                    if static_frame && cached.is_none() {
+                        let _ = cache_slot.set(identity);
+                    }
+                    self.remember_frame_node(parent_id, identity.frame_id, state);
+                }
                 frame_anchor_positions.push(*anchor_pos);
                 *anchor_pos = Some(result.end);
                 consumed_end
@@ -2726,14 +2829,16 @@ impl TextMateTokenizer {
                 name,
                 content_name,
                 patterns,
+                while_static,
+                push_cache,
             } => {
                 let consumed_end = specified_outside_capture_end(result, begin_captures);
-                let name = name
-                    .as_ref()
-                    .map(|name| substitute_scope_text(name, line, &result.captures));
-                let content_name = content_name
-                    .as_ref()
-                    .map(|name| substitute_scope_text(name, line, &result.captures));
+                let names_static = !name.as_deref().is_some_and(|name| name.contains('$'))
+                    && !content_name
+                        .as_deref()
+                        .is_some_and(|name| name.contains('$'));
+                let name = frame_scope_text(name, line, &result.captures);
+                let content_name = frame_scope_text(content_name, line, &result.captures);
                 let mut stack = active_stack;
                 if let Some(prefix) = candidate.scope_prefix.clone() {
                     stack = self.push_scope_prefix_once_id(stack, &prefix);
@@ -2771,32 +2876,74 @@ impl TextMateTokenizer {
                     );
                 }
                 let static_while_pattern_id = *while_pattern;
-                let while_pattern =
-                    self.substituted_pattern(*grammar_id, static_while_pattern_id, line, result);
-                let while_pattern_id = while_pattern
-                    .as_ref()
-                    .and_then(|(_, is_static)| is_static.then_some(static_while_pattern_id));
-                state.push_frame(Frame {
-                    grammar_id: *grammar_id,
-                    base_grammar_id: candidate.base_grammar_id,
-                    rule_id: *rule_id,
-                    scope_prefix: candidate.scope_prefix.clone().map(Arc::from),
-                    name: name.map(Arc::from),
-                    content_name: content_name.map(Arc::from),
-                    end_pattern: None,
-                    end_pattern_id: None,
-                    while_pattern: while_pattern.map(|(pattern, _)| Arc::from(pattern)),
-                    while_pattern_id,
-                    end_captures: Arc::new(CaptureSpec::default()),
-                    while_captures: Arc::new(while_captures.clone()),
-                    patterns: patterns.clone().into(),
-                    apply_end_pattern_last: false,
-                    begin_captured_eol: result.end == line.len() && line.ends_with('\n'),
-                    identity_hash: 0,
-                    stack_hash: 0,
-                    state_hash: 0,
-                    interned_stack_id: InternedFrameStackId::default(),
+                let (while_pattern, while_pattern_id, static_frame) =
+                    if let Some(while_static) = while_static {
+                        (
+                            Some(Arc::clone(while_static)),
+                            Some(static_while_pattern_id),
+                            names_static,
+                        )
+                    } else {
+                        let while_pattern = self.substituted_pattern(
+                            *grammar_id,
+                            static_while_pattern_id,
+                            line,
+                            result,
+                        );
+                        let while_pattern_id = while_pattern.as_ref().and_then(|(_, is_static)| {
+                            is_static.then_some(static_while_pattern_id)
+                        });
+                        (
+                            while_pattern.map(|(pattern, _)| Arc::<str>::from(pattern)),
+                            while_pattern_id,
+                            false,
+                        )
+                    };
+                let begin_captured_eol = result.end == line.len() && line.ends_with('\n');
+                let cache_slot = &push_cache[usize::from(begin_captured_eol)];
+                let cached = if static_frame {
+                    cache_slot.get().copied()
+                } else {
+                    None
+                };
+                let parent_id = state.frames.interned_id();
+                let shared_node = cached.and_then(|cached| {
+                    self.frame_node_cache
+                        .get(&(parent_id, cached.frame_id))
+                        .cloned()
                 });
+                if let Some(node) = shared_node {
+                    state.push_frame_shared(node);
+                } else {
+                    let identity = state.push_frame_cached(
+                        Frame {
+                            grammar_id: *grammar_id,
+                            base_grammar_id: candidate.base_grammar_id,
+                            rule_id: *rule_id,
+                            scope_prefix: candidate.scope_prefix.clone(),
+                            name,
+                            content_name,
+                            end_pattern: None,
+                            end_pattern_id: None,
+                            while_pattern,
+                            while_pattern_id,
+                            end_captures: shared_empty_capture_spec(),
+                            while_captures: Arc::clone(while_captures),
+                            patterns: Arc::clone(patterns),
+                            apply_end_pattern_last: false,
+                            begin_captured_eol,
+                            identity_hash: 0,
+                            state_hash: 0,
+                            interned_stack_id: InternedFrameStackId::default(),
+                        },
+                        cached,
+                        Some(&mut self.frame_edge_cache),
+                    );
+                    if static_frame && cached.is_none() {
+                        let _ = cache_slot.set(identity);
+                    }
+                    self.remember_frame_node(parent_id, identity.frame_id, state);
+                }
                 frame_anchor_positions.push(*anchor_pos);
                 *anchor_pos = Some(result.end);
                 consumed_end
@@ -2830,6 +2977,22 @@ impl TextMateTokenizer {
                 consumed_end
             }
         }
+    }
+
+    fn remember_frame_node(
+        &mut self,
+        parent_id: InternedFrameStackId,
+        frame_id: InternedFrameId,
+        state: &TokenizerState,
+    ) {
+        let Some(node) = state.frames.tail_node() else {
+            return;
+        };
+        if self.frame_node_cache.len() >= MAX_FRAME_NODE_CACHE_ENTRIES {
+            self.frame_node_cache.clear();
+        }
+        self.frame_node_cache
+            .insert((parent_id, frame_id), Arc::clone(node));
     }
 
     fn substituted_pattern(
@@ -3546,7 +3709,7 @@ struct Candidate {
     base_grammar_id: GrammarId,
     pattern: String,
     pattern_id: Option<(GrammarId, PatternId)>,
-    scope_prefix: Option<String>,
+    scope_prefix: Option<Arc<str>>,
     kind: CandidateKind,
 }
 
@@ -3563,25 +3726,33 @@ enum CandidateKind {
         rule_id: RuleId,
         end: PatternId,
         begin_captures: CaptureSpec,
-        end_captures: CaptureSpec,
-        name: Option<String>,
-        content_name: Option<String>,
-        patterns: Vec<RuleRef>,
+        end_captures: Arc<CaptureSpec>,
+        name: Option<Arc<str>>,
+        content_name: Option<Arc<str>>,
+        patterns: Arc<[RuleRef]>,
         apply_end_pattern_last: bool,
+        /// End pattern text when it contains no backreferences, so pushes
+        /// skip capture substitution and reuse one shared allocation.
+        end_static: Option<Arc<str>>,
+        /// Cached interned identity per `begin_captured_eol` value for fully
+        /// static frames (no `$` in names, static end pattern).
+        push_cache: [OnceLock<StaticFrameIdentity>; 2],
     },
     BeginWhile {
         grammar_id: GrammarId,
         rule_id: RuleId,
         while_pattern: PatternId,
         begin_captures: CaptureSpec,
-        while_captures: CaptureSpec,
-        name: Option<String>,
-        content_name: Option<String>,
-        patterns: Vec<RuleRef>,
+        while_captures: Arc<CaptureSpec>,
+        name: Option<Arc<str>>,
+        content_name: Option<Arc<str>>,
+        patterns: Arc<[RuleRef]>,
+        while_static: Option<Arc<str>>,
+        push_cache: [OnceLock<StaticFrameIdentity>; 2],
     },
     End {
         grammar_id: GrammarId,
-        captures: CaptureSpec,
+        captures: Arc<CaptureSpec>,
     },
 }
 
@@ -3681,7 +3852,10 @@ impl InjectionOutcomeInterner {
 #[derive(Debug, Clone)]
 struct StateInterner {
     states: Vec<TokenizerState>,
-    ids: HashMap<TokenizerState, StateId, BuildHasherDefault<StateIdentityHasher>>,
+    // `TokenizerState` equality is exactly interned-frame-stack-id equality
+    // (`FrameStack::eq`), so the id map can key on the u32 id directly and
+    // probing never clones or walks a state.
+    ids: FastMap<InternedFrameStackId, StateId>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -3711,19 +3885,20 @@ impl StateInterner {
     fn new() -> Self {
         let mut interner = Self {
             states: Vec::new(),
-            ids: HashMap::with_hasher(BuildHasherDefault::default()),
+            ids: hashing::fast_map(),
         };
-        interner.intern(TokenizerState::default());
+        interner.intern(&TokenizerState::default());
         interner
     }
 
-    fn intern(&mut self, state: TokenizerState) -> (StateId, bool) {
-        if let Some(id) = self.ids.get(&state) {
+    fn intern(&mut self, state: &TokenizerState) -> (StateId, bool) {
+        let key = state.frames.interned_id();
+        if let Some(id) = self.ids.get(&key) {
             return (*id, false);
         }
         let id = StateId(self.states.len() as u32);
         self.states.push(state.clone());
-        self.ids.insert(state, id);
+        self.ids.insert(key, id);
         (id, true)
     }
 
@@ -3865,6 +4040,38 @@ pub fn tokenize_json_string_smoke(line: &str) -> Vec<ScopeSpan> {
 
 fn scope_name(grammar: &CompiledGrammar, id: Option<super::state::ScopeId>) -> Option<String> {
     id.and_then(|id| grammar.scope(id).map(str::to_owned))
+}
+
+/// Mirrors `substitute_end_pattern`'s escape handling: a backslash consumes
+/// the next character, and only `\1`..`\9` starts a backreference.
+fn pattern_has_backreference(pattern: &str) -> bool {
+    let mut chars = pattern.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '\\' && matches!(chars.next(), Some('1'..='9')) {
+            return true;
+        }
+    }
+    false
+}
+
+fn shared_empty_capture_spec() -> Arc<CaptureSpec> {
+    static EMPTY: OnceLock<Arc<CaptureSpec>> = OnceLock::new();
+    Arc::clone(EMPTY.get_or_init(|| Arc::new(CaptureSpec::default())))
+}
+
+/// Resolves a possibly capture-referencing scope text: static names reuse the
+/// candidate's shared allocation, `$n` names substitute per match.
+fn frame_scope_text(
+    name: &Option<Arc<str>>,
+    line: &str,
+    captures: &[Option<Range<usize>>],
+) -> Option<Arc<str>> {
+    let name = name.as_ref()?;
+    if name.contains('$') {
+        Some(Arc::from(substitute_scope_text(name, line, captures)))
+    } else {
+        Some(Arc::clone(name))
+    }
 }
 
 fn substitute_scope_text(scope: &str, line: &str, captures: &[Option<Range<usize>>]) -> String {
@@ -4288,7 +4495,6 @@ mod tests {
             apply_end_pattern_last: rule.is_multiple_of(2),
             begin_captured_eol: false,
             identity_hash: 0,
-            stack_hash: 0,
             state_hash: 0,
             interned_stack_id: InternedFrameStackId::default(),
         }
@@ -4301,16 +4507,11 @@ mod tests {
         let mut expected_state_hash = 0x811c9dc5u32;
         for rule in 0..300 {
             let frame = continuation_frame(rule);
-            expected_state_hash = fnv_mix(expected_state_hash, 1);
-            expected_state_hash = fnv_mix(expected_state_hash, 2);
-            expected_state_hash = fnv_mix(expected_state_hash, rule);
-            expected_state_hash =
-                fnv_mix_opt_str(expected_state_hash, frame.scope_prefix.as_deref());
-            expected_state_hash = fnv_mix_opt_str(expected_state_hash, frame.name.as_deref());
-            expected_state_hash = fnv_mix_opt_str(expected_state_hash, None);
-            expected_state_hash =
-                fnv_mix_opt_str(expected_state_hash, frame.end_pattern.as_deref());
-            expected_state_hash = fnv_mix_opt_str(expected_state_hash, None);
+            let identity_hash = frame.compute_identity_hash();
+            expected_state_hash = fnv_mix(
+                expected_state_hash,
+                (identity_hash ^ (identity_hash >> 32)) as u32,
+            );
             state.push_frame(frame);
             independently_built.push_frame(continuation_frame(rule));
         }
@@ -4491,16 +4692,13 @@ mod tests {
         let mut tokenizer = TextMateTokenizer::from_grammar(grammar).unwrap();
         assert_eq!(tokenizer.interned_state_count(), 1);
         assert_eq!(
-            tokenizer.intern_state(TokenizerState::default()),
+            tokenizer.intern_state(&TokenizerState::default()),
             StateId(0)
         );
 
         let first = tokenizer.tokenize_line_scopes("/* open", TokenizerState::default());
         assert_eq!(first.entry_state_id, StateId(0));
-        assert_eq!(
-            tokenizer.intern_state(first.state.clone()),
-            first.exit_state_id
-        );
+        assert_eq!(tokenizer.intern_state(&first.state), first.exit_state_id);
         assert_eq!(
             tokenizer.state_for_id(first.exit_state_id),
             Some(&first.state)
