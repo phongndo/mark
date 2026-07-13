@@ -38,6 +38,7 @@ try {
         { include: '$self' },
         { include: 'source.missing#optional' },
         { include: 'source.dep#entry' },
+        { include: 'source.yaml' },
       ],
     }),
     grammar(grammars, 'dep', {
@@ -48,6 +49,14 @@ try {
     }),
     grammar(grammars, 'leaf', {
       scopeName: 'source.leaf',
+      patterns: [],
+    }),
+    grammar(grammars, 'yaml', {
+      scopeName: 'source.yaml',
+      patterns: [{ include: 'source.yaml.1.2' }],
+    }),
+    grammar(grammars, 'yaml-1.2', {
+      scopeName: 'source.yaml.1.2',
       patterns: [],
     }),
   ])
@@ -98,6 +107,8 @@ kept = [
   assert.doesNotMatch(first, /sample/)
   assert.match(first, /scope = "source\.dep"\ngrammar = "grammars\/dep\.tmLanguage\.json"/)
   assert.match(first, /scope = "source\.leaf"\ngrammar = "grammars\/leaf\.tmLanguage\.json"/)
+  assert.match(first, /scope = "source\.yaml"\ngrammar = "grammars\/yaml\.tmLanguage\.json"/)
+  assert.doesNotMatch(first, /scope = "source\.yaml\.1\.2"/)
   assert.doesNotMatch(first, /source\.missing/)
   assert.ok(first.indexOf('scope = "source.dep"') < first.indexOf('scope = "source.leaf"'))
 

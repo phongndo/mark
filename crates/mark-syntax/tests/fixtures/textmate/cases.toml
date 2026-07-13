@@ -454,10 +454,6 @@ scope = "source.clojure"
 grammar = "assets/tm-grammars/languages/clojure.tmLanguage.json"
 
 [[case.embedded]]
-scope = "source.cmake"
-grammar = "assets/tm-grammars/languages/cmake.tmLanguage.json"
-
-[[case.embedded]]
 scope = "source.coffee"
 grammar = "assets/tm-grammars/languages/coffee.tmLanguage.json"
 
@@ -755,10 +751,6 @@ grammar = "assets/tm-grammars/languages/c.tmLanguage.json"
 [[case.embedded]]
 scope = "source.clojure"
 grammar = "assets/tm-grammars/languages/clojure.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.cmake"
-grammar = "assets/tm-grammars/languages/cmake.tmLanguage.json"
 
 [[case.embedded]]
 scope = "source.coffee"
@@ -2153,10 +2145,6 @@ scope = "source.clojure"
 grammar = "assets/tm-grammars/languages/clojure.tmLanguage.json"
 
 [[case.embedded]]
-scope = "source.cmake"
-grammar = "assets/tm-grammars/languages/cmake.tmLanguage.json"
-
-[[case.embedded]]
 scope = "source.coffee"
 grammar = "assets/tm-grammars/languages/coffee.tmLanguage.json"
 
@@ -2446,10 +2434,6 @@ grammar = "assets/tm-grammars/languages/c.tmLanguage.json"
 [[case.embedded]]
 scope = "source.clojure"
 grammar = "assets/tm-grammars/languages/clojure.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.cmake"
-grammar = "assets/tm-grammars/languages/cmake.tmLanguage.json"
 
 [[case.embedded]]
 scope = "source.coffee"
@@ -2743,10 +2727,6 @@ scope = "source.clojure"
 grammar = "assets/tm-grammars/languages/clojure.tmLanguage.json"
 
 [[case.embedded]]
-scope = "source.cmake"
-grammar = "assets/tm-grammars/languages/cmake.tmLanguage.json"
-
-[[case.embedded]]
 scope = "source.coffee"
 grammar = "assets/tm-grammars/languages/coffee.tmLanguage.json"
 
@@ -3032,10 +3012,6 @@ grammar = "assets/tm-grammars/languages/c.tmLanguage.json"
 [[case.embedded]]
 scope = "source.clojure"
 grammar = "assets/tm-grammars/languages/clojure.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.cmake"
-grammar = "assets/tm-grammars/languages/cmake.tmLanguage.json"
 
 [[case.embedded]]
 scope = "source.coffee"
@@ -3593,10 +3569,6 @@ scope = "source.clojure"
 grammar = "assets/tm-grammars/languages/clojure.tmLanguage.json"
 
 [[case.embedded]]
-scope = "source.cmake"
-grammar = "assets/tm-grammars/languages/cmake.tmLanguage.json"
-
-[[case.embedded]]
 scope = "source.coffee"
 grammar = "assets/tm-grammars/languages/coffee.tmLanguage.json"
 
@@ -3882,10 +3854,6 @@ grammar = "assets/tm-grammars/languages/c.tmLanguage.json"
 [[case.embedded]]
 scope = "source.clojure"
 grammar = "assets/tm-grammars/languages/clojure.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.cmake"
-grammar = "assets/tm-grammars/languages/cmake.tmLanguage.json"
 
 [[case.embedded]]
 scope = "source.coffee"
@@ -4573,10 +4541,6 @@ scope = "source.clojure"
 grammar = "assets/tm-grammars/languages/clojure.tmLanguage.json"
 
 [[case.embedded]]
-scope = "source.cmake"
-grammar = "assets/tm-grammars/languages/cmake.tmLanguage.json"
-
-[[case.embedded]]
 scope = "source.coffee"
 grammar = "assets/tm-grammars/languages/coffee.tmLanguage.json"
 
@@ -4862,10 +4826,6 @@ grammar = "assets/tm-grammars/languages/c.tmLanguage.json"
 [[case.embedded]]
 scope = "source.clojure"
 grammar = "assets/tm-grammars/languages/clojure.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.cmake"
-grammar = "assets/tm-grammars/languages/cmake.tmLanguage.json"
 
 [[case.embedded]]
 scope = "source.coffee"
@@ -5843,10 +5803,6 @@ scope = "source.clojure"
 grammar = "assets/tm-grammars/languages/clojure.tmLanguage.json"
 
 [[case.embedded]]
-scope = "source.cmake"
-grammar = "assets/tm-grammars/languages/cmake.tmLanguage.json"
-
-[[case.embedded]]
 scope = "source.coffee"
 grammar = "assets/tm-grammars/languages/coffee.tmLanguage.json"
 
@@ -6136,10 +6092,6 @@ grammar = "assets/tm-grammars/languages/c.tmLanguage.json"
 [[case.embedded]]
 scope = "source.clojure"
 grammar = "assets/tm-grammars/languages/clojure.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.cmake"
-grammar = "assets/tm-grammars/languages/cmake.tmLanguage.json"
 
 [[case.embedded]]
 scope = "source.coffee"
@@ -6482,10 +6434,6 @@ scope = "source.clojure"
 grammar = "assets/tm-grammars/languages/clojure.tmLanguage.json"
 
 [[case.embedded]]
-scope = "source.cmake"
-grammar = "assets/tm-grammars/languages/cmake.tmLanguage.json"
-
-[[case.embedded]]
 scope = "source.coffee"
 grammar = "assets/tm-grammars/languages/coffee.tmLanguage.json"
 
@@ -6771,10 +6719,6 @@ grammar = "assets/tm-grammars/languages/c.tmLanguage.json"
 [[case.embedded]]
 scope = "source.clojure"
 grammar = "assets/tm-grammars/languages/clojure.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.cmake"
-grammar = "assets/tm-grammars/languages/cmake.tmLanguage.json"
 
 [[case.embedded]]
 scope = "source.coffee"
@@ -7248,10 +7192,6 @@ scope = "source.clojure"
 grammar = "assets/tm-grammars/languages/clojure.tmLanguage.json"
 
 [[case.embedded]]
-scope = "source.cmake"
-grammar = "assets/tm-grammars/languages/cmake.tmLanguage.json"
-
-[[case.embedded]]
 scope = "source.coffee"
 grammar = "assets/tm-grammars/languages/coffee.tmLanguage.json"
 
@@ -7537,10 +7477,6 @@ grammar = "assets/tm-grammars/languages/c.tmLanguage.json"
 [[case.embedded]]
 scope = "source.clojure"
 grammar = "assets/tm-grammars/languages/clojure.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.cmake"
-grammar = "assets/tm-grammars/languages/cmake.tmLanguage.json"
 
 [[case.embedded]]
 scope = "source.coffee"
@@ -7852,10 +7788,6 @@ scope = "source.clojure"
 grammar = "assets/tm-grammars/languages/clojure.tmLanguage.json"
 
 [[case.embedded]]
-scope = "source.cmake"
-grammar = "assets/tm-grammars/languages/cmake.tmLanguage.json"
-
-[[case.embedded]]
 scope = "source.coffee"
 grammar = "assets/tm-grammars/languages/coffee.tmLanguage.json"
 
@@ -8161,10 +8093,6 @@ grammar = "assets/tm-grammars/languages/c.tmLanguage.json"
 [[case.embedded]]
 scope = "source.clojure"
 grammar = "assets/tm-grammars/languages/clojure.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.cmake"
-grammar = "assets/tm-grammars/languages/cmake.tmLanguage.json"
 
 [[case.embedded]]
 scope = "source.coffee"
@@ -8534,10 +8462,6 @@ scope = "source.clojure"
 grammar = "assets/tm-grammars/languages/clojure.tmLanguage.json"
 
 [[case.embedded]]
-scope = "source.cmake"
-grammar = "assets/tm-grammars/languages/cmake.tmLanguage.json"
-
-[[case.embedded]]
 scope = "source.coffee"
 grammar = "assets/tm-grammars/languages/coffee.tmLanguage.json"
 
@@ -8829,10 +8753,6 @@ scope = "source.clojure"
 grammar = "assets/tm-grammars/languages/clojure.tmLanguage.json"
 
 [[case.embedded]]
-scope = "source.cmake"
-grammar = "assets/tm-grammars/languages/cmake.tmLanguage.json"
-
-[[case.embedded]]
 scope = "source.coffee"
 grammar = "assets/tm-grammars/languages/coffee.tmLanguage.json"
 
@@ -9122,10 +9042,6 @@ grammar = "assets/tm-grammars/languages/c.tmLanguage.json"
 [[case.embedded]]
 scope = "source.clojure"
 grammar = "assets/tm-grammars/languages/clojure.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.cmake"
-grammar = "assets/tm-grammars/languages/cmake.tmLanguage.json"
 
 [[case.embedded]]
 scope = "source.coffee"
@@ -9433,10 +9349,6 @@ grammar = "assets/tm-grammars/languages/c.tmLanguage.json"
 [[case.embedded]]
 scope = "source.clojure"
 grammar = "assets/tm-grammars/languages/clojure.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.cmake"
-grammar = "assets/tm-grammars/languages/cmake.tmLanguage.json"
 
 [[case.embedded]]
 scope = "source.coffee"
@@ -9910,10 +9822,6 @@ scope = "source.clojure"
 grammar = "assets/tm-grammars/languages/clojure.tmLanguage.json"
 
 [[case.embedded]]
-scope = "source.cmake"
-grammar = "assets/tm-grammars/languages/cmake.tmLanguage.json"
-
-[[case.embedded]]
 scope = "source.coffee"
 grammar = "assets/tm-grammars/languages/coffee.tmLanguage.json"
 
@@ -10203,10 +10111,6 @@ grammar = "assets/tm-grammars/languages/c.tmLanguage.json"
 [[case.embedded]]
 scope = "source.clojure"
 grammar = "assets/tm-grammars/languages/clojure.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.cmake"
-grammar = "assets/tm-grammars/languages/cmake.tmLanguage.json"
 
 [[case.embedded]]
 scope = "source.coffee"
@@ -11259,10 +11163,6 @@ scope = "source.clojure"
 grammar = "assets/tm-grammars/languages/clojure.tmLanguage.json"
 
 [[case.embedded]]
-scope = "source.cmake"
-grammar = "assets/tm-grammars/languages/cmake.tmLanguage.json"
-
-[[case.embedded]]
 scope = "source.coffee"
 grammar = "assets/tm-grammars/languages/coffee.tmLanguage.json"
 
@@ -11548,10 +11448,6 @@ grammar = "assets/tm-grammars/languages/c.tmLanguage.json"
 [[case.embedded]]
 scope = "source.clojure"
 grammar = "assets/tm-grammars/languages/clojure.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.cmake"
-grammar = "assets/tm-grammars/languages/cmake.tmLanguage.json"
 
 [[case.embedded]]
 scope = "source.coffee"
@@ -11841,10 +11737,6 @@ scope = "source.clojure"
 grammar = "assets/tm-grammars/languages/clojure.tmLanguage.json"
 
 [[case.embedded]]
-scope = "source.cmake"
-grammar = "assets/tm-grammars/languages/cmake.tmLanguage.json"
-
-[[case.embedded]]
 scope = "source.coffee"
 grammar = "assets/tm-grammars/languages/coffee.tmLanguage.json"
 
@@ -12132,10 +12024,6 @@ scope = "source.clojure"
 grammar = "assets/tm-grammars/languages/clojure.tmLanguage.json"
 
 [[case.embedded]]
-scope = "source.cmake"
-grammar = "assets/tm-grammars/languages/cmake.tmLanguage.json"
-
-[[case.embedded]]
 scope = "source.coffee"
 grammar = "assets/tm-grammars/languages/coffee.tmLanguage.json"
 
@@ -12421,10 +12309,6 @@ grammar = "assets/tm-grammars/languages/c.tmLanguage.json"
 [[case.embedded]]
 scope = "source.clojure"
 grammar = "assets/tm-grammars/languages/clojure.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.cmake"
-grammar = "assets/tm-grammars/languages/cmake.tmLanguage.json"
 
 [[case.embedded]]
 scope = "source.coffee"
@@ -13070,10 +12954,6 @@ scope = "source.clojure"
 grammar = "assets/tm-grammars/languages/clojure.tmLanguage.json"
 
 [[case.embedded]]
-scope = "source.cmake"
-grammar = "assets/tm-grammars/languages/cmake.tmLanguage.json"
-
-[[case.embedded]]
 scope = "source.coffee"
 grammar = "assets/tm-grammars/languages/coffee.tmLanguage.json"
 
@@ -13371,10 +13251,6 @@ grammar = "assets/tm-grammars/languages/c.tmLanguage.json"
 [[case.embedded]]
 scope = "source.clojure"
 grammar = "assets/tm-grammars/languages/clojure.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.cmake"
-grammar = "assets/tm-grammars/languages/cmake.tmLanguage.json"
 
 [[case.embedded]]
 scope = "source.coffee"
@@ -13926,10 +13802,6 @@ scope = "source.clojure"
 grammar = "assets/tm-grammars/languages/clojure.tmLanguage.json"
 
 [[case.embedded]]
-scope = "source.cmake"
-grammar = "assets/tm-grammars/languages/cmake.tmLanguage.json"
-
-[[case.embedded]]
 scope = "source.coffee"
 grammar = "assets/tm-grammars/languages/coffee.tmLanguage.json"
 
@@ -14219,10 +14091,6 @@ grammar = "assets/tm-grammars/languages/c.tmLanguage.json"
 [[case.embedded]]
 scope = "source.clojure"
 grammar = "assets/tm-grammars/languages/clojure.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.cmake"
-grammar = "assets/tm-grammars/languages/cmake.tmLanguage.json"
 
 [[case.embedded]]
 scope = "source.coffee"
@@ -14642,10 +14510,6 @@ scope = "source.clojure"
 grammar = "assets/tm-grammars/languages/clojure.tmLanguage.json"
 
 [[case.embedded]]
-scope = "source.cmake"
-grammar = "assets/tm-grammars/languages/cmake.tmLanguage.json"
-
-[[case.embedded]]
 scope = "source.coffee"
 grammar = "assets/tm-grammars/languages/coffee.tmLanguage.json"
 
@@ -14947,10 +14811,6 @@ grammar = "assets/tm-grammars/languages/c.tmLanguage.json"
 [[case.embedded]]
 scope = "source.clojure"
 grammar = "assets/tm-grammars/languages/clojure.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.cmake"
-grammar = "assets/tm-grammars/languages/cmake.tmLanguage.json"
 
 [[case.embedded]]
 scope = "source.coffee"

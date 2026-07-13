@@ -1864,7 +1864,7 @@ impl TextMateTokenizer {
             match result {
                 Some(result) if result.start == *cursor => {
                     let frame_state = state.prefix(index + 1);
-                    let stack = self.current_scope_stack_id(&frame_state, false, None);
+                    let stack = self.current_scope_stack_id(&frame_state, true, None);
                     self.emit_match(
                         tokens,
                         line,
@@ -1890,7 +1890,12 @@ impl TextMateTokenizer {
                     state.frames.for_each(|child_index, child| {
                         has_child_end |= child_index > index && child.end_pattern.is_some();
                     });
-                    if has_child_end {
+                    // A line-consuming container must not immediately reopen
+                    // on its own closing delimiter after its while condition
+                    // fails. Zero-width structural containers (notably YAML
+                    // mappings) may legitimately start a sibling at the same
+                    // position, so do not suppress those rules globally.
+                    if frame.begin_captured_eol && has_child_end {
                         suppressed.insert((frame.grammar_id, frame.rule_id));
                     }
                     state.truncate_frames(index);

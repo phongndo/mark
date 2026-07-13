@@ -413,6 +413,11 @@ function externalGrammarClosure(rootGrammar, catalog) {
       // unavailable include. Do not manufacture manifest entries for it.
       if (!dependency) continue
       if (scope !== rootGrammar.scope) embedded.set(scope, dependency)
+      // The vendored YAML root is a dispatcher whose private version grammars
+      // are validated by the direct YAML cases. Keep those override-only
+      // assets out of unrelated host cases: recursively expanding them here
+      // silently changes every Markdown-like oracle's dependency surface.
+      if (scope === 'source.yaml' && rootGrammar.scope !== 'source.yaml') continue
       pending.push({ grammar: dependency, repository: dependencyRepository })
     }
   }

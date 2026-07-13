@@ -913,7 +913,19 @@ impl<'a> Parser<'a> {
                 } else {
                     self.take_hex_digits(2)
                 };
-                ClassAtom::Char(hex_char(&digits).unwrap_or('x'))
+                let chars = digits
+                    .split_ascii_whitespace()
+                    .map(hex_char)
+                    .collect::<Option<Vec<_>>>();
+                match chars.as_deref() {
+                    Some([ch]) => ClassAtom::Char(*ch),
+                    Some(chars) if !chars.is_empty() => ClassAtom::Nested(Box::new(CharClass {
+                        negated: false,
+                        intersections: Vec::new(),
+                        atoms: chars.iter().copied().map(ClassAtom::Char).collect(),
+                    })),
+                    _ => ClassAtom::Char('x'),
+                }
             }
             'u' => {
                 let digits = self.take_hex_digits(4);
@@ -1402,6 +1414,24 @@ mod tests {
                 atoms: vec![ClassAtom::Range('\0', '\u{7f}')],
             }))
         );
+    }
+
+    #[test]
+    fn parses_oniguruma_multi_codepoint_hex_class_escape() {
+        let parsed = parse(r"[^\x{FEFF FFFE FFFF}]");
+        let Ast::Class(class) = parsed.ast else {
+            panic!("expected class");
+        };
+        assert!(class.negated);
+        assert!(matches!(
+            class.atoms.as_slice(),
+            [ClassAtom::Nested(nested)]
+                if nested.atoms == [
+                    ClassAtom::Char('\u{feff}'),
+                    ClassAtom::Char('\u{fffe}'),
+                    ClassAtom::Char('\u{ffff}'),
+                ]
+        ));
     }
 
     #[test]
