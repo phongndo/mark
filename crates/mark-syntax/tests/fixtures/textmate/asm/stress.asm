@@ -1,240 +1,259 @@
-; instruction 1
-label_1: mov rax, 1
-; instruction 2
-label_2: mov rax, 2
-; instruction 3
-label_3: mov rax, 3
-; instruction 4
-label_4: mov rax, 4
-; instruction 5
-label_5: mov rax, 5
-; instruction 6
-label_6: mov rax, 6
-; instruction 7
-label_7: mov rax, 7
-; instruction 8
-label_8: mov rax, 8
-; instruction 9
-label_9: mov rax, 9
-; instruction 10
-label_10: mov rax, 10
-; instruction 11
-label_11: mov rax, 11
-; instruction 12
-label_12: mov rax, 12
-; instruction 13
-label_13: mov rax, 13
-; instruction 14
-label_14: mov rax, 14
-; instruction 15
-label_15: mov rax, 15
-; instruction 16
-label_16: mov rax, 16
-; instruction 17
-label_17: mov rax, 17
-; instruction 18
-label_18: mov rax, 18
-; instruction 19
-label_19: mov rax, 19
-; instruction 20
-label_20: mov rax, 20
-; instruction 21
-label_21: mov rax, 21
-; instruction 22
-label_22: mov rax, 22
-; instruction 23
-label_23: mov rax, 23
-; instruction 24
-label_24: mov rax, 24
-; instruction 25
-label_25: mov rax, 25
-; instruction 26
-label_26: mov rax, 26
-; instruction 27
-label_27: mov rax, 27
-; instruction 28
-label_28: mov rax, 28
-; instruction 29
-label_29: mov rax, 29
-; instruction 30
-label_30: mov rax, 30
-; instruction 31
-label_31: mov rax, 31
-; instruction 32
-label_32: mov rax, 32
-; instruction 33
-label_33: mov rax, 33
-; instruction 34
-label_34: mov rax, 34
-; instruction 35
-label_35: mov rax, 35
-; instruction 36
-label_36: mov rax, 36
-; instruction 37
-label_37: mov rax, 37
-; instruction 38
-label_38: mov rax, 38
-; instruction 39
-label_39: mov rax, 39
-; instruction 40
-label_40: mov rax, 40
-; instruction 41
-label_41: mov rax, 41
-; instruction 42
-label_42: mov rax, 42
-; instruction 43
-label_43: mov rax, 43
-; instruction 44
-label_44: mov rax, 44
-; instruction 45
-label_45: mov rax, 45
-; instruction 46
-label_46: mov rax, 46
-; instruction 47
-label_47: mov rax, 47
-; instruction 48
-label_48: mov rax, 48
-; instruction 49
-label_49: mov rax, 49
-; instruction 50
-label_50: mov rax, 50
-; instruction 51
-label_51: mov rax, 51
-; instruction 52
-label_52: mov rax, 52
-; instruction 53
-label_53: mov rax, 53
-; instruction 54
-label_54: mov rax, 54
-; instruction 55
-label_55: mov rax, 55
-; instruction 56
-label_56: mov rax, 56
-; instruction 57
-label_57: mov rax, 57
-; instruction 58
-label_58: mov rax, 58
-; instruction 59
-label_59: mov rax, 59
-; instruction 60
-label_60: mov rax, 60
-; instruction 61
-label_61: mov rax, 61
-; instruction 62
-label_62: mov rax, 62
-; instruction 63
-label_63: mov rax, 63
-; instruction 64
-label_64: mov rax, 64
-; instruction 65
-label_65: mov rax, 65
-; instruction 66
-label_66: mov rax, 66
-; instruction 67
-label_67: mov rax, 67
-; instruction 68
-label_68: mov rax, 68
-; instruction 69
-label_69: mov rax, 69
-; instruction 70
-label_70: mov rax, 70
-; instruction 71
-label_71: mov rax, 71
-; instruction 72
-label_72: mov rax, 72
-; instruction 73
-label_73: mov rax, 73
-; instruction 74
-label_74: mov rax, 74
-; instruction 75
-label_75: mov rax, 75
-; instruction 76
-label_76: mov rax, 76
-; instruction 77
-label_77: mov rax, 77
-; instruction 78
-label_78: mov rax, 78
-; instruction 79
-label_79: mov rax, 79
-; instruction 80
-label_80: mov rax, 80
-; instruction 81
-label_81: mov rax, 81
-; instruction 82
-label_82: mov rax, 82
-; instruction 83
-label_83: mov rax, 83
-; instruction 84
-label_84: mov rax, 84
-; instruction 85
-label_85: mov rax, 85
-; instruction 86
-label_86: mov rax, 86
-; instruction 87
-label_87: mov rax, 87
-; instruction 88
-label_88: mov rax, 88
-; instruction 89
-label_89: mov rax, 89
-; instruction 90
-label_90: mov rax, 90
-; instruction 91
-label_91: mov rax, 91
-; instruction 92
-label_92: mov rax, 92
-; instruction 93
-label_93: mov rax, 93
-; instruction 94
-label_94: mov rax, 94
-; instruction 95
-label_95: mov rax, 95
-; instruction 96
-label_96: mov rax, 96
-; instruction 97
-label_97: mov rax, 97
-; instruction 98
-label_98: mov rax, 98
-; instruction 99
-label_99: mov rax, 99
-; instruction 100
-label_100: mov rax, 100
-; instruction 101
-label_101: mov rax, 101
-; instruction 102
-label_102: mov rax, 102
-; instruction 103
-label_103: mov rax, 103
-; instruction 104
-label_104: mov rax, 104
-; instruction 105
-label_105: mov rax, 105
-; instruction 106
-label_106: mov rax, 106
-; instruction 107
-label_107: mov rax, 107
-; instruction 108
-label_108: mov rax, 108
-; instruction 109
-label_109: mov rax, 109
-; instruction 110
-label_110: mov rax, 110
-; instruction 111
-label_111: mov rax, 111
-; instruction 112
-label_112: mov rax, 112
-; instruction 113
-label_113: mov rax, 113
-; instruction 114
-label_114: mov rax, 114
-; instruction 115
-label_115: mov rax, 115
-; instruction 116
-label_116: mov rax, 116
-; instruction 117
-label_117: mov rax, 117
-; instruction 118
-label_118: mov rax, 118
-; instruction 119
-label_119: mov rax, 119
-; instruction 120
-label_120: mov rax, 120
+; Streaming checksum and text classifier for x86-64.
+; The comments safely carry BMP café/λ and astral symbols 🧭🚀.
+bits 64
+default rel
+%define ABI_SYSV 1
+%idefine cache_line 64
+%assign MAX_CHUNK (4 * 1024)
+%define FEATURE_WORD %eval((1 << 9) | (1 << 19))
+%strlen banner_length "assembly telemetry"
+%substr banner_initial "assembly telemetry", 1, 1
+%ifdef USE_PLATFORM_ABI
+%include "platform/abi.inc"
+%endif
+%ifndef ABI_SYSV
+%warning "building without the SysV register map"
+%endif
+%macro SAVE_CALLEE 0
+    push rbp
+    mov rbp, rsp
+    push rbx
+    push r12
+%endmacro
+%macro RESTORE_CALLEE 0
+    pop r12
+    pop rbx
+    leave
+    ret
+%endmacro
+%if 0
+; Retained design sketch: this whole conditional is a closed comment state.
+legacy_entry:
+    mov eax, 0xDEAD
+    int 0x80
+%endif
+/* The lexer also accepts a C-style block comment.
+   This closed note spans lines without hiding the module that follows. */
+extern malloc
+global checksum_update
+global classify_utf8
+global probe_features
+global dispatch_checksum
+section .rodata
+align 64
+banner:         db "assembly telemetry — café 🛰️", 10, 0
+escaped_path:   db `cache\line\n`, 0
+printf_shape:   db "crc=%08x, bytes=%zu", 0
+binary_masks:   dd 0b1010_0101, 1100_0011b
+octal_modes:    dw 0o755, 0644q
+decimal_limits: dd 0d65_535, 1_000_000
+hex_masks:      dq 0xFF00_FF00_AA55_AA55, 0h7FFF_FFFF, 0BADC0DEh
+scalar_floats:  dd 1.25, 6.022e+23, 0x1.8p+2
+wide_floats:    dq 0b1.01p+3, 0o7.4p-1, 3.1415926535
+packed_bcd:     dt 123456789p
+fp_specials:    dq __?float64?__(1.0), __float64__(2.0), Inf, QNaN
+build_stamp:    db __?DATE?__, " ", __?TIME?__, 0
+source_stamp:   db __FILE__, ':', __?LINE?__, 0
+dispatch_slot:  dq checksum_update wrt ..gotpc
+align 32
+shuffle_bytes:  db 15, 14, 13, 12, 11, 10, 9, 8
+                db 7, 6, 5, 4, 3, 2, 1, 0
+float_scale:    dd 0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5
+aes_round_key:  do 0x00112233445566778899AABBCCDDEEFF
+vector_seed:    dy 1, 2, 3, 4, 5, 6, 7, 8
+zmm_seed:       dz 16 dup (0x3F800000)
+section .data
+align 8
+selected_impl:  dq checksum_scalar
+feature_cache:  dd FEATURE_WORD
+section .bss
+alignb cache_line
+scratch_byte:   resb 1
+scratch_words:  resw 8
+scratch_dwords: resd 16
+scratch_qwords: resq 8
+scratch_oword:  reso 1
+scratch_ymm:    resy 1
+scratch_zmm:    resz 1
+fpu_temp:       rest 1
+section .text
+align 16
+checksum_update:
+    SAVE_CALLEE
+    mov r12, rdi
+    mov rbx, rsi
+    test rsi, rsi
+    jz .empty
+    mov eax, edx
+.byte_loop:
+    movzx ecx, byte [r12]
+    crc32 eax, cl
+    rol eax, 5
+    xor eax, ecx
+    inc r12
+    dec rbx
+    jnz .byte_loop
+    lock xadd dword [rel feature_cache], eax
+    bswap eax
+    jmp .done
+.empty:
+    xor eax, eax
+.done:
+    RESTORE_CALLEE
+align 16
+checksum_scalar:
+    xor eax, eax
+    xor ecx, ecx
+.next_word:
+    cmp rsi, 8
+    jb .tail
+    mov rdx, qword [rdi]
+    add rax, rdx
+    rorx r8, rdx, 17
+    adcx rax, r8
+    add rdi, 8
+    sub rsi, 8
+    jmp .next_word
+.tail:
+    test rsi, rsi
+    jz .return
+    movzx edx, byte [rdi]
+    imul eax, eax, 33
+    add eax, edx
+    inc rdi
+    dec rsi
+    jmp .tail
+.return:
+    ret
+align 16
+classify_utf8:
+    xor eax, eax
+    xor edx, edx
+.scan:
+    cmp rdx, rsi
+    jae .classified
+    movzx ecx, byte [rdi + rdx]
+    test cl, 0x80
+    setnz r8b
+    add al, r8b
+    inc rdx
+    jmp .scan
+.classified:
+    ret
+align 16
+copy_forward:
+    mov rcx, rdx
+    cld
+    rep movsb
+    ret
+align 16
+checksum_sse2:
+    pxor xmm0, xmm0
+.sse_loop:
+    cmp rsi, 16
+    jb .sse_reduce
+    movdqu xmm1, oword [rdi]
+    paddd xmm0, xmm1
+    pshufb xmm0, [rel shuffle_bytes]
+    add rdi, 16
+    sub rsi, 16
+    jmp .sse_loop
+.sse_reduce:
+    ptest xmm0, xmm0
+    movd eax, xmm0
+    ret
+
+align 32
+checksum_avx2:
+    vpxor ymm0, ymm0, ymm0
+    vbroadcastss ymm2, [rel float_scale]
+.avx_loop:
+    cmp rsi, 32
+    jb .avx_reduce
+    vmovdqu ymm1, yword [rdi]
+    vpaddd ymm0, ymm0, ymm1
+    vpermq ymm0, ymm0, 0b01_00_11_10
+    vfmadd231ps ymm3, ymm2, ymm1
+    add rdi, 32
+    sub rsi, 32
+    jmp .avx_loop
+.avx_reduce:
+    vextracti128 xmm1, ymm0, 1
+    vpaddd xmm0, xmm0, xmm1
+    vmovd eax, xmm0
+    vzeroupper
+    ret
+
+align 16
+mix_aes_sha:
+    movdqu xmm0, [rdi]
+    movdqa xmm1, [rel aes_round_key]
+    aesenc xmm0, xmm1
+    aesdeclast xmm0, xmm1
+    pclmulqdq xmm0, xmm1, 0x11
+    sha1msg1 xmm0, xmm1
+    sha256rnds2 xmm0, xmm1
+    movdqu [rdi], xmm0
+    ret
+
+align 64
+checksum_avx512:
+    kxord k1, k1, k1
+    mov eax, 0xFFFF
+    kmovw k1, eax
+    vmovdqu32 zmm0 {k1}{z}, zword [rdi]
+    vpaddd zmm0 {k1}, zmm0, dword [rel zmm_seed] {1to16}
+    vaddps zmm1 {k1}{rn-sae}, zmm0, zword [rel zmm_seed]
+    vcompressps zword [rdi] {k1}, zmm1
+    vzeroupper
+    ret
+
+align 16
+fpu_reference:
+    fld qword [rdi]
+    fld1
+    faddp st1, st0
+    fsqrt
+    fstp qword [rdi]
+    fnstcw word [rel scratch_words]
+    ret
+
+probe_features:
+    push rbx
+    xor eax, eax
+    cpuid
+    mov eax, 1
+    cpuid
+    bt ecx, 27
+    jnc .no_xsave
+    xor ecx, ecx
+    xgetbv
+.no_xsave:
+    rdrand r8d
+    rdseed r9d
+    rdtscp
+    pop rbx
+    ret
+
+dispatch_checksum:
+    xbegin .transaction_failed
+    mov rax, [rel selected_impl]
+    test rax, rax
+    jz .abort
+    xend
+    jmp rax
+.abort:
+    xabort 0x7F
+.transaction_failed:
+    lea rax, [rel checksum_scalar]
+    mov [rel selected_impl], rax     # selected after a safe fallback
+    jmp rax
+
+; A tiny MMX compatibility path remains for old plugin buffers.
+checksum_mmx:
+    movq mm0, [rdi]
+    paddw mm0, [rdi + 8]
+    psrlq mm0, 16
+    movd eax, mm0
+    emms
+    ret

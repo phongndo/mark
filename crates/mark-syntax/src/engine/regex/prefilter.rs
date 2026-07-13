@@ -1,6 +1,9 @@
 use std::collections::VecDeque;
 
-use super::ast::{Ast, CharClass, ClassAtom, LookKind, ParsedRegex, has_case_insensitive_scope};
+use super::ast::{
+    Ast, CharClass, ClassAtom, LookKind, ParsedRegex, has_case_insensitive_scope,
+    uniform_effective_flags,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RequiredLiterals {
@@ -34,6 +37,11 @@ pub enum Prefilter {
 
 impl Prefilter {
     pub fn from_regex(parsed: &ParsedRegex) -> Self {
+        if let Some(flags) = uniform_effective_flags(&parsed.ast)
+            && has_case_insensitive_scope(&parsed.ast)
+        {
+            return Self::from_required(required_literals(&parsed.ast), flags.case_insensitive);
+        }
         if let Ast::Flags { flags, child } = &parsed.ast
             && !has_flag_scope(child)
         {
@@ -621,6 +629,8 @@ fn class_required_literals(class: &CharClass) -> RequiredLiterals {
     if class.negated || class.atoms.is_empty() {
         return RequiredLiterals::None;
     }
+    // Every intersection result is a subset of the first union. Its finite
+    // literals therefore remain a safe (possibly broader) prefilter set.
     let mut literals = Vec::new();
     for atom in &class.atoms {
         match atom {

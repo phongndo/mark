@@ -100,6 +100,7 @@ fn detects_bundled_language_paths_and_basenames() {
 fn backend_catalog_contains_the_core_pack() {
     assert_eq!(installed_language_set().len(), 254);
     assert!(core_enabled_language_set().contains("rust"));
+    assert!(core_enabled_language_set().contains("bash"));
     assert!(core_language_set().contains("rust"));
 }
 

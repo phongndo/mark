@@ -39,10 +39,10 @@ impl EndPatternCache {
         }
         let substituted = substitute_end_pattern(pattern, captures, self.max_pattern_len)?;
         if self.max_entries > 0 {
-            if self.entries.len() >= self.max_entries {
-                if let Some(oldest) = self.order.pop_front() {
-                    self.entries.remove(&oldest);
-                }
+            if self.entries.len() >= self.max_entries
+                && let Some(oldest) = self.order.pop_front()
+            {
+                self.entries.remove(&oldest);
             }
             self.order.push_back(key.clone());
             self.entries.insert(key, substituted.clone());

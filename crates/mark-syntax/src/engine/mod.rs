@@ -114,9 +114,11 @@ fn grammar_blob_closure(
     bundle: &grammars::bundle::Bundle,
     root_scope: &str,
 ) -> MarkResult<Vec<usize>> {
-    let mut pending = vec![root_scope.to_owned()];
+    let mut pending = vec![(root_scope.to_owned(), None::<String>)];
     let mut selected = BTreeSet::new();
-    while let Some(scope) = pending.pop() {
+    let mut inspected = BTreeSet::new();
+    let mut decoded = std::collections::BTreeMap::new();
+    while let Some((scope, repository)) = pending.pop() {
         let Some((index, blob)) = bundle
             .grammar_blobs
             .iter()
@@ -125,52 +127,188 @@ fn grammar_blob_closure(
         else {
             continue;
         };
-        if !selected.insert(index) {
+        selected.insert(index);
+        if !inspected.insert((index, repository.clone())) {
             continue;
         }
-        let bytes = blob.decoded_bytes().map_err(|error| {
-            MarkError::Usage(format!(
-                "failed to decode bundled TextMate grammar `{}`: {error:?}",
-                blob.language
-            ))
-        })?;
-        let json = serde_json::from_slice::<serde_json::Value>(&bytes).map_err(|error| {
-            MarkError::Usage(format!(
-                "failed to inspect bundled TextMate grammar `{}`: {error}",
-                blob.language
-            ))
-        })?;
-        collect_external_scopes(&json, bundle, &mut pending);
+        if let std::collections::btree_map::Entry::Vacant(entry) = decoded.entry(index) {
+            let bytes = blob.decoded_bytes().map_err(|error| {
+                MarkError::Usage(format!(
+                    "failed to decode bundled TextMate grammar `{}`: {error:?}",
+                    blob.language
+                ))
+            })?;
+            let json = serde_json::from_slice::<serde_json::Value>(&bytes).map_err(|error| {
+                MarkError::Usage(format!(
+                    "failed to inspect bundled TextMate grammar `{}`: {error}",
+                    blob.language
+                ))
+            })?;
+            entry.insert(json);
+        }
+        let json = decoded
+            .get(&index)
+            .expect("decoded grammar inserted before dependency inspection");
+        collect_external_scopes(
+            json,
+            &blob.scope_name,
+            root_scope,
+            repository.as_deref(),
+            bundle,
+            &mut pending,
+        );
     }
     Ok(selected.into_iter().collect())
 }
 
 fn collect_external_scopes(
-    value: &serde_json::Value,
+    grammar: &serde_json::Value,
+    grammar_scope: &str,
+    root_scope: &str,
+    repository_rule: Option<&str>,
     bundle: &grammars::bundle::Bundle,
-    pending: &mut Vec<String>,
+    pending: &mut Vec<(String, Option<String>)>,
 ) {
-    match value {
-        serde_json::Value::Object(object) => {
-            if let Some(include) = object.get("include").and_then(|value| value.as_str())
-                && !include.starts_with('#')
-                && !matches!(include, "$self" | "$base")
+    let Some(object) = grammar.as_object() else {
+        return;
+    };
+    let repository = object
+        .get("repository")
+        .and_then(serde_json::Value::as_object);
+    // Repository rules form a shared graph, not a tree. Keep completed names
+    // visited as well as active ones: removing them after recursion makes the
+    // Markdown dependency walk exponential (many fenced-language rules share
+    // the same CommonMark repositories).
+    let mut visited_local = BTreeSet::new();
+    if let Some(name) = repository_rule {
+        if let Some(rule) = repository.and_then(|repository| repository.get(name)) {
+            collect_rule_dependencies(
+                rule,
+                grammar_scope,
+                root_scope,
+                repository,
+                bundle,
+                pending,
+                &mut visited_local,
+            );
+        }
+    } else {
+        if let Some(patterns) = object.get("patterns") {
+            collect_pattern_dependencies(
+                patterns,
+                grammar_scope,
+                root_scope,
+                repository,
+                bundle,
+                pending,
+                &mut visited_local,
+            );
+        }
+        // Inline injections are owned by the root grammar. Dependencies may
+        // themselves contain `injections`, but loading them as includes must
+        // not activate (or load the closure of) those unrelated rules.
+        if grammar_scope == root_scope
+            && let Some(injections) = object
+                .get("injections")
+                .and_then(serde_json::Value::as_object)
+        {
+            for rule in injections.values() {
+                collect_rule_dependencies(
+                    rule,
+                    grammar_scope,
+                    root_scope,
+                    repository,
+                    bundle,
+                    pending,
+                    &mut visited_local,
+                );
+            }
+        }
+    }
+}
+
+fn collect_pattern_dependencies(
+    patterns: &serde_json::Value,
+    grammar_scope: &str,
+    root_scope: &str,
+    repository: Option<&serde_json::Map<String, serde_json::Value>>,
+    bundle: &grammars::bundle::Bundle,
+    pending: &mut Vec<(String, Option<String>)>,
+    visited_local: &mut BTreeSet<String>,
+) {
+    let Some(patterns) = patterns.as_array() else {
+        return;
+    };
+    for rule in patterns {
+        collect_rule_dependencies(
+            rule,
+            grammar_scope,
+            root_scope,
+            repository,
+            bundle,
+            pending,
+            visited_local,
+        );
+    }
+}
+
+fn collect_rule_dependencies(
+    rule: &serde_json::Value,
+    grammar_scope: &str,
+    root_scope: &str,
+    repository: Option<&serde_json::Map<String, serde_json::Value>>,
+    bundle: &grammars::bundle::Bundle,
+    pending: &mut Vec<(String, Option<String>)>,
+    visited_local: &mut BTreeSet<String>,
+) {
+    let Some(rule) = rule.as_object() else {
+        return;
+    };
+    if let Some(include) = rule.get("include").and_then(serde_json::Value::as_str) {
+        if let Some(name) = include.strip_prefix('#') {
+            if visited_local.insert(name.to_owned())
+                && let Some(local) = repository.and_then(|repository| repository.get(name))
             {
-                let scope = include.split('#').next().unwrap_or(include);
-                if bundle.grammar_blob_for_scope(scope).is_some() {
-                    pending.push(scope.to_owned());
-                }
+                collect_rule_dependencies(
+                    local,
+                    grammar_scope,
+                    root_scope,
+                    repository,
+                    bundle,
+                    pending,
+                    visited_local,
+                );
             }
-            for child in object.values() {
-                collect_external_scopes(child, bundle, pending);
+        } else if include == "$self" {
+            pending.push((grammar_scope.to_owned(), None));
+        } else if include == "$base" {
+            pending.push((root_scope.to_owned(), None));
+        } else {
+            let (scope, repository) = include
+                .split_once('#')
+                .map_or((include, None), |(scope, repository)| {
+                    (scope, Some(repository.to_owned()))
+                });
+            if bundle.grammar_blob_for_scope(scope).is_some() {
+                pending.push((scope.to_owned(), repository));
             }
         }
-        serde_json::Value::Array(values) => {
-            for child in values {
-                collect_external_scopes(child, bundle, pending);
-            }
-        }
-        _ => {}
+        return;
+    }
+
+    // vscode-textmate's dependency processor follows ordinary rule patterns,
+    // but not capture retokenization patterns. A capture-only external include
+    // is therefore unresolved unless that grammar is reachable elsewhere.
+    if let Some(patterns) = rule.get("patterns") {
+        collect_pattern_dependencies(
+            patterns,
+            grammar_scope,
+            root_scope,
+            repository,
+            bundle,
+            pending,
+            visited_local,
+        );
     }
 }
 

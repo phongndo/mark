@@ -122,7 +122,6 @@ struct AssetGrammar {
     path: String,
     scope_name: String,
     first_line_pattern: Option<String>,
-    file_types: Vec<String>,
     bytes: Vec<u8>,
     pattern_count: u32,
     dfa_count: u32,
@@ -130,12 +129,38 @@ struct AssetGrammar {
     scopes: Vec<String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LanguageMetadataManifest {
+    languages: Vec<LanguageMetadata>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LanguageMetadata {
+    id: String,
+    #[serde(default)]
+    asset: Option<String>,
+    #[serde(default)]
+    aliases: Vec<String>,
+    #[serde(default)]
+    extensions: Vec<String>,
+    #[serde(default)]
+    basenames: Vec<String>,
+}
+
 fn build_bundle(assets: &Path) -> Result<Bundle, Box<dyn std::error::Error>> {
     let coverage_text = fs::read_to_string(assets.join("coverage.toml"))?;
     let source_text = fs::read_to_string(assets.join("SOURCE.toml"))?;
     let licenses_text = fs::read_to_string(assets.join("licenses.json"))?;
+    let metadata_text = fs::read_to_string(assets.join("language-metadata.json"))?;
     let coverage: CoverageManifest = toml::from_str(&coverage_text)?;
     let licenses: LicensesManifest = serde_json::from_str(&licenses_text)?;
+    let metadata: LanguageMetadataManifest = serde_json::from_str(&metadata_text)?;
+    let metadata_by_language = metadata
+        .languages
+        .iter()
+        .map(|entry| (entry.id.as_str(), entry))
+        .collect::<BTreeMap<_, _>>();
     let license_by_language = licenses
         .assets
         .iter()
@@ -195,6 +220,7 @@ fn build_bundle(assets: &Path) -> Result<Bundle, Box<dyn std::error::Error>> {
                 &language,
                 &language,
                 &grammar_by_language,
+                &metadata_by_language,
                 &mut seen_languages,
             )?);
         }
@@ -208,6 +234,7 @@ fn build_bundle(assets: &Path) -> Result<Bundle, Box<dyn std::error::Error>> {
             &remap.language,
             &remap.asset,
             &grammar_by_language,
+            &metadata_by_language,
             &mut seen_languages,
         )?);
     }
@@ -217,6 +244,7 @@ fn build_bundle(assets: &Path) -> Result<Bundle, Box<dyn std::error::Error>> {
     hash_input.extend_from_slice(source_text.as_bytes());
     hash_input.extend_from_slice(coverage_text.as_bytes());
     hash_input.extend_from_slice(licenses_text.as_bytes());
+    hash_input.extend_from_slice(metadata_text.as_bytes());
 
     Ok(Bundle {
         source_hash: fnv1a64(&hash_input),
@@ -262,7 +290,6 @@ fn collect_grammars(assets: &Path) -> Result<Vec<AssetGrammar>, Box<dyn std::err
             path: normalize_path(&path),
             scope_name: compiled.scope_name.clone(),
             first_line_pattern: compiled.metadata.first_line_match.clone(),
-            file_types: compiled.metadata.file_types.clone(),
             bytes,
             pattern_count: compiled.patterns.len() as u32,
             dfa_count,
@@ -277,6 +304,7 @@ fn language_entry(
     language: &str,
     asset: &str,
     grammar_by_language: &BTreeMap<&str, (u32, &AssetGrammar)>,
+    metadata_by_language: &BTreeMap<&str, &LanguageMetadata>,
     seen_languages: &mut BTreeSet<String>,
 ) -> Result<LanguageEntry, Box<dyn std::error::Error>> {
     if !seen_languages.insert(language.to_owned()) {
@@ -285,10 +313,23 @@ fn language_entry(
     let (grammar_blob, grammar) = grammar_by_language
         .get(asset)
         .ok_or_else(|| format!("coverage maps {language} to missing grammar asset {asset}"))?;
+    let metadata = metadata_by_language
+        .get(language)
+        .ok_or_else(|| format!("language metadata is missing public id {language}"))?;
+    if metadata.asset.as_deref().unwrap_or(language) != asset {
+        return Err(format!("language metadata maps {language} to the wrong asset").into());
+    }
     let mut aliases = catalog::aliases_for_language(language)
         .into_iter()
         .filter(|alias| alias != language)
         .collect::<BTreeSet<_>>();
+    aliases.extend(
+        metadata
+            .aliases
+            .iter()
+            .map(|alias| catalog::normalize_language_token(alias))
+            .filter(|alias| !alias.is_empty() && alias != language),
+    );
     if asset != language {
         aliases.insert(catalog::normalize_language_token(asset));
     }
@@ -300,17 +341,14 @@ fn language_entry(
         .into_iter()
         .filter(|basename| !basename.is_empty())
         .collect::<BTreeSet<_>>();
-    for file_type in &grammar.file_types {
-        let value = file_type.trim();
-        if value.is_empty() {
-            continue;
-        }
-        if value.contains('.') && !value.starts_with('.') {
-            basenames.insert(value.to_owned());
-        } else {
-            extensions.insert(value.trim_start_matches('.').to_ascii_lowercase());
-        }
-    }
+    extensions.extend(
+        metadata
+            .extensions
+            .iter()
+            .filter(|extension| catalog::extension_is_allowed(extension, language))
+            .cloned(),
+    );
+    basenames.extend(metadata.basenames.iter().cloned());
     if language == "tsx" {
         aliases.insert("typescriptreact".to_owned());
         extensions.insert("tsx".to_owned());

@@ -25,9 +25,9 @@ path = "target/textmate-performance/corpora/representative-markdown.md"
 builder = "tools/build-textmate-corpora.py"
 language = "markdown"
 scope = "text.html.markdown"
-bytes = 31961
-tokenizer_lines = 1048
-sha256 = "62b8cc16cc30aeba5804565371c97baccdecee0683f4ed303d17066737d28acc"
+bytes = 35137
+tokenizer_lines = 1112
+sha256 = "fbef4362a3aa5c8974e0d8e336f34f5e9cf379960903723d5b8be9fd97b961ab"
 
 [[corpus]]
 id = "core-repeated"
@@ -35,9 +35,19 @@ path = "target/textmate-performance/corpora/core-repeated"
 builder = "tools/build-textmate-corpora.py"
 languages = 38
 generated_languages = 39
-bytes = 3177627
-tokenizer_lines = 146289
-sha256 = "106583851ff7e5ff349d716cf22e459ed43083b936a8f5c2ce554c22ed385766"
+bytes = 3289110
+tokenizer_lines = 108596
+sha256 = "7dced6109443b5786b960cf5530a335509e0667845603c53a56edffacbab8b99"
+
+# Complete catalog sweep: one stable-size member for every public stress fixture.
+[[corpus]]
+id = "catalog-repeated"
+path = "target/textmate-performance/corpora/catalog-repeated"
+builder = "tools/build-textmate-corpora.py"
+languages = 254
+bytes = 21945375
+tokenizer_lines = 734618
+sha256 = "3f8c9406fd545dcaea8d40d589ac3015bb71054b245e9f16d1d680233a7199e2"
 
 # Xcode Command Line Tools libc++ corpus used by the checkpoint profile.
 [[corpus]]

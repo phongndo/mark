@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "targetPublicLanguages": 254,
+  "targetMinimumGoldenCases": 508,
+  "measurementGateCases": 124,
+  "warmupRuns": 1,
+  "timedRuns": 5,
+  "interactiveP95Seconds": 60,
+  "shardTargetP95Seconds": 45,
+  "maximumShards": 8,
+  "shardStrategy": "sha256-language-id-modulo",
+  "referenceRunner": "local development machine (L0.6 baseline)",
+  "percentileMethod": "nearest-rank",
+  "timingCommand": "cargo test -p mark-syntax --test textmate_golden --locked",
+  "decision": {
+    "state": "measured",
+    "manifestCases": 524,
+    "fullSuiteP95Seconds": 63.33,
+    "interactiveThresholdSeconds": 60,
+    "shardCount": 4,
+    "shardP95SecondsByIndex": {
+      "0": 16.67,
+      "1": 20.56,
+      "2": 8.24,
+      "3": 13.29
+    },
+    "measuredAt": "2026-07-12",
+    "runner": "local development machine (L0.6 baseline)",
+    "evidence": "Local full-suite wall-clock measurement at 524 manifest cases: 63.33 s, above the 60 s interactive threshold. CI therefore runs a four-shard matrix; the unfiltered timingCommand remains the local full-suite gate. Per-shard evidence for the selected four-shard matrix (1 warmup + 5 timed runs each, nearest-rank p95, 2026-07-12, after the bird2 stress-fixture rebalance): shard 0 = 16.67 s, shard 1 = 20.56 s, shard 2 = 8.24 s, shard 3 = 13.29 s; maximum 20.56 s, within the 45 s shard target. Same-protocol comparison runs on the same day measured the unsharded suite at 58.82 s and a two-shard split at max 33.91 s (shards 24.94 s / 33.91 s); the reviewed four-shard decision is retained for headroom against the interactive trigger rather than re-decided on a borderline re-measurement."
+  }
+}

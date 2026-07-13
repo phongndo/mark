@@ -120,7 +120,17 @@ pub enum ClassAtom {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct CharClass {
     pub negated: bool,
+    /// Additional union terms intersected with `atoms` by Oniguruma's `&&`
+    /// operator. Each inner vector is a union, so `[ab&&bc&&cd]` is stored as
+    /// `ab AND bc AND cd`.
+    pub intersections: Vec<Vec<ClassAtom>>,
     pub atoms: Vec<ClassAtom>,
+}
+
+impl CharClass {
+    fn current_union_mut(&mut self) -> &mut Vec<ClassAtom> {
+        self.intersections.last_mut().unwrap_or(&mut self.atoms)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -310,6 +320,43 @@ pub(crate) fn has_case_insensitive_scope(ast: &Ast) -> bool {
     }
 }
 
+pub(crate) fn uniform_effective_flags(ast: &Ast) -> Option<RegexFlags> {
+    fn visit(ast: &Ast, inherited: RegexFlags) -> Result<Option<RegexFlags>, ()> {
+        match ast {
+            Ast::Empty => Ok(None),
+            Ast::Flags { flags, child } => visit(child, *flags),
+            Ast::Concat(nodes) | Ast::Alternation(nodes) => {
+                let mut uniform = None;
+                for node in nodes {
+                    if let Some(flags) = visit(node, inherited)? {
+                        if uniform.is_some_and(|uniform| uniform != flags) {
+                            return Err(());
+                        }
+                        uniform = Some(flags);
+                    }
+                }
+                Ok(uniform)
+            }
+            Ast::Conditional {
+                matched, unmatched, ..
+            } => {
+                let left = visit(matched, inherited)?;
+                let right = visit(unmatched, inherited)?;
+                if left.is_some() && right.is_some() && left != right {
+                    Err(())
+                } else {
+                    Ok(left.or(right))
+                }
+            }
+            Ast::Repeat { node, .. }
+            | Ast::Group { child: node, .. }
+            | Ast::Look { child: node, .. } => visit(node, inherited),
+            _ => Ok(Some(inherited)),
+        }
+    }
+    visit(ast, RegexFlags::default()).ok().flatten()
+}
+
 struct Parser<'a> {
     source: &'a str,
     chars: Vec<char>,
@@ -350,7 +397,11 @@ impl<'a> Parser<'a> {
             source: self.source.to_owned(),
             ast,
             features: self.features,
-            flags: self.flags,
+            // Option changes are represented at the AST node where they are
+            // active.  The VM therefore always starts with Oniguruma's
+            // defaults; using the final parser state here incorrectly applies
+            // a trailing `(?i)`/`(?-i)` choice to the entire expression.
+            flags: RegexFlags::default(),
             capture_count: self.next_capture.saturating_sub(1),
             named_captures: self.named_captures,
             diagnostics: self.diagnostics,
@@ -367,11 +418,7 @@ impl<'a> Parser<'a> {
             }
             break;
         }
-        if branches.len() == 1 {
-            branches.pop().unwrap_or(Ast::Empty)
-        } else {
-            Ast::Alternation(branches)
-        }
+        normalize_flag_changes(branches)
     }
 
     fn parse_concat(&mut self, terminator: Option<char>) -> Ast {
@@ -400,9 +447,32 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_repeat(&mut self) -> Ast {
+        let active_flags = self.flags;
+        let atom_is_group = self.peek() == Some('(');
         let mut node = self.parse_atom();
-        loop {
-            let Some(ch) = self.peek() else { break };
+        // Bare option groups such as `(?i)` affect the remainder of the
+        // enclosing subexpression. Snapshot those options on consuming atoms.
+        // Groups and lookarounds snapshot their children while parsing, so an
+        // outer wrapper here would overwrite an inner `(?-i)` transition.
+        if !atom_is_group
+            && active_flags != RegexFlags::default()
+            && matches!(
+                node,
+                Ast::Literal(_)
+                    | Ast::Dot
+                    | Ast::Grapheme
+                    | Ast::Class(_)
+                    | Ast::Anchor(_)
+                    | Ast::Backref(_)
+                    | Ast::Subroutine(_)
+            )
+        {
+            node = Ast::Flags {
+                flags: active_flags,
+                child: Box::new(node),
+            };
+        }
+        while let Some(ch) = self.peek() {
             let quantifier = match ch {
                 '*' => {
                     self.bump();
@@ -473,7 +543,9 @@ impl<'a> Parser<'a> {
     fn parse_group(&mut self) -> Ast {
         if self.peek() != Some('?') {
             let index = self.alloc_capture(None);
+            let outer = self.flags;
             let child = self.parse_alternation(Some(')'));
+            self.flags = outer;
             self.expect(')');
             return Ast::Group {
                 index: Some(index),
@@ -485,14 +557,18 @@ impl<'a> Parser<'a> {
         match self.peek() {
             Some(':') => {
                 self.bump();
+                let outer = self.flags;
                 let child = self.parse_alternation(Some(')'));
+                self.flags = outer;
                 self.expect(')');
                 child
             }
             Some('=') => {
                 self.bump();
                 self.features.lookahead = true;
+                let outer = self.flags;
                 let child = self.parse_alternation(Some(')'));
+                self.flags = outer;
                 self.expect(')');
                 Ast::Look {
                     kind: LookKind::Ahead,
@@ -502,7 +578,9 @@ impl<'a> Parser<'a> {
             Some('!') => {
                 self.bump();
                 self.features.lookahead = true;
+                let outer = self.flags;
                 let child = self.parse_alternation(Some(')'));
+                self.flags = outer;
                 self.expect(')');
                 Ast::Look {
                     kind: LookKind::NotAhead,
@@ -515,7 +593,9 @@ impl<'a> Parser<'a> {
                     Some('=') => {
                         self.bump();
                         self.features.lookbehind = true;
+                        let outer = self.flags;
                         let child = self.parse_alternation(Some(')'));
+                        self.flags = outer;
                         self.expect(')');
                         Ast::Look {
                             kind: LookKind::Behind,
@@ -525,7 +605,9 @@ impl<'a> Parser<'a> {
                     Some('!') => {
                         self.bump();
                         self.features.lookbehind = true;
+                        let outer = self.flags;
                         let child = self.parse_alternation(Some(')'));
+                        self.flags = outer;
                         self.expect(')');
                         Ast::Look {
                             kind: LookKind::NotBehind,
@@ -537,7 +619,9 @@ impl<'a> Parser<'a> {
                         self.expect('>');
                         self.features.named_group = true;
                         let index = self.alloc_capture(Some(name.clone()));
+                        let outer = self.flags;
                         let child = self.parse_alternation(Some(')'));
+                        self.flags = outer;
                         self.expect(')');
                         Ast::Group {
                             index: Some(index),
@@ -554,7 +638,9 @@ impl<'a> Parser<'a> {
                 self.expect('>');
                 self.features.named_group = true;
                 let index = self.alloc_capture(Some(name.clone()));
+                let outer = self.flags;
                 let child = self.parse_alternation(Some(')'));
+                self.flags = outer;
                 self.expect(')');
                 Ast::Group {
                     index: Some(index),
@@ -565,7 +651,9 @@ impl<'a> Parser<'a> {
             Some('>') => {
                 self.bump();
                 self.features.possessive_or_atomic = true;
+                let outer = self.flags;
                 let child = self.parse_alternation(Some(')'));
+                self.flags = outer;
                 self.expect(')');
                 Ast::Repeat {
                     node: Box::new(child),
@@ -584,7 +672,10 @@ impl<'a> Parser<'a> {
             }
             Some('(') => {
                 self.features.conditional = true;
-                self.parse_conditional()
+                let outer = self.flags;
+                let conditional = self.parse_conditional();
+                self.flags = outer;
+                conditional
             }
             Some(ch) if is_flag_char(ch) || ch == '-' => self.parse_flag_group(),
             _ => {
@@ -654,6 +745,9 @@ impl<'a> Parser<'a> {
                     let child = self.parse_alternation(Some(')'));
                     self.flags = outer;
                     self.expect(')');
+                    // Keep an explicit snapshot even when `local` is the
+                    // default. An enclosing bare option change may otherwise
+                    // wrap this child and erase a scoped `(?-i:...)` reset.
                     return Ast::Flags {
                         flags: local,
                         child: Box::new(child),
@@ -662,7 +756,7 @@ impl<'a> Parser<'a> {
                 ')' => {
                     self.bump();
                     self.flags = local;
-                    return Ast::Empty;
+                    return flag_change_marker(local);
                 }
                 _ => break,
             }
@@ -692,23 +786,30 @@ impl<'a> Parser<'a> {
                 self.bump();
                 break;
             }
+            if ch == '&' && self.peek_n(1) == Some('&') {
+                self.bump();
+                self.bump();
+                class.intersections.push(Vec::new());
+                continue;
+            }
             let atom = self.read_class_atom();
             if let ClassAtom::Char(start) = atom {
                 if self.peek() == Some('-') && self.peek_n(1).is_some_and(|next| next != ']') {
                     self.bump();
                     let end_atom = self.read_class_atom();
                     if let ClassAtom::Char(end) = end_atom {
-                        class.atoms.push(ClassAtom::Range(start, end));
+                        class.current_union_mut().push(ClassAtom::Range(start, end));
                     } else {
-                        class.atoms.push(ClassAtom::Char(start));
-                        class.atoms.push(ClassAtom::Char('-'));
-                        class.atoms.push(end_atom);
+                        let union = class.current_union_mut();
+                        union.push(ClassAtom::Char(start));
+                        union.push(ClassAtom::Char('-'));
+                        union.push(end_atom);
                     }
                     continue;
                 }
-                class.atoms.push(ClassAtom::Char(start));
+                class.current_union_mut().push(ClassAtom::Char(start));
             } else {
-                class.atoms.push(atom);
+                class.current_union_mut().push(atom);
             }
         }
         class
@@ -739,7 +840,7 @@ impl<'a> Parser<'a> {
             self.features.unicode_or_posix_class = true;
             return ClassAtom::Posix { name, negated };
         }
-        if ch == '[' && self.peek_n(1) == Some('^') {
+        if ch == '[' {
             self.bump();
             return ClassAtom::Nested(Box::new(self.parse_class_body()));
         }
@@ -815,46 +916,57 @@ impl<'a> Parser<'a> {
             'B' if !in_class => Ast::Anchor(AnchorKind::NotWordBoundary),
             'd' => Ast::Class(CharClass {
                 negated: false,
+                intersections: Vec::new(),
                 atoms: vec![ClassAtom::Perl(PerlClassKind::Digit)],
             }),
             'D' => Ast::Class(CharClass {
                 negated: false,
+                intersections: Vec::new(),
                 atoms: vec![ClassAtom::Perl(PerlClassKind::NotDigit)],
             }),
             's' => Ast::Class(CharClass {
                 negated: false,
+                intersections: Vec::new(),
                 atoms: vec![ClassAtom::Perl(PerlClassKind::Space)],
             }),
             'S' => Ast::Class(CharClass {
                 negated: false,
+                intersections: Vec::new(),
                 atoms: vec![ClassAtom::Perl(PerlClassKind::NotSpace)],
             }),
             'w' => Ast::Class(CharClass {
                 negated: false,
+                intersections: Vec::new(),
                 atoms: vec![ClassAtom::Perl(PerlClassKind::Word)],
             }),
             'W' => Ast::Class(CharClass {
                 negated: false,
+                intersections: Vec::new(),
                 atoms: vec![ClassAtom::Perl(PerlClassKind::NotWord)],
             }),
             'h' => Ast::Class(CharClass {
                 negated: false,
+                intersections: Vec::new(),
                 atoms: vec![ClassAtom::Perl(PerlClassKind::HorizontalSpace)],
             }),
             'H' => Ast::Class(CharClass {
                 negated: false,
+                intersections: Vec::new(),
                 atoms: vec![ClassAtom::Perl(PerlClassKind::NotHorizontalSpace)],
             }),
             'v' => Ast::Class(CharClass {
                 negated: false,
+                intersections: Vec::new(),
                 atoms: vec![ClassAtom::Perl(PerlClassKind::VerticalSpace)],
             }),
             'V' => Ast::Class(CharClass {
                 negated: false,
+                intersections: Vec::new(),
                 atoms: vec![ClassAtom::Perl(PerlClassKind::NotVerticalSpace)],
             }),
             'N' => Ast::Class(CharClass {
                 negated: false,
+                intersections: Vec::new(),
                 atoms: vec![ClassAtom::Perl(PerlClassKind::NotNewline)],
             }),
             'X' => Ast::Grapheme,
@@ -865,6 +977,7 @@ impl<'a> Parser<'a> {
                 self.features.unicode_or_posix_class = true;
                 Ast::Class(CharClass {
                     negated: false,
+                    intersections: Vec::new(),
                     atoms: vec![ClassAtom::Unicode {
                         name,
                         negated: ch == 'P',
@@ -922,6 +1035,7 @@ impl<'a> Parser<'a> {
                 Ast::Literal("\r\n".to_owned()),
                 Ast::Class(CharClass {
                     negated: false,
+                    intersections: Vec::new(),
                     atoms: vec![
                         ClassAtom::Char('\n'),
                         ClassAtom::Char('\r'),
@@ -1031,12 +1145,107 @@ impl<'a> Parser<'a> {
     }
 }
 
+fn normalize_flag_changes(mut branches: Vec<Ast>) -> Ast {
+    for branch_index in 0..branches.len() {
+        let branch = std::mem::replace(&mut branches[branch_index], Ast::Empty);
+        let mut nodes = match branch {
+            Ast::Concat(nodes) => nodes,
+            node => vec![node],
+        };
+        let Some(change_index) = nodes
+            .iter()
+            .position(|node| flag_change_flags(node).is_some())
+        else {
+            branches[branch_index] = concat_ast(nodes);
+            continue;
+        };
+        let flags = flag_change_flags(&nodes.remove(change_index)).expect("flag marker");
+        let prefix = nodes.drain(..change_index).collect::<Vec<_>>();
+        let mut remainder = vec![concat_ast(nodes)];
+        remainder.extend(branches.drain(branch_index + 1..));
+        let scoped_remainder = Ast::Flags {
+            flags,
+            child: Box::new(normalize_flag_changes(remainder)),
+        };
+        let mut transformed = prefix;
+        transformed.push(scoped_remainder);
+        branches[branch_index] = concat_ast(transformed);
+        break;
+    }
+    alternation_ast(branches)
+}
+
+fn flag_change_marker(flags: RegexFlags) -> Ast {
+    let bits = u8::from(flags.case_insensitive)
+        | (u8::from(flags.multi_line) << 1)
+        | (u8::from(flags.dot_matches_new_line) << 2)
+        | (u8::from(flags.ignore_whitespace) << 3);
+    Ast::Unsupported(format!("\0option-change:{bits}"))
+}
+
+fn flag_change_flags(ast: &Ast) -> Option<RegexFlags> {
+    let Ast::Unsupported(marker) = ast else {
+        return None;
+    };
+    let bits = marker
+        .strip_prefix("\0option-change:")?
+        .parse::<u8>()
+        .ok()?;
+    Some(RegexFlags {
+        case_insensitive: bits & 1 != 0,
+        multi_line: bits & 2 != 0,
+        dot_matches_new_line: bits & 4 != 0,
+        ignore_whitespace: bits & 8 != 0,
+    })
+}
+
+fn concat_ast(mut nodes: Vec<Ast>) -> Ast {
+    match nodes.len() {
+        0 => Ast::Empty,
+        1 => nodes.pop().expect("one concat node"),
+        _ => Ast::Concat(nodes),
+    }
+}
+
+fn alternation_ast(mut branches: Vec<Ast>) -> Ast {
+    match branches.len() {
+        0 => Ast::Empty,
+        1 => branches.pop().expect("one alternation branch"),
+        _ => Ast::Alternation(branches),
+    }
+}
+
 fn push_concat_node(nodes: &mut Vec<Ast>, node: Ast) {
     if let Ast::Literal(literal) = node {
         if let Some(Ast::Literal(previous)) = nodes.last_mut() {
             previous.push_str(&literal);
         } else {
             nodes.push(Ast::Literal(literal));
+        }
+    } else if let Ast::Flags { flags, child } = node {
+        // Keep option snapshots compact. Without this, `(?i:keyword)` becomes
+        // one flag node per scalar and defeats literal/alternation fast paths.
+        match *child {
+            Ast::Literal(literal) => {
+                if let Some(Ast::Flags {
+                    flags: previous_flags,
+                    child: previous_child,
+                }) = nodes.last_mut()
+                    && *previous_flags == flags
+                    && let Ast::Literal(previous) = previous_child.as_mut()
+                {
+                    previous.push_str(&literal);
+                } else {
+                    nodes.push(Ast::Flags {
+                        flags,
+                        child: Box::new(Ast::Literal(literal)),
+                    });
+                }
+            }
+            child => nodes.push(Ast::Flags {
+                flags,
+                child: Box::new(child),
+            }),
         }
     } else {
         nodes.push(node);
@@ -1124,6 +1333,7 @@ mod tests {
             parsed.ast,
             Ast::Class(CharClass {
                 negated: false,
+                intersections: Vec::new(),
                 atoms: vec![
                     ClassAtom::Char(']'),
                     ClassAtom::Char(')'),
@@ -1147,9 +1357,61 @@ mod tests {
             class.atoms[2],
             ClassAtom::Nested(Box::new(CharClass {
                 negated: true,
+                intersections: Vec::new(),
                 atoms: vec![ClassAtom::Range('\0', '\u{7f}')],
             }))
         );
+    }
+
+    #[test]
+    fn parses_nested_class_intersection_as_intersected_unions() {
+        let parsed = parse(r#"[[\p{S}\p{P}]&&[^]"'(),;\[_`{}]]+"#);
+        let Ast::Repeat { node, .. } = parsed.ast else {
+            panic!("expected repeated class");
+        };
+        let Ast::Class(class) = *node else {
+            panic!("expected class");
+        };
+        assert_eq!(class.atoms.len(), 1);
+        assert_eq!(class.intersections.len(), 1);
+        assert!(matches!(
+            &class.atoms[0],
+            ClassAtom::Nested(nested)
+                if matches!(
+                    nested.atoms.as_slice(),
+                    [
+                        ClassAtom::Unicode { name: symbol, negated: false },
+                        ClassAtom::Unicode { name: punctuation, negated: false },
+                    ] if symbol == "S" && punctuation == "P"
+                )
+        ));
+        assert!(matches!(
+            class.intersections[0].as_slice(),
+            [ClassAtom::Nested(nested)]
+                if nested.negated
+                    && nested.atoms.first() == Some(&ClassAtom::Char(']'))
+                    && nested.atoms.contains(&ClassAtom::Char('['))
+        ));
+    }
+
+    #[test]
+    fn intersection_rhs_is_a_union_and_chained_intersections_are_preserved() {
+        let parsed = parse(r"[a-w&&[^c-g]z&&[^x]]");
+        let Ast::Class(class) = parsed.ast else {
+            panic!("expected class");
+        };
+        assert_eq!(class.atoms, vec![ClassAtom::Range('a', 'w')]);
+        assert_eq!(class.intersections.len(), 2);
+        assert!(matches!(
+            class.intersections[0].as_slice(),
+            [ClassAtom::Nested(nested), ClassAtom::Char('z')]
+                if nested.negated && nested.atoms == [ClassAtom::Range('c', 'g')]
+        ));
+        assert!(matches!(
+            class.intersections[1].as_slice(),
+            [ClassAtom::Nested(nested)]
+                if nested.negated && nested.atoms == [ClassAtom::Char('x')]
+        ));
     }
 
     #[test]

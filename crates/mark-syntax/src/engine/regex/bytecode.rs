@@ -4,12 +4,12 @@
 //! Mutable DFS, assertion, and repeat state lives in [`BytecodeScratch`], so a
 //! caller can reuse its allocations across candidate attempts.
 
-use super::AnchorContext;
 use super::ast::{Ast, Backref, CharClass, LookKind, ParsedRegex, RegexFlags};
 use super::backtrack::{
     BudgetExceeded, StepBudget, anchor_matches, char_at, class_contains,
-    is_cpp_space_comment_separator,
+    is_cpp_space_comment_separator, match_literal_end, unicode_case_eq,
 };
+use super::{AnchorContext, is_unicode_word_char};
 use std::ops::Range;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,11 +61,18 @@ struct LiteralTrieId(u32);
 #[derive(Debug, Clone, Default)]
 struct LiteralTrie {
     nodes: Vec<LiteralTrieNode>,
+    unicode_nodes: Vec<UnicodeLiteralTrieNode>,
 }
 
 #[derive(Debug, Clone, Default)]
 struct LiteralTrieNode {
     edges: Vec<(u8, u32)>,
+    terminal_order: Option<u32>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct UnicodeLiteralTrieNode {
+    edges: Vec<(char, u32)>,
     terminal_order: Option<u32>,
 }
 
@@ -243,17 +250,12 @@ struct RepeatState {
     stalled: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 enum CaptureState {
+    #[default]
     Unset,
     Open(usize),
     Matched(Range<usize>),
-}
-
-impl Default for CaptureState {
-    fn default() -> Self {
-        Self::Unset
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -419,7 +421,7 @@ fn previous_char(line: &str, pos: usize) -> Option<char> {
 }
 
 fn cpp_is_word_char(ch: char) -> bool {
-    ch == '_' || ch.is_alphanumeric()
+    is_unicode_word_char(ch)
 }
 
 fn is_line_end_position(line: &str, pos: usize) -> bool {
@@ -537,15 +539,7 @@ impl Program {
             match &self.instructions[pc] {
                 Instruction::Literal { id, flags, next } => {
                     let value = &self.literals[id.0 as usize];
-                    let end = position.saturating_add(value.len());
-                    let matched = line.as_bytes().get(position..end).is_some_and(|candidate| {
-                        if flags.case_insensitive {
-                            candidate.eq_ignore_ascii_case(value.as_bytes())
-                        } else {
-                            candidate == value.as_bytes()
-                        }
-                    });
-                    if matched {
+                    if let Some(end) = match_literal_end(line, position, value, *flags) {
                         position = end;
                         pc = *next;
                     } else if !self.backtrack_or_resolve(line, scratch, &mut pc, &mut position)? {
@@ -555,7 +549,7 @@ impl Program {
                 Instruction::LiteralTrie { id, flags, next } => {
                     let trie = &self.literal_tries[id.0 as usize];
                     trie.collect_matches(
-                        line.as_bytes(),
+                        line,
                         position,
                         *flags,
                         budget,
@@ -756,15 +750,8 @@ impl Program {
                 Instruction::Backref { slot, flags, next } => {
                     let matched = match &scratch.captures[*slot] {
                         CaptureState::Matched(range) => {
-                            line.as_bytes().get(range.clone()).and_then(|captured| {
-                                let end = position.checked_add(captured.len())?;
-                                let candidate = line.as_bytes().get(position..end)?;
-                                let equal = if flags.case_insensitive {
-                                    candidate.eq_ignore_ascii_case(captured)
-                                } else {
-                                    candidate == captured
-                                };
-                                equal.then_some(end)
+                            line.get(range.clone()).and_then(|captured| {
+                                match_literal_end(line, position, captured, *flags)
                             })
                         }
                         CaptureState::Unset | CaptureState::Open(_) => None,
@@ -874,17 +861,7 @@ impl Program {
                         let advanced = match node {
                             ScanNode::Literal(id) => {
                                 let value = &self.literals[id.0 as usize];
-                                let end = cursor.saturating_add(value.len());
-                                line.as_bytes()
-                                    .get(cursor..end)
-                                    .is_some_and(|candidate| {
-                                        if flags.case_insensitive {
-                                            candidate.eq_ignore_ascii_case(value.as_bytes())
-                                        } else {
-                                            candidate == value.as_bytes()
-                                        }
-                                    })
-                                    .then_some(end)
+                                match_literal_end(line, cursor, value, *flags)
                             }
                             ScanNode::Class(id) => {
                                 let class = &self.classes[id.0 as usize];
@@ -1383,13 +1360,48 @@ impl Compiler {
                 if captures_can_be_elided && is_cpp_space_comment_separator(branches) {
                     return Ok(self.push(Instruction::CppSpaceCommentSeparator { next }));
                 }
-                if captures_can_be_elided && let Some(literals) = exact_literal_branches(branches) {
+                if captures_can_be_elided
+                    && let Some(literals) = exact_literal_branches(branches, flags)
+                {
                     let id = self.intern_literal_trie(&literals, flags)?;
                     return Ok(self.push(Instruction::LiteralTrie { id, flags, next }));
                 }
                 let mut entries = Vec::with_capacity(branches.len());
-                for branch in branches {
-                    entries.push(self.compile_node(branch, flags, next)?);
+                let mut branch = 0;
+                while branch < branches.len() {
+                    // Large grammar closures often contain a mostly-literal
+                    // keyword alternation with a few structured variants
+                    // (`foo|bar|create( or alter)?|...`). Treating one such
+                    // variant as a reason to compile every literal into a
+                    // Split chain makes each negative probe walk the full
+                    // closure. Compact contiguous literal runs into the same
+                    // reusable trie used by all-literal alternations. Keeping
+                    // runs contiguous preserves ordered-alternation priority
+                    // around the structured branches.
+                    if captures_can_be_elided
+                        && exact_literal_ast(&branches[branch], flags).is_some()
+                    {
+                        let run_start = branch;
+                        let mut literals = Vec::new();
+                        while branch < branches.len() {
+                            let Some(literal) = exact_literal_ast(&branches[branch], flags) else {
+                                break;
+                            };
+                            literals.push(literal);
+                            branch += 1;
+                        }
+                        if literals.len() >= 4 {
+                            let id = self.intern_literal_trie(&literals, flags)?;
+                            entries.push(self.push(Instruction::LiteralTrie { id, flags, next }));
+                        } else {
+                            for branch in &branches[run_start..branch] {
+                                entries.push(self.compile_node(branch, flags, next)?);
+                            }
+                        }
+                        continue;
+                    }
+                    entries.push(self.compile_node(&branches[branch], flags, next)?);
+                    branch += 1;
                 }
                 let mut entry = entries.pop().unwrap_or(next);
                 for preferred in entries.into_iter().rev() {
@@ -1625,7 +1637,37 @@ impl LiteralTrie {
     fn new(literals: &[String], flags: RegexFlags) -> Result<Self, CompileError> {
         let mut trie = Self {
             nodes: vec![LiteralTrieNode::default()],
+            unicode_nodes: Vec::new(),
         };
+        if flags.case_insensitive && literals.iter().any(|literal| !literal.is_ascii()) {
+            trie.nodes.clear();
+            trie.unicode_nodes.push(UnicodeLiteralTrieNode::default());
+            for (order, literal) in literals.iter().enumerate() {
+                let order = u32::try_from(order).map_err(|_| CompileError::TableOverflow)?;
+                let mut node = 0usize;
+                for ch in literal.chars() {
+                    let edge = trie.unicode_nodes[node]
+                        .edges
+                        .iter()
+                        .find(|(edge, _)| unicode_case_eq(*edge, ch))
+                        .map(|(_, child)| *child);
+                    node = if let Some(child) = edge {
+                        child as usize
+                    } else {
+                        let child = u32::try_from(trie.unicode_nodes.len())
+                            .map_err(|_| CompileError::TableOverflow)?;
+                        trie.unicode_nodes.push(UnicodeLiteralTrieNode::default());
+                        trie.unicode_nodes[node].edges.push((ch, child));
+                        child as usize
+                    };
+                }
+                let terminal = &mut trie.unicode_nodes[node].terminal_order;
+                if terminal.is_none_or(|existing| order < existing) {
+                    *terminal = Some(order);
+                }
+            }
+            return Ok(trie);
+        }
         for (order, literal) in literals.iter().enumerate() {
             let order = u32::try_from(order).map_err(|_| CompileError::TableOverflow)?;
             let mut node = 0usize;
@@ -1658,18 +1700,49 @@ impl LiteralTrie {
 
     fn collect_matches(
         &self,
-        line: &[u8],
+        line: &str,
         start: usize,
         flags: RegexFlags,
         budget: &mut StepBudget,
         matches: &mut Vec<(u32, usize)>,
     ) -> Result<(), BudgetExceeded> {
         matches.clear();
+        if !self.unicode_nodes.is_empty() {
+            let mut node = 0usize;
+            if let Some(order) = self.unicode_nodes[0].terminal_order {
+                matches.push((order, start));
+            }
+            for (offset, input) in line.get(start..).unwrap_or_default().char_indices() {
+                // Keep the same resource accounting as the byte trie: one
+                // unit per consumed input symbol, independent of inventory
+                // size. The scalar path is necessary for Oniguruma-compatible
+                // Unicode case-insensitive literal sets such as BSL keywords.
+                budget.step()?;
+                let child = self.unicode_nodes[node]
+                    .edges
+                    .iter()
+                    .find_map(|(edge, child)| unicode_case_eq(*edge, input).then_some(*child));
+                let Some(child) = child else {
+                    break;
+                };
+                node = child as usize;
+                if let Some(order) = self.unicode_nodes[node].terminal_order {
+                    matches.push((order, start + offset + input.len_utf8()));
+                }
+            }
+            return Ok(());
+        }
         let mut node = 0usize;
         if let Some(order) = self.nodes[0].terminal_order {
             matches.push((order, start));
         }
-        for (offset, &input) in line.get(start..).unwrap_or_default().iter().enumerate() {
+        for (offset, &input) in line
+            .as_bytes()
+            .get(start..)
+            .unwrap_or_default()
+            .iter()
+            .enumerate()
+        {
             // Charge input traversal as useful VM work. This keeps resource
             // limits comparable rather than making a large trie lookup free.
             budget.step()?;
@@ -1695,7 +1768,7 @@ impl LiteralTrie {
     }
 }
 
-fn exact_literal_branches(branches: &[Ast]) -> Option<Vec<String>> {
+fn exact_literal_branches(branches: &[Ast], flags: RegexFlags) -> Option<Vec<String>> {
     // Small alternations do not amortize a second table and already execute
     // cheaply as ordered `Split`s.
     if branches.len() < 4 {
@@ -1703,7 +1776,7 @@ fn exact_literal_branches(branches: &[Ast]) -> Option<Vec<String>> {
     }
     branches
         .iter()
-        .map(exact_literal_ast)
+        .map(|branch| exact_literal_ast(branch, flags))
         .collect::<Option<Vec<_>>>()
 }
 
@@ -1744,18 +1817,22 @@ fn ast_contains_live_capture(ast: &Ast, capture_layout: &[u32]) -> bool {
     }
 }
 
-fn exact_literal_ast(ast: &Ast) -> Option<String> {
+fn exact_literal_ast(ast: &Ast, flags: RegexFlags) -> Option<String> {
     match ast {
         Ast::Empty => Some(String::new()),
         Ast::Literal(literal) => Some(literal.clone()),
         Ast::Concat(nodes) => {
             let mut literal = String::new();
             for node in nodes {
-                literal.push_str(&exact_literal_ast(node)?);
+                literal.push_str(&exact_literal_ast(node, flags)?);
             }
             Some(literal)
         }
-        Ast::Group { child, .. } => exact_literal_ast(child),
+        Ast::Group { child, .. } => exact_literal_ast(child, flags),
+        Ast::Flags {
+            flags: local,
+            child,
+        } if *local == flags => exact_literal_ast(child, flags),
         _ => None,
     }
 }
@@ -1956,6 +2033,65 @@ mod tests {
             );
         }
         assert_eq!(bytecode_span(r"(?:foo|bar|baz|quux)", "nope", 0), None);
+    }
+
+    #[test]
+    fn literal_trie_compacts_runs_around_structured_alternatives() {
+        let mut branches = (0..250)
+            .map(|index| format!("kw{index:03}"))
+            .collect::<Vec<_>>();
+        branches.push("special(?:ized)?".to_owned());
+        branches.extend((250..500).map(|index| format!("kw{index:03}")));
+        let pattern = format!("(?:{})", branches.join("|"));
+        let program = Program::compile(&parse(&pattern)).expect("mixed literal inventory");
+        assert_eq!(
+            program
+                .instructions
+                .iter()
+                .filter(|instruction| matches!(instruction, Instruction::LiteralTrie { .. }))
+                .count(),
+            2,
+            "literal runs on both sides of the structured branch should be reusable tries"
+        );
+
+        let mut budget = StepBudget::new(64);
+        let result = program
+            .execute(
+                "unknown",
+                0,
+                context(),
+                &mut budget,
+                &mut BytecodeScratch::default(),
+            )
+            .expect("a negative probe should not exhaust the existing VM budget");
+        assert_eq!(result, None);
+        assert_eq!(bytecode_span(&pattern, "specialized!", 0), Some(0..11));
+        assert_eq!(bytecode_span(&pattern, "kw499!", 0), Some(0..5));
+
+        // The structured branch remains ahead of the second literal run.
+        let ordered = r"(?:foo|bar|baz|quux|x(?:y)?|xyz|xyzz|xyzzy)";
+        assert_eq!(bytecode_span(ordered, "xyz", 0), Some(0..2));
+    }
+
+    #[test]
+    fn literal_trie_handles_unicode_case_insensitive_inventories() {
+        let pattern = "(?i:Начать|Транзакция|Отменить|Зафиксировать|Begin|Commit|Rollback)";
+        let program = Program::compile(&parse(pattern)).expect("Unicode literal trie");
+        assert!(
+            program
+                .instructions
+                .iter()
+                .any(|instruction| matches!(instruction, Instruction::LiteralTrie { .. })),
+            "expected Unicode alternatives to use the reusable literal trie"
+        );
+        for (line, end) in [
+            ("НАЧАТЬ!", "НАЧАТЬ".len()),
+            ("транзакция(", "транзакция".len()),
+            ("rOlLbAcK ", "rOlLbAcK".len()),
+        ] {
+            assert_eq!(bytecode_span(pattern, line, 0), Some(0..end), "{line:?}");
+        }
+        assert_eq!(bytecode_span(pattern, "Неизвестно", 0), None);
     }
 
     #[test]

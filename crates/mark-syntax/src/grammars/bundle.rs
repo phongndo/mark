@@ -1,8 +1,8 @@
-//! Deterministic `MRKB` bundle reader/writer used by the Phase 4 compiler.
+//! Deterministic `MRKB` bundle reader/writer.
 //!
-//! The production highlighter is not switched to this bundle yet. This module
-//! gives the compiler and tests a real byte-level container with eager metadata
-//! and lazy per-grammar blob access.
+//! The production highlighter resolves every grammar through this bundle. It
+//! is a byte-level container with eager metadata and lazy per-grammar blob
+//! access, produced by the `grammar-compile` build step.
 
 use std::{collections::BTreeMap, path::Path};
 
@@ -283,12 +283,16 @@ impl Bundle {
         }) {
             return Some(language);
         }
+        // Compound fileTypes (`blade.php`, `html.erb`, `adoc.txt`, …) are
+        // registered as basenames but follow TextMate suffix semantics, so
+        // they also compete with plain extensions by match length.
         self.languages
             .iter()
             .filter_map(|entry| {
                 entry
                     .extensions
                     .iter()
+                    .chain(entry.basenames.iter().filter(|name| name.contains('.')))
                     .filter_map(|extension| extension_match_len(&lower_name, extension))
                     .max()
                     .map(|len| (len, entry.canonical.as_str()))

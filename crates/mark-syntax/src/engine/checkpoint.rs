@@ -48,7 +48,7 @@ impl CheckpointTable {
     }
 
     pub fn record_if_boundary(&mut self, line_index: usize, state: StateId) {
-        if line_index == 0 || line_index % self.interval == 0 {
+        if line_index == 0 || line_index.is_multiple_of(self.interval) {
             self.record(line_index, state);
         }
     }

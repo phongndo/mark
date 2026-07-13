@@ -1,8 +1,8 @@
 //! Grammar asset registry and embedded bundle access.
 //!
-//! Production highlighting still goes through the legacy backend until the
-//! migration cutover, but Phase 4 makes the in-house bundle the authoritative
-//! grammar catalog for language metadata and bundle diagnostics.
+//! The embedded bundle is the authoritative grammar catalog: production
+//! highlighting, language metadata, path detection, and bundle diagnostics
+//! all resolve through it.
 
 use std::sync::OnceLock;
 
@@ -13,6 +13,13 @@ pub(crate) mod registry;
 use bundle::{Bundle, BundleError, BundleGrammarRegistry, LicenseEntry};
 
 static EMBEDDED_BUNDLE: OnceLock<Bundle> = OnceLock::new();
+#[cfg(not(rust_analyzer))]
+include!(concat!(env!("OUT_DIR"), "/embedded_bundle.rs"));
+// rust-analyzer cannot infer the array length of a large include_bytes! from
+// build-script output. Diagnostics only need the type; rustc uses the real
+// generated static above for every build.
+#[cfg(rust_analyzer)]
+static EMBEDDED_BUNDLE_BYTES: &[u8] = &[];
 
 pub fn embedded_bundle() -> &'static Bundle {
     EMBEDDED_BUNDLE.get_or_init(|| {
@@ -21,7 +28,7 @@ pub fn embedded_bundle() -> &'static Bundle {
 }
 
 pub fn embedded_bundle_bytes() -> &'static [u8] {
-    include_bytes!(env!("MARK_SYNTAX_BUNDLE_PATH"))
+    EMBEDDED_BUNDLE_BYTES
 }
 
 pub fn embedded_bundle_version() -> &'static str {
@@ -104,6 +111,7 @@ mod tests {
         state::GrammarId,
         tokenizer::{GrammarSet, TextMateTokenizer},
     };
+    use std::collections::{BTreeMap, BTreeSet};
 
     #[test]
     fn embedded_bundle_parses_and_exposes_catalog() {
@@ -125,6 +133,30 @@ mod tests {
             bundle.canonical_language("shellscript"),
             Some("shellscript")
         );
+        assert_eq!(bundle.canonical_language("bash"), Some("shellscript"));
+        assert_eq!(bundle.canonical_language("sh"), Some("shellscript"));
+        assert_eq!(
+            bundle.detect_language_from_path("script.sh"),
+            Some("shellscript")
+        );
+        assert_eq!(
+            bundle.detect_language_from_path("httpd.conf"),
+            Some("apache")
+        );
+        assert_eq!(
+            bundle.detect_language_from_path("module.v"),
+            Some("verilog")
+        );
+        assert_eq!(
+            bundle.detect_language_from_path("generated.js"),
+            Some("javascript")
+        );
+        // Extension precedence must not hide an explicitly selected language.
+        assert_eq!(bundle.canonical_language("bird2"), Some("bird2"));
+        // Aliases shipped by Shiki's grammar metadata are part of the bundle,
+        // not a second hand-maintained catalog. `properties` is declared by
+        // the INI grammar and has historically been easy to omit.
+        assert_eq!(bundle.canonical_language("properties"), Some("ini"));
         assert_eq!(bundle.canonical_language("docker"), Some("docker"));
         assert_eq!(bundle.detect_language_from_path("src/lib.rs"), Some("rust"));
         assert_eq!(
@@ -141,6 +173,26 @@ mod tests {
             bundle.detect_language_from_path("main.tf"),
             Some("terraform")
         );
+        // Compound fileTypes are suffixes, not only literal basenames, and
+        // outrank the shorter plain-extension owner.
+        assert_eq!(
+            bundle.detect_language_from_path("resources/views/index.blade.php"),
+            Some("blade")
+        );
+        assert_eq!(
+            bundle.detect_language_from_path("app/views/show.html.erb"),
+            Some("erb")
+        );
+        assert_eq!(
+            bundle.detect_language_from_path("widget.html.haml"),
+            Some("haml")
+        );
+        assert_eq!(
+            bundle.detect_language_from_path("notes.adoc.txt"),
+            Some("asciidoc")
+        );
+        assert_eq!(bundle.detect_language_from_path("blade.php"), Some("blade"));
+        assert_eq!(bundle.detect_language_from_path("index.php"), Some("php"));
         assert_eq!(bundle.licenses.len(), bundle.grammar_blobs.len());
     }
 
@@ -149,6 +201,309 @@ mod tests {
         let parsed = parse_embedded_bundle().unwrap();
         let reparsed = Bundle::parse(&parsed.to_bytes()).unwrap();
         assert_eq!(parsed.to_bytes(), reparsed.to_bytes());
+    }
+
+    #[test]
+    fn pinned_language_metadata_matches_every_public_catalog_entry() {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Manifest {
+            schema_version: u32,
+            languages: Vec<Metadata>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Metadata {
+            id: String,
+            #[serde(default)]
+            asset: Option<String>,
+            #[serde(default)]
+            aliases: Vec<String>,
+            #[serde(default)]
+            extensions: Vec<String>,
+            #[serde(default)]
+            basenames: Vec<String>,
+        }
+
+        let manifest: Manifest = serde_json::from_str(include_str!(
+            "../../../../assets/tm-grammars/language-metadata.json"
+        ))
+        .unwrap();
+        let bundle = embedded_bundle();
+        assert_eq!(manifest.schema_version, 1);
+        assert_eq!(manifest.languages.len(), 254);
+        assert_eq!(bundle.languages.len(), 254);
+
+        let metadata_by_id = manifest
+            .languages
+            .iter()
+            .map(|entry| (entry.id.as_str(), entry))
+            .collect::<BTreeMap<_, _>>();
+        let public_ids = bundle
+            .languages
+            .iter()
+            .map(|entry| entry.canonical.as_str())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            metadata_by_id.keys().copied().collect::<BTreeSet<_>>(),
+            public_ids
+        );
+        assert!(public_ids.contains("bird2"));
+
+        let mut alias_owners = BTreeMap::<String, BTreeSet<&str>>::new();
+        let mut extension_owners = BTreeMap::<String, BTreeSet<&str>>::new();
+        let mut basename_owners = BTreeMap::<String, BTreeSet<&str>>::new();
+        let mut raw_extension_owners = BTreeMap::<String, BTreeSet<&str>>::new();
+
+        for language in &bundle.languages {
+            let metadata = metadata_by_id[language.canonical.as_str()];
+            assert_eq!(
+                metadata.asset.as_deref().unwrap_or(&metadata.id),
+                bundle.grammar_blobs[language.grammar_blob as usize].language
+            );
+
+            raw_extension_owners
+                .entry(catalog::normalize_language_token(&language.canonical))
+                .or_default()
+                .insert(&language.canonical);
+            for (extension, target) in catalog::LANGUAGE_ALIASES {
+                if *target == language.canonical {
+                    raw_extension_owners
+                        .entry(catalog::normalize_language_token(extension))
+                        .or_default()
+                        .insert(&language.canonical);
+                }
+            }
+            for (extension, target) in catalog::EXTENSION_ALIASES {
+                if *target == language.canonical {
+                    raw_extension_owners
+                        .entry(catalog::normalize_language_token(extension))
+                        .or_default()
+                        .insert(&language.canonical);
+                }
+            }
+
+            let mut expected_aliases = catalog::aliases_for_language(&language.canonical)
+                .into_iter()
+                .filter(|alias| alias != &language.canonical)
+                .collect::<BTreeSet<_>>();
+            expected_aliases.extend(metadata.aliases.iter().cloned());
+            if metadata
+                .asset
+                .as_deref()
+                .is_some_and(|asset| asset != metadata.id)
+            {
+                expected_aliases.insert(metadata.asset.clone().unwrap());
+            }
+            if language.canonical == "tsx" {
+                expected_aliases.insert("typescriptreact".to_owned());
+            }
+            if language.canonical == "jsx" {
+                expected_aliases.insert("javascript-babel".to_owned());
+            }
+
+            let mut expected_extensions = catalog::extensions_for_language(&language.canonical)
+                .into_iter()
+                .collect::<BTreeSet<_>>();
+            for extension in &metadata.extensions {
+                raw_extension_owners
+                    .entry(extension.clone())
+                    .or_default()
+                    .insert(&language.canonical);
+                if catalog::extension_is_allowed(extension, &language.canonical) {
+                    expected_extensions.insert(extension.clone());
+                } else {
+                    assert!(
+                        catalog::extension_precedence(extension).is_some()
+                            || catalog::extension_override(extension).is_some(),
+                        "{} silently drops metadata extension {extension}",
+                        language.canonical
+                    );
+                }
+            }
+            if language.canonical == "tsx" {
+                expected_extensions.insert("tsx".to_owned());
+                raw_extension_owners
+                    .entry("tsx".to_owned())
+                    .or_default()
+                    .insert(&language.canonical);
+            }
+            if language.canonical == "jsx" {
+                expected_extensions.insert("jsx".to_owned());
+                raw_extension_owners
+                    .entry("jsx".to_owned())
+                    .or_default()
+                    .insert(&language.canonical);
+            }
+            if language.canonical == "c" {
+                expected_extensions.insert("h".to_owned());
+                raw_extension_owners
+                    .entry("h".to_owned())
+                    .or_default()
+                    .insert(&language.canonical);
+            }
+            if language.canonical == "cpp" {
+                expected_extensions.extend(["hh", "hpp", "hxx"].map(str::to_owned));
+                for extension in ["hh", "hpp", "hxx"] {
+                    raw_extension_owners
+                        .entry(extension.to_owned())
+                        .or_default()
+                        .insert(&language.canonical);
+                }
+            }
+
+            let mut expected_basenames = catalog::basenames_for_language(&language.canonical)
+                .into_iter()
+                .collect::<BTreeSet<_>>();
+            expected_basenames.extend(metadata.basenames.iter().cloned());
+            if language.canonical == "make" {
+                expected_basenames
+                    .extend(["Makefile", "GNUmakefile", "BSDmakefile"].map(str::to_owned));
+            }
+
+            assert_eq!(
+                language.aliases.iter().cloned().collect::<BTreeSet<_>>(),
+                expected_aliases,
+                "alias metadata drift for {}",
+                language.canonical
+            );
+            assert_eq!(
+                language.extensions.iter().cloned().collect::<BTreeSet<_>>(),
+                expected_extensions,
+                "extension metadata drift for {}",
+                language.canonical
+            );
+            assert_eq!(
+                language.basenames.iter().cloned().collect::<BTreeSet<_>>(),
+                expected_basenames,
+                "basename metadata drift for {}",
+                language.canonical
+            );
+
+            for alias in &language.aliases {
+                alias_owners
+                    .entry(alias.clone())
+                    .or_default()
+                    .insert(&language.canonical);
+            }
+            for extension in &language.extensions {
+                extension_owners
+                    .entry(extension.clone())
+                    .or_default()
+                    .insert(&language.canonical);
+            }
+            for basename in &language.basenames {
+                basename_owners
+                    .entry(basename.to_ascii_lowercase())
+                    .or_default()
+                    .insert(&language.canonical);
+            }
+        }
+
+        for (extension, owners) in &raw_extension_owners {
+            if owners.len() > 1 {
+                assert!(
+                    catalog::extension_precedence(extension).is_some()
+                        || catalog::extension_override(extension).is_some(),
+                    "unresolved metadata extension collision {extension}: {owners:?}"
+                );
+            }
+        }
+        assert!(
+            extension_owners.values().all(|owners| owners.len() == 1),
+            "final extension catalog still has collisions: {:?}",
+            extension_owners
+                .iter()
+                .filter(|(_, owners)| owners.len() > 1)
+                .collect::<Vec<_>>()
+        );
+        assert!(basename_owners.values().all(|owners| owners.len() == 1));
+        assert!(alias_owners.values().all(|owners| owners.len() == 1));
+
+        for (extension, winner) in catalog::EXTENSION_PRECEDENCE {
+            let raw_owners = raw_extension_owners
+                .get(*extension)
+                .unwrap_or_else(|| panic!("stale extension precedence for {extension}"));
+            assert!(
+                raw_owners.len() > 1,
+                "stale extension precedence for {extension}: {raw_owners:?}"
+            );
+            if winner.is_empty() {
+                assert!(
+                    !extension_owners.contains_key(*extension),
+                    "suppressed extension {extension} still has an owner"
+                );
+            } else {
+                assert!(
+                    raw_owners.contains(winner),
+                    "extension precedence winner {winner} does not advertise {extension}"
+                );
+                assert_eq!(
+                    extension_owners.get(*extension),
+                    Some(&BTreeSet::from([*winner])),
+                    "extension precedence for {extension}"
+                );
+            }
+        }
+
+        for (alias, owners) in alias_owners {
+            let owner = *owners.first().unwrap();
+            let expected = public_ids.get(alias.as_str()).copied().unwrap_or(owner);
+            assert_eq!(
+                bundle.canonical_language(&alias),
+                Some(expected),
+                "alias {alias}"
+            );
+        }
+        for (extension, owners) in extension_owners {
+            if extension.contains('/') {
+                // TextMate can publish path-qualified fileTypes. The current
+                // path API receives a basename and still retains these values
+                // exactly in catalog metadata for future path-aware matching.
+                continue;
+            }
+            assert_eq!(
+                bundle.detect_language_from_path(&format!("fixture.{extension}")),
+                owners.first().copied(),
+                "extension {extension}"
+            );
+        }
+        for (basename, owners) in basename_owners {
+            assert_eq!(
+                bundle.detect_language_from_path(&basename),
+                owners.first().copied(),
+                "basename {basename}"
+            );
+        }
+    }
+
+    #[test]
+    fn curated_extension_precedence_is_in_the_generated_catalog() {
+        let bundle = embedded_bundle();
+        let owners = |extension: &str| {
+            bundle
+                .languages
+                .iter()
+                .filter(|entry| entry.extensions.iter().any(|item| item == extension))
+                .map(|entry| entry.canonical.as_str())
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(owners("conf"), vec!["apache"]);
+        assert_eq!(owners("v"), vec!["verilog"]);
+        assert_eq!(owners("js"), vec!["javascript"]);
+        assert_eq!(
+            bundle.detect_language_from_path("router.conf"),
+            Some("apache")
+        );
+        assert_eq!(
+            bundle.detect_language_from_path("module.v"),
+            Some("verilog")
+        );
+        assert_eq!(
+            bundle.detect_language_from_path("generated.js"),
+            Some("javascript")
+        );
+        assert_eq!(bundle.canonical_language("bird2"), Some("bird2"));
     }
 
     #[test]

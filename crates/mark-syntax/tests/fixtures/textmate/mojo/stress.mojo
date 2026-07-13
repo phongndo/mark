@@ -1,240 +1,259 @@
-# mojo line 1
-let value_1 = 1
-# mojo line 2
-let value_2 = 2
-# mojo line 3
-let value_3 = 3
-# mojo line 4
-let value_4 = 4
-# mojo line 5
-let value_5 = 5
-# mojo line 6
-let value_6 = 6
-# mojo line 7
-let value_7 = 7
-# mojo line 8
-let value_8 = 8
-# mojo line 9
-let value_9 = 9
-# mojo line 10
-let value_10 = 10
-# mojo line 11
-let value_11 = 11
-# mojo line 12
-let value_12 = 12
-# mojo line 13
-let value_13 = 13
-# mojo line 14
-let value_14 = 14
-# mojo line 15
-let value_15 = 15
-# mojo line 16
-let value_16 = 16
-# mojo line 17
-let value_17 = 17
-# mojo line 18
-let value_18 = 18
-# mojo line 19
-let value_19 = 19
-# mojo line 20
-let value_20 = 20
-# mojo line 21
-let value_21 = 21
-# mojo line 22
-let value_22 = 22
-# mojo line 23
-let value_23 = 23
-# mojo line 24
-let value_24 = 24
-# mojo line 25
-let value_25 = 25
-# mojo line 26
-let value_26 = 26
-# mojo line 27
-let value_27 = 27
-# mojo line 28
-let value_28 = 28
-# mojo line 29
-let value_29 = 29
-# mojo line 30
-let value_30 = 30
-# mojo line 31
-let value_31 = 31
-# mojo line 32
-let value_32 = 32
-# mojo line 33
-let value_33 = 33
-# mojo line 34
-let value_34 = 34
-# mojo line 35
-let value_35 = 35
-# mojo line 36
-let value_36 = 36
-# mojo line 37
-let value_37 = 37
-# mojo line 38
-let value_38 = 38
-# mojo line 39
-let value_39 = 39
-# mojo line 40
-let value_40 = 40
-# mojo line 41
-let value_41 = 41
-# mojo line 42
-let value_42 = 42
-# mojo line 43
-let value_43 = 43
-# mojo line 44
-let value_44 = 44
-# mojo line 45
-let value_45 = 45
-# mojo line 46
-let value_46 = 46
-# mojo line 47
-let value_47 = 47
-# mojo line 48
-let value_48 = 48
-# mojo line 49
-let value_49 = 49
-# mojo line 50
-let value_50 = 50
-# mojo line 51
-let value_51 = 51
-# mojo line 52
-let value_52 = 52
-# mojo line 53
-let value_53 = 53
-# mojo line 54
-let value_54 = 54
-# mojo line 55
-let value_55 = 55
-# mojo line 56
-let value_56 = 56
-# mojo line 57
-let value_57 = 57
-# mojo line 58
-let value_58 = 58
-# mojo line 59
-let value_59 = 59
-# mojo line 60
-let value_60 = 60
-# mojo line 61
-let value_61 = 61
-# mojo line 62
-let value_62 = 62
-# mojo line 63
-let value_63 = 63
-# mojo line 64
-let value_64 = 64
-# mojo line 65
-let value_65 = 65
-# mojo line 66
-let value_66 = 66
-# mojo line 67
-let value_67 = 67
-# mojo line 68
-let value_68 = 68
-# mojo line 69
-let value_69 = 69
-# mojo line 70
-let value_70 = 70
-# mojo line 71
-let value_71 = 71
-# mojo line 72
-let value_72 = 72
-# mojo line 73
-let value_73 = 73
-# mojo line 74
-let value_74 = 74
-# mojo line 75
-let value_75 = 75
-# mojo line 76
-let value_76 = 76
-# mojo line 77
-let value_77 = 77
-# mojo line 78
-let value_78 = 78
-# mojo line 79
-let value_79 = 79
-# mojo line 80
-let value_80 = 80
-# mojo line 81
-let value_81 = 81
-# mojo line 82
-let value_82 = 82
-# mojo line 83
-let value_83 = 83
-# mojo line 84
-let value_84 = 84
-# mojo line 85
-let value_85 = 85
-# mojo line 86
-let value_86 = 86
-# mojo line 87
-let value_87 = 87
-# mojo line 88
-let value_88 = 88
-# mojo line 89
-let value_89 = 89
-# mojo line 90
-let value_90 = 90
-# mojo line 91
-let value_91 = 91
-# mojo line 92
-let value_92 = 92
-# mojo line 93
-let value_93 = 93
-# mojo line 94
-let value_94 = 94
-# mojo line 95
-let value_95 = 95
-# mojo line 96
-let value_96 = 96
-# mojo line 97
-let value_97 = 97
-# mojo line 98
-let value_98 = 98
-# mojo line 99
-let value_99 = 99
-# mojo line 100
-let value_100 = 100
-# mojo line 101
-let value_101 = 101
-# mojo line 102
-let value_102 = 102
-# mojo line 103
-let value_103 = 103
-# mojo line 104
-let value_104 = 104
-# mojo line 105
-let value_105 = 105
-# mojo line 106
-let value_106 = 106
-# mojo line 107
-let value_107 = 107
-# mojo line 108
-let value_108 = 108
-# mojo line 109
-let value_109 = 109
-# mojo line 110
-let value_110 = 110
-# mojo line 111
-let value_111 = 111
-# mojo line 112
-let value_112 = 112
-# mojo line 113
-let value_113 = 113
-# mojo line 114
-let value_114 = 114
-# mojo line 115
-let value_115 = 115
-# mojo line 116
-let value_116 = 116
-# mojo line 117
-let value_117 = 117
-# mojo line 118
-let value_118 = 118
-# mojo line 119
-let value_119 = 119
-# mojo line 120
-let value_120 = 120
+"""Telemetry helpers used by a small sensor-processing demo.
+
+The fixture keeps Unicode in harmless prose: café, naïve, λ, 漢字, 🚀, and 𝄞.
+
+```mojo
+fn tiny_example(value: Int) -> Int:
+    return value + 1
+```
+"""
+
+from collections import Dict, List
+from math import sqrt
+import sys
+import time as clock
+
+alias DEFAULT_WINDOW = 8
+alias SAMPLE_BITS = 0b1111_1111
+let MODULE_NAME = "telemetry"
+
+
+trait Renderable:
+    fn render(self) -> String:
+        ...
+
+
+trait Accumulator(CollectionElement):
+    fn push(inout self, value: Float64):
+        ...
+
+    fn total(self) -> Float64:
+        ...
+
+
+@fieldwise_init
+struct Reading(Renderable):
+    var channel: String
+    var value: Float64
+    var valid: Bool
+
+    fn render(self) -> String:
+        return f"{self.channel}: {self.value:8.3f}"
+
+    fn scaled(self, factor: Float64 = 1.0) -> Self:
+        return Self(self.channel, self.value * factor, self.valid)
+
+
+struct RunningStats(Accumulator):
+    var count: Int
+    var sum: Float64
+    var sum_squares: Float64
+
+    fn __init__(out self):
+        self.count = 0
+        self.sum = 0.0
+        self.sum_squares = 0.0
+
+    fn push(inout self, value: Float64):
+        self.count += 1
+        self.sum += value
+        self.sum_squares += value ** 2
+
+    fn total(self) -> Float64:
+        return self.sum
+
+    fn mean(self) -> Float64:
+        if self.count == 0:
+            return 0.0
+        return self.sum / self.count
+
+    fn variance(self) -> Float64:
+        let average = self.mean()
+        return max(0.0, self.sum_squares / self.count - average * average)
+
+
+class Dashboard(Renderable):
+    var title: String
+    var rows: List[Reading]
+
+    fn __init__(out self, title: String):
+        self.title = title
+        self.rows = List[Reading]()
+
+    fn append(inout self, owned reading: Reading):
+        self.rows.append(reading)
+
+    fn render(self) -> String:
+        return f"Dashboard({self.title!r}, rows={len(self.rows)})"
+
+
+@always_inline
+fn clamp[T: DType](value: SIMD[T, 1], low: SIMD[T, 1], high: SIMD[T, 1]) -> SIMD[T, 1]:
+    return min(max(value, low), high)
+
+
+fn decode_flags(bits: Int) -> Dict[String, Bool]:
+    let masks = {
+        "ready": 0x01,
+        "warning": 0x02,
+        "remote": 0o10,
+    }
+    var flags = Dict[String, Bool]()
+    for name, mask in masks.items():
+        flags[name] = (bits & mask) != 0
+    return flags
+
+
+fn parse_line(
+    borrowed line: String,
+    separator: String = ",",
+    strict: Bool = False,
+) raises -> Reading:
+    let parts = line.split(separator)
+    if len(parts) < 2:
+        raise Error("missing measurement")
+    try:
+        let measured = Float64(parts[1].strip())
+        return Reading(parts[0].strip(), measured, True)
+    except:
+        if strict:
+            raise
+        return Reading(parts[0].strip(), Float64("nan"), False)
+
+
+fn normalize[width: Int = DEFAULT_WINDOW](
+    values: List[Float64],
+    inout stats: RunningStats,
+) -> List[Float64]:
+    comptime assert width > 0
+    var cleaned = List[Float64]()
+    for index in range(len(values)):
+        let bounded = clamp(values[index], -1.0e3, +1_000.0)
+        stats.push(bounded)
+        cleaned.append(bounded)
+
+    let center = stats.mean()
+    let spread = sqrt(stats.variance()) or 1.0
+    return [(item - center) / spread for item in cleaned]
+
+
+fn select_channels(readings: List[Reading], wanted: List[String]) -> List[Reading]:
+    let allowed = set(wanted)
+    return [item for item in readings if item.valid and item.channel in allowed]
+
+
+fn summarize(values: List[Float64]) -> tuple[Int, Float64, Float64]:
+    if not values:
+        return (0, 0.0, 0.0)
+    let ordered = sorted(values)
+    let midpoint = len(ordered) // 2
+    return (len(values), ordered[midpoint], sum(values))
+
+
+fn classify(value: Int) -> String:
+    match value:
+        case 0:
+            return "idle"
+        case 1 | 2:
+            return "warming"
+        case _ if value < 0:
+            return "invalid"
+        case _:
+            return "active"
+
+
+fn rolling_checksum(data: List[Int]) -> Int:
+    var checksum = 0x811C9DC5
+    for byte in data:
+        checksum ^= byte & SAMPLE_BITS
+        checksum *= 0x01000193
+        checksum = (checksum << 5) | (checksum >> 27)
+    return checksum
+
+
+fn make_formatter(prefix: String) capturing:
+    return lambda owned text, suffix="!": f"{prefix}: {text}{suffix}"
+
+
+async fn fetch_snapshot(endpoint: String) raises -> String:
+    let response = await request(endpoint)
+    if response.status >= 400:
+        raise Error(f"request failed: {response.status}")
+    return await response.text()
+
+
+async fn retry(endpoint: String, attempts: Int = 3) raises -> String:
+    var remaining = attempts
+    while remaining > 0:
+        try:
+            return await fetch_snapshot(endpoint)
+        except Error as failure:
+            remaining -= 1
+            if remaining == 0:
+                raise failure
+            continue
+        finally:
+            clock.sleep(0.01)
+    return "unreachable"
+
+
+fn string_samples(name: String, value: Float64) -> List[String]:
+    let escaped = "tab:\t newline:\n snowman:\u2603"
+    let raw_path = r"^/sensors/(?P<name>[A-Za-z_]+)/(?:latest|\d{4})$"
+    let bytes_header = b"MOJO\x00\x01"
+    let raw_bytes = rb"packet\x20payload"
+    let percent_style = "channel=%(name)-12s value=%08.2f"
+    let brace_style = "channel={name!r:>12} value={value:.2f}"
+    let interpolated = f"{name.upper()} => {value:+.2f} {{ok}}"
+    return [escaped, raw_path, str(bytes_header), str(raw_bytes), percent_style, brace_style, interpolated]
+
+
+fn multiline_samples(channel: String) -> tuple[String, String, String]:
+    let note = """First line for café.
+Second line carries 漢字 and an astral rocket 🚀.
+The delimiters are balanced and this sentence closes the note.
+"""
+    let template = f'''channel = {channel!r}
+status = {classify(2):>8}
+literal braces = {{ready}}
+'''
+    let expression = r'''(?x)
+^(?P<key>[A-Z_]+)\s*=\s*(?=\S)(?!disabled)(.+)$
+'''
+    return (note, template, expression)
+
+
+fn inspect_scope(value: Int):
+    global MODULE_NAME
+    let label = `diagnostic-channel`
+    assert value >= 0, "value must be nonnegative"
+    # type: Dict[str, int]
+    let metadata = {"value": value, "octets": value.bit_length()}
+    # NOTE: λ is BMP; 𝄞 and 🛰️ exercise astral-safe comments.
+    print(label, metadata.get("value", None))
+
+
+fn main() raises:
+    let source = ["temperature,21.5", "pressure,101.3", "broken,n/a"]
+    var dashboard = Dashboard("Orbital café 🛰️")
+    var stats = RunningStats()
+    for line in source:
+        let reading = parse_line(line)
+        dashboard.append(reading)
+        if reading.valid:
+            stats.push(reading.value)
+
+    let values = [row.value for row in dashboard.rows if row.valid]
+    let report = {
+        "summary": summarize(values),
+        "flags": decode_flags(0b0000_1011),
+        "checksum": rolling_checksum([1, 2, 3, 255]),
+    }
+    comptime if DEFAULT_WINDOW > 4:
+        print("wide smoothing window")
+    else:
+        pass
+
+    print(dashboard.render())
+    print(report["summary"], normalize(values, stats))
+    print(string_samples("temp", 21.5)[-1])

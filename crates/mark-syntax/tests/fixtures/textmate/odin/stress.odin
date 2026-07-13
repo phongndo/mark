@@ -1,240 +1,230 @@
-// declaration 1
-value_1 := 1;
-// declaration 2
-value_2 := 2;
-// declaration 3
-value_3 := 3;
-// declaration 4
-value_4 := 4;
-// declaration 5
-value_5 := 5;
-// declaration 6
-value_6 := 6;
-// declaration 7
-value_7 := 7;
-// declaration 8
-value_8 := 8;
-// declaration 9
-value_9 := 9;
-// declaration 10
-value_10 := 10;
-// declaration 11
-value_11 := 11;
-// declaration 12
-value_12 := 12;
-// declaration 13
-value_13 := 13;
-// declaration 14
-value_14 := 14;
-// declaration 15
-value_15 := 15;
-// declaration 16
-value_16 := 16;
-// declaration 17
-value_17 := 17;
-// declaration 18
-value_18 := 18;
-// declaration 19
-value_19 := 19;
-// declaration 20
-value_20 := 20;
-// declaration 21
-value_21 := 21;
-// declaration 22
-value_22 := 22;
-// declaration 23
-value_23 := 23;
-// declaration 24
-value_24 := 24;
-// declaration 25
-value_25 := 25;
-// declaration 26
-value_26 := 26;
-// declaration 27
-value_27 := 27;
-// declaration 28
-value_28 := 28;
-// declaration 29
-value_29 := 29;
-// declaration 30
-value_30 := 30;
-// declaration 31
-value_31 := 31;
-// declaration 32
-value_32 := 32;
-// declaration 33
-value_33 := 33;
-// declaration 34
-value_34 := 34;
-// declaration 35
-value_35 := 35;
-// declaration 36
-value_36 := 36;
-// declaration 37
-value_37 := 37;
-// declaration 38
-value_38 := 38;
-// declaration 39
-value_39 := 39;
-// declaration 40
-value_40 := 40;
-// declaration 41
-value_41 := 41;
-// declaration 42
-value_42 := 42;
-// declaration 43
-value_43 := 43;
-// declaration 44
-value_44 := 44;
-// declaration 45
-value_45 := 45;
-// declaration 46
-value_46 := 46;
-// declaration 47
-value_47 := 47;
-// declaration 48
-value_48 := 48;
-// declaration 49
-value_49 := 49;
-// declaration 50
-value_50 := 50;
-// declaration 51
-value_51 := 51;
-// declaration 52
-value_52 := 52;
-// declaration 53
-value_53 := 53;
-// declaration 54
-value_54 := 54;
-// declaration 55
-value_55 := 55;
-// declaration 56
-value_56 := 56;
-// declaration 57
-value_57 := 57;
-// declaration 58
-value_58 := 58;
-// declaration 59
-value_59 := 59;
-// declaration 60
-value_60 := 60;
-// declaration 61
-value_61 := 61;
-// declaration 62
-value_62 := 62;
-// declaration 63
-value_63 := 63;
-// declaration 64
-value_64 := 64;
-// declaration 65
-value_65 := 65;
-// declaration 66
-value_66 := 66;
-// declaration 67
-value_67 := 67;
-// declaration 68
-value_68 := 68;
-// declaration 69
-value_69 := 69;
-// declaration 70
-value_70 := 70;
-// declaration 71
-value_71 := 71;
-// declaration 72
-value_72 := 72;
-// declaration 73
-value_73 := 73;
-// declaration 74
-value_74 := 74;
-// declaration 75
-value_75 := 75;
-// declaration 76
-value_76 := 76;
-// declaration 77
-value_77 := 77;
-// declaration 78
-value_78 := 78;
-// declaration 79
-value_79 := 79;
-// declaration 80
-value_80 := 80;
-// declaration 81
-value_81 := 81;
-// declaration 82
-value_82 := 82;
-// declaration 83
-value_83 := 83;
-// declaration 84
-value_84 := 84;
-// declaration 85
-value_85 := 85;
-// declaration 86
-value_86 := 86;
-// declaration 87
-value_87 := 87;
-// declaration 88
-value_88 := 88;
-// declaration 89
-value_89 := 89;
-// declaration 90
-value_90 := 90;
-// declaration 91
-value_91 := 91;
-// declaration 92
-value_92 := 92;
-// declaration 93
-value_93 := 93;
-// declaration 94
-value_94 := 94;
-// declaration 95
-value_95 := 95;
-// declaration 96
-value_96 := 96;
-// declaration 97
-value_97 := 97;
-// declaration 98
-value_98 := 98;
-// declaration 99
-value_99 := 99;
-// declaration 100
-value_100 := 100;
-// declaration 101
-value_101 := 101;
-// declaration 102
-value_102 := 102;
-// declaration 103
-value_103 := 103;
-// declaration 104
-value_104 := 104;
-// declaration 105
-value_105 := 105;
-// declaration 106
-value_106 := 106;
-// declaration 107
-value_107 := 107;
-// declaration 108
-value_108 := 108;
-// declaration 109
-value_109 := 109;
-// declaration 110
-value_110 := 110;
-// declaration 111
-value_111 := 111;
-// declaration 112
-value_112 := 112;
-// declaration 113
-value_113 := 113;
-// declaration 114
-value_114 := 114;
-// declaration 115
-value_115 := 115;
-// declaration 116
-value_116 := 116;
-// declaration 117
-value_117 := 117;
-// declaration 118
-value_118 := 118;
-// declaration 119
-value_119 := 119;
-// declaration 120
-value_120 := 120;
+#+build linux, darwin, !freestanding
+package telemetry
+
+import "core:fmt"
+import "core:math"
+import str "core:strings"
+foreign import libc "system:c"
+using fmt
+
+App_Name :: "Northwind Telemetry"
+// Build-time knobs mirror the collector's wire protocol defaults.
+Build_Label :: #config(BUILD_LABEL, "development")
+Default_Capacity :: 1 << 10
+Binary_Header :: 0b1010_0110
+Unix_Mode :: 0o755
+Decimal_Budget :: 0d25_000
+Magic_Word :: 0xCAFE_BABE
+Avogadro :: 6.022_140_76e23
+Imaginary_Unit :: 1.0i
+Quaternion_J :: 2j
+Quaternion_K :: 3k
+#assert(Default_Capacity > 0)
+
+Device_ID :: distinct u64
+Sequence :: distinct uint
+Transform :: matrix[4, 4]f32
+Device_State :: distinct u8
+State_Unknown :: Device_State(0)
+State_Starting :: Device_State(1)
+State_Online :: Device_State(4)
+State_Sleeping :: Device_State(5)
+State_Failed :: Device_State(255)
+Capability_Temperature :: 0
+Capability_Pressure :: 1
+Capability_Position :: 2
+Capability_Diagnostics :: 3
+Capabilities :: distinct u16
+Geo_Point :: [3]f64
+Sample_Value :: any
+Reading_Buffer :: [dynamic]Sample_Value
+Channel_Buffer :: [dynamic]string
+Metadata :: map[string]string
+Envelope :: [3]any
+
+Reducer :: #type proc "odin" (accumulator, value: f64) -> f64
+@(default_calling_convention = "c")
+foreign libc {
+    @(link_name = "puts")
+    c_puts :: proc(message: cstring) -> i32 ---
+}
+@(private)
+registry: map[Device_ID]string
+states: map[Device_ID]Device_State
+capabilities: map[Device_ID]Capabilities
+locations: map[Device_ID]Geo_Point
+reading_values: map[Device_ID]Reading_Buffer
+reading_channels: map[Device_ID]Channel_Buffer
+metadata: map[Device_ID]Metadata
+pending: [dynamic]Sample_Value
+
+make_device :: proc(id: Device_ID, allocator := context.allocator) -> Device_ID {
+    states[id] = State_Starting
+    capabilities[id] = Capabilities((1 << Capability_Temperature) | (1 << Capability_Diagnostics))
+    locations[id] = Geo_Point{0, 0, 0}
+    reading_values[id] = make(Reading_Buffer, 0, 32, allocator)
+    reading_channels[id] = make(Channel_Buffer, 0, 32, allocator)
+    metadata[id] = make(Metadata, allocator)
+    return id
+}
+split_coordinate :: proc(point: Geo_Point) -> (latitude, longitude: f64, altitude: f32) {
+    return point[0], point[1], point[2]
+}
+normalize :: proc(value, lower, upper: f64) -> (result: f64, ok: bool) {
+    if upper <= lower {
+        return 0, false
+    }
+    result = clamp((value-lower)/(upper-lower), 0, 1)
+    return result, true
+}
+append_sample :: proc(device: Device_ID, channel: string, value: Sample_Value) {
+    old_allocator := context.allocator
+    context.allocator = context.temp_allocator
+    defer context.allocator = old_allocator
+    values := reading_values[device]
+    channels := reading_channels[device]
+    append(&values, value)
+    append(&channels, channel)
+    reading_values[device] = values
+    reading_channels[device] = channels
+    states[device] = State_Online
+}
+value_as_number :: proc(value: Sample_Value) -> (f64, bool) {
+    switch item in value {
+    case f64:
+        return item, true
+    case i64:
+        return f64(item), true
+    case bool:
+        return item ? 1.0 : 0.0, true
+    case string, Geo_Point:
+        return 0, false
+    }
+    return 0, false
+}
+describe_any :: proc(payload: any) -> string {
+    if point, ok := payload.(Geo_Point); ok {
+        return fmt.aprintf("%.2f, %.2f", point[0], point[1])
+    }
+    return "unsupported payload"
+}
+fold :: proc(values: []f64, initial: f64, reduce: Reducer) -> f64 {
+    result := initial
+    for value, index in values {
+        result = reduce(result, value)
+        if math.is_nan(result) do break
+        if index > Default_Capacity do continue
+    }
+    return result
+}
+sum :: proc(left, right: f64) -> f64 #force_inline {
+    return left + right
+}
+copy_selected :: proc($T: typeid, source: []T, accept: proc(T) -> bool) -> [dynamic]T {
+    result := make([dynamic]T, 0, len(source), context.allocator)
+    for element in source {
+        if accept(element) {
+            append(&result, element)
+        }
+    }
+    return result
+}
+state_label :: proc(state: Device_State) -> string {
+    switch state {
+    case State_Unknown:  return "unknown"
+    case State_Starting: fallthrough
+    case State_Online:   return "active"
+    case State_Sleeping: return "sleeping"
+    case State_Failed:   return "failed"
+    }
+    return "invalid"
+}
+
+poll_window :: proc(device: Device_ID, first, last: int) {
+window: for index in first..<last {
+        when ODIN_OS == .Linux {
+            if index not_in 0..<Default_Capacity do break window
+        } else {
+            if index < 0 do continue window
+        }
+        switch index % 3 {
+        case 0:
+            append_sample(device, "temperature", 21.5)
+        case 1:
+            append_sample(device, "pressure", i64(101_325))
+        case:
+            append_sample(device, "healthy", true)
+        }
+    }
+    for retry in 0..=3 {
+        if retry == 3 do fmt.println("poll window complete")
+    }
+}
+
+format_report :: proc(device: Device_ID) -> string {
+    builder: str.Builder
+    str.builder_init(&builder, context.allocator)
+    defer str.builder_destroy(&builder)
+    /* Nested comments exercise balanced grammar state.
+       /* The probe remains coherent and deliberately finite. */
+       Coordinates are emitted after the heading. */
+    heading := "Station 東京 — café observatory 🛰️\n"
+    escapes := "tab:\t quote:\" rune:\u03bb ansi:\x1b[32mgreen\x1b[0m"
+    raw_layout := `channel | value
+---------+------`
+    marker := 'λ'
+    newline := '\n'
+    str.write_string(&builder, heading)
+    fmt.sbprintf(&builder, "%s\n%c %c\n", escapes, marker, newline)
+    str.write_string(&builder, raw_layout)
+    channels := reading_channels[device]
+    for value, index in reading_values[device] {
+        if number, ok := value.(f64); ok {
+            fmt.sbprintf(&builder, "\n%s | %.2f", channels[index], number)
+        } else {
+            fmt.sbprintf(&builder, "\n%s | %s", channels[index], state_label(states[device]))
+        }
+    }
+    return str.to_string(builder)
+}
+
+register_device :: proc(device: Device_ID, name: string) -> bool {
+    if existing, present := registry[device]; present {
+        fmt.println("already registered:", existing)
+        return false
+    }
+    registry[device] = name
+    return true
+}
+main :: proc() {
+    registry = make(map[Device_ID]string)
+    states = make(map[Device_ID]Device_State)
+    capabilities = make(map[Device_ID]Capabilities)
+    locations = make(map[Device_ID]Geo_Point)
+    reading_values = make(map[Device_ID]Reading_Buffer)
+    reading_channels = make(map[Device_ID]Channel_Buffer)
+    metadata = make(map[Device_ID]Metadata)
+    pending = make([dynamic]Sample_Value)
+    defer delete(registry)
+    defer delete(states)
+    defer delete(capabilities)
+    defer delete(locations)
+    defer delete(reading_values)
+    defer delete(reading_channels)
+    defer delete(metadata)
+    defer free(pending)
+    station := make_device(Device_ID(Magic_Word))
+    register_device(station, "Aster 🚀")
+    poll_window(station, 0, 6)
+    location := Geo_Point{35.6762, 139.6503, 40}
+    locations[station] = location
+    latitude, longitude, altitude := split_coordinate(location)
+    fmt.printf("position: %.4f, %.4f, %.1f\n", latitude, longitude, altitude)
+    values := [?]f64{1, 2.5, 0x10, -4e-1}
+    total := fold(values[:], 0, sum)
+    ratio, valid := normalize(total, 0, 100)
+    assert(valid, "normalization bounds")
+    report := format_report(station)
+    c_puts(cstring(report))
+    fmt.println(Build_Label, ratio, type_of(station), size_of(Geo_Point))
+}

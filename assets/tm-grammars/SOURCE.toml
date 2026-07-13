@@ -39,6 +39,7 @@ assets = ["mlir"]
 languages = "assets/tm-grammars/languages"
 licenses = "assets/tm-grammars/licenses.json"
 coverage = "assets/tm-grammars/coverage.toml"
+language_metadata = "assets/tm-grammars/language-metadata.json"
 
 [policy]
 grammar_sources_committed_as_text = true

@@ -7,6 +7,12 @@ exclude = List(
   "pi-mark/node_modules",
 )
 
+// TextMate golden fixtures are verbatim oracle inputs: they deliberately
+// carry trailing whitespace, exact EOF newline structure, and un-rustfmt'd
+// long lines as edge-case coverage. Any hook that rewrites file bytes would
+// desync them from the checked-in goldens and break the 254/254 contract.
+local grammarFixtures = "crates/mark-syntax/tests/fixtures/**"
+
 local architectureGlobs = List(
   "scripts/check-architecture",
   "crates/mark-tui/src/**",
@@ -33,16 +39,28 @@ local piImpactGlobs = List(
 )
 
 local hygiene = new Mapping<String, Step | Group> {
-  ["merge-conflict"] = Builtins.check_merge_conflict
+  // TextMate grammar fixtures are arbitrary language text: RST section
+  // underlines and simple-table borders look like conflict markers.
+  ["merge-conflict"] = (Builtins.check_merge_conflict) {
+    exclude = List(grammarFixtures)
+  }
   ["private-key"] = Builtins.detect_private_key
-  ["large-file"] = Builtins.check_added_large_files
+  // Generated oracle goldens are large by nature and required checked-in
+  // by the 254/254 validation contract.
+  ["large-file"] = (Builtins.check_added_large_files) {
+    exclude = List("crates/mark-syntax/tests/fixtures/textmate/**/*.golden.jsonl")
+  }
   ["case-conflict"] = Builtins.check_case_conflict
   ["executable-shebang"] = Builtins.check_executables_have_shebangs
   ["symlinks"] = Builtins.check_symlinks
   ["bom"] = Builtins.byte_order_marker
   ["line-endings"] = Builtins.mixed_line_ending
-  ["newlines"] = Builtins.newlines
-  ["trailing-whitespace"] = Builtins.trailing_whitespace
+  ["newlines"] = (Builtins.newlines) {
+    exclude = List(grammarFixtures)
+  }
+  ["trailing-whitespace"] = (Builtins.trailing_whitespace) {
+    exclude = List(grammarFixtures)
+  }
 }
 
 local fast = new Mapping<String, Step | Group> {
@@ -50,6 +68,7 @@ local fast = new Mapping<String, Step | Group> {
 
   ["rustfmt"] {
     glob = "**/*.rs"
+    exclude = grammarFixtures
     check = "mise x -- rustfmt --check --edition 2024 {{files}}"
     check_list_files = "mise x -- rustfmt --check --edition 2024 --files-with-diff {{files}}"
     fix = "mise x -- rustfmt --edition 2024 {{files}}"

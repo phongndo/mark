@@ -526,7 +526,7 @@ dependencies = [
 
 [[package]]
 name = "mark-bench"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "clap",
  "mark-diff",
@@ -539,7 +539,7 @@ dependencies = [
 
 [[package]]
 name = "mark-cli"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "clap",
  "crossterm",
@@ -557,7 +557,7 @@ dependencies = [
 
 [[package]]
 name = "mark-command"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "mark-core",
  "mark-diff",
@@ -567,7 +567,7 @@ dependencies = [
 
 [[package]]
 name = "mark-core"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -575,7 +575,7 @@ dependencies = [
 
 [[package]]
 name = "mark-diff"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "mark-core",
  "mark-git",
@@ -586,14 +586,14 @@ dependencies = [
 
 [[package]]
 name = "mark-git"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "mark-core",
 ]
 
 [[package]]
 name = "mark-runtime"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "num_cpus",
  "rayon",
@@ -602,7 +602,7 @@ dependencies = [
 
 [[package]]
 name = "mark-syntax"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "mark-core",
  "memchr",
@@ -611,12 +611,14 @@ dependencies = [
  "serde",
  "serde_json",
  "toml",
+ "unicode-general-category",
+ "unicode-script",
  "unicode-segmentation",
 ]
 
 [[package]]
 name = "mark-tui"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "crossterm",
  "fff-grep",
@@ -1109,10 +1111,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "756daf9b1013ebe47a8776667b466417e2d4c5679d441c26230efd9ef78692db"
 
 [[package]]
+name = "unicode-general-category"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b993bddc193ae5bd0d623b49ec06ac3e9312875fdae725a975c51db1cc1677f"
+
+[[package]]
 name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+
+[[package]]
+name = "unicode-script"
+version = "0.5.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "383ad40bb927465ec0ce7720e033cb4ca06912855fc35db31b5755d0de75b1ee"
 
 [[package]]
 name = "unicode-segmentation"

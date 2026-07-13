@@ -49,27 +49,56 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = env::args().skip(1).collect::<Vec<_>>();
     let mut assets = None;
     let mut scope = None;
+    let mut grammar = None;
+    let mut embedded = Vec::new();
     let mut mode = Mode::LineCold;
     let mut assert_min_mb_s = None;
+    let mut json_output = false;
     let mut positional = Vec::new();
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
             "--assets" => {
-                assets = Some(PathBuf::from(&args[index + 1]));
+                assets = Some(PathBuf::from(
+                    args.get(index + 1).ok_or("--assets requires a value")?,
+                ));
                 index += 2;
             }
             "--scope" => {
-                scope = Some(args[index + 1].clone());
+                scope = Some(
+                    args.get(index + 1)
+                        .ok_or("--scope requires a value")?
+                        .clone(),
+                );
+                index += 2;
+            }
+            "--grammar" => {
+                grammar = Some(PathBuf::from(
+                    args.get(index + 1).ok_or("--grammar requires a value")?,
+                ));
+                index += 2;
+            }
+            "--embedded" => {
+                embedded.push(PathBuf::from(
+                    args.get(index + 1).ok_or("--embedded requires a value")?,
+                ));
                 index += 2;
             }
             "--mode" => {
-                mode = Mode::parse(&args[index + 1])?;
+                mode = Mode::parse(args.get(index + 1).ok_or("--mode requires a value")?)?;
                 index += 2;
             }
             "--assert-min-mb-s" => {
-                assert_min_mb_s = Some(args[index + 1].parse::<f64>()?);
+                assert_min_mb_s = Some(
+                    args.get(index + 1)
+                        .ok_or("--assert-min-mb-s requires a value")?
+                        .parse::<f64>()?,
+                );
                 index += 2;
+            }
+            "--json" => {
+                json_output = true;
+                index += 1;
             }
             other => {
                 positional.push(other.to_owned());
@@ -77,8 +106,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
-    let assets = assets.ok_or("--assets required")?;
-    let scope = scope.ok_or("--scope required")?;
     let file = positional.first().ok_or("missing source file")?;
     let iterations: usize = positional
         .get(1)
@@ -86,48 +113,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .transpose()?
         .unwrap_or(10);
 
-    let mut sources = BTreeMap::new();
-    let mut entries = fs::read_dir(&assets)?.collect::<Result<Vec<_>, _>>()?;
-    entries.sort_by_key(|entry| entry.file_name());
-    for entry in entries {
-        let path = entry.path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
-            continue;
+    let (set, root) = if let Some(grammar) = grammar {
+        if assets.is_some() || scope.is_some() {
+            return Err("--grammar cannot be combined with --assets or --scope".into());
         }
-        let contents = fs::read_to_string(&path)?;
-        let parsed: serde_json::Value = serde_json::from_str(&contents)?;
-        if let Some(scope_name) = parsed.get("scopeName").and_then(|value| value.as_str()) {
-            sources.insert(scope_name.to_owned(), (contents, parsed));
+        let mut set = GrammarSet::new();
+        let root = set.load_and_add(&fs::read_to_string(grammar)?)?;
+        for embedded in embedded {
+            set.load_and_add(&fs::read_to_string(embedded)?)?;
         }
-    }
-
-    // Clone only the external-include closure of the requested root into each
-    // fresh tokenizer. Loading every private Markdown dependency made an
-    // unrelated Rust process-cold sample pay for the expanded asset catalog.
-    let mut selected = BTreeSet::new();
-    let mut pending = vec![scope.clone()];
-    while let Some(requested) = pending.pop() {
-        if !selected.insert(requested.clone()) {
-            continue;
+        (set, root)
+    } else {
+        if !embedded.is_empty() {
+            return Err("--embedded requires --grammar".into());
         }
-        if let Some((_, grammar)) = sources.get(&requested) {
-            collect_external_scopes(grammar, &sources, &mut pending);
-        }
-    }
-
-    let mut set = GrammarSet::new();
-    for requested in selected {
-        let Some((contents, _)) = sources.get(&requested) else {
-            continue;
-        };
-        let id = GrammarId(set.grammars().len() as u16);
-        if let Ok(grammar) = load_dev_grammar_from_str(id, contents) {
-            set.add(grammar);
-        }
-    }
-    let root = set
-        .grammar_id_by_scope(&scope)
-        .ok_or_else(|| format!("scope {scope:?} not found"))?;
+        let assets = assets.ok_or("--assets required without --grammar")?;
+        let scope = scope.ok_or("--scope required with --assets")?;
+        load_asset_closure(&assets, &scope)?
+    };
 
     let source = fs::read_to_string(file)?;
     let mut reusable_tokenizer =
@@ -187,6 +190,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         elapsed.as_secs_f64(),
         avg_mb_s
     );
+    if json_output {
+        println!(
+            "{}",
+            serde_json::json!({
+                "schemaVersion": 1,
+                "mode": mode.name(),
+                "iterations": iterations,
+                "bytesPerIteration": source.len(),
+                "processedBytes": source.len() * iterations,
+                "elapsedNanoseconds": u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX),
+                "tokens": total_tokens,
+            })
+        );
+    }
     if let Some(min_mb_s) = assert_min_mb_s
         && avg_mb_s < min_mb_s
     {
@@ -196,6 +213,55 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .into());
     }
     Ok(())
+}
+
+fn load_asset_closure(
+    assets: &PathBuf,
+    scope: &str,
+) -> Result<(GrammarSet, GrammarId), Box<dyn std::error::Error>> {
+    let mut sources = BTreeMap::new();
+    let mut entries = fs::read_dir(assets)?.collect::<Result<Vec<_>, _>>()?;
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let contents = fs::read_to_string(&path)?;
+        let parsed: serde_json::Value = serde_json::from_str(&contents)?;
+        if let Some(scope_name) = parsed.get("scopeName").and_then(|value| value.as_str()) {
+            sources.insert(scope_name.to_owned(), (contents, parsed));
+        }
+    }
+
+    // Clone only the external-include closure of the requested root into each
+    // fresh tokenizer. Loading every private Markdown dependency made an
+    // unrelated Rust process-cold sample pay for the expanded asset catalog.
+    let mut selected = BTreeSet::new();
+    let mut pending = vec![scope.to_owned()];
+    while let Some(requested) = pending.pop() {
+        if !selected.insert(requested.clone()) {
+            continue;
+        }
+        if let Some((_, grammar)) = sources.get(&requested) {
+            collect_external_scopes(grammar, &sources, &mut pending);
+        }
+    }
+
+    let mut set = GrammarSet::new();
+    for requested in selected {
+        let Some((contents, _)) = sources.get(&requested) else {
+            continue;
+        };
+        let id = GrammarId(set.grammars().len() as u16);
+        if let Ok(grammar) = load_dev_grammar_from_str(id, contents) {
+            set.add(grammar);
+        }
+    }
+    let root = set
+        .grammar_id_by_scope(scope)
+        .ok_or_else(|| format!("scope {scope:?} not found"))?;
+    Ok((set, root))
 }
 
 fn collect_external_scopes(

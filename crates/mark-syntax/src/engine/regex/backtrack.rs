@@ -6,11 +6,11 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use super::ast::{
     AnchorKind, Ast, AstPathStep, Backref, CharClass, ClassAtom, LookKind, ParsedRegex,
-    PerlClassKind, RegexFlags, has_case_insensitive_scope, parse,
+    PerlClassKind, RegexFlags, has_case_insensitive_scope, parse, uniform_effective_flags,
 };
 use super::bytecode::{BytecodeScratch, CompileError, Program};
 use super::prefilter::Prefilter;
-use super::{AnchorContext, MatchResult, Matcher};
+use super::{AnchorContext, MatchResult, Matcher, is_unicode_word_char};
 
 pub(crate) const DEFAULT_STEP_BUDGET: usize = 100_000;
 const STATE_LIMIT: usize = 2048;
@@ -452,24 +452,26 @@ impl FallbackMatcher {
 
     pub(crate) fn from_parsed(parsed: Arc<ParsedRegex>, budget: usize) -> Self {
         let prefilter = Prefilter::from_regex(&parsed);
-        let (start_bytes, start_nullable) = if has_case_insensitive_scope(&parsed.ast) {
-            (None, false)
-        } else {
-            match first_start_bytes(&parsed.ast) {
-                Some(mut info) if !info.bytes.is_empty() => {
-                    if parsed.flags.case_insensitive {
-                        expand_ascii_case_start_bytes(&mut info.bytes);
+        let uniform_flags = uniform_effective_flags(&parsed.ast);
+        let (start_bytes, start_nullable) =
+            if has_case_insensitive_scope(&parsed.ast) && uniform_flags.is_none() {
+                (None, false)
+            } else {
+                match first_start_bytes(&parsed.ast) {
+                    Some(mut info) if !info.bytes.is_empty() => {
+                        if uniform_flags.unwrap_or(parsed.flags).case_insensitive {
+                            expand_case_insensitive_start_bytes(&mut info.bytes);
+                        }
+                        if info.bytes.len() < 128 {
+                            (Some(info.bytes), info.nullable)
+                        } else {
+                            (None, info.nullable)
+                        }
                     }
-                    if info.bytes.len() < 128 {
-                        (Some(info.bytes), info.nullable)
-                    } else {
-                        (None, info.nullable)
-                    }
+                    Some(info) => (None, info.nullable),
+                    None => (None, false),
                 }
-                Some(info) => (None, info.nullable),
-                None => (None, false),
-            }
-        };
+            };
         let start_hint = start_hint(&parsed.ast);
         static NEXT_PREFILTER_SLOT: std::sync::atomic::AtomicU32 =
             std::sync::atomic::AtomicU32::new(0);
@@ -541,7 +543,11 @@ impl FallbackMatcher {
 
     pub(crate) fn restricted_start_bytes(&self) -> Option<Vec<u8>> {
         let bytes = self.start_bytes.as_ref().filter(|_| !self.start_nullable)?;
-        Some((0u8..=0x7f).filter(|byte| bytes.contains(*byte)).collect())
+        Some(
+            (0u8..=u8::MAX)
+                .filter(|byte| bytes.contains(*byte))
+                .collect(),
+        )
     }
 
     pub fn try_find(
@@ -598,19 +604,19 @@ impl FallbackMatcher {
         {
             // Nullable patterns (e.g. `a?`, optional prefixes) can match empty
             // at `from` even when no start-byte candidate exists later.
-            if self.start_nullable {
-                if let Some(result) = self.try_match_at_start_with_capture_count(
+            if self.start_nullable
+                && let Some(result) = self.try_match_at_start_with_capture_count(
                     line,
                     from,
                     ctx,
                     &mut budget,
                     capture_count,
-                )? {
-                    return Ok(FallbackReport {
-                        result: Some(result),
-                        steps: budget.used(),
-                    });
-                }
+                )?
+            {
+                return Ok(FallbackReport {
+                    result: Some(result),
+                    steps: budget.used(),
+                });
             }
             for (offset, byte) in line
                 .as_bytes()
@@ -939,33 +945,27 @@ impl FallbackMatcher {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct StartByteSet {
-    lo: u64,
-    hi: u64,
+    bits: [u64; 4],
     len: usize,
 }
 
 impl StartByteSet {
     fn empty() -> Self {
         Self {
-            lo: 0,
-            hi: 0,
+            bits: [0; 4],
             len: 0,
         }
     }
 
     fn insert(&mut self, byte: u8) {
         if !self.contains(byte) {
-            if byte < 64 {
-                self.lo |= 1u64 << byte;
-            } else {
-                self.hi |= 1u64 << (byte - 64);
-            }
+            self.bits[byte as usize >> 6] |= 1u64 << (byte & 63);
             self.len += 1;
         }
     }
 
     fn extend(&mut self, other: &Self) {
-        for byte in 0..=0x7f {
+        for byte in 0..=u8::MAX {
             if other.contains(byte) {
                 self.insert(byte);
             }
@@ -973,13 +973,7 @@ impl StartByteSet {
     }
 
     fn contains(&self, byte: u8) -> bool {
-        if byte < 64 {
-            self.lo & (1u64 << byte) != 0
-        } else if byte < 128 {
-            self.hi & (1u64 << (byte - 64)) != 0
-        } else {
-            false
-        }
+        self.bits[byte as usize >> 6] & (1u64 << (byte & 63)) != 0
     }
 
     fn is_empty(&self) -> bool {
@@ -991,19 +985,25 @@ impl StartByteSet {
     }
 }
 
-fn expand_ascii_case_start_bytes(bytes: &mut StartByteSet) {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StartBytes {
+    bytes: StartByteSet,
+    nullable: bool,
+}
+
+fn expand_case_insensitive_start_bytes(bytes: &mut StartByteSet) {
     for byte in b'a'..=b'z' {
         if bytes.contains(byte) || bytes.contains(byte.to_ascii_uppercase()) {
             bytes.insert(byte);
             bytes.insert(byte.to_ascii_uppercase());
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct StartBytes {
-    bytes: StartByteSet,
-    nullable: bool,
+    // Unicode simple/full folds can make an ASCII atom match a non-ASCII
+    // scalar. Any such UTF-8 scalar starts with one of these lead bytes; keep
+    // them as conservative candidates while still skipping unrelated ASCII.
+    for byte in 0xc2..=0xf4 {
+        bytes.insert(byte);
+    }
 }
 
 fn first_start_bytes(ast: &Ast) -> Option<StartBytes> {
@@ -1109,6 +1109,8 @@ fn class_start_bytes(class: &CharClass) -> Option<StartByteSet> {
     if class.negated {
         return None;
     }
+    // Intersections only narrow this first union, so its byte set remains a
+    // conservative start hint without having to flatten nested predicates.
     let mut bytes = StartByteSet::empty();
     for atom in &class.atoms {
         match atom {
@@ -1210,16 +1212,8 @@ fn match_position_node(
     match ast {
         Ast::Empty => Ok(PositionStates::one(position)),
         Ast::Literal(literal) => {
-            let end = position.saturating_add(literal.len());
-            let Some(candidate) = line.get(position..end) else {
-                return Ok(PositionStates::empty());
-            };
-            let matched = if flags.case_insensitive {
-                candidate.eq_ignore_ascii_case(literal)
-            } else {
-                candidate == literal
-            };
-            Ok(if matched {
+            let end = match_literal_end(line, position, literal, flags);
+            Ok(if let Some(end) = end {
                 PositionStates::one(end)
             } else {
                 PositionStates::empty()
@@ -1411,7 +1405,9 @@ fn position_lookbehind_matches(
     flags: RegexFlags,
     budget: &mut StepBudget,
 ) -> Result<bool, BudgetExceeded> {
-    if let Some(literal) = ast_exact_literal(child) {
+    if let Some(literal) = ast_exact_literal(child)
+        && (!flags.case_insensitive || literal.is_ascii())
+    {
         let start = position.saturating_sub(literal.len());
         return Ok(position >= literal.len()
             && line.is_char_boundary(start)
@@ -1955,7 +1951,9 @@ fn is_perl_class(ast: &Ast, wanted: PerlClassKind) -> bool {
     let Ast::Class(class) = strip_nonsemantic_group(ast) else {
         return false;
     };
-    !class.negated && matches!(class.atoms.as_slice(), [ClassAtom::Perl(kind)] if *kind == wanted)
+    !class.negated
+        && class.intersections.is_empty()
+        && matches!(class.atoms.as_slice(), [ClassAtom::Perl(kind)] if *kind == wanted)
 }
 
 fn ast_contains_literal(ast: &Ast, wanted: &str) -> bool {
@@ -2005,16 +2003,7 @@ fn match_literal(
     flags: RegexFlags,
     _budget: &mut StepBudget,
 ) -> Result<VmStates, BudgetExceeded> {
-    let end = state.pos.saturating_add(literal.len());
-    let Some(candidate) = line.get(state.pos..end) else {
-        return Ok(VmStates::empty());
-    };
-    let matched = if flags.case_insensitive {
-        candidate.eq_ignore_ascii_case(literal)
-    } else {
-        candidate == literal
-    };
-    if matched {
+    if let Some(end) = match_literal_end(line, state.pos, literal, flags) {
         Ok(VmStates::one(VmState { pos: end, ..state }))
     } else {
         Ok(VmStates::empty())
@@ -2070,7 +2059,10 @@ pub(crate) fn anchor_matches(
     match anchor {
         AnchorKind::LineStart => pos == 0,
         AnchorKind::LineEnd => is_line_end_position(line, pos),
-        AnchorKind::TextEnd => pos == line.len(),
+        // vscode-textmate rewrites Oniguruma `\z` as
+        // `$(?!\n)(?<!\n)`. Logical lines carry a synthetic trailing newline,
+        // so `\z` must not close document-scoped frames on every line.
+        AnchorKind::TextEnd => pos == line.len() && !line.ends_with('\n'),
         AnchorKind::TextEndOrFinalNewline => {
             pos == line.len() || line.get(pos..).is_some_and(|tail| tail == "\n")
         }
@@ -2081,7 +2073,7 @@ pub(crate) fn anchor_matches(
     }
 }
 
-fn is_line_end_position(line: &str, pos: usize) -> bool {
+pub(crate) fn is_line_end_position(line: &str, pos: usize) -> bool {
     pos == line.len() || (line.as_bytes().get(pos).copied() == Some(b'\n') && pos + 1 == line.len())
 }
 
@@ -2274,16 +2266,7 @@ fn is_simple_repeat_atom(node: &Ast) -> bool {
 
 fn simple_repeat_next(node: &Ast, line: &str, pos: usize, flags: RegexFlags) -> Option<usize> {
     match node {
-        Ast::Literal(literal) => {
-            let end = pos.checked_add(literal.len())?;
-            let candidate = line.get(pos..end)?;
-            let matched = if flags.case_insensitive {
-                candidate.eq_ignore_ascii_case(literal)
-            } else {
-                candidate == literal
-            };
-            matched.then_some(end)
-        }
+        Ast::Literal(literal) => match_literal_end(line, pos, literal, flags),
         Ast::Class(class) => {
             let (ch, next) = char_at(line, pos)?;
             class_contains(class, ch, flags).then_some(next)
@@ -2512,16 +2495,7 @@ fn match_backref(
     let Some(captured) = line.get(range.clone()) else {
         return Ok(VmStates::empty());
     };
-    let end = state.pos.saturating_add(captured.len());
-    let Some(candidate) = line.get(state.pos..end) else {
-        return Ok(VmStates::empty());
-    };
-    let matched = if flags.case_insensitive {
-        candidate.eq_ignore_ascii_case(captured)
-    } else {
-        candidate == captured
-    };
-    if matched {
+    if let Some(end) = match_literal_end(line, state.pos, captured, flags) {
         Ok(VmStates::one(VmState { pos: end, ..state }))
     } else {
         Ok(VmStates::empty())
@@ -2554,10 +2528,13 @@ fn push_limited(out: &mut VmStates, states: VmStates) {
 }
 
 pub(crate) fn class_contains(class: &CharClass, ch: char, flags: RegexFlags) -> bool {
-    let matched = class
-        .atoms
-        .iter()
-        .any(|atom| atom_contains(atom, ch, flags));
+    let union_contains =
+        |atoms: &[ClassAtom]| atoms.iter().any(|atom| atom_contains(atom, ch, flags));
+    let matched = union_contains(&class.atoms)
+        && class
+            .intersections
+            .iter()
+            .all(|atoms| union_contains(atoms));
     if class.negated { !matched } else { matched }
 }
 
@@ -2565,10 +2542,21 @@ fn atom_contains(atom: &ClassAtom, ch: char, flags: RegexFlags) -> bool {
     match atom {
         ClassAtom::Char(expected) => char_eq(*expected, ch, flags),
         ClassAtom::Range(start, end) => {
-            let ch = fold_char(ch, flags);
-            let start = fold_char(*start, flags);
-            let end = fold_char(*end, flags);
-            start <= ch && ch <= end
+            let in_folded_range =
+                |value: char, start: char, end: char| start <= value && value <= end;
+            if flags.case_insensitive {
+                in_folded_range(
+                    ch.to_lowercase().next().unwrap_or(ch),
+                    start.to_lowercase().next().unwrap_or(*start),
+                    end.to_lowercase().next().unwrap_or(*end),
+                ) || in_folded_range(
+                    ch.to_uppercase().next().unwrap_or(ch),
+                    start.to_uppercase().next().unwrap_or(*start),
+                    end.to_uppercase().next().unwrap_or(*end),
+                )
+            } else {
+                start <= &ch && &ch <= end
+            }
         }
         ClassAtom::Perl(kind) => perl_class_contains(*kind, ch),
         ClassAtom::Posix { name, negated } => {
@@ -2634,7 +2622,43 @@ fn posix_class_contains(name: &str, ch: char) -> bool {
 }
 
 fn unicode_class_contains(name: &str, ch: char) -> bool {
+    use unicode_general_category::{GeneralCategory as Gc, get_general_category};
+    use unicode_script::UnicodeScript;
+
+    let category = get_general_category(ch);
+    let is_letter = matches!(
+        category,
+        Gc::LowercaseLetter
+            | Gc::ModifierLetter
+            | Gc::OtherLetter
+            | Gc::TitlecaseLetter
+            | Gc::UppercaseLetter
+    );
+    let is_mark = matches!(
+        category,
+        Gc::EnclosingMark | Gc::NonspacingMark | Gc::SpacingMark
+    );
+    let is_number = matches!(
+        category,
+        Gc::DecimalNumber | Gc::LetterNumber | Gc::OtherNumber
+    );
+    let is_punctuation = matches!(
+        category,
+        Gc::ClosePunctuation
+            | Gc::ConnectorPunctuation
+            | Gc::DashPunctuation
+            | Gc::FinalPunctuation
+            | Gc::InitialPunctuation
+            | Gc::OpenPunctuation
+            | Gc::OtherPunctuation
+    );
+    let is_symbol = matches!(
+        category,
+        Gc::CurrencySymbol | Gc::MathSymbol | Gc::ModifierSymbol | Gc::OtherSymbol
+    );
     if name.eq_ignore_ascii_case("l") || name.eq_ignore_ascii_case("letter") {
+        is_letter
+    } else if name.eq_ignore_ascii_case("alphabetic") {
         ch.is_alphabetic()
     } else if name.eq_ignore_ascii_case("alnum") {
         ch.is_alphanumeric()
@@ -2662,35 +2686,69 @@ fn unicode_class_contains(name: &str, ch: char) -> bool {
         ch.is_uppercase()
     } else if name.eq_ignore_ascii_case("xdigit") {
         ch.is_ascii_hexdigit()
-    } else if name.eq_ignore_ascii_case("n")
-        || name.eq_ignore_ascii_case("number")
-        || name.eq_ignore_ascii_case("nd")
-        || name.eq_ignore_ascii_case("decimal_number")
-    {
-        ch.is_numeric()
+    } else if name.eq_ignore_ascii_case("n") || name.eq_ignore_ascii_case("number") {
+        is_number
+    } else if name.eq_ignore_ascii_case("m") || name.eq_ignore_ascii_case("mark") {
+        is_mark
+    } else if name.eq_ignore_ascii_case("p") || name.eq_ignore_ascii_case("punctuation") {
+        is_punctuation
+    } else if name.eq_ignore_ascii_case("s") || name.eq_ignore_ascii_case("symbol") {
+        is_symbol
+    } else if name.eq_ignore_ascii_case(category.abbreviation()) {
+        true
+    } else if name.eq_ignore_ascii_case("decimal_number") {
+        category == Gc::DecimalNumber
     } else if name.eq_ignore_ascii_case("z") || name.eq_ignore_ascii_case("separator") {
         ch.is_whitespace()
     } else if name.eq_ignore_ascii_case("word") {
         is_word_char(ch)
     } else {
-        false
+        ch.script().full_name().eq_ignore_ascii_case(name)
+            || ch.script().short_name().eq_ignore_ascii_case(name)
     }
 }
 
 fn char_eq(expected: char, actual: char, flags: RegexFlags) -> bool {
     if flags.case_insensitive {
-        fold_char(expected, flags) == fold_char(actual, flags)
+        unicode_case_eq(expected, actual)
     } else {
         expected == actual
     }
 }
 
-fn fold_char(ch: char, flags: RegexFlags) -> char {
-    if flags.case_insensitive {
-        ch.to_ascii_lowercase()
-    } else {
-        ch
+pub(crate) fn match_literal_end(
+    line: &str,
+    start: usize,
+    literal: &str,
+    flags: RegexFlags,
+) -> Option<usize> {
+    if !flags.case_insensitive {
+        let end = start.checked_add(literal.len())?;
+        return (line.get(start..end)? == literal).then_some(end);
     }
+    if literal.is_ascii() {
+        let end = start.checked_add(literal.len())?;
+        return line
+            .get(start..end)?
+            .eq_ignore_ascii_case(literal)
+            .then_some(end);
+    }
+
+    let mut position = start;
+    for expected in literal.chars() {
+        let (actual, end) = char_at(line, position)?;
+        if !unicode_case_eq(expected, actual) {
+            return None;
+        }
+        position = end;
+    }
+    Some(position)
+}
+
+pub(crate) fn unicode_case_eq(left: char, right: char) -> bool {
+    left == right
+        || left.to_lowercase().eq(right.to_lowercase())
+        || left.to_uppercase().eq(right.to_uppercase())
 }
 
 pub(crate) fn char_at(line: &str, pos: usize) -> Option<(char, usize)> {
@@ -2746,7 +2804,7 @@ fn previous_char(line: &str, pos: usize) -> Option<char> {
 }
 
 fn is_word_char(ch: char) -> bool {
-    ch == '_' || ch.is_alphanumeric()
+    is_unicode_word_char(ch)
 }
 
 #[cfg(test)]
@@ -2816,9 +2874,100 @@ mod tests {
     }
 
     #[test]
+    fn supports_oniguruma_alphabetic_property_inside_classes() {
+        let matcher = FallbackMatcher::new(r"^[.:_\p{Alphabetic}\p{N}]+$");
+        assert!(matcher.find("alpha:λ_三7", 0, ctx()).is_some());
+        assert!(matcher.find("not alphabetic!", 0, ctx()).is_none());
+    }
+
+    #[test]
+    fn supports_oniguruma_nested_class_intersection_and_subtraction() {
+        let operators = FallbackMatcher::new(r#"^[[\p{S}\p{P}]&&[^]"'(),;\[_`{}]]+$"#);
+        for sample in ["+", "→", "🚀", "!", ".:"] {
+            assert!(operators.find(sample, 0, ctx()).is_some(), "{sample:?}");
+        }
+        for sample in ["a", "7", " ", "]", "\"", "'", "(", "_", "`", "{"] {
+            assert!(operators.find(sample, 0, ctx()).is_none(), "{sample:?}");
+        }
+
+        let rhs_union = FallbackMatcher::new(r"^[a-w&&[^c-g]z]+$");
+        assert!(rhs_union.find("abhw", 0, ctx()).is_some());
+        assert!(rhs_union.find("c", 0, ctx()).is_none());
+        assert!(rhs_union.find("g", 0, ctx()).is_none());
+        assert!(rhs_union.find("z", 0, ctx()).is_none());
+
+        let chained = FallbackMatcher::new(r"^[a-z&&[^aeiou]&&[^x-z]]+$");
+        assert!(chained.find("bcd", 0, ctx()).is_some());
+        assert!(chained.find("a", 0, ctx()).is_none());
+        assert!(chained.find("z", 0, ctx()).is_none());
+    }
+
+    #[test]
+    fn supports_unicode_general_category_properties() {
+        for (property, sample) in [
+            ("Cc", "\u{1}"),
+            ("Cf", "\u{200d}"),
+            ("Ll", "a"),
+            ("Lm", "ʰ"),
+            ("Lo", "文"),
+            ("Lt", "ǅ"),
+            ("Lu", "A"),
+            ("Mc", "ा"),
+            ("Me", "⃝"),
+            ("Mn", "\u{301}"),
+            ("Nl", "Ⅻ"),
+            ("No", "½"),
+            ("Pc", "_"),
+            ("Sc", "$"),
+            ("Sk", "^"),
+            ("Sm", "+"),
+            ("So", "🚀"),
+        ] {
+            let pattern = format!(r"^\p{{{property}}}+$");
+            let matcher = FallbackMatcher::new(&pattern);
+            assert!(matcher.find(sample, 0, ctx()).is_some(), "{property}");
+        }
+        for (property, sample) in [("M", "\u{301}"), ("P", "!"), ("S", "🚀")] {
+            let pattern = format!(r"^\p{{{property}}}+$");
+            let matcher = FallbackMatcher::new(&pattern);
+            assert!(matcher.find(sample, 0, ctx()).is_some(), "{property}");
+        }
+        let greek = FallbackMatcher::new(r"^\p{Greek}+$");
+        assert!(greek.find("αΩ", 0, ctx()).is_some());
+        assert!(greek.find("Latin", 0, ctx()).is_none());
+    }
+
+    #[test]
     fn scoped_case_insensitive_flags_do_not_get_case_sensitive_start_bytes() {
         let matcher = FallbackMatcher::new(r"(?i:DOCTYPE)");
         assert_eq!(matcher.find("doctype", 0, ctx()).unwrap().start, 0);
+    }
+
+    #[test]
+    fn case_insensitive_literals_fold_non_ascii_scalars() {
+        let matcher = FallbackMatcher::new(r"(?i)Выбрать|Истина|НРег");
+        for sample in ["ВЫБРАТЬ", "истина", "нрег"] {
+            let matched = matcher.find(sample, 0, ctx()).expect(sample);
+            assert_eq!(matched.start..matched.end, 0..sample.len());
+        }
+    }
+
+    #[test]
+    fn case_insensitive_ascii_ranges_accept_unicode_simple_folds() {
+        let matcher = FallbackMatcher::new(r"(?i)^[A-Z]+$");
+        for sample in ["ſ", "K"] {
+            assert!(matcher.find(sample, 0, ctx()).is_some(), "{sample:?}");
+        }
+    }
+
+    #[test]
+    fn alphabetic_property_includes_derived_alphabetic_marks() {
+        let matcher = FallbackMatcher::new(r"^\p{Alphabetic}+$");
+        for sample in ["\u{0345}", "\u{05b0}"] {
+            assert!(matcher.find(sample, 0, ctx()).is_some(), "{sample:?}");
+        }
+        let letters = FallbackMatcher::new(r"^\p{L}+$");
+        assert!(letters.find("\u{0345}", 0, ctx()).is_none());
     }
 
     #[test]
@@ -3090,11 +3239,14 @@ mod tests {
     }
 
     #[test]
-    fn start_byte_hint_expands_case_insensitive_ascii_patterns() {
+    fn case_insensitive_start_hints_include_unicode_lead_bytes() {
         let matcher = FallbackMatcher::new(r"(?i)foo");
         let result = matcher.find("xxFOO", 0, ctx()).unwrap();
         assert_eq!(result.start..result.end, 2..5);
-        assert_eq!(matcher.restricted_start_bytes(), Some(vec![b'F', b'f']));
+        let bytes = matcher.restricted_start_bytes().unwrap();
+        assert!(bytes.contains(&b'F'));
+        assert!(bytes.contains(&b'f'));
+        assert!((0xc2..=0xf4).all(|byte| bytes.contains(&byte)));
     }
 
     #[test]

@@ -149,11 +149,11 @@ pub const LANGUAGE_ALIASES: &[(&str, &str)] = &[
     ("scm", "scheme"),
     ("scheme", "scheme"),
     ("makefile", "make"),
-    ("shell", "bash"),
-    ("shellscript", "bash"),
+    ("bash", "shellscript"),
+    ("shell", "shellscript"),
     ("shell-session", "shell-unix-generic"),
     ("shellsession", "shell-unix-generic"),
-    ("sh", "bash"),
+    ("sh", "shellscript"),
     ("shader", "shaderlab"),
     ("slim", "ruby-slim"),
     ("sol", "solidity"),
@@ -196,7 +196,7 @@ pub const LANGUAGE_ALIASES: &[(&str, &str)] = &[
     ("xslt", "xsl"),
     ("yml", "yaml"),
     ("zs", "zenscript"),
-    ("zsh", "bash"),
+    ("zsh", "shellscript"),
 ];
 
 pub const EXTENSION_ALIASES: &[(&str, &str)] = &[
@@ -206,6 +206,9 @@ pub const EXTENSION_ALIASES: &[(&str, &str)] = &[
     ("cc", "cpp"),
     ("cjs", "javascript"),
     ("cls", "apex"),
+    // Both Apache and BIRD publish `conf`; generic .conf files follow the
+    // broadly used Apache configuration grammar rather than catalog order.
+    ("conf", "apache"),
     ("cs", "csharp"),
     ("cu", "cuda"),
     ("cuh", "cuda"),
@@ -236,7 +239,7 @@ pub const EXTENSION_ALIASES: &[(&str, &str)] = &[
     ("rs", "rust"),
     ("cts", "typescript"),
     ("scss", "scss"),
-    ("sh", "bash"),
+    ("sh", "shellscript"),
     ("sql", "sql"),
     ("sv", "systemverilog"),
     ("swift", "swift"),
@@ -248,6 +251,36 @@ pub const EXTENSION_ALIASES: &[(&str, &str)] = &[
     ("v", "verilog"),
     ("yaml", "yaml"),
     ("yml", "yaml"),
+];
+
+/// Explicit ownership for every extension that otherwise has multiple public
+/// catalog owners. An empty owner deliberately suppresses a file type that is
+/// only advertised by embedded/tag fragment grammars.
+pub const EXTENSION_PRECEDENCE: &[(&str, &str)] = &[
+    ("asm", "asm"),
+    ("bib", "bibtex"),
+    ("conf", "apache"),
+    ("gs", "genie"),
+    ("hcl", "terraform"),
+    ("hjson", "json"),
+    ("html", "html"),
+    ("html-derivative", "html-derivative"),
+    ("js", "javascript"),
+    ("json5", "json5"),
+    ("jsonc", "jsonc"),
+    ("jsonl", "jsonl"),
+    ("m", "matlab"),
+    ("plsql", "plsql"),
+    ("postcss", "postcss"),
+    ("pp", "puppet"),
+    ("res", ""),
+    ("s", "asm"),
+    ("ss", "scheme"),
+    ("svelte", "svelte"),
+    ("v", "verilog"),
+    ("vh", "verilog"),
+    ("vsh", "glsl"),
+    ("vue", "vue"),
 ];
 
 pub const BASENAME_ALIASES: &[(&str, &str)] = &[
@@ -281,19 +314,12 @@ pub fn aliases_for_language(language: &str) -> Vec<String> {
 }
 
 pub fn extensions_for_language(language: &str) -> Vec<String> {
-    let target_for_extension = |extension: &str| {
-        EXTENSION_ALIASES
-            .iter()
-            .find_map(|(candidate, target)| (*candidate == extension).then_some(*target))
-    };
     let mut extensions = BTreeSet::new();
-    if target_for_extension(language).is_none_or(|target| target == language) {
+    if extension_is_allowed(language, language) {
         extensions.insert(normalize(language));
     }
     for (alias, target) in LANGUAGE_ALIASES {
-        if *target == language
-            && target_for_extension(alias).is_none_or(|target| target == language)
-        {
+        if *target == language && extension_is_allowed(alias, language) {
             extensions.insert(normalize(alias));
         }
     }
@@ -303,6 +329,29 @@ pub fn extensions_for_language(language: &str) -> Vec<String> {
         }
     }
     extensions.into_iter().collect()
+}
+
+pub fn extension_override(extension: &str) -> Option<&'static str> {
+    if let Some(target) = extension_precedence(extension) {
+        return target;
+    }
+    EXTENSION_ALIASES
+        .iter()
+        .find_map(|(candidate, target)| (*candidate == extension).then_some(*target))
+}
+
+pub fn extension_precedence(extension: &str) -> Option<Option<&'static str>> {
+    EXTENSION_PRECEDENCE.iter().find_map(|(candidate, target)| {
+        (*candidate == extension).then_some((!target.is_empty()).then_some(*target))
+    })
+}
+
+pub fn extension_is_allowed(extension: &str, language: &str) -> bool {
+    match extension_precedence(extension) {
+        Some(Some(target)) => target == language,
+        Some(None) => false,
+        None => extension_override(extension).is_none_or(|target| target == language),
+    }
 }
 
 pub fn basenames_for_language(language: &str) -> Vec<String> {
@@ -327,10 +376,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn curated_extension_overrides_keep_v_for_verilog() {
+    fn curated_extension_overrides_win_over_generated_file_types() {
+        assert_eq!(extension_override("conf"), Some("apache"));
+        assert!(extensions_for_language("apache").contains(&"conf".to_owned()));
+        assert!(!extensions_for_language("bird2").contains(&"conf".to_owned()));
+
         assert!(!extensions_for_language("v").contains(&"v".to_owned()));
         assert!(extensions_for_language("verilog").contains(&"v".to_owned()));
+
+        assert_eq!(extension_override("js"), Some("javascript"));
+        assert!(extensions_for_language("javascript").contains(&"js".to_owned()));
         assert!(extensions_for_language("c").contains(&"h".to_owned()));
+        assert_eq!(extension_precedence("res"), Some(None));
     }
 
     #[test]
@@ -342,8 +399,8 @@ mod tests {
 
     #[test]
     fn core_30_aliases_and_extensions() {
-        assert!(aliases_for_language("bash").contains(&"shellscript".to_owned()));
-        assert!(aliases_for_language("bash").contains(&"sh".to_owned()));
+        assert!(aliases_for_language("shellscript").contains(&"bash".to_owned()));
+        assert!(aliases_for_language("shellscript").contains(&"sh".to_owned()));
         assert!(aliases_for_language("dockerfile").contains(&"docker".to_owned()));
         assert!(aliases_for_language("rust").contains(&"rs".to_owned()));
         assert!(aliases_for_language("typescript").contains(&"ts".to_owned()));
