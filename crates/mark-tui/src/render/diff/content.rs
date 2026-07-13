@@ -1,6 +1,10 @@
 use mark_diff::DiffLineKind;
-use mark_syntax::{DiffBackground, HighlightedLine, SyntaxClass};
+use mark_syntax::{DiffBackground, HighlightedLine, SyntaxClass, SyntaxSegment};
 use ratatui::prelude::{Color, Modifier, Span, Style};
+use std::{
+    collections::HashSet,
+    sync::{Mutex, OnceLock},
+};
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
@@ -10,8 +14,9 @@ use crate::{
     },
     syntax::InlineRange,
     theme::{
-        DiffTheme, EMPTY_DIFF_FILL, EMPTY_DIFF_FILL_SPACING, GUTTER_WIDTH, UNIFIED_GUTTER_WIDTH,
-        line_gutter_bg, line_gutter_fg,
+        DiffTheme, EMPTY_DIFF_FILL, EMPTY_DIFF_FILL_SPACING, GUTTER_WIDTH, TextMateEngineMode,
+        UNIFIED_GUTTER_WIDTH, line_gutter_bg, line_gutter_fg, textmate_engine_mode,
+        with_scope_override_theme,
     },
 };
 
@@ -163,7 +168,7 @@ pub(crate) fn content_spans_at_scroll(
             if !writer.push_segment(
                 &text[byte_start..byte_end],
                 byte_start,
-                syntax_style(segment.class, kind, theme),
+                segment_syntax_style(segment, syntax, kind, theme),
             ) {
                 break;
             }
@@ -402,6 +407,166 @@ pub(crate) fn syntax_style(
         style = style.fg(color);
     }
     style
+}
+
+fn segment_syntax_style(
+    segment: &SyntaxSegment,
+    line: &HighlightedLine,
+    kind: DiffLineKind,
+    theme: DiffTheme,
+) -> Style {
+    let engine_mode = textmate_engine_mode();
+    if engine_mode == TextMateEngineMode::Coarse {
+        let coarse = syntax_style(segment.class, kind, theme);
+        return apply_scope_override(coarse, segment, line, kind, theme);
+    }
+    let coarse = (engine_mode == TextMateEngineMode::Compare)
+        .then(|| syntax_style(segment.class, kind, theme));
+    let Some(exact_theme) = theme.exact_syntax else {
+        let coarse = coarse.unwrap_or_else(|| syntax_style(segment.class, kind, theme));
+        return apply_scope_override(coarse, segment, line, kind, theme);
+    };
+    let matched = exact_theme.resolve_style(&line.scope_table, segment.scope_stack);
+    let resolved = matched.style;
+    let mut style = line_style(kind, theme);
+    // Unmatched foregrounds inherit the TextMate theme default. A configured
+    // global foreground remains the base for unmatched scopes, while token
+    // rules and the more specific overrides below still take precedence.
+    if (matched.foreground_matched || !theme.foreground_overridden)
+        && let Some(color) = resolved.foreground
+    {
+        style = style.fg(Color::Rgb(color.red, color.green, color.blue));
+    }
+    // Diff row backgrounds deliberately win over token backgrounds. Context
+    // rows retain the TextMate background unless transparency was requested.
+    if kind == DiffLineKind::Context
+        && !theme.transparent_background
+        && matched.background_matched
+        && let Some(color) = resolved.background
+    {
+        style = style.bg(Color::Rgb(color.red, color.green, color.blue));
+    }
+    let modifiers = resolved.modifiers;
+    if !modifiers.is_empty() {
+        if modifiers.contains(mark_syntax::theme::SyntaxModifiers::BOLD) {
+            style = style.add_modifier(Modifier::BOLD);
+        }
+        if modifiers.contains(mark_syntax::theme::SyntaxModifiers::ITALIC) {
+            style = style.add_modifier(Modifier::ITALIC);
+        }
+        if modifiers.contains(mark_syntax::theme::SyntaxModifiers::UNDERLINED) {
+            style = style.add_modifier(Modifier::UNDERLINED);
+        }
+        if modifiers.contains(mark_syntax::theme::SyntaxModifiers::CROSSED_OUT) {
+            style = style.add_modifier(Modifier::CROSSED_OUT);
+        }
+    }
+    // Existing class-based user overrides are coarse by design and apply last.
+    if let Some(color) = segment
+        .class
+        .and_then(|class| theme.syntax_overrides.color(class))
+    {
+        style = style.fg(color);
+    }
+    style = apply_scope_override(style, segment, line, kind, theme);
+    if engine_mode == TextMateEngineMode::Compare {
+        let coarse = apply_scope_override(
+            coarse.expect("compare mode prepares coarse style"),
+            segment,
+            line,
+            kind,
+            theme,
+        );
+        log_theme_comparison(segment, line, coarse, style);
+    }
+    style
+}
+
+fn apply_scope_override(
+    mut style: Style,
+    segment: &SyntaxSegment,
+    line: &HighlightedLine,
+    kind: DiffLineKind,
+    theme: DiffTheme,
+) -> Style {
+    let Some(id) = theme.scope_overrides else {
+        return style;
+    };
+    let Some((foreground_matched, background_matched, modifiers_matched, resolved)) =
+        with_scope_override_theme(id, |overrides| {
+            let matched = overrides.resolve_style(&line.scope_table, segment.scope_stack);
+            (
+                matched.foreground_matched,
+                matched.background_matched,
+                matched.modifiers_matched,
+                matched.style,
+            )
+        })
+    else {
+        return style;
+    };
+    if foreground_matched && let Some(color) = resolved.foreground {
+        style = style.fg(Color::Rgb(color.red, color.green, color.blue));
+    }
+    if background_matched
+        && kind == DiffLineKind::Context
+        && !theme.transparent_background
+        && let Some(color) = resolved.background
+    {
+        style = style.bg(Color::Rgb(color.red, color.green, color.blue));
+    }
+    if modifiers_matched {
+        let all = Modifier::BOLD | Modifier::ITALIC | Modifier::UNDERLINED | Modifier::CROSSED_OUT;
+        style = style.remove_modifier(all);
+        for (syntax_modifier, modifier) in [
+            (mark_syntax::theme::SyntaxModifiers::BOLD, Modifier::BOLD),
+            (
+                mark_syntax::theme::SyntaxModifiers::ITALIC,
+                Modifier::ITALIC,
+            ),
+            (
+                mark_syntax::theme::SyntaxModifiers::UNDERLINED,
+                Modifier::UNDERLINED,
+            ),
+            (
+                mark_syntax::theme::SyntaxModifiers::CROSSED_OUT,
+                Modifier::CROSSED_OUT,
+            ),
+        ] {
+            if resolved.modifiers.contains(syntax_modifier) {
+                style = style.add_modifier(modifier);
+            }
+        }
+    }
+    style
+}
+
+fn log_theme_comparison(
+    segment: &SyntaxSegment,
+    line: &HighlightedLine,
+    coarse: Style,
+    exact: Style,
+) {
+    if coarse == exact {
+        return;
+    }
+    let scopes = line
+        .scope_table
+        .stack_names(segment.scope_stack)
+        .collect::<Vec<_>>()
+        .join(" ");
+    let message = format!(
+        "TextMate theme difference: scopes={scopes:?} class={:?} coarse={coarse:?} exact={exact:?}",
+        segment.class
+    );
+    static SEEN: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    let mut seen = SEEN
+        .get_or_init(|| Mutex::new(HashSet::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if seen.len() < 1_000 && seen.insert(message.clone()) {
+        eprintln!("{message}");
+    }
 }
 
 pub(crate) fn inline_style(style: Style, kind: DiffLineKind, theme: DiffTheme) -> Style {

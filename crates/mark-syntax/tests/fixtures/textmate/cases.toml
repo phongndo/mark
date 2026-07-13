@@ -646,10 +646,6 @@ scope = "source.sql"
 grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"
 
 [[case.embedded]]
-scope = "source.stylus"
-grammar = "assets/tm-grammars/languages/stylus.tmLanguage.json"
-
-[[case.embedded]]
 scope = "source.swift"
 grammar = "assets/tm-grammars/languages/swift.tmLanguage.json"
 
@@ -951,10 +947,6 @@ grammar = "assets/tm-grammars/languages/shellscript.tmLanguage.json"
 [[case.embedded]]
 scope = "source.sql"
 grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.stylus"
-grammar = "assets/tm-grammars/languages/stylus.tmLanguage.json"
 
 [[case.embedded]]
 scope = "source.swift"
@@ -2349,10 +2341,6 @@ scope = "source.sql"
 grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"
 
 [[case.embedded]]
-scope = "source.stylus"
-grammar = "assets/tm-grammars/languages/stylus.tmLanguage.json"
-
-[[case.embedded]]
 scope = "source.swift"
 grammar = "assets/tm-grammars/languages/swift.tmLanguage.json"
 
@@ -2648,10 +2636,6 @@ scope = "source.sql"
 grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"
 
 [[case.embedded]]
-scope = "source.stylus"
-grammar = "assets/tm-grammars/languages/stylus.tmLanguage.json"
-
-[[case.embedded]]
 scope = "source.swift"
 grammar = "assets/tm-grammars/languages/swift.tmLanguage.json"
 
@@ -2943,10 +2927,6 @@ scope = "source.sql"
 grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"
 
 [[case.embedded]]
-scope = "source.stylus"
-grammar = "assets/tm-grammars/languages/stylus.tmLanguage.json"
-
-[[case.embedded]]
 scope = "source.swift"
 grammar = "assets/tm-grammars/languages/swift.tmLanguage.json"
 
@@ -3236,10 +3216,6 @@ grammar = "assets/tm-grammars/languages/shellscript.tmLanguage.json"
 [[case.embedded]]
 scope = "source.sql"
 grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.stylus"
-grammar = "assets/tm-grammars/languages/stylus.tmLanguage.json"
 
 [[case.embedded]]
 scope = "source.swift"
@@ -3801,10 +3777,6 @@ scope = "source.sql"
 grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"
 
 [[case.embedded]]
-scope = "source.stylus"
-grammar = "assets/tm-grammars/languages/stylus.tmLanguage.json"
-
-[[case.embedded]]
 scope = "source.swift"
 grammar = "assets/tm-grammars/languages/swift.tmLanguage.json"
 
@@ -4094,10 +4066,6 @@ grammar = "assets/tm-grammars/languages/shellscript.tmLanguage.json"
 [[case.embedded]]
 scope = "source.sql"
 grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.stylus"
-grammar = "assets/tm-grammars/languages/stylus.tmLanguage.json"
 
 [[case.embedded]]
 scope = "source.swift"
@@ -4793,10 +4761,6 @@ scope = "source.sql"
 grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"
 
 [[case.embedded]]
-scope = "source.stylus"
-grammar = "assets/tm-grammars/languages/stylus.tmLanguage.json"
-
-[[case.embedded]]
 scope = "source.swift"
 grammar = "assets/tm-grammars/languages/swift.tmLanguage.json"
 
@@ -5086,10 +5050,6 @@ grammar = "assets/tm-grammars/languages/shellscript.tmLanguage.json"
 [[case.embedded]]
 scope = "source.sql"
 grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.stylus"
-grammar = "assets/tm-grammars/languages/stylus.tmLanguage.json"
 
 [[case.embedded]]
 scope = "source.swift"
@@ -6071,10 +6031,6 @@ scope = "source.sql"
 grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"
 
 [[case.embedded]]
-scope = "source.stylus"
-grammar = "assets/tm-grammars/languages/stylus.tmLanguage.json"
-
-[[case.embedded]]
 scope = "source.swift"
 grammar = "assets/tm-grammars/languages/swift.tmLanguage.json"
 
@@ -6368,10 +6324,6 @@ grammar = "assets/tm-grammars/languages/shellscript.tmLanguage.json"
 [[case.embedded]]
 scope = "source.sql"
 grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.stylus"
-grammar = "assets/tm-grammars/languages/stylus.tmLanguage.json"
 
 [[case.embedded]]
 scope = "source.swift"
@@ -6718,10 +6670,6 @@ scope = "source.sql"
 grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"
 
 [[case.embedded]]
-scope = "source.stylus"
-grammar = "assets/tm-grammars/languages/stylus.tmLanguage.json"
-
-[[case.embedded]]
 scope = "source.swift"
 grammar = "assets/tm-grammars/languages/swift.tmLanguage.json"
 
@@ -7011,10 +6959,6 @@ grammar = "assets/tm-grammars/languages/shellscript.tmLanguage.json"
 [[case.embedded]]
 scope = "source.sql"
 grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.stylus"
-grammar = "assets/tm-grammars/languages/stylus.tmLanguage.json"
 
 [[case.embedded]]
 scope = "source.swift"
@@ -7492,10 +7436,6 @@ scope = "source.sql"
 grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"
 
 [[case.embedded]]
-scope = "source.stylus"
-grammar = "assets/tm-grammars/languages/stylus.tmLanguage.json"
-
-[[case.embedded]]
 scope = "source.swift"
 grammar = "assets/tm-grammars/languages/swift.tmLanguage.json"
 
@@ -7785,10 +7725,6 @@ grammar = "assets/tm-grammars/languages/shellscript.tmLanguage.json"
 [[case.embedded]]
 scope = "source.sql"
 grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.stylus"
-grammar = "assets/tm-grammars/languages/stylus.tmLanguage.json"
 
 [[case.embedded]]
 scope = "source.swift"
@@ -8786,10 +8722,6 @@ scope = "source.sql"
 grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"
 
 [[case.embedded]]
-scope = "source.stylus"
-grammar = "assets/tm-grammars/languages/stylus.tmLanguage.json"
-
-[[case.embedded]]
 scope = "source.swift"
 grammar = "assets/tm-grammars/languages/swift.tmLanguage.json"
 
@@ -9083,10 +9015,6 @@ grammar = "assets/tm-grammars/languages/shellscript.tmLanguage.json"
 [[case.embedded]]
 scope = "source.sql"
 grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.stylus"
-grammar = "assets/tm-grammars/languages/stylus.tmLanguage.json"
 
 [[case.embedded]]
 scope = "source.swift"
@@ -9390,10 +9318,6 @@ grammar = "assets/tm-grammars/languages/shellscript.tmLanguage.json"
 [[case.embedded]]
 scope = "source.sql"
 grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.stylus"
-grammar = "assets/tm-grammars/languages/stylus.tmLanguage.json"
 
 [[case.embedded]]
 scope = "source.swift"
@@ -9705,10 +9629,6 @@ grammar = "assets/tm-grammars/languages/shellscript.tmLanguage.json"
 [[case.embedded]]
 scope = "source.sql"
 grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.stylus"
-grammar = "assets/tm-grammars/languages/stylus.tmLanguage.json"
 
 [[case.embedded]]
 scope = "source.swift"
@@ -10178,10 +10098,6 @@ scope = "source.sql"
 grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"
 
 [[case.embedded]]
-scope = "source.stylus"
-grammar = "assets/tm-grammars/languages/stylus.tmLanguage.json"
-
-[[case.embedded]]
 scope = "source.swift"
 grammar = "assets/tm-grammars/languages/swift.tmLanguage.json"
 
@@ -10475,10 +10391,6 @@ grammar = "assets/tm-grammars/languages/shellscript.tmLanguage.json"
 [[case.embedded]]
 scope = "source.sql"
 grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.stylus"
-grammar = "assets/tm-grammars/languages/stylus.tmLanguage.json"
 
 [[case.embedded]]
 scope = "source.swift"
@@ -11021,14 +10933,6 @@ scope = "source.js.regexp"
 grammar = "assets/tm-grammars/languages/js-regexp.tmLanguage.json"
 
 [[case.embedded]]
-scope = "source.sass"
-grammar = "assets/tm-grammars/languages/sass.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.stylus"
-grammar = "assets/tm-grammars/languages/stylus.tmLanguage.json"
-
-[[case.embedded]]
 scope = "text.html.basic"
 grammar = "assets/tm-grammars/languages/html.tmLanguage.json"
 
@@ -11058,14 +10962,6 @@ grammar = "assets/tm-grammars/languages/javascript.tmLanguage.json"
 [[case.embedded]]
 scope = "source.js.regexp"
 grammar = "assets/tm-grammars/languages/js-regexp.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.sass"
-grammar = "assets/tm-grammars/languages/sass.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.stylus"
-grammar = "assets/tm-grammars/languages/stylus.tmLanguage.json"
 
 [[case.embedded]]
 scope = "text.html.basic"
@@ -11547,10 +11443,6 @@ scope = "source.sql"
 grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"
 
 [[case.embedded]]
-scope = "source.stylus"
-grammar = "assets/tm-grammars/languages/stylus.tmLanguage.json"
-
-[[case.embedded]]
 scope = "source.swift"
 grammar = "assets/tm-grammars/languages/swift.tmLanguage.json"
 
@@ -11840,10 +11732,6 @@ grammar = "assets/tm-grammars/languages/shellscript.tmLanguage.json"
 [[case.embedded]]
 scope = "source.sql"
 grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.stylus"
-grammar = "assets/tm-grammars/languages/stylus.tmLanguage.json"
 
 [[case.embedded]]
 scope = "source.swift"
@@ -12137,10 +12025,6 @@ scope = "source.sql"
 grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"
 
 [[case.embedded]]
-scope = "source.stylus"
-grammar = "assets/tm-grammars/languages/stylus.tmLanguage.json"
-
-[[case.embedded]]
 scope = "source.swift"
 grammar = "assets/tm-grammars/languages/swift.tmLanguage.json"
 
@@ -12432,10 +12316,6 @@ scope = "source.sql"
 grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"
 
 [[case.embedded]]
-scope = "source.stylus"
-grammar = "assets/tm-grammars/languages/stylus.tmLanguage.json"
-
-[[case.embedded]]
 scope = "source.swift"
 grammar = "assets/tm-grammars/languages/swift.tmLanguage.json"
 
@@ -12725,10 +12605,6 @@ grammar = "assets/tm-grammars/languages/shellscript.tmLanguage.json"
 [[case.embedded]]
 scope = "source.sql"
 grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.stylus"
-grammar = "assets/tm-grammars/languages/stylus.tmLanguage.json"
 
 [[case.embedded]]
 scope = "source.swift"
@@ -14238,10 +14114,6 @@ scope = "source.sql"
 grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"
 
 [[case.embedded]]
-scope = "source.stylus"
-grammar = "assets/tm-grammars/languages/stylus.tmLanguage.json"
-
-[[case.embedded]]
 scope = "source.swift"
 grammar = "assets/tm-grammars/languages/swift.tmLanguage.json"
 
@@ -14535,10 +14407,6 @@ grammar = "assets/tm-grammars/languages/shellscript.tmLanguage.json"
 [[case.embedded]]
 scope = "source.sql"
 grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.stylus"
-grammar = "assets/tm-grammars/languages/stylus.tmLanguage.json"
 
 [[case.embedded]]
 scope = "source.swift"
@@ -15707,12 +15575,28 @@ grammar = "assets/tm-grammars/languages/yaml.tmLanguage.json"
 fixture = "crates/mark-syntax/tests/fixtures/textmate/yaml/basic.yaml"
 golden = "crates/mark-syntax/tests/fixtures/textmate/yaml/basic.golden.jsonl"
 
+[[case.embedded]]
+scope = "source.yaml.1.2"
+grammar = "assets/tm-grammars/languages/yaml-1.2.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.yaml.embedded"
+grammar = "assets/tm-grammars/languages/yaml-embedded.tmLanguage.json"
+
 [[case]]
 language = "yaml"
 scope = "source.yaml"
 grammar = "assets/tm-grammars/languages/yaml.tmLanguage.json"
 fixture = "crates/mark-syntax/tests/fixtures/textmate/yaml/stress.yaml"
 golden = "crates/mark-syntax/tests/fixtures/textmate/yaml/stress.golden.jsonl"
+
+[[case.embedded]]
+scope = "source.yaml.1.2"
+grammar = "assets/tm-grammars/languages/yaml-1.2.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.yaml.embedded"
+grammar = "assets/tm-grammars/languages/yaml-embedded.tmLanguage.json"
 
 [[case]]
 language = "zenscript"

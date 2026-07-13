@@ -322,6 +322,7 @@ impl DiffApp {
         let theme = match diff_theme_from_config(&settings.theme).and_then(|theme| {
             theme
                 .with_color_overrides(&settings.colors)
+                .and_then(|theme| theme.with_syntax_rules(&settings.syntax_rules))
                 .map(|theme| theme.with_transparent_background(settings.transparent_background))
         }) {
             Ok(theme) => theme
@@ -335,6 +336,7 @@ impl DiffApp {
                 color_scheme = ColorSchemeChoice::System;
                 DiffTheme::default()
                     .with_color_overrides(&settings.colors)
+                    .and_then(|theme| theme.with_syntax_rules(&settings.syntax_rules))
                     .unwrap_or_else(|_| DiffTheme::default())
                     .with_transparent_background(settings.transparent_background)
                     .with_diff_settings(settings.diff)

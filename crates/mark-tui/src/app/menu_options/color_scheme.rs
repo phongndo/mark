@@ -164,6 +164,9 @@ impl DiffApp {
         match diff_theme_from_config(&config).and_then(|theme| {
             theme
                 .with_color_overrides(&self.config.theme_color_overrides)
+                .and_then(|theme| {
+                    theme.with_syntax_rules(&self.config.syntax_settings.syntax_rules)
+                })
                 .map(|theme| {
                     theme.with_transparent_background(self.config.theme_transparent_background)
                 })

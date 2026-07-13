@@ -2,8 +2,8 @@
 # Active public catalog remains curated; coverage.full-shiki.toml is the
 # Phase G skeleton for promoting all Shiki language ids.
 public_language_count = 254
-asset_grammar_count = 258
-private_dependency_count = 4
+asset_grammar_count = 260
+private_dependency_count = 6
 kept_count = 254
 remapped_count = 0
 
@@ -13,6 +13,8 @@ private_assets = [
   "ignore",
   "js-regexp",
   "twig-source",
+  "yaml-1.2",
+  "yaml-embedded",
   "yang",
 ]
 

@@ -1,4 +1,4 @@
-use mark_syntax::{DiffSettings, SyntaxClass};
+use mark_syntax::{DiffSettings, SyntaxClass, theme::BuiltinTextMateTheme};
 use ratatui::prelude::Color;
 
 use super::{Base16Scheme, DecorationStyle, DiffTheme, RgbColor};
@@ -389,6 +389,27 @@ pub(crate) struct SyntaxPalette {
 }
 
 impl SyntaxPalette {
+    pub(crate) const fn empty() -> Self {
+        Self {
+            attribute: None,
+            comment: None,
+            constant: None,
+            constructor: None,
+            function: None,
+            keyword: None,
+            label: None,
+            module: None,
+            number: None,
+            operator: None,
+            property: None,
+            punctuation: None,
+            string: None,
+            tag: None,
+            r#type: None,
+            variable: None,
+        }
+    }
+
     pub(crate) fn ansi() -> Self {
         Self {
             attribute: Some(Color::Indexed(12)),
@@ -540,23 +561,28 @@ impl SyntaxPalette {
 impl DiffTheme {
     pub(crate) fn catppuccin_mocha() -> Self {
         Self::catppuccin(CatppuccinPalette::MOCHA)
+            .with_exact_syntax(BuiltinTextMateTheme::CatppuccinMocha)
     }
 
     pub(crate) fn catppuccin_macchiato() -> Self {
         Self::catppuccin(CatppuccinPalette::MACCHIATO)
+            .with_exact_syntax(BuiltinTextMateTheme::CatppuccinMacchiato)
     }
 
     pub(crate) fn catppuccin_frappe() -> Self {
         Self::catppuccin(CatppuccinPalette::FRAPPE)
+            .with_exact_syntax(BuiltinTextMateTheme::CatppuccinFrappe)
     }
 
     pub(crate) fn catppuccin_latte() -> Self {
         Self::catppuccin(CatppuccinPalette::LATTE)
+            .with_exact_syntax(BuiltinTextMateTheme::CatppuccinLatte)
     }
 
     fn catppuccin(palette: CatppuccinPalette) -> Self {
         Self {
             foreground: palette.text.color(),
+            foreground_overridden: false,
             background: palette.base.color(),
             header: palette.lavender.color(),
             file: palette.text.color(),
@@ -587,15 +613,18 @@ impl DiffTheme {
             decorations: DecorationStyle::default(),
             diff: DiffSettings::default(),
             syntax: SyntaxPalette::catppuccin(palette),
+            syntax_overrides: SyntaxPalette::empty(),
+            exact_syntax: None,
+            scope_overrides: None,
         }
     }
 
     pub(crate) fn gruvbox_dark() -> Self {
-        Self::gruvbox(GruvboxPalette::DARK)
+        Self::gruvbox(GruvboxPalette::DARK).with_exact_syntax(BuiltinTextMateTheme::GruvboxDark)
     }
 
     pub(crate) fn gruvbox_light() -> Self {
-        Self::gruvbox(GruvboxPalette::LIGHT)
+        Self::gruvbox(GruvboxPalette::LIGHT).with_exact_syntax(BuiltinTextMateTheme::GruvboxLight)
     }
 
     fn gruvbox(palette: GruvboxPalette) -> Self {
@@ -603,6 +632,7 @@ impl DiffTheme {
         let deletion = palette.bright_red;
         Self {
             foreground: palette.fg1.color(),
+            foreground_overridden: false,
             background: palette.bg0.color(),
             header: palette.fg0.color(),
             file: palette.fg1.color(),
@@ -633,28 +663,34 @@ impl DiffTheme {
             decorations: DecorationStyle::default(),
             diff: DiffSettings::default(),
             syntax: SyntaxPalette::gruvbox(palette),
+            syntax_overrides: SyntaxPalette::empty(),
+            exact_syntax: None,
+            scope_overrides: None,
         }
     }
 
     pub(crate) fn github_dark() -> Self {
-        Self::github(GithubPalette::DARK)
+        Self::github(GithubPalette::DARK).with_exact_syntax(BuiltinTextMateTheme::GithubDark)
     }
 
     pub(crate) fn github_dark_high_contrast() -> Self {
         Self::github(GithubPalette::DARK_HIGH_CONTRAST)
+            .with_exact_syntax(BuiltinTextMateTheme::GithubDarkHighContrast)
     }
 
     pub(crate) fn github_light() -> Self {
-        Self::github(GithubPalette::LIGHT)
+        Self::github(GithubPalette::LIGHT).with_exact_syntax(BuiltinTextMateTheme::GithubLight)
     }
 
     pub(crate) fn github_light_high_contrast() -> Self {
         Self::github(GithubPalette::LIGHT_HIGH_CONTRAST)
+            .with_exact_syntax(BuiltinTextMateTheme::GithubLightHighContrast)
     }
 
     fn github(palette: GithubPalette) -> Self {
         Self {
             foreground: palette.fg_default.color(),
+            foreground_overridden: false,
             background: palette.canvas_default.color(),
             header: palette.fg_default.color(),
             file: palette.fg_default.color(),
@@ -706,6 +742,14 @@ impl DiffTheme {
             decorations: DecorationStyle::default(),
             diff: DiffSettings::default(),
             syntax: SyntaxPalette::github(palette),
+            syntax_overrides: SyntaxPalette::empty(),
+            exact_syntax: None,
+            scope_overrides: None,
         }
+    }
+
+    fn with_exact_syntax(mut self, theme: BuiltinTextMateTheme) -> Self {
+        self.exact_syntax = Some(theme.get());
+        self
     }
 }

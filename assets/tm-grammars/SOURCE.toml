@@ -8,6 +8,7 @@ repository = "https://github.com/shikijs/shiki"
 license = "MIT"
 package_version = "3.23.0"
 source_revision = "package:@shikijs/langs@3.23.0"
+source_commit = "1850697815131b3e4ab6a5ac794c58af10bc1c4b"
 
 [import]
 source_path = "tools/golden-oracle/node_modules/@shikijs/langs"
@@ -18,8 +19,10 @@ notes = "All default-exported TextMate grammar objects from the pinned package a
 name = "Visual Studio Code built-in grammars"
 repository = "https://github.com/microsoft/vscode"
 version = "1.128.0"
+source_commit = "fc3def6774c76082adf699d366f31a557ce5573f"
 license = "MIT"
-assets = ["ignore", "js-regexp"]
+assets = ["dart", "handlebars", "ignore", "js-regexp", "php", "pug", "r", "rst", "yaml", "yaml-1.2", "yaml-embedded"]
+notes = "Pug source.sass/source.stylus and reStructuredText source.cmake includes are renamed to retain VS Code built-in unresolved-include behavior; the canonical and behavior audits verify these transformations."
 
 [[additional_sources]]
 name = "YANG syntax highlighter"

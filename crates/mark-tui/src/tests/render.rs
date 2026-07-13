@@ -1309,7 +1309,9 @@ fn content_spans_fall_back_when_syntax_text_mismatches_diff_text() {
             byte_start: 0,
             byte_end: 5,
             class: Some(SyntaxClass::Keyword),
+            scope_stack: Default::default(),
         }],
+        scope_table: Default::default(),
     };
 
     let spans = content_spans_at_scroll(
@@ -1339,7 +1341,9 @@ fn content_spans_expand_tabs_and_escape_controls_before_rendering() {
             byte_start: 0,
             byte_end: text.len(),
             class: Some(SyntaxClass::Keyword),
+            scope_stack: Default::default(),
         }],
+        scope_table: Default::default(),
     };
 
     let spans = content_spans_at_scroll(
@@ -1356,6 +1360,166 @@ fn content_spans_expand_tabs_and_escape_controls_before_rendering() {
     assert_eq!(rendered, "    if (ok)\\u{1b}   ");
     assert!(!rendered.contains('\t'));
     assert!(!rendered.contains('\u{1b}'));
+}
+
+#[test]
+fn github_high_contrast_resolves_exact_scopes_and_modifiers() {
+    let text = "\\begin";
+    let (table, scope_stack) = mark_syntax::HighlightScopeTable::from_scope_names(&[
+        "text.tex.latex",
+        "support.function.general.tex",
+        "punctuation.definition.function.tex",
+    ]);
+    let syntax = HighlightedLine {
+        fingerprint: mark_syntax::LineTextFingerprint::from_text(text),
+        segments: vec![
+            mark_syntax::SyntaxSegment::new(0, text.len(), Some(SyntaxClass::Function))
+                .with_scope_stack(scope_stack),
+        ],
+        scope_table: std::sync::Arc::new(table),
+    };
+    let spans = content_spans_at_scroll(
+        text,
+        Some(&syntax),
+        &[],
+        DiffLineKind::Context,
+        text.len(),
+        DiffTheme::github_dark_high_contrast(),
+        0,
+    );
+    assert_eq!(spans[0].style.fg, Some(Color::Rgb(0x91, 0xcb, 0xff)));
+
+    let text = "bold";
+    let (table, scope_stack) = mark_syntax::HighlightScopeTable::from_scope_names(&[
+        "text.html.markdown",
+        "markup.bold.markdown",
+    ]);
+    let syntax = HighlightedLine {
+        fingerprint: mark_syntax::LineTextFingerprint::from_text(text),
+        segments: vec![
+            mark_syntax::SyntaxSegment::new(0, text.len(), None).with_scope_stack(scope_stack),
+        ],
+        scope_table: std::sync::Arc::new(table),
+    };
+    let spans = content_spans_at_scroll(
+        text,
+        Some(&syntax),
+        &[],
+        DiffLineKind::Context,
+        text.len(),
+        DiffTheme::github_dark_high_contrast(),
+        0,
+    );
+    assert!(spans[0].style.add_modifier.contains(Modifier::BOLD));
+}
+
+#[test]
+fn exact_theme_uses_default_foreground_for_unmatched_properties() {
+    let text = "plain";
+    let (table, scope_stack) =
+        mark_syntax::HighlightScopeTable::from_scope_names(&["unmatched.custom"]);
+    let syntax = HighlightedLine {
+        fingerprint: mark_syntax::LineTextFingerprint::from_text(text),
+        segments: vec![
+            mark_syntax::SyntaxSegment::new(0, text.len(), None).with_scope_stack(scope_stack),
+        ],
+        scope_table: std::sync::Arc::new(table),
+    };
+    let theme = DiffTheme::github_dark();
+    let spans = content_spans_at_scroll(
+        text,
+        Some(&syntax),
+        &[],
+        DiffLineKind::Context,
+        text.len(),
+        theme,
+        0,
+    );
+
+    assert_eq!(theme.foreground, Color::Rgb(0xc9, 0xd1, 0xd9));
+    assert_eq!(spans[0].style.fg, Some(Color::Rgb(0xe6, 0xed, 0xf3)));
+}
+
+#[test]
+fn exact_theme_preserves_configured_base_colors_for_unmatched_scopes() {
+    let text = "plain";
+    let (table, scope_stack) =
+        mark_syntax::HighlightScopeTable::from_scope_names(&["unmatched.custom"]);
+    let syntax = HighlightedLine {
+        fingerprint: mark_syntax::LineTextFingerprint::from_text(text),
+        segments: vec![
+            mark_syntax::SyntaxSegment::new(0, text.len(), None).with_scope_stack(scope_stack),
+        ],
+        scope_table: std::sync::Arc::new(table),
+    };
+    let theme = DiffTheme::github_dark_high_contrast()
+        .with_color_overrides(&mark_syntax::ColorOverrides {
+            fg: Some("#123456".to_owned()),
+            bg: Some("#654321".to_owned()),
+            ..Default::default()
+        })
+        .unwrap();
+    let spans = content_spans_at_scroll(
+        text,
+        Some(&syntax),
+        &[],
+        DiffLineKind::Context,
+        text.len(),
+        theme,
+        0,
+    );
+
+    assert_eq!(spans[0].style.fg, Some(Color::Rgb(0x12, 0x34, 0x56)));
+    assert_eq!(spans[0].style.bg, Some(Color::Rgb(0x65, 0x43, 0x21)));
+}
+
+#[test]
+fn scope_aware_user_rules_apply_after_exact_theme_and_respect_diff_background() {
+    let text = "call";
+    let (table, scope_stack) = mark_syntax::HighlightScopeTable::from_scope_names(&[
+        "source.test",
+        "support.function.custom",
+    ]);
+    let syntax = HighlightedLine {
+        fingerprint: mark_syntax::LineTextFingerprint::from_text(text),
+        segments: vec![
+            mark_syntax::SyntaxSegment::new(0, text.len(), Some(SyntaxClass::Function))
+                .with_scope_stack(scope_stack),
+        ],
+        scope_table: std::sync::Arc::new(table),
+    };
+    let theme = DiffTheme::github_dark_high_contrast()
+        .with_syntax_rules(&[mark_syntax::SyntaxRuleOverride {
+            scope: "support.function".to_owned(),
+            foreground: Some("#123456".to_owned()),
+            background: Some("#654321".to_owned()),
+            font_style: Some("bold underline".to_owned()),
+        }])
+        .unwrap();
+    let context = content_spans_at_scroll(
+        text,
+        Some(&syntax),
+        &[],
+        DiffLineKind::Context,
+        text.len(),
+        theme,
+        0,
+    );
+    assert_eq!(context[0].style.fg, Some(Color::Rgb(0x12, 0x34, 0x56)));
+    assert_eq!(context[0].style.bg, Some(Color::Rgb(0x65, 0x43, 0x21)));
+    assert!(context[0].style.add_modifier.contains(Modifier::BOLD));
+    assert!(context[0].style.add_modifier.contains(Modifier::UNDERLINED));
+
+    let addition = content_spans_at_scroll(
+        text,
+        Some(&syntax),
+        &[],
+        DiffLineKind::Addition,
+        text.len(),
+        theme,
+        0,
+    );
+    assert_eq!(addition[0].style.bg, Some(theme.addition_bg));
 }
 
 #[test]
@@ -1397,18 +1561,22 @@ fn content_spans_preserve_width_when_syntax_splits_graphemes() {
                 byte_start: 0,
                 byte_end: heart_end,
                 class: Some(SyntaxClass::Keyword),
+                scope_stack: Default::default(),
             },
             mark_syntax::SyntaxSegment {
                 byte_start: heart_end,
                 byte_end: emoji_end,
                 class: Some(SyntaxClass::Operator),
+                scope_stack: Default::default(),
             },
             mark_syntax::SyntaxSegment {
                 byte_start: emoji_end,
                 byte_end: text.len(),
                 class: None,
+                scope_stack: Default::default(),
             },
         ],
+        scope_table: Default::default(),
     };
 
     let spans = content_spans_at_scroll(
@@ -2519,6 +2687,14 @@ fn packaged_builtin_themes_are_available() {
             theme.syntax.color(SyntaxClass::Keyword).is_some(),
             "{name} should set syntax keyword foreground"
         );
+        if name == "system" {
+            assert!(theme.exact_syntax.is_none());
+        } else {
+            assert!(
+                theme.exact_syntax.is_some(),
+                "{name} should use vendored TextMate rules"
+            );
+        }
     }
 }
 
@@ -2825,18 +3001,22 @@ fn content_spans_layers_inline_emphasis_over_syntax() {
                 byte_start: 0,
                 byte_end: 12,
                 class: Some(SyntaxClass::Keyword),
+                scope_stack: Default::default(),
             },
             mark_syntax::SyntaxSegment {
                 byte_start: 12,
                 byte_end: 13,
                 class: Some(SyntaxClass::Number),
+                scope_stack: Default::default(),
             },
             mark_syntax::SyntaxSegment {
                 byte_start: 13,
                 byte_end: 14,
                 class: Some(SyntaxClass::Punctuation),
+                scope_stack: Default::default(),
             },
         ],
+        scope_table: Default::default(),
     };
 
     let spans = content_spans_at_scroll(

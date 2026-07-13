@@ -165,6 +165,23 @@ pub(crate) enum SyntaxCommand {
     Path,
     #[command(about = "Validate the syntax backend and configured languages")]
     Doctor,
+    #[command(about = "Inspect exact TextMate scopes and resolved token styles")]
+    Inspect(SyntaxInspectArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct SyntaxInspectArgs {
+    #[arg(value_name = "PATH")]
+    pub(crate) path: PathBuf,
+    /// Override language detection.
+    #[arg(long, value_name = "LANG")]
+    pub(crate) language: Option<String>,
+    /// One-based source line to inspect. Prints every line when omitted.
+    #[arg(long, value_name = "N")]
+    pub(crate) line: Option<usize>,
+    /// Built-in TextMate theme.
+    #[arg(long, default_value = "github-dark-high-contrast")]
+    pub(crate) theme: String,
 }
 
 #[derive(Debug, Args)]

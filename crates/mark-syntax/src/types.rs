@@ -1,4 +1,11 @@
-use std::{collections::BTreeSet, path::PathBuf};
+use std::{
+    collections::BTreeSet,
+    path::PathBuf,
+    sync::{
+        Arc, RwLock,
+        atomic::{AtomicU64, AtomicUsize, Ordering},
+    },
+};
 
 use crate::{
     detect_custom_language_from_path, detect_language_name, enabled_language_set_for_mode,
@@ -28,11 +35,244 @@ pub enum SyntaxClass {
     Variable,
 }
 
+/// A compact reference to one complete, ordered TextMate scope stack.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct ScopeStackRef(pub u32);
+
+/// An interned TextMate scope name.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct ScopeAtomId(pub u32);
+
+// Rendering can resolve a base theme and a post-theme scope override for each
+// segment. Keep both generations warm instead of making them evict each other.
+const STYLE_CACHE_SLOTS: usize = 2;
+
+/// Immutable scope data shared by every line in one highlighting result.
+///
+/// Entry zero is always the empty stack. Keeping this table separate from
+/// segments allows themes to be changed without tokenizing the source again.
+#[derive(Debug)]
+pub struct HighlightScopeTable {
+    atoms: Vec<Arc<str>>,
+    stacks: Vec<Arc<[ScopeAtomId]>>,
+    resolved_styles: Vec<[AtomicU64; STYLE_CACHE_SLOTS]>,
+    style_cache_generations: [AtomicU64; STYLE_CACHE_SLOTS],
+    style_cache_next_slot: AtomicUsize,
+    style_cache_lock: RwLock<()>,
+    style_cache_hits: AtomicU64,
+    style_cache_misses: AtomicU64,
+    style_cache_stats_enabled: bool,
+}
+
+impl Clone for HighlightScopeTable {
+    fn clone(&self) -> Self {
+        Self {
+            atoms: self.atoms.clone(),
+            stacks: self.stacks.clone(),
+            resolved_styles: (0..self.stacks.len())
+                .map(|_| std::array::from_fn(|_| AtomicU64::new(0)))
+                .collect(),
+            style_cache_generations: std::array::from_fn(|_| AtomicU64::new(0)),
+            style_cache_next_slot: AtomicUsize::new(0),
+            style_cache_lock: RwLock::new(()),
+            style_cache_hits: AtomicU64::new(0),
+            style_cache_misses: AtomicU64::new(0),
+            style_cache_stats_enabled: self.style_cache_stats_enabled,
+        }
+    }
+}
+
+impl PartialEq for HighlightScopeTable {
+    fn eq(&self, other: &Self) -> bool {
+        self.atoms == other.atoms && self.stacks == other.stacks
+    }
+}
+
+impl Eq for HighlightScopeTable {}
+
+impl Default for HighlightScopeTable {
+    fn default() -> Self {
+        Self {
+            atoms: Vec::new(),
+            stacks: vec![Arc::from([])],
+            resolved_styles: vec![std::array::from_fn(|_| AtomicU64::new(0))],
+            style_cache_generations: std::array::from_fn(|_| AtomicU64::new(0)),
+            style_cache_next_slot: AtomicUsize::new(0),
+            style_cache_lock: RwLock::new(()),
+            style_cache_hits: AtomicU64::new(0),
+            style_cache_misses: AtomicU64::new(0),
+            style_cache_stats_enabled: style_cache_stats_enabled(),
+        }
+    }
+}
+
+impl HighlightScopeTable {
+    /// Builds a small standalone table for diagnostics and theme tooling.
+    pub fn from_scope_names(scopes: &[&str]) -> (Self, ScopeStackRef) {
+        let atoms = scopes
+            .iter()
+            .map(|scope| Arc::<str>::from(*scope))
+            .collect::<Vec<_>>();
+        let stack = (0..atoms.len())
+            .map(|index| ScopeAtomId(index as u32))
+            .collect::<Vec<_>>();
+        (
+            Self {
+                atoms,
+                stacks: vec![Arc::from([]), Arc::from(stack)],
+                resolved_styles: (0..2)
+                    .map(|_| std::array::from_fn(|_| AtomicU64::new(0)))
+                    .collect(),
+                style_cache_generations: std::array::from_fn(|_| AtomicU64::new(0)),
+                style_cache_next_slot: AtomicUsize::new(0),
+                style_cache_lock: RwLock::new(()),
+                style_cache_hits: AtomicU64::new(0),
+                style_cache_misses: AtomicU64::new(0),
+                style_cache_stats_enabled: style_cache_stats_enabled(),
+            },
+            ScopeStackRef(1),
+        )
+    }
+
+    pub fn stack(&self, stack: ScopeStackRef) -> Option<&[ScopeAtomId]> {
+        self.stacks.get(stack.0 as usize).map(AsRef::as_ref)
+    }
+
+    pub fn atom(&self, atom: ScopeAtomId) -> Option<&str> {
+        self.atoms.get(atom.0 as usize).map(AsRef::as_ref)
+    }
+
+    pub fn stack_names(&self, stack: ScopeStackRef) -> impl Iterator<Item = &str> {
+        self.stack(stack)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|atom| self.atom(*atom))
+    }
+
+    pub fn stack_count(&self) -> usize {
+        self.stacks.len()
+    }
+
+    pub fn atom_count(&self) -> usize {
+        self.atoms.len()
+    }
+
+    pub fn memory_bytes(&self) -> usize {
+        let cached_styles =
+            self.resolved_styles.capacity() * std::mem::size_of::<[AtomicU64; STYLE_CACHE_SLOTS]>();
+        std::mem::size_of::<Self>()
+            .saturating_add(self.atoms.len() * std::mem::size_of::<Arc<str>>())
+            .saturating_add(self.atoms.iter().map(|atom| atom.len()).sum::<usize>())
+            .saturating_add(self.stacks.len() * std::mem::size_of::<Arc<[ScopeAtomId]>>())
+            .saturating_add(
+                self.stacks
+                    .iter()
+                    .map(|stack| stack.len() * std::mem::size_of::<ScopeAtomId>())
+                    .sum::<usize>(),
+            )
+            .saturating_add(cached_styles)
+    }
+
+    /// Cumulative resolved-style cache hits and misses for benchmark tooling.
+    pub fn style_cache_stats(&self) -> (u64, u64) {
+        (
+            self.style_cache_hits.load(Ordering::Relaxed),
+            self.style_cache_misses.load(Ordering::Relaxed),
+        )
+    }
+
+    pub(crate) fn from_parts(atoms: Vec<Arc<str>>, stacks: Vec<Arc<[ScopeAtomId]>>) -> Self {
+        let stack_count = stacks.len();
+        Self {
+            atoms,
+            stacks,
+            resolved_styles: (0..stack_count)
+                .map(|_| std::array::from_fn(|_| AtomicU64::new(0)))
+                .collect(),
+            style_cache_generations: std::array::from_fn(|_| AtomicU64::new(0)),
+            style_cache_next_slot: AtomicUsize::new(0),
+            style_cache_lock: RwLock::new(()),
+            style_cache_hits: AtomicU64::new(0),
+            style_cache_misses: AtomicU64::new(0),
+            style_cache_stats_enabled: style_cache_stats_enabled(),
+        }
+    }
+
+    pub(crate) fn cached_style(&self, theme: u64, stack: ScopeStackRef) -> (usize, Option<u64>) {
+        let (slot, style) = loop {
+            {
+                // Keep the generation check and entry read under the same
+                // shared lock so another theme cannot reset the entries in
+                // between them.
+                let _read = self
+                    .style_cache_lock
+                    .read()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                if let Some(slot) = self
+                    .style_cache_generations
+                    .iter()
+                    .position(|generation| generation.load(Ordering::Acquire) == theme)
+                {
+                    let style = self
+                        .resolved_styles
+                        .get(stack.0 as usize)
+                        .and_then(|styles| styles[slot].load(Ordering::Relaxed).checked_sub(1));
+                    break (slot, style);
+                }
+            }
+            let _write = self
+                .style_cache_lock
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if self
+                .style_cache_generations
+                .iter()
+                .all(|generation| generation.load(Ordering::Relaxed) != theme)
+            {
+                let slot =
+                    self.style_cache_next_slot.fetch_add(1, Ordering::Relaxed) % STYLE_CACHE_SLOTS;
+                for styles in &self.resolved_styles {
+                    styles[slot].store(0, Ordering::Relaxed);
+                }
+                self.style_cache_generations[slot].store(theme, Ordering::Release);
+            }
+        };
+        if self.style_cache_stats_enabled {
+            if style.is_some() {
+                self.style_cache_hits.fetch_add(1, Ordering::Relaxed);
+            } else {
+                self.style_cache_misses.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        // Return the slot even on a miss so cache_style can populate exactly
+        // the generation reserved by this lookup.
+        (slot, style)
+    }
+
+    pub(crate) fn cache_style(&self, theme: u64, stack: ScopeStackRef, slot: usize, style: u64) {
+        let _read = self
+            .style_cache_lock
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if self.style_cache_generations[slot].load(Ordering::Acquire) == theme
+            && let Some(entries) = self.resolved_styles.get(stack.0 as usize)
+        {
+            entries[slot].store(style + 1, Ordering::Relaxed);
+        }
+    }
+}
+
+fn style_cache_stats_enabled() -> bool {
+    std::env::var_os("MARK_TEXTMATE_THEME_CACHE_STATS").is_some()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyntaxSegment {
     pub byte_start: usize,
     pub byte_end: usize,
     pub class: Option<SyntaxClass>,
+    /// Exact TextMate scopes. `class` is retained only as a coarse fallback.
+    pub scope_stack: ScopeStackRef,
 }
 
 impl SyntaxSegment {
@@ -42,7 +282,13 @@ impl SyntaxSegment {
             byte_start,
             byte_end,
             class,
+            scope_stack: ScopeStackRef::default(),
         }
+    }
+
+    pub fn with_scope_stack(mut self, scope_stack: ScopeStackRef) -> Self {
+        self.scope_stack = scope_stack;
+        self
     }
 
     pub fn len(&self) -> usize {
@@ -58,6 +304,7 @@ impl SyntaxSegment {
 pub struct HighlightedLine {
     pub fingerprint: LineTextFingerprint,
     pub segments: Vec<SyntaxSegment>,
+    pub scope_table: Arc<HighlightScopeTable>,
 }
 
 impl HighlightedLine {
@@ -65,6 +312,7 @@ impl HighlightedLine {
         Self {
             fingerprint: LineTextFingerprint::from_text(text),
             segments: Vec::new(),
+            scope_table: Arc::default(),
         }
     }
 
@@ -249,6 +497,8 @@ pub(crate) struct StoredSyntaxSettings {
     pub(crate) line_wrapping: bool,
     #[serde(default)]
     pub(crate) colors: ColorOverrides,
+    #[serde(default)]
+    pub(crate) syntax_rules: Vec<SyntaxRuleOverride>,
     #[serde(default, flatten)]
     pub(crate) color_overrides: ColorOverrides,
     #[serde(default, alias = "background_transparent", alias = "transparent_bg")]
@@ -386,6 +636,7 @@ pub struct SyntaxSettings {
     pub syntax_highlighting: bool,
     pub line_wrapping: bool,
     pub colors: ColorOverrides,
+    pub syntax_rules: Vec<SyntaxRuleOverride>,
     pub transparent_background: bool,
     pub diff: DiffSettings,
     pub notifications: NotificationSettings,
@@ -403,12 +654,22 @@ impl Default for SyntaxSettings {
             syntax_highlighting: true,
             line_wrapping: false,
             colors: ColorOverrides::default(),
+            syntax_rules: Vec::new(),
             transparent_background: false,
             diff: DiffSettings::default(),
             notifications: NotificationSettings::default(),
             limits: SyntaxLimits::default(),
         }
     }
+}
+
+/// A post-theme TextMate selector override from `[[syntax_rules]]`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Deserialize)]
+pub struct SyntaxRuleOverride {
+    pub scope: String,
+    pub foreground: Option<String>,
+    pub background: Option<String>,
+    pub font_style: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]

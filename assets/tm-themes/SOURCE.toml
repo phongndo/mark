@@ -1,0 +1,75 @@
+[[source]]
+package = "github-vscode-themes"
+version = "6.3.4"
+repository = "https://github.com/primer/github-vscode-theme"
+source_commit = "67461974ae6d337a8cf352c277bf3908bf6b6317"
+license = "MIT"
+resolved = true
+
+[[source.theme]]
+id = "github-dark"
+source_path = "dist/dark-default.json"
+sha256 = "05150fe30a4d6f6b40f4ccf9bb84c5f7f0dfe84986c3e0437e1664402996435f"
+
+[[source.theme]]
+id = "github-dark-high-contrast"
+source_path = "dist/dark-high-contrast.json"
+sha256 = "e538e324b4fb4373049beba51de4ffe3c3d1dcad2761078725c2376f623d6881"
+
+[[source.theme]]
+id = "github-light"
+source_path = "dist/light-default.json"
+sha256 = "453fd4707102f08cc12a42e41ec86f952bb5db9d3814023c61f634696f812530"
+
+[[source.theme]]
+id = "github-light-high-contrast"
+source_path = "dist/light-high-contrast.json"
+sha256 = "4964f623e9615238a7feaeaa9728dafb769e2c1506c8c0417baefb0cab020882"
+
+[[source]]
+package = "@shikijs/themes"
+version = "3.23.0"
+repository = "https://github.com/shikijs/shiki"
+source_commit = "1850697815131b3e4ab6a5ac794c58af10bc1c4b"
+license = "MIT"
+resolved = true
+
+[[source.theme]]
+id = "catppuccin-latte"
+source_path = "dist/catppuccin-latte.mjs"
+sha256 = "b8738fedce253854cb53ebae82d8b874d99a7dbfd5be07917f6613d4caff71d9"
+
+[[source.theme]]
+id = "catppuccin-frappe"
+source_path = "dist/catppuccin-frappe.mjs"
+sha256 = "e6c762d66d2f8104e4ef69cac94d290134dec3715cf792476bfe7a3d1126fba4"
+
+[[source.theme]]
+id = "catppuccin-macchiato"
+source_path = "dist/catppuccin-macchiato.mjs"
+sha256 = "ca08dc225c75235771b2ce0fc510c7e6fa400b2f373ed02d5f2a700e969cf556"
+
+[[source.theme]]
+id = "catppuccin-mocha"
+source_path = "dist/catppuccin-mocha.mjs"
+sha256 = "aa030d67dbd4a6b66995c89ba31ef90ac3c2da23a30f712277acb50c6e94d102"
+
+[[source.theme]]
+id = "gruvbox-dark"
+source_path = "dist/gruvbox-dark-medium.mjs"
+sha256 = "8d301867af3eb863e1ae289e8657264e244ffbf2c12f4c40cd13635b102f0046"
+
+[[source.theme]]
+id = "gruvbox-light"
+source_path = "dist/gruvbox-light-medium.mjs"
+sha256 = "0fee7e7311f0c1c7b15d01cdb327b9651f7220b1702a3bdfcf9b1ead55752d5b"
+
+[[source.theme]]
+id = "tokyonight"
+source_path = "dist/tokyo-night.mjs"
+sha256 = "b77b29c07cceabd70495101d64f1acd350965be209fc13f33ec246cc5f06da01"
+
+# Regenerate the JSON assets without adding Node to release builds:
+# npm pack @shikijs/themes@3.23.0
+# import each MJS module and JSON.stringify its default export.
+# GitHub assets are copied byte-for-byte from the package dist directory.

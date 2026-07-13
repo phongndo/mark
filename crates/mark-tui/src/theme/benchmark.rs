@@ -29,6 +29,8 @@ pub struct DiffBenchmarkReport {
     pub inline_cache_entries: usize,
     pub diff_cache_entries: usize,
     pub syntax_cache_estimated_memory_bytes: usize,
+    pub scope_stack_count: usize,
+    pub scope_table_bytes: usize,
     pub open_micros: u128,
     pub file_filter_micros: u128,
     pub legacy_file_filter_micros: u128,
@@ -52,6 +54,8 @@ pub struct DiffBenchmarkReport {
     pub random_scroll_max_micros: u128,
     pub warm_cache_hits: u64,
     pub warm_cache_misses: u64,
+    pub warm_theme_cache_hits: u64,
+    pub warm_theme_cache_misses: u64,
     pub channel_send_timeouts: u64,
     pub syntax: SyntaxBenchmarkReport,
 }

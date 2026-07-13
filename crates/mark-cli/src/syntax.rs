@@ -1,9 +1,11 @@
 mod commands;
+mod inspect;
 mod options;
 mod output;
 mod table;
 
 pub(crate) use commands::syntax;
+pub(crate) use inspect::inspect;
 pub(crate) use options::{
     diff_options, difftool_options, patch_options, review_options, show_options,
 };

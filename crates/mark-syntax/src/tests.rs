@@ -94,6 +94,28 @@ fn detects_bundled_language_paths_and_basenames() {
         detect_language_from_path("include/project.h").as_deref(),
         Some("c")
     );
+    assert_eq!(
+        detect_language_from_path("analysis.r").as_deref(),
+        Some("r")
+    );
+    assert_eq!(
+        detect_language_from_path("lint.reek").as_deref(),
+        Some("yaml")
+    );
+    assert_eq!(normalize_language_name("hbs".to_owned()), "handlebars");
+    assert_eq!(normalize_language_name("jade".to_owned()), "pug");
+}
+
+#[test]
+fn tex_extension_uses_vscode_latex_language() {
+    assert_eq!(
+        detect_language_from_path("homework.tex").as_deref(),
+        Some("latex")
+    );
+    assert!(
+        has_language("tex"),
+        "plain TeX remains explicitly selectable"
+    );
 }
 
 #[test]
@@ -840,6 +862,27 @@ statusline_accent_bg = "#334455"
         settings.colors.statusline_accent_bg.as_deref(),
         Some("#334455")
     );
+}
+
+#[test]
+fn syntax_settings_supports_scope_aware_rules() {
+    let settings = parse_settings(
+        r##"
+[[syntax_rules]]
+scope = "support.function"
+foreground = "#91cbff"
+
+[[syntax_rules]]
+scope = "entity.name.function"
+foreground = "#dbb7ff"
+font_style = "bold"
+"##,
+    )
+    .expect("settings should parse");
+
+    assert_eq!(settings.syntax_rules.len(), 2);
+    assert_eq!(settings.syntax_rules[0].scope, "support.function");
+    assert_eq!(settings.syntax_rules[1].font_style.as_deref(), Some("bold"));
 }
 
 #[test]

@@ -2,8 +2,8 @@
 # Skeleton only: build.rs reads coverage.toml, not this file. Copy this
 # over coverage.toml only when the Phase G public-catalog gates are met.
 public_language_count = 253
-asset_grammar_count = 258
-private_dependency_count = 5
+asset_grammar_count = 260
+private_dependency_count = 7
 kept_count = 253
 remapped_count = 0
 
@@ -13,6 +13,8 @@ private_assets = [
   "js-regexp",
   "mlir",
   "twig-source",
+  "yaml-1.2",
+  "yaml-embedded",
   "yang",
 ]
 

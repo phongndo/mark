@@ -98,6 +98,7 @@ pub(crate) fn settings_from_stored(stored: StoredSyntaxSettings) -> SyntaxSettin
         syntax_highlighting: stored.syntax_highlighting.unwrap_or(true),
         line_wrapping: stored.line_wrapping,
         colors: stored.colors.overlay(stored.color_overrides),
+        syntax_rules: stored.syntax_rules,
         transparent_background: stored.transparent_background,
         diff: diff_from_stored(stored.diff),
         notifications: notifications_from_stored(stored.notifications),

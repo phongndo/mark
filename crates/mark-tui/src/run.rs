@@ -155,6 +155,12 @@ pub fn benchmark_diff_view(
         DiffLayoutMode::Split,
         syntax_mode,
     );
+    if let Some(theme) = std::env::var("MARK_TEXTMATE_BENCH_THEME")
+        .ok()
+        .and_then(|name| mark_syntax::theme::BuiltinTextMateTheme::from_name(&name))
+    {
+        app.config.theme.exact_syntax = Some(theme.get());
+    }
     let open_micros = open_start.elapsed().as_micros();
     let row_count = app.document.model.len();
     let syntax_enabled = app.config.syntax.is_some();
@@ -224,6 +230,12 @@ pub fn benchmark_diff_view(
         settle_syntax_for_benchmark(&mut app).map(|duration| duration.as_micros());
 
     let before_warm_stats = app.syntax_stats();
+    let before_theme_stats = app
+        .config
+        .syntax
+        .as_ref()
+        .map(SyntaxRuntime::scope_table_stats)
+        .unwrap_or_default();
     let (warm_scroll_total_micros, warm_scroll_max_micros) =
         benchmark_scroll_pass(&mut app, &positions, options.width);
     let random_positions = benchmark_random_scroll_positions(
@@ -240,6 +252,12 @@ pub fn benchmark_diff_view(
         .as_ref()
         .map(SyntaxRuntime::estimated_memory_bytes)
         .unwrap_or_default();
+    let after_theme_stats = app
+        .config
+        .syntax
+        .as_ref()
+        .map(SyntaxRuntime::scope_table_stats)
+        .unwrap_or_default();
 
     DiffBenchmarkReport {
         syntax_enabled,
@@ -252,6 +270,8 @@ pub fn benchmark_diff_view(
         inline_cache_entries: app.document.inline_cache.len(),
         diff_cache_entries: app.jobs.diff_cache.len(),
         syntax_cache_estimated_memory_bytes,
+        scope_stack_count: after_theme_stats.0,
+        scope_table_bytes: after_theme_stats.1,
         open_micros,
         file_filter_micros,
         legacy_file_filter_micros,
@@ -279,6 +299,8 @@ pub fn benchmark_diff_view(
         warm_cache_misses: after_warm_stats
             .cache_misses
             .saturating_sub(before_warm_stats.cache_misses),
+        warm_theme_cache_hits: after_theme_stats.2.saturating_sub(before_theme_stats.2),
+        warm_theme_cache_misses: after_theme_stats.3.saturating_sub(before_theme_stats.3),
         channel_send_timeouts: runtime::channel_send_timeout_count(),
         syntax: after_warm_stats,
     }

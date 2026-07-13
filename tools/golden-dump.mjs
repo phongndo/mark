@@ -25,6 +25,7 @@ Options:
   --language <id>              Language id to write in each record (defaults to --scope).
   --out <jsonl>                Write JSONL to this file instead of stdout.
   --embedded <scope=grammar>   Register an embedded grammar; may be repeated.
+  --theme <theme.json>         Also emit resolved TextMate foreground/background/fontStyle.
   --time-limit <ms>            vscode-textmate tokenizeLine time limit (default: 0 = none).
   -h, --help                   Show this help.
 
@@ -46,7 +47,7 @@ function parseArgs(argv) {
     const equals = item.indexOf('=')
     const name = equals > 0 ? item.slice(0, equals) : item
     let value = equals > 0 ? item.slice(equals + 1) : undefined
-    if (['--assets', '--grammar', '--scope', '--language', '--file', '--out', '--embedded', '--time-limit'].includes(name)) {
+    if (['--assets', '--grammar', '--scope', '--language', '--file', '--out', '--embedded', '--theme', '--time-limit'].includes(name)) {
       if (value === undefined) {
         value = argv[++index]
       }
@@ -161,7 +162,26 @@ for (const spec of grammarSpecs) {
   if (grammars.has(spec.scope)) throw new Error(`duplicate grammar scope ${spec.scope}`)
   grammars.set(spec.scope, spec.parsed ?? JSON.parse(await fs.readFile(spec.grammarPath, 'utf8')))
 }
+let rawTheme
+if (args.theme) {
+  const theme = JSON.parse(await fs.readFile(args.theme, 'utf8'))
+  const foreground = theme.colors?.['editor.foreground']
+  const background = theme.colors?.['editor.background']
+  rawTheme = {
+    settings: [
+      {
+        settings: {
+          ...(typeof foreground === 'string' ? { foreground } : {}),
+          ...(typeof background === 'string' ? { background } : {}),
+        },
+      },
+      ...(Array.isArray(theme.tokenColors) ? theme.tokenColors : []),
+    ],
+  }
+}
+
 const registry = new vsctm.Registry({
+  ...(rawTheme ? { theme: rawTheme } : {}),
   onigLib: Promise.resolve({
     createOnigScanner(patterns) { return new onig.OnigScanner(patterns) },
     createOnigString(source) { return new onig.OnigString(source) },
@@ -176,12 +196,17 @@ const source = await fs.readFile(sourcePath, 'utf8')
 const lines = source.split('\n')
 let ruleStack = vsctm.INITIAL
 const records = []
+const colorMap = registry.getColorMap()
 for (let lineNumber = 0; lineNumber < lines.length; lineNumber++) {
   const line = lines[lineNumber]
   // timeLimit 0 disables vscode-textmate's wall-clock early stop so long
   // minified fixtures compare against our own budget behavior, not silent
   // oracle truncation.
-  const result = grammar.tokenizeLine(line, ruleStack, timeLimit)
+  const entryRuleStack = ruleStack
+  const result = grammar.tokenizeLine(line, entryRuleStack, timeLimit)
+  const styled = rawTheme
+    ? grammar.tokenizeLine2(line, entryRuleStack, timeLimit)
+    : null
   ruleStack = result.ruleStack
   const ruleStackText = String(ruleStack)
   records.push(JSON.stringify({
@@ -194,6 +219,7 @@ for (let lineNumber = 0; lineNumber < lines.length; lineNumber++) {
       startIndex: token.startIndex,
       endIndex: token.endIndex,
       scopes: token.scopes,
+      ...(styled ? { style: decodedStyleAt(styled.tokens, token.startIndex, colorMap) } : {}),
     })),
     ruleStack: ruleStackText,
     ruleStackHash: createHash('sha256').update(ruleStackText).digest('hex'),
@@ -204,3 +230,24 @@ for (let lineNumber = 0; lineNumber < lines.length; lineNumber++) {
 const output = `${records.join('\n')}\n`
 if (outPath) await fs.writeFile(outPath, output)
 else process.stdout.write(output)
+
+function decodedStyleAt(tokens, offset, colorMap) {
+  let metadata = 0
+  for (let index = 0; index < tokens.length; index += 2) {
+    if (tokens[index] > offset) break
+    metadata = tokens[index + 1] >>> 0
+  }
+  const fontStyle = (metadata & 0x00007800) >>> 11
+  const foregroundId = (metadata & 0x00ff8000) >>> 15
+  const backgroundId = (metadata & 0xff000000) >>> 24
+  const modifiers = []
+  if (fontStyle & 1) modifiers.push('italic')
+  if (fontStyle & 2) modifiers.push('bold')
+  if (fontStyle & 4) modifiers.push('underline')
+  if (fontStyle & 8) modifiers.push('strikethrough')
+  return {
+    foreground: colorMap[foregroundId]?.toLowerCase() ?? null,
+    background: colorMap[backgroundId]?.toLowerCase() ?? null,
+    modifiers,
+  }
+}

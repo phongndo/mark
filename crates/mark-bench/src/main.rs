@@ -593,6 +593,8 @@ struct TuiMeasureReport {
     inline_cache_entries: usize,
     diff_cache_entries: usize,
     syntax_cache_estimated_memory_bytes: usize,
+    scope_stack_count: usize,
+    scope_table_bytes: usize,
     open_micros: u128,
     file_filter_micros: u128,
     legacy_file_filter_micros: u128,
@@ -620,6 +622,9 @@ struct TuiMeasureReport {
     warm_cache_hits: u64,
     warm_cache_misses: u64,
     warm_cache_hit_rate: Option<f64>,
+    warm_theme_cache_hits: u64,
+    warm_theme_cache_misses: u64,
+    warm_theme_cache_hit_rate: Option<f64>,
     channel_send_timeouts: u64,
     syntax: SyntaxMeasureReport,
 }
@@ -1850,6 +1855,9 @@ fn tui_report(report: mark_tui::DiffBenchmarkReport) -> TuiMeasureReport {
     let warm_cache_total = report
         .warm_cache_hits
         .saturating_add(report.warm_cache_misses);
+    let warm_theme_cache_total = report
+        .warm_theme_cache_hits
+        .saturating_add(report.warm_theme_cache_misses);
     TuiMeasureReport {
         syntax_enabled: report.syntax_enabled,
         row_count: report.row_count,
@@ -1861,6 +1869,8 @@ fn tui_report(report: mark_tui::DiffBenchmarkReport) -> TuiMeasureReport {
         inline_cache_entries: report.inline_cache_entries,
         diff_cache_entries: report.diff_cache_entries,
         syntax_cache_estimated_memory_bytes: report.syntax_cache_estimated_memory_bytes,
+        scope_stack_count: report.scope_stack_count,
+        scope_table_bytes: report.scope_table_bytes,
         open_micros: report.open_micros,
         file_filter_micros: report.file_filter_micros,
         legacy_file_filter_micros: report.legacy_file_filter_micros,
@@ -1898,6 +1908,10 @@ fn tui_report(report: mark_tui::DiffBenchmarkReport) -> TuiMeasureReport {
         warm_cache_misses: report.warm_cache_misses,
         warm_cache_hit_rate: (warm_cache_total > 0)
             .then(|| report.warm_cache_hits as f64 / warm_cache_total as f64),
+        warm_theme_cache_hits: report.warm_theme_cache_hits,
+        warm_theme_cache_misses: report.warm_theme_cache_misses,
+        warm_theme_cache_hit_rate: (warm_theme_cache_total > 0)
+            .then(|| report.warm_theme_cache_hits as f64 / warm_theme_cache_total as f64),
         channel_send_timeouts: report.channel_send_timeouts,
         syntax: syntax_report(report.syntax),
     }

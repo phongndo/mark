@@ -8,6 +8,7 @@ mod paths;
 mod storage;
 #[cfg(test)]
 mod tests;
+pub mod theme;
 mod types;
 
 pub use highlight::detect_language_from_path;

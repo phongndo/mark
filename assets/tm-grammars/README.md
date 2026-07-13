@@ -3,9 +3,14 @@
 Vendored TextMate grammar source assets for the in-house engine migration.
 
 The active public catalog is the full pinned Shiki language set plus the MLIR
-grammar imported from LLVM. `coverage.toml` is the source of truth for the public
-language ids (254 languages) and the private dependency blobs embedded alongside
-them.
+grammar imported from LLVM. Dart, Handlebars, PHP, Pug, R, reStructuredText,
+and YAML use the pinned VS Code 1.128 built-in assets after the cross-source
+behavior audit found observable differences. Pug preserves VS Code's unresolved
+Sass/Stylus includes and reStructuredText preserves VS Code's unresolved CMake
+include despite Mark bundling those languages independently. The YAML root is
+bundled with its private YAML 1.2 and embedded dependency grammars.
+`coverage.toml` is the source of truth for the public language ids (254
+languages) and the private dependency blobs embedded alongside them.
 
 Private dependency grammars are also embedded without becoming public catalog
 languages. The non-Shiki compatibility assets are recorded in `SOURCE.toml`.

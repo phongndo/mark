@@ -548,6 +548,7 @@ dependencies = [
  "mark-diff",
  "mark-git",
  "mark-runtime",
+ "mark-syntax",
  "mark-tui",
  "mimalloc",
  "rustix 0.38.44",

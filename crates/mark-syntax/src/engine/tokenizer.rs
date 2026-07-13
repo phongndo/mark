@@ -11,7 +11,10 @@ use std::{
     time::Instant,
 };
 
-use crate::{HighlightedLine, HighlightedText, LineTextFingerprint, SyntaxClass, SyntaxSegment};
+use crate::{
+    HighlightScopeTable, HighlightedLine, HighlightedText, LineTextFingerprint, ScopeAtomId,
+    ScopeStackRef, SyntaxClass, SyntaxSegment,
+};
 
 use super::cache::{CachedLine, LineCache, LineCacheKey};
 use super::checkpoint::CheckpointTable;
@@ -76,6 +79,61 @@ pub struct ScopedToken {
 pub(crate) struct CompactScopedToken {
     pub(crate) range: Range<usize>,
     pub(crate) stack: ScopeStackId,
+}
+
+#[derive(Debug)]
+struct OutputScopeTableBuilder {
+    engine_to_output: HashMap<ScopeStackId, ScopeStackRef>,
+    output_stacks: Vec<ScopeStackId>,
+}
+
+impl OutputScopeTableBuilder {
+    fn new() -> Self {
+        let mut engine_to_output = HashMap::new();
+        engine_to_output.insert(ScopeStackId::default(), ScopeStackRef::default());
+        Self {
+            engine_to_output,
+            output_stacks: vec![ScopeStackId::default()],
+        }
+    }
+
+    fn intern_engine_stack(&mut self, stack: ScopeStackId) -> ScopeStackRef {
+        if let Some(output) = self.engine_to_output.get(&stack) {
+            return *output;
+        }
+        let output = ScopeStackRef(self.output_stacks.len() as u32);
+        self.output_stacks.push(stack);
+        self.engine_to_output.insert(stack, output);
+        output
+    }
+
+    fn finish(
+        self,
+        scope_stacks: &ScopeStackInterner,
+        scope_names: &ScopeInterner,
+    ) -> Arc<HighlightScopeTable> {
+        let mut stacks = Vec::with_capacity(self.output_stacks.len());
+        let mut atoms = Vec::<Arc<str>>::new();
+        let mut atom_ids = HashMap::new();
+        for engine_stack in self.output_stacks {
+            let stack_atoms = scope_stacks
+                .resolve_ids(engine_stack)
+                .into_iter()
+                .filter_map(|scope| {
+                    if let Some(atom) = atom_ids.get(&scope) {
+                        return Some(*atom);
+                    }
+                    let name = scope_names.get(scope)?;
+                    let atom = ScopeAtomId(atoms.len() as u32);
+                    atoms.push(Arc::from(name));
+                    atom_ids.insert(scope, atom);
+                    Some(atom)
+                })
+                .collect::<Vec<_>>();
+            stacks.push(Arc::from(stack_atoms));
+        }
+        Arc::new(HighlightScopeTable::from_parts(atoms, stacks))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1065,6 +1123,7 @@ impl TextMateTokenizer {
             .replace(fallback_call_budget(source.len()));
         let mut state = TokenizerState::default();
         let mut lines = Vec::with_capacity(source.len().div_ceil(40).max(1));
+        let mut scope_table = OutputScopeTableBuilder::new();
         for (line_index, chunk) in LineChunks::new(source).enumerate() {
             let tokenized = self.tokenize_line_compact_at_line(chunk.parse_text, state, line_index);
             state = tokenized.state.clone();
@@ -1073,9 +1132,18 @@ impl TextMateTokenizer {
             } else {
                 tokenized.parse_fingerprint
             };
-            lines.push(self.build_highlighted_line(chunk.text, fingerprint, &tokenized.tokens));
+            lines.push(self.build_highlighted_line(
+                chunk.text,
+                fingerprint,
+                &tokenized.tokens,
+                &mut scope_table,
+            ));
         }
         self.fallback_call_budget_remaining = previous_budget;
+        let scope_table = scope_table.finish(&self.scope_stacks, &self.scope_names);
+        for line in &mut lines {
+            line.scope_table = Arc::clone(&scope_table);
+        }
         HighlightedText { lines }
     }
 
@@ -1145,7 +1213,8 @@ impl TextMateTokenizer {
             .replace(fallback_call_budget(source.len()));
         let tokenized = self.tokenize_viewport_compact(source, visible, checkpoints);
         self.fallback_call_budget_remaining = previous_budget;
-        let lines = tokenized
+        let mut scope_table = OutputScopeTableBuilder::new();
+        let mut lines = tokenized
             .iter()
             .enumerate()
             .filter_map(|(offset, tokenized)| {
@@ -1155,9 +1224,18 @@ impl TextMateTokenizer {
                 } else {
                     tokenized.parse_fingerprint
                 };
-                Some(self.build_highlighted_line(chunk.text, fingerprint, &tokenized.tokens))
+                Some(self.build_highlighted_line(
+                    chunk.text,
+                    fingerprint,
+                    &tokenized.tokens,
+                    &mut scope_table,
+                ))
             })
-            .collect();
+            .collect::<Vec<_>>();
+        let scope_table = scope_table.finish(&self.scope_stacks, &self.scope_names);
+        for line in &mut lines {
+            line.scope_table = Arc::clone(&scope_table);
+        }
         HighlightedText { lines }
     }
 
@@ -1240,21 +1318,23 @@ impl TextMateTokenizer {
 
         let mut tokens = Vec::with_capacity(parse_text.len().div_ceil(2).min(256));
         let mut cursor = 0usize;
-        let suppressed_begin_rules =
+        let (suppressed_begin_rules, while_anchor_pos) =
             self.apply_while_continuations(parse_text, &mut state, &mut tokens, &mut cursor);
 
         let mut steps = 0usize;
         let mut fallback_steps = 0u64;
         let mut degraded = false;
-        let mut anchor_pos = if cursor > 0 {
-            Some(cursor)
-        } else {
-            state
-                .frames
-                .last()
-                .is_some_and(|frame| frame.begin_captured_eol)
-                .then_some(0)
-        };
+        let mut anchor_pos = while_anchor_pos.or_else(|| {
+            if cursor > 0 {
+                Some(cursor)
+            } else {
+                state
+                    .frames
+                    .last()
+                    .is_some_and(|frame| frame.begin_captured_eol)
+                    .then_some(0)
+            }
+        });
         // vscode-textmate keeps a line-local anchor position stack for `\G`.
         // Existing frames only need a synthetic restore value when they pop;
         // avoid materializing one `None` per deep frame on every line.
@@ -1708,10 +1788,12 @@ impl TextMateTokenizer {
         text: &str,
         fingerprint: LineTextFingerprint,
         scoped_tokens: &[CompactScopedToken],
+        scope_table: &mut OutputScopeTableBuilder,
     ) -> HighlightedLine {
         let mut line = HighlightedLine {
             fingerprint,
             segments: Vec::with_capacity(scoped_tokens.len()),
+            scope_table: Arc::default(),
         };
         for token in scoped_tokens {
             let start = token.range.start.min(text.len());
@@ -1720,7 +1802,8 @@ impl TextMateTokenizer {
                 continue;
             }
             let class = self.scope_stacks.class(token.stack);
-            push_segment(&mut line.segments, start, end, class);
+            let stack = scope_table.intern_engine_stack(token.stack);
+            push_segment(&mut line.segments, start, end, class, stack);
         }
         line
     }
@@ -1749,11 +1832,12 @@ impl TextMateTokenizer {
         state: &mut TokenizerState,
         tokens: &mut Vec<CompactScopedToken>,
         cursor: &mut usize,
-    ) -> HashSet<(GrammarId, RuleId)> {
+    ) -> (HashSet<(GrammarId, RuleId)>, Option<usize>) {
         let mut suppressed = HashSet::new();
         if state.frames.while_frame_count() == 0 {
-            return suppressed;
+            return (suppressed, None);
         }
+        let mut anchor_pos = None;
         let mut while_frames = Vec::new();
         state.frames.for_each(|index, frame| {
             if frame.while_pattern.is_some() {
@@ -1794,6 +1878,10 @@ impl TextMateTokenizer {
                     // A zero-width while match only validates continuation; it
                     // must not consume the first byte of the continued line.
                     *cursor = result.end;
+                    // vscode-textmate uses the most recent successful while
+                    // match as the line-local `\G` anchor. Nested begin/end
+                    // rules can rely on that anchor to close at line start.
+                    anchor_pos = Some(result.end);
                 }
                 _ => {
                     // A failed ancestor while condition also removes every
@@ -1810,7 +1898,7 @@ impl TextMateTokenizer {
                 }
             }
         }
-        suppressed
+        (suppressed, anchor_pos)
     }
 
     fn candidates_for_state(
@@ -4929,18 +5017,20 @@ fn push_segment(
     start: usize,
     end: usize,
     class: Option<SyntaxClass>,
+    scope_stack: ScopeStackRef,
 ) {
     if start >= end {
         return;
     }
     if let Some(last) = segments.last_mut()
         && last.class == class
+        && last.scope_stack == scope_stack
         && last.byte_end == start
     {
         last.byte_end = end;
         return;
     }
-    segments.push(SyntaxSegment::new(start, end, class));
+    segments.push(SyntaxSegment::new(start, end, class).with_scope_stack(scope_stack));
 }
 
 fn clamp_range(range: Range<usize>, parent: Range<usize>) -> Range<usize> {
@@ -6523,6 +6613,33 @@ mod tests {
     }
 
     #[test]
+    fn successful_while_match_sets_continuation_anchor_for_nested_end() {
+        let grammar = r##"{
+            "scopeName": "source.while-g-anchor",
+            "patterns": [{
+                "begin": "\\A",
+                "while": "^",
+                "patterns": [{
+                    "begin": "\\G%YAML 1\\.2",
+                    "end": "\\G(?=---)",
+                    "name": "meta.directive.while-g-anchor",
+                    "patterns": [{"match": ".+", "name": "invalid.directive.while-g-anchor"}]
+                }, {
+                    "match": "---",
+                    "name": "entity.document.while-g-anchor"
+                }]
+            }]
+        }"##;
+        let mut tokenizer = TextMateTokenizer::from_grammar(grammar).unwrap();
+        let directive =
+            tokenizer.tokenize_line_scopes_at_line("%YAML 1.2\n", TokenizerState::default(), 0);
+        let document = tokenizer.tokenize_line_scopes_at_line("---\n", directive.state, 1);
+
+        assert!(line_has_scope(&document, "entity.document.while-g-anchor"));
+        assert!(!line_has_scope(&document, "meta.directive.while-g-anchor"));
+    }
+
+    #[test]
     fn applies_capture_zero_scope() {
         let grammar = r##"{
             "scopeName": "source.fixture",
@@ -6673,6 +6790,81 @@ mod tests {
                 .segments
                 .iter()
                 .all(|segment| segment.byte_start < segment.byte_end)
+        );
+        assert!(highlighted.lines[0].segments.iter().all(|segment| {
+            highlighted.lines[0]
+                .scope_table
+                .stack(segment.scope_stack)
+                .is_some_and(|stack| !stack.is_empty())
+        }));
+        assert!(Arc::ptr_eq(
+            &highlighted.lines[0].scope_table,
+            &highlighted.lines[1].scope_table
+        ));
+    }
+
+    #[test]
+    fn output_scope_table_remaps_sparse_engine_ids_to_dense_refs() {
+        let mut scope_names = ScopeInterner::default();
+        let mut scope_stacks = ScopeStackInterner::default();
+        let mut high_stack = scope_stacks.empty();
+        for index in 0..4_096 {
+            let scope = scope_names.intern(&format!("entity.name.generated-{index}"));
+            high_stack = scope_stacks.push(scope_stacks.empty(), scope, &scope_names);
+        }
+        assert!(high_stack.0 >= 4_096);
+
+        let mut builder = OutputScopeTableBuilder::new();
+        let output = builder.intern_engine_stack(high_stack);
+        assert_eq!(output, ScopeStackRef(1));
+        assert_eq!(builder.intern_engine_stack(high_stack), output);
+
+        let table = builder.finish(&scope_stacks, &scope_names);
+        assert_eq!(table.stack_count(), 2);
+        assert_eq!(table.atom_count(), 1);
+        assert_eq!(
+            table.stack_names(output).collect::<Vec<_>>(),
+            ["entity.name.generated-4095"]
+        );
+    }
+
+    #[test]
+    fn begin_captures_preserve_text_consumed_after_continuation_anchor() {
+        let grammar = r##"{
+            "scopeName": "source.fixture",
+            "patterns": [{
+                "begin": "\\\\href",
+                "end": "}",
+                "name": "meta.link.fixture",
+                "patterns": [{
+                    "begin": "\\G(\\{)([^}]*)(})(?:\\{[^}]*}){2}?(\\{)",
+                    "beginCaptures": {
+                        "1": {"name": "punctuation.begin.fixture"},
+                        "2": {"name": "markup.underline.link.fixture"},
+                        "3": {"name": "punctuation.end.fixture"},
+                        "4": {"name": "punctuation.begin.fixture"}
+                    },
+                    "end": "(?=})",
+                    "contentName": "meta.link.text.fixture"
+                }]
+            }]
+        }"##;
+        let mut tokenizer = TextMateTokenizer::from_grammar(grammar).unwrap();
+        let line = tokenizer.tokenize_line_scopes(
+            "\\href{https://example.com}{link}",
+            TokenizerState::default(),
+        );
+        let url = line
+            .tokens
+            .iter()
+            .find(|token| token.range == (6..25))
+            .expect("URL capture token");
+        assert!(
+            url.scopes
+                .iter()
+                .any(|scope| scope == "markup.underline.link.fixture"),
+            "{:?}",
+            line.tokens
         );
     }
 

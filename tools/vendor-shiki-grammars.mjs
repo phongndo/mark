@@ -111,7 +111,18 @@ for (const name of shikiNames) {
 // rooted at `text.html.twig`. Keep the private compatibility root-scope alias
 // that the current bundle already uses.
 const shikiAliasAssets = [makeTwigSourceAlias(shikiAssets)]
-const generatedAssets = [...shikiAssets, ...shikiAliasAssets]
+// These public languages intentionally track VS Code's pinned built-in
+// grammars because their Shiki revisions have observable scope/style
+// differences in the cross-asset behavior audit.
+const vscodeOverrides = new Set(['dart', 'handlebars', 'php', 'pug', 'r', 'rst', 'yaml'])
+const generatedAssets = [
+  ...shikiAssets.filter(asset => !vscodeOverrides.has(asset.language)),
+  ...shikiAliasAssets,
+]
+// Grammar content may come from an override, but language aliases and file
+// types are registration metadata supplied by Shiki. VS Code's raw
+// tmLanguage files do not contain its package-level language contributions.
+const metadataAssets = [...shikiAssets, ...shikiAliasAssets]
 const generatedNames = new Set(generatedAssets.map(asset => asset.language))
 
 const existingLanguageNames = await existingAssetNames(languagesDir)
@@ -156,7 +167,7 @@ const fullCoverage = renderFullCoverage({
 })
 const languageMetadata = await renderLanguageMetadata({
   coverage: currentCoverage,
-  generatedAssets,
+  metadataAssets,
   languagesDir,
   packageJson,
 })
@@ -353,8 +364,8 @@ function renderFullCoverage({ shikiNames, allAssetNames }) {
     `${tomlArray('kept', shikiNames)}`
 }
 
-async function renderLanguageMetadata({ coverage, generatedAssets, languagesDir, packageJson }) {
-  const generatedByName = new Map(generatedAssets.map(asset => [asset.language, asset.grammar]))
+async function renderLanguageMetadata({ coverage, metadataAssets, languagesDir, packageJson }) {
+  const metadataByName = new Map(metadataAssets.map(asset => [asset.language, asset.grammar]))
   const entries = []
   const publicEntries = [
     ...coverage.kept.map(id => ({ id, asset: id })),
@@ -362,7 +373,7 @@ async function renderLanguageMetadata({ coverage, generatedAssets, languagesDir,
   ].sort((left, right) => left.id.localeCompare(right.id))
 
   for (const { id, asset } of publicEntries) {
-    let grammar = generatedByName.get(asset)
+    let grammar = metadataByName.get(asset)
     if (!grammar) {
       const file = path.join(languagesDir, `${asset}.tmLanguage.json`)
       grammar = JSON.parse(await fs.readFile(file, 'utf8'))

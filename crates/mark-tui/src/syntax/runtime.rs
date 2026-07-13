@@ -111,6 +111,21 @@ impl SyntaxRuntime {
     pub(crate) fn estimated_memory_bytes(&self) -> usize {
         self.cache.total_weight()
     }
+
+    pub(crate) fn scope_table_stats(&self) -> (usize, usize, u64, u64) {
+        self.cache.values().fold(
+            (0usize, 0usize, 0u64, 0u64),
+            |(stacks, bytes, hits, misses), side| {
+                let current = side.scope_table_stats();
+                (
+                    stacks.saturating_add(current.0),
+                    bytes.saturating_add(current.1),
+                    hits.saturating_add(current.2),
+                    misses.saturating_add(current.3),
+                )
+            },
+        )
+    }
 }
 
 impl Drop for SyntaxRuntime {

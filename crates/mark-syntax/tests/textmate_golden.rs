@@ -1003,8 +1003,11 @@ fn compare_coarse_highlights(
         if allowed_lines.contains(&index) {
             continue;
         }
-        let actual_segments = &highlighted.lines[index].segments;
-        if actual_segments != expected_segments {
+        // Highlighted output now retains exact scope-stack boundaries and IDs.
+        // This compatibility assertion intentionally checks only the old
+        // coarse-class projection.
+        let actual_segments = coarse_projection(&highlighted.lines[index].segments);
+        if actual_segments != *expected_segments {
             failures.push(format!(
                 "coarse mismatch: {} {} line {} expected={:?} actual={:?} line={:?}",
                 case.language,
@@ -1019,6 +1022,18 @@ fn compare_coarse_highlights(
             ));
         }
     }
+}
+
+fn coarse_projection(segments: &[SyntaxSegment]) -> Vec<SyntaxSegment> {
+    let mut projected = Vec::with_capacity(segments.len());
+    for segment in segments {
+        push_segment(
+            &mut projected,
+            segment.byte_start..segment.byte_end,
+            segment.class,
+        );
+    }
+    projected
 }
 
 fn validate_record(case: &CaseSpec, record: &GoldenLine, index: usize, failures: &mut Vec<String>) {

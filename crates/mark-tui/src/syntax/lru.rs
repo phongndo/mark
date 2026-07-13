@@ -86,6 +86,10 @@ where
         self.total_bytes
     }
 
+    pub(crate) fn values(&self) -> impl Iterator<Item = &V> {
+        self.entries.values().map(|entry| &entry.value)
+    }
+
     pub(crate) fn get(&mut self, key: &K) -> Option<&V> {
         let last_used = self.next_tick();
         let entry = self.entries.get_mut(key)?;

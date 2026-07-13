@@ -476,20 +476,46 @@ impl<'a> Parser<'a> {
             let quantifier = match ch {
                 '*' => {
                     self.bump();
-                    Some((0, None))
+                    Some((0, None, false))
                 }
                 '+' => {
                     self.bump();
-                    Some((1, None))
+                    Some((1, None, false))
                 }
                 '?' => {
                     self.bump();
-                    Some((0, Some(1)))
+                    Some((0, Some(1), false))
                 }
                 '{' => self.parse_braced_quantifier(),
                 _ => None,
             };
-            let Some((min, max)) = quantifier else { break };
+            let Some((min, max, is_braced_exact)) = quantifier else {
+                break;
+            };
+            // Oniguruma keeps the historical Ruby interpretation of `{n}?`:
+            // the exact repetition is optional (zero or exactly n copies),
+            // rather than a lazily evaluated exact repetition. TextMate
+            // grammars rely on this, notably LaTeX hyperlink argument rules.
+            if is_braced_exact && self.peek() == Some('?') {
+                self.bump();
+                let exact = Ast::Repeat {
+                    node: Box::new(node),
+                    min,
+                    max,
+                    greedy: true,
+                    possessive: false,
+                    atomic: false,
+                };
+                node = Ast::Repeat {
+                    node: Box::new(exact),
+                    min: 0,
+                    max: Some(1),
+                    greedy: true,
+                    possessive: false,
+                    atomic: false,
+                };
+                continue;
+            }
             let mut greedy = true;
             let mut possessive = false;
             if self.peek() == Some('?') {
@@ -1051,16 +1077,31 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_braced_quantifier(&mut self) -> Option<(usize, Option<usize>)> {
+    fn parse_braced_quantifier(&mut self) -> Option<(usize, Option<usize>, bool)> {
         let saved = self.pos;
         self.bump(); // {
         let min_digits = self.take_digits();
         if min_digits.is_empty() {
-            self.pos = saved;
-            return None;
+            if self.peek() != Some(',') {
+                self.pos = saved;
+                return None;
+            }
+            self.bump();
+            let max_digits = self.take_digits();
+            let Some(max) = max_digits.parse::<usize>().ok() else {
+                self.pos = saved;
+                return None;
+            };
+            if self.peek() != Some('}') {
+                self.pos = saved;
+                return None;
+            }
+            self.bump();
+            return Some((0, Some(max), false));
         }
         let min = min_digits.parse::<usize>().ok()?;
-        let max = if self.peek() == Some(',') {
+        let is_braced_exact = self.peek() != Some(',');
+        let max = if !is_braced_exact {
             self.bump();
             let max_digits = self.take_digits();
             if max_digits.is_empty() {
@@ -1076,7 +1117,7 @@ impl<'a> Parser<'a> {
             return None;
         }
         self.bump();
-        Some((min, max))
+        Some((min, max, is_braced_exact))
     }
 
     fn alloc_capture(&mut self, name: Option<String>) -> u32 {
@@ -1431,6 +1472,55 @@ mod tests {
         assert_eq!(nodes.get(2), Some(&Ast::Literal("c".to_owned())));
         assert!(matches!(nodes.get(3), Some(Ast::Group { .. })));
         assert_eq!(nodes.get(4), Some(&Ast::Literal("e".to_owned())));
+    }
+
+    #[test]
+    fn parses_oniguruma_omitted_lower_repeat_bound() {
+        let parsed = parse("`_{,2}");
+        let Ast::Concat(nodes) = parsed.ast else {
+            panic!("expected concatenation");
+        };
+        assert!(matches!(
+            &nodes[1],
+            Ast::Repeat {
+                min: 0,
+                max: Some(2),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn only_lexical_braced_exact_repeat_uses_oniguruma_optional_semantics() {
+        let parsed = parse("a{2}?");
+        assert!(matches!(
+            parsed.ast,
+            Ast::Repeat {
+                min: 0,
+                max: Some(1),
+                node,
+                ..
+            } if matches!(
+                *node,
+                Ast::Repeat {
+                    min: 2,
+                    max: Some(2),
+                    greedy: true,
+                    ..
+                }
+            )
+        ));
+
+        let parsed = parse("a{2,2}?");
+        assert!(matches!(
+            parsed.ast,
+            Ast::Repeat {
+                min: 2,
+                max: Some(2),
+                greedy: false,
+                ..
+            }
+        ));
     }
 
     #[test]

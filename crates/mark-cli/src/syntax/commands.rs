@@ -5,7 +5,7 @@ use crate::{
 };
 
 use super::{
-    print_syntax_add_result, print_syntax_remove_result, print_syntax_statuses,
+    inspect, print_syntax_add_result, print_syntax_remove_result, print_syntax_statuses,
     print_syntax_update_result,
 };
 
@@ -81,6 +81,7 @@ pub(crate) fn syntax(command: SyntaxCommand) -> CliResult<()> {
                 }
             }
         }
+        SyntaxCommand::Inspect(args) => inspect(args)?,
     }
     Ok(())
 }

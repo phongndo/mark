@@ -60,6 +60,7 @@ pub(crate) fn push_line_segment(
             byte_start,
             byte_end,
             class,
+            scope_stack: Default::default(),
         });
         return;
     };
@@ -71,6 +72,7 @@ pub(crate) fn push_line_segment(
             byte_start,
             byte_end,
             class,
+            scope_stack: Default::default(),
         });
     }
 }

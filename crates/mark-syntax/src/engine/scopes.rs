@@ -253,6 +253,13 @@ impl ScopeStackInterner {
     }
 
     pub fn resolve(&self, id: ScopeStackId, scopes: &ScopeInterner) -> Vec<String> {
+        self.resolve_ids(id)
+            .into_iter()
+            .filter_map(|scope| scopes.get(scope).map(str::to_owned))
+            .collect()
+    }
+
+    pub fn resolve_ids(&self, id: ScopeStackId) -> Vec<ScopeId> {
         let mut ids = Vec::new();
         let mut cursor = id;
         while cursor != self.empty() {
@@ -265,9 +272,7 @@ impl ScopeStackInterner {
             cursor = node.parent;
         }
         ids.reverse();
-        ids.into_iter()
-            .filter_map(|scope| scopes.get(scope).map(str::to_owned))
-            .collect()
+        ids
     }
 
     pub fn len(&self) -> usize {

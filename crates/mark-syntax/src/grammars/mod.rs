@@ -119,7 +119,7 @@ mod tests {
         // Full public catalog plus private dependency blobs. `coverage.toml`
         // decides which embedded blobs are public catalog entries.
         assert_eq!(bundle.languages.len(), 254);
-        assert_eq!(bundle.grammar_blobs.len(), 258);
+        assert_eq!(bundle.grammar_blobs.len(), 260);
         assert!(
             bundle
                 .grammar_blob_for_scope("source.cpp.embedded.macro")
@@ -127,6 +127,12 @@ mod tests {
         );
         assert!(bundle.grammar_blob_for_scope("source.yang").is_some());
         assert!(bundle.grammar_blob_for_scope("source.twig").is_some());
+        assert!(bundle.grammar_blob_for_scope("source.yaml.1.2").is_some());
+        assert!(
+            bundle
+                .grammar_blob_for_scope("source.yaml.embedded")
+                .is_some()
+        );
         assert!(bundle.has_language("cpp-macro"));
         assert_eq!(bundle.canonical_language("rs"), Some("rust"));
         assert_eq!(
@@ -513,6 +519,23 @@ mod tests {
         let grammar = registry.grammar("json").unwrap();
         assert_eq!(grammar.scope_name, "source.json");
         assert_eq!(registry.cached_grammar_count(), 1);
+    }
+
+    #[test]
+    fn bundled_yaml_loads_private_dependency_closure() {
+        let mut highlighter = crate::SyntaxHighlighter::new();
+        let highlighted = highlighter
+            .highlight("yaml", "%YAML 1.2\n---\ntitle: \"Mark\"\nenabled: true\n")
+            .unwrap();
+
+        assert!(
+            highlighted
+                .lines
+                .iter()
+                .flat_map(|line| &line.segments)
+                .any(|segment| segment.class.is_some()),
+            "YAML should not collapse to root-scope-only output"
+        );
     }
 
     #[test]

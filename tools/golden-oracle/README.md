@@ -1,7 +1,9 @@
 # Golden oracle dependencies
 
 Development-only package used by `../golden-dump.mjs`, `../generate-goldens.mjs`,
-`../regex-conformance.mjs`, and `../vendor-shiki-grammars.mjs`. Versions are
+`../regex-conformance.mjs`, `../vendor-shiki-grammars.mjs`, and
+`../vendor-textmate-themes.mjs`, and `../vscode-grammar-behavior-audit.mjs`.
+Versions are
 pinned exactly (no ranges) so oracle output and vendored grammar imports stay
 reproducible.
 
@@ -69,6 +71,8 @@ This verifies `assets/tm-grammars/languages/`, `coverage.toml`,
 | Package | Version | Role |
 | --- | --- | --- |
 | `@shikijs/langs` | `3.23.0` | Pinned source for vendored TextMate grammars |
+| `@shikijs/themes` | `3.23.0` | Pinned source for named community themes |
+| `github-vscode-themes` | `6.3.4` | Pinned source for GitHub themes |
 | `vscode-textmate` | `9.2.0` | TextMate line tokenizer reference |
 | `vscode-oniguruma` | `1.7.0` | Oniguruma WASM used by the reference |
 

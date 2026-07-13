@@ -245,6 +245,9 @@ pub const EXTENSION_ALIASES: &[(&str, &str)] = &[
     ("swift", "swift"),
     ("tf", "terraform"),
     ("tfvars", "terraform"),
+    // VS Code assigns .tex files to its LaTeX language contribution. Keep
+    // plain `tex` available only as an explicit language override.
+    ("tex", "latex"),
     ("toml", "toml"),
     ("ts", "typescript"),
     ("tsx", "tsx"),
