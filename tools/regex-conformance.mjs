@@ -20,7 +20,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { spawnSync } from 'node:child_process'
 
 const unicodePositiveVariants = {
-  alnum: 'λ7', alpha: 'λ', blank: ' ', Cc: '\u0001', Cf: '\u200D', Greek: 'Ω',
+  alnum: 'λ7', alpha: 'λ', blank: ' ', Cc: '\u0001', Cf: '\u200D', Cntrl: '\u0001', Greek: 'Ω',
   Ll: 'a', Lm: 'ʰ', Lo: '文', lower: 'a', Lt: 'ǅ', Lu: 'A', M: '\u0301',
   Mc: 'ा', Mn: '\u0301', Nl: 'Ⅻ', P: '!', Pc: '_', print: 'A', S: '+',
   Sc: '$', Sm: '+', So: '🚀', upper: 'A', word: 'λ_7',
@@ -59,6 +59,16 @@ function inventoryVariantCases() {
       constructs: ['posix-class.positive'],
     })
   }
+  // UTF-8 cannot encode surrogate code points, but the property must still
+  // compile and reject ordinary Unicode scalar values like the oracle does.
+  cases.push({
+    name: 'unicode-property-surrogate',
+    pattern: '\\p{Surrogate}+',
+    line: 'A',
+    engine: 'fallback',
+    constructs: ['unicode-property.positive'],
+    expectMiss: true,
+  })
   cases.push({
     name: 'posix-property-negative-ascii',
     pattern: '[[:^ascii:]]+',
@@ -84,6 +94,8 @@ export const conformanceCases = Object.freeze([
   { name: 'duplicate-named-backref', pattern: String.raw`(?<x>a)(?<x>b)\k<x>`, line: 'abb', engine: 'fallback', constructs: ['named-group.angle', 'named-group.duplicate', 'backreference.named-angle'] },
 
   { name: 'global-ignore-case', pattern: String.raw`(?i)foo`, line: 'xxFOO', engine: 'fallback', constructs: ['inline-flags.global-set'] },
+  { name: 'global-ignore-case-extended', pattern: '(?ix) f o o', line: 'xxFOO', engine: 'fallback', constructs: ['inline-flags.global-set', 'inline-flags.extended-set'] },
+  { name: 'global-extended-ignore-case', pattern: '(?xi) f o o', line: 'xxFOO', engine: 'fallback', constructs: ['inline-flags.global-set', 'inline-flags.extended-set'] },
   { name: 'scoped-ignore-case', pattern: String.raw`(?i:foo)bar`, line: 'xxFOObar', engine: 'fallback', constructs: ['inline-flags.scoped-set'] },
   { name: 'scoped-flag-clearing', pattern: String.raw`(?i:foo(?-i:bar))`, line: 'xxFOObar', engine: 'fallback', constructs: ['inline-flags.scoped-set', 'inline-flags.scoped-clear'] },
   { name: 'global-extended-mode', pattern: '(?x) f o o  # ignored comment\n b a r', line: 'xxfoobar', engine: 'fallback', constructs: ['inline-flags.global-set', 'inline-flags.extended-set'] },
