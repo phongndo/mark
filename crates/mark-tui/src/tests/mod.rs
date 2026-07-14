@@ -19,8 +19,8 @@ use crate::render::{
     },
     sidebar::{file_sidebar_lines, file_sidebar_width},
     statusline::{
-        error_log_header_line, error_log_height, error_log_separator, filter_bar_line,
-        filter_bar_visible, statusline_file_count_label, statusline_header_line,
+        draw_error_log, error_log_header_line, error_log_height, error_log_separator,
+        filter_bar_line, filter_bar_visible, statusline_file_count_label, statusline_header_line,
     },
     style::{base_bg, diff_base_bg, header_bg, statusline_bg},
     text::{

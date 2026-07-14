@@ -691,6 +691,33 @@ fn error_log_header_shows_copy_command_on_right() {
 }
 
 #[test]
+fn transparent_background_applies_to_entire_error_log_pane() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.config.theme = DiffTheme::catppuccin_mocha().with_transparent_background(true);
+    app.set_error_log("reload failed:\nfatal: bad revision");
+
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(40, 4))
+        .expect("test terminal should be created");
+    terminal
+        .draw(|frame| {
+            let area = frame.area();
+            draw_error_log(frame, &app, area);
+        })
+        .expect("error log draw should succeed");
+
+    let buffer = terminal.backend().buffer();
+    for y in 0..buffer.area.height {
+        for x in 0..buffer.area.width {
+            assert_eq!(
+                buffer.cell((x, y)).expect("cell should exist").bg,
+                Color::Reset
+            );
+        }
+    }
+}
+
+#[test]
 fn error_log_header_uses_configured_copy_command() {
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);

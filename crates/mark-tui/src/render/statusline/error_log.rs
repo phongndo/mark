@@ -9,7 +9,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::{
     app::DiffApp,
     keymap::GlobalAction,
-    render::{style::base_bg, text::fit},
+    render::{style::diff_base_bg, text::fit},
     theme::DiffTheme,
 };
 
@@ -21,7 +21,7 @@ pub(crate) fn draw_error_log(frame: &mut Frame<'_>, app: &DiffApp, area: Rect) {
         return;
     }
 
-    let bg = base_bg(app.config.theme);
+    let bg = diff_base_bg(app.config.theme);
     frame.render_widget(
         Paragraph::new(error_log_header_line(app, area.width as usize))
             .style(Style::default().bg(bg)),
@@ -51,7 +51,7 @@ pub(crate) fn error_log_header_line(app: &DiffApp, width: usize) -> Line<'static
         return Line::default();
     }
 
-    let bg = base_bg(app.config.theme);
+    let bg = diff_base_bg(app.config.theme);
     let title = "error ";
     let title_width = title.width();
     let rule_style = Style::default()
