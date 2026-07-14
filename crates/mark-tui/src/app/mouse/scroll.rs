@@ -4,6 +4,7 @@ use crossterm::event::MouseEventKind;
 
 use crate::{
     app::{DiffApp, MOUSE_HUNK_FOCUS_SCROLL_TICKS},
+    controls::BranchMenu,
     theme::{
         MOUSE_SCROLL_ACCEL_A, MOUSE_SCROLL_ACCEL_TAU, MOUSE_SCROLL_HISTORY_SIZE,
         MOUSE_SCROLL_MAX_MULTIPLIER, MOUSE_SCROLL_MIN_TICK_INTERVAL,
@@ -15,6 +16,19 @@ use crate::{
 pub(crate) enum MouseScrollDirection {
     Up,
     Down,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MouseScrollContext {
+    Diff,
+    HelpMenu,
+    ColorSchemePicker,
+    BranchMenu(BranchMenu),
+    CommitMenu,
+    ReviewInput,
+    DiffMenu,
+    OptionsMenu,
+    AnnotationMenu,
 }
 
 #[derive(Debug, Default)]
@@ -113,6 +127,28 @@ impl MouseScroll {
 }
 
 impl DiffApp {
+    pub(crate) fn mouse_scroll_context(&self) -> MouseScrollContext {
+        if self.overlays.help_menu_is_open() {
+            MouseScrollContext::HelpMenu
+        } else if self.overlays.color_scheme_picker_is_open() {
+            MouseScrollContext::ColorSchemePicker
+        } else if let Some(menu) = self.refs.branch_menu_open() {
+            MouseScrollContext::BranchMenu(menu)
+        } else if self.refs.commit_menu_is_open() {
+            MouseScrollContext::CommitMenu
+        } else if self.overlays.review_input_is_open() {
+            MouseScrollContext::ReviewInput
+        } else if self.overlays.diff_menu_is_open() {
+            MouseScrollContext::DiffMenu
+        } else if self.overlays.options_menu_is_open() {
+            MouseScrollContext::OptionsMenu
+        } else if self.overlays.annotation_menu_is_open() {
+            MouseScrollContext::AnnotationMenu
+        } else {
+            MouseScrollContext::Diff
+        }
+    }
+
     pub(super) fn handle_open_menu_mouse_scroll(&mut self, kind: MouseEventKind) -> bool {
         self.handle_open_menu_mouse_scroll_ticks(kind, 1)
     }
@@ -125,13 +161,22 @@ impl DiffApp {
         let delta = match kind {
             MouseEventKind::ScrollDown => ticks.min(isize::MAX as usize) as isize,
             MouseEventKind::ScrollUp => -(ticks.min(isize::MAX as usize) as isize),
+            MouseEventKind::ScrollLeft | MouseEventKind::ScrollRight => {
+                if self.mouse_scroll_context() == MouseScrollContext::Diff {
+                    return false;
+                }
+                // A modal owns input while it is open. Consume horizontal wheel
+                // events rather than letting them reach the obscured diff.
+                self.input.reset_mouse_scroll();
+                return true;
+            }
             _ => return false,
         };
 
         if self.overlays.help_menu_is_open() {
             self.scroll_help_menu(delta);
         } else if self.overlays.color_scheme_picker_is_open() {
-            self.move_color_scheme_selection(delta);
+            self.scroll_color_scheme_selection(delta);
         } else if self.refs.branch_menu_is_open() {
             self.move_branch_selection(delta);
         } else if self.refs.commit_menu_is_open() {
@@ -140,9 +185,11 @@ impl DiffApp {
             // Review input has no scrollable content, but the open modal should
             // still consume wheel events instead of scrolling the diff behind it.
         } else if self.overlays.diff_menu_is_open() {
-            self.move_diff_menu_selection(delta);
+            self.scroll_diff_menu_selection(delta);
         } else if self.overlays.options_menu_is_open() {
-            self.move_options_menu_selection(delta);
+            self.scroll_options_menu_selection(delta);
+        } else if self.overlays.annotation_menu_is_open() {
+            self.move_annotation_menu_selection(delta);
         } else {
             return false;
         }

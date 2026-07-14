@@ -99,6 +99,14 @@ impl DiffApp {
     }
 
     pub(crate) fn move_color_scheme_selection(&mut self, delta: isize) {
+        self.move_color_scheme_selection_with(delta, SelectorMovement::Wrapping);
+    }
+
+    pub(crate) fn scroll_color_scheme_selection(&mut self, delta: isize) {
+        self.move_color_scheme_selection_with(delta, SelectorMovement::Saturating);
+    }
+
+    fn move_color_scheme_selection_with(&mut self, delta: isize, movement: SelectorMovement) {
         let len = self.filtered_color_schemes().len();
         if len == 0 {
             return;
@@ -106,7 +114,7 @@ impl DiffApp {
         let rows = self.color_scheme_picker_rows();
         if SelectorController::new(&mut self.overlays.color_scheme_picker, len)
             .with_visible_rows(rows)
-            .move_by(delta, SelectorMovement::Wrapping)
+            .move_by(delta, movement)
         {
             self.preview_highlighted_color_scheme();
             self.runtime.dirty = true;

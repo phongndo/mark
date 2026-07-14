@@ -7,10 +7,11 @@ use crate::theme::MAX_READY_EVENTS_PER_FRAME;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use mark_core::MarkResult;
 use ratatui::layout::Rect;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc::Receiver;
 
 const MAX_SCROLL_EVENTS_DRAIN_PER_FRAME: usize = 2048;
+const MOUSE_SCROLL_CONTEXT_QUIET_PERIOD: Duration = Duration::from_millis(150);
 
 pub(crate) async fn run_loop(
     terminal: &mut CrosstermTerminal,
@@ -19,6 +20,7 @@ pub(crate) async fn run_loop(
     live_diff: &mut Option<LiveDiff>,
 ) -> MarkResult<()> {
     let mut events = TerminalEventReader::start("mark-diff-events")?;
+    let mut scroll_fence = MouseScrollContextFence::default();
 
     loop {
         app.expire_toasts(Instant::now());
@@ -48,7 +50,7 @@ pub(crate) async fn run_loop(
         }
 
         if let Some(event) = events.read_timeout(app.event_poll()).await?
-            && handle_ready_events(app, live_diff, event, &mut events)?
+            && handle_ready_events(app, live_diff, event, &mut events, &mut scroll_fence)?
         {
             break;
         }
@@ -62,6 +64,7 @@ fn handle_ready_events(
     live_diff: &mut Option<LiveDiff>,
     first_event: Event,
     events: &mut TerminalEventReader,
+    scroll_fence: &mut MouseScrollContextFence,
 ) -> MarkResult<bool> {
     let mut pending = Some(first_event);
     let mut handled = 0usize;
@@ -87,13 +90,19 @@ fn handle_ready_events(
                 // front of it is stale. Prefer the user's latest intent over
                 // faithfully replaying old wheel ticks after they have already
                 // moved on to keyboard/mouse navigation.
-                if handle_event(app, next_event, live_diff, events)? {
+                scroll_fence.observe_scroll(Instant::now());
+                if handle_non_scroll_event(app, next_event, live_diff, events, scroll_fence)? {
                     return Ok(true);
                 }
                 handled += 1;
                 if app.runtime.dirty {
                     break 'events;
                 }
+                continue;
+            }
+
+            if scroll_fence.should_suppress_scroll(Instant::now()) {
+                handled += 1;
                 continue;
             }
 
@@ -110,7 +119,7 @@ fn handle_ready_events(
             continue;
         }
 
-        if handle_event(app, event, live_diff, events)? {
+        if handle_non_scroll_event(app, event, live_diff, events, scroll_fence)? {
             return Ok(true);
         }
         handled += 1;
@@ -120,6 +129,55 @@ fn handle_ready_events(
     }
 
     Ok(false)
+}
+
+/// Prevents one physical wheel/trackpad gesture from being routed to two
+/// different UI layers when a modal opens or closes mid-gesture.
+#[derive(Debug, Default)]
+struct MouseScrollContextFence {
+    last_scroll: Option<Instant>,
+    context_fenced: bool,
+}
+
+impl MouseScrollContextFence {
+    fn observe_scroll(&mut self, now: Instant) {
+        self.last_scroll = Some(now);
+    }
+
+    fn context_changed(&mut self, now: Instant) {
+        self.context_fenced = self.last_scroll.is_some_and(|last_scroll| {
+            now.saturating_duration_since(last_scroll) <= MOUSE_SCROLL_CONTEXT_QUIET_PERIOD
+        });
+    }
+
+    fn should_suppress_scroll(&mut self, now: Instant) -> bool {
+        let continues_previous_gesture = self.last_scroll.is_some_and(|last_scroll| {
+            now.saturating_duration_since(last_scroll) <= MOUSE_SCROLL_CONTEXT_QUIET_PERIOD
+        });
+        self.last_scroll = Some(now);
+
+        if self.context_fenced && continues_previous_gesture {
+            return true;
+        }
+
+        self.context_fenced = false;
+        false
+    }
+}
+
+fn handle_non_scroll_event(
+    app: &mut DiffApp,
+    event: Event,
+    live_diff: &mut Option<LiveDiff>,
+    events: &mut TerminalEventReader,
+    scroll_fence: &mut MouseScrollContextFence,
+) -> MarkResult<bool> {
+    let previous_context = app.mouse_scroll_context();
+    let should_quit = handle_event(app, event, live_diff, events)?;
+    if app.mouse_scroll_context() != previous_context {
+        scroll_fence.context_changed(Instant::now());
+    }
+    Ok(should_quit)
 }
 
 struct DrainedMouseScrollRun {
@@ -398,6 +456,39 @@ mod tests {
             row,
             modifiers: KeyModifiers::NONE,
         })
+    }
+
+    #[test]
+    fn scroll_context_fence_drops_the_tail_of_an_active_gesture() {
+        let start = Instant::now();
+        let mut fence = MouseScrollContextFence::default();
+
+        fence.observe_scroll(start);
+        fence.context_changed(start + Duration::from_millis(1));
+        assert!(fence.should_suppress_scroll(start + Duration::from_millis(2)));
+        assert!(fence.should_suppress_scroll(start + Duration::from_millis(100)));
+
+        assert!(!fence.should_suppress_scroll(
+            start
+                + Duration::from_millis(100)
+                + MOUSE_SCROLL_CONTEXT_QUIET_PERIOD
+                + Duration::from_millis(1)
+        ));
+    }
+
+    #[test]
+    fn scroll_context_fence_does_not_block_a_new_gesture() {
+        let start = Instant::now();
+        let mut fence = MouseScrollContextFence::default();
+
+        fence.context_changed(start);
+        assert!(!fence.should_suppress_scroll(start));
+
+        fence.observe_scroll(start);
+        fence.context_changed(start + MOUSE_SCROLL_CONTEXT_QUIET_PERIOD + Duration::from_millis(1));
+        assert!(!fence.should_suppress_scroll(
+            start + MOUSE_SCROLL_CONTEXT_QUIET_PERIOD + Duration::from_millis(2)
+        ));
     }
 
     #[test]

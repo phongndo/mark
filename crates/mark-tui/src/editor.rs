@@ -7,11 +7,13 @@ use std::{
 
 use crossterm::{
     cursor::{SetCursorStyle, Show},
-    event::{DisableMouseCapture, EnableMouseCapture},
+    event::EnableMouseCapture,
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use mark_core::MarkResult;
+
+use crate::terminal_input::{disable_mouse_capture_and_discard_reports, discard_pending_input};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct EditorTarget {
@@ -107,16 +109,16 @@ struct SuspendedTerminal {
 impl SuspendedTerminal {
     fn suspend() -> MarkResult<Self> {
         let terminal = Self { active: true };
-        disable_raw_mode()?;
         let mut stdout = io::stdout();
+        disable_mouse_capture_and_discard_reports(&mut stdout)?;
         execute!(
             stdout,
-            DisableMouseCapture,
             LeaveAlternateScreen,
             SetCursorStyle::DefaultUserShape,
             Show
         )?;
         stdout.flush()?;
+        disable_raw_mode()?;
         Ok(terminal)
     }
 
@@ -125,8 +127,9 @@ impl SuspendedTerminal {
             return Ok(());
         }
 
-        let _ = flush_terminal_input_queue();
+        let _ = discard_pending_input();
         let mut stdout = io::stdout();
+        enable_raw_mode()?;
         execute!(
             stdout,
             EnterAlternateScreen,
@@ -134,7 +137,6 @@ impl SuspendedTerminal {
             SetCursorStyle::BlinkingBlock
         )?;
         stdout.flush()?;
-        enable_raw_mode()?;
         drain_pending_editor_events()?;
         self.active = false;
         Ok(())
@@ -145,34 +147,6 @@ fn drain_pending_editor_events() -> io::Result<()> {
     // The diff view owns terminal input while it is running. Avoid draining
     // input here; transient editor quit keys are filtered by DiffApp after
     // resume.
-    Ok(())
-}
-
-#[cfg(unix)]
-fn flush_terminal_input_queue() -> io::Result<()> {
-    use std::fs::OpenOptions;
-
-    use rustix::{
-        io::Errno,
-        termios::{QueueSelector, isatty, tcflush},
-    };
-
-    let stdin = io::stdin();
-    let flush_result = if isatty(&stdin) {
-        tcflush(stdin, QueueSelector::IFlush)
-    } else {
-        let tty = OpenOptions::new().read(true).write(true).open("/dev/tty")?;
-        tcflush(tty, QueueSelector::IFlush)
-    };
-
-    match flush_result {
-        Ok(()) | Err(Errno::NOTTY) => Ok(()),
-        Err(error) => Err(error.into()),
-    }
-}
-
-#[cfg(not(unix))]
-fn flush_terminal_input_queue() -> io::Result<()> {
     Ok(())
 }
 

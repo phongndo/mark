@@ -13,6 +13,7 @@ mod search;
 mod selector;
 mod static_pager;
 mod syntax;
+mod terminal_input;
 #[cfg(test)]
 mod tests;
 mod text_input;

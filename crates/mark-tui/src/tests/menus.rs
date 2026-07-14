@@ -197,6 +197,87 @@ fn o_key_opens_options_menu() {
 }
 
 #[test]
+fn mouse_wheel_saturates_selector_menus_instead_of_wrapping() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    let scroll_down = MouseEvent {
+        kind: MouseEventKind::ScrollDown,
+        column: 0,
+        row: 0,
+        modifiers: KeyModifiers::NONE,
+    };
+    let scroll_up = MouseEvent {
+        kind: MouseEventKind::ScrollUp,
+        ..scroll_down
+    };
+
+    app.open_diff_menu();
+    let diff_choice_count = app.filtered_diff_choices().len();
+    app.handle_mouse_scroll_burst_with_effects(scroll_down, usize::MAX)
+        .expect("diff menu scroll should be handled");
+    assert_eq!(app.overlays.diff_menu.selected, diff_choice_count - 1);
+    app.handle_mouse_scroll_burst_with_effects(scroll_down, usize::MAX)
+        .expect("diff menu scroll at bottom should be handled");
+    assert_eq!(app.overlays.diff_menu.selected, diff_choice_count - 1);
+    app.handle_mouse_scroll_burst_with_effects(scroll_up, usize::MAX)
+        .expect("diff menu upward scroll should be handled");
+    assert_eq!(app.overlays.diff_menu.selected, 0);
+
+    app.close_diff_menu();
+    app.open_options_menu();
+    let option_count = app.filtered_options_menu_items().len();
+    app.handle_mouse_scroll_burst_with_effects(scroll_down, usize::MAX)
+        .expect("options menu scroll should be handled");
+    assert_eq!(app.overlays.options_menu.selected, option_count - 1);
+    app.handle_mouse_scroll_burst_with_effects(scroll_down, usize::MAX)
+        .expect("options menu scroll at bottom should be handled");
+    assert_eq!(app.overlays.options_menu.selected, option_count - 1);
+
+    app.open_color_scheme_picker();
+    let color_scheme_count = app.filtered_color_schemes().len();
+    app.handle_mouse_scroll_burst_with_effects(scroll_down, usize::MAX)
+        .expect("color scheme scroll should be handled");
+    assert_eq!(
+        app.overlays.color_scheme_picker.selected,
+        color_scheme_count - 1
+    );
+    app.handle_mouse_scroll_burst_with_effects(scroll_down, usize::MAX)
+        .expect("color scheme scroll at bottom should be handled");
+    assert_eq!(
+        app.overlays.color_scheme_picker.selected,
+        color_scheme_count - 1
+    );
+}
+
+#[test]
+fn open_menu_consumes_horizontal_wheel_without_scrolling_diff() {
+    let changeset = changeset_with_line_text(&"x".repeat(200));
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_width(40);
+    app.set_horizontal_scroll(20);
+    app.open_options_menu();
+
+    mouse_scroll(&mut app, MouseEventKind::ScrollRight);
+    assert_eq!(app.viewport.horizontal_scroll, 20);
+
+    mouse_scroll(&mut app, MouseEventKind::ScrollLeft);
+    assert_eq!(app.viewport.horizontal_scroll, 20);
+}
+
+#[test]
+fn annotation_menu_consumes_mouse_wheel_without_scrolling_diff() {
+    let changeset = changeset_with_context_lines(100);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(5);
+    app.set_scroll(10);
+    app.overlays.open_annotation_menu();
+
+    mouse_scroll(&mut app, MouseEventKind::ScrollDown);
+
+    assert_eq!(app.viewport.scroll, 10);
+}
+
+#[test]
 fn configured_edit_hunk_key_does_not_bypass_open_menus() {
     let mut changeset = changeset_with_hunk_at(PathBuf::from("/repo"), 20);
     set_test_file_deleted(&mut changeset.files[0]);
@@ -2450,6 +2531,22 @@ fn branch_header_exposes_head_and_base_selectors() {
         app.branch_selector_text(BranchMenu::Head).as_deref(),
         Some("● feature/ui ▾")
     );
+}
+
+#[test]
+fn scroll_context_distinguishes_head_and_base_branch_menus() {
+    let mut app = DiffApp::new(
+        DiffOptions::default(),
+        changeset_with_context_lines(1),
+        DiffLayoutMode::Unified,
+    );
+    app.refs.comparison_branches = branch_names(&["main", "feature"]);
+
+    app.toggle_branch_menu(BranchMenu::Head);
+    let head_context = app.mouse_scroll_context();
+    app.toggle_branch_menu(BranchMenu::Base);
+
+    assert_ne!(head_context, app.mouse_scroll_context());
 }
 
 #[test]

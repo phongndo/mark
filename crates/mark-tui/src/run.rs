@@ -5,7 +5,7 @@ use std::{
 
 use crossterm::{
     cursor::{SetCursorStyle, Show},
-    event::{DisableMouseCapture, EnableMouseCapture},
+    event::EnableMouseCapture,
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -23,6 +23,7 @@ use crate::{
     render::diff::render_row,
     runtime,
     syntax::SyntaxRuntime,
+    terminal_input::disable_mouse_capture_and_discard_reports,
     theme::{DecorationPreference, DiffBenchmarkOptions, DiffBenchmarkReport},
 };
 
@@ -453,53 +454,23 @@ impl TerminalCleanup {
         self.active = false;
 
         let mut stdout = io::stdout();
+        // Keep raw mode active while mouse reporting is disabled and its
+        // already-emitted escape sequences are discarded. Otherwise those
+        // bytes can become text in the shell's next command line.
+        let mouse_result = disable_mouse_capture_and_discard_reports(&mut stdout);
         let screen_result = execute!(
             stdout,
-            DisableMouseCapture,
             LeaveAlternateScreen,
             SetCursorStyle::DefaultUserShape,
             Show
         );
-        let flush_input_result = flush_terminal_input_queue();
         let raw_mode_result = disable_raw_mode();
 
+        mouse_result?;
         screen_result?;
-        flush_input_result?;
         raw_mode_result?;
         Ok(())
     }
-}
-
-#[cfg(unix)]
-fn flush_terminal_input_queue() -> io::Result<()> {
-    use std::fs::OpenOptions;
-
-    use rustix::{
-        io::Errno,
-        termios::{QueueSelector, isatty, tcflush},
-    };
-
-    // Crossterm enables raw mode on stdin only when fd 0 is a tty; with
-    // redirected stdin it reads events from the controlling terminal instead.
-    // Flush the same terminal input queue so queued mouse bytes do not leak to
-    // the shell after cleanup.
-    let stdin = io::stdin();
-    let flush_result = if isatty(&stdin) {
-        tcflush(stdin, QueueSelector::IFlush)
-    } else {
-        let tty = OpenOptions::new().read(true).write(true).open("/dev/tty")?;
-        tcflush(tty, QueueSelector::IFlush)
-    };
-
-    match flush_result {
-        Ok(()) | Err(Errno::NOTTY) => Ok(()),
-        Err(error) => Err(error.into()),
-    }
-}
-
-#[cfg(not(unix))]
-fn flush_terminal_input_queue() -> io::Result<()> {
-    Ok(())
 }
 
 impl Drop for TerminalCleanup {

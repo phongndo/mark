@@ -170,14 +170,20 @@ impl DiffApp {
     }
 
     pub(crate) fn move_diff_menu_selection(&mut self, delta: isize) {
+        self.move_diff_menu_selection_with(delta, SelectorMovement::Wrapping);
+    }
+
+    pub(crate) fn scroll_diff_menu_selection(&mut self, delta: isize) {
+        self.move_diff_menu_selection_with(delta, SelectorMovement::Saturating);
+    }
+
+    fn move_diff_menu_selection_with(&mut self, delta: isize, movement: SelectorMovement) {
         let len = self.filtered_diff_choices().len();
         if len == 0 {
             return;
         }
 
-        if SelectorController::new(&mut self.overlays.diff_menu, len)
-            .move_by(delta, SelectorMovement::Wrapping)
-        {
+        if SelectorController::new(&mut self.overlays.diff_menu, len).move_by(delta, movement) {
             self.runtime.dirty = true;
         }
     }
