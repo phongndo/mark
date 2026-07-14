@@ -38,6 +38,13 @@ impl Keymap {
         let copy_marks_configured = stored_global.copy_marks.is_some();
         let line_wrapping_configured = stored_global.line_wrapping.is_some();
         let horizontal_scroll_lock_configured = stored_global.horizontal_scroll_lock.is_some();
+        let diff_menu_configured = stored_global.diff_menu.is_some();
+        let review_target_configured = stored_global.review_target.is_some();
+        let head_branch_configured = stored_global.head_branch.is_some();
+        let base_branch_configured = stored_global.base_branch.is_some();
+        let commit_picker_configured = stored_global.commit_picker.is_some();
+        let previous_file_configured = stored_global.previous_file.is_some();
+        let next_file_configured = stored_global.next_file.is_some();
 
         if let Some(leader) = stored_global.leader.take() {
             parse_key_press(&leader)?;
@@ -56,6 +63,22 @@ impl Keymap {
         }
         if !horizontal_scroll_lock_configured {
             keymap.clear_default_on_conflict(GlobalAction::HorizontalScrollLock);
+        }
+        // These defaults changed together. Keep explicit bindings from older
+        // configs authoritative instead of rejecting the entire keymap when
+        // they use one of the new keys or prefixes.
+        for (action, configured) in [
+            (GlobalAction::DiffMenu, diff_menu_configured),
+            (GlobalAction::ReviewTarget, review_target_configured),
+            (GlobalAction::HeadBranch, head_branch_configured),
+            (GlobalAction::BaseBranch, base_branch_configured),
+            (GlobalAction::CommitPicker, commit_picker_configured),
+            (GlobalAction::PreviousFile, previous_file_configured),
+            (GlobalAction::NextFile, next_file_configured),
+        ] {
+            if !configured {
+                keymap.clear_default_on_conflict(action);
+            }
         }
 
         for spec in MENU_ACTION_SPECS {
@@ -226,6 +249,7 @@ struct StoredGlobalKeymap {
     file_filter: Option<KeySpec>,
     grep: Option<KeySpec>,
     diff_menu: Option<KeySpec>,
+    review_target: Option<KeySpec>,
     head_branch: Option<KeySpec>,
     base_branch: Option<KeySpec>,
     commit_picker: Option<KeySpec>,
@@ -266,6 +290,7 @@ impl StoredGlobalKeymap {
             GlobalAction::FileFilter => self.file_filter.take(),
             GlobalAction::Grep => self.grep.take(),
             GlobalAction::DiffMenu => self.diff_menu.take(),
+            GlobalAction::ReviewTarget => self.review_target.take(),
             GlobalAction::HeadBranch => self.head_branch.take(),
             GlobalAction::BaseBranch => self.base_branch.take(),
             GlobalAction::CommitPicker => self.commit_picker.take(),

@@ -79,6 +79,10 @@ pub(crate) const HELP_MENU_ROWS: &[HelpMenuRow] = &[
     HelpMenuRow::Binding(HelpMenuKey::Global(GlobalAction::Reload), "reload diff"),
     HelpMenuRow::Binding(HelpMenuKey::Global(GlobalAction::DiffMenu), "diff selector"),
     HelpMenuRow::Binding(
+        HelpMenuKey::Global(GlobalAction::ReviewTarget),
+        "enter review ID / URL",
+    ),
+    HelpMenuRow::Binding(
         HelpMenuKey::Global(GlobalAction::HeadBranch),
         "select head branch",
     ),

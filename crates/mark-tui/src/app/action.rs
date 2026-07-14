@@ -12,6 +12,7 @@ pub(crate) enum AppAction {
     OpenFileFilter,
     OpenGrepFilter,
     OpenDiffMenu,
+    OpenReviewTarget,
     ToggleHeadBranchMenu,
     ToggleBaseBranchMenu,
     ToggleCommitMenu,
@@ -47,6 +48,7 @@ impl AppAction {
             GlobalAction::FileFilter => Self::OpenFileFilter,
             GlobalAction::Grep => Self::OpenGrepFilter,
             GlobalAction::DiffMenu => Self::OpenDiffMenu,
+            GlobalAction::ReviewTarget => Self::OpenReviewTarget,
             GlobalAction::HeadBranch => Self::ToggleHeadBranchMenu,
             GlobalAction::BaseBranch => Self::ToggleBaseBranchMenu,
             GlobalAction::CommitPicker => Self::ToggleCommitMenu,
@@ -105,6 +107,10 @@ impl DiffApp {
             }
             AppAction::OpenDiffMenu => {
                 self.open_diff_menu();
+                Ok(ActionOutcome::consumed())
+            }
+            AppAction::OpenReviewTarget => {
+                self.open_review_input();
                 Ok(ActionOutcome::consumed())
             }
             AppAction::ToggleHeadBranchMenu => {

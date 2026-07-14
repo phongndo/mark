@@ -230,24 +230,24 @@ fn selecting_file_keeps_first_hunk_visible_when_header_top_would_hide_it() {
 }
 
 #[test]
-fn paren_file_navigation_focuses_first_hunk_and_updates_selected_file() {
+fn tab_file_navigation_focuses_first_hunk_and_updates_selected_file() {
     let changeset = changeset_with_files(&["a.rs", "b.rs", "c.rs"]);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
     app.set_viewport_rows(7);
 
-    app.handle_key(KeyEvent::new(KeyCode::Char(')'), KeyModifiers::NONE))
-        .expect(") should be handled");
+    app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+        .expect("tab should be handled");
 
     assert_eq!(app.sidebar.selected_file, FILE_1);
     assert_eq!(app.focused_hunk_for_viewport(7), Some((FILE_1, HUNK_0)));
 
-    app.handle_key(KeyEvent::new(KeyCode::Char(')'), KeyModifiers::NONE))
-        .expect(") should be handled");
+    app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+        .expect("tab should be handled");
     assert_eq!(app.sidebar.selected_file, FILE_2);
     assert_eq!(app.focused_hunk_for_viewport(7), Some((FILE_2, HUNK_0)));
 
-    app.handle_key(KeyEvent::new(KeyCode::Char('('), KeyModifiers::NONE))
-        .expect("( should be handled");
+    app.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT))
+        .expect("shift-tab should be handled");
     assert_eq!(app.sidebar.selected_file, FILE_1);
     assert_eq!(app.focused_hunk_for_viewport(7), Some((FILE_1, HUNK_0)));
 }
@@ -884,24 +884,20 @@ fn cached_diff_choice_is_not_reused_without_live_invalidator() {
     app.cache_loaded_diff(all_changes.clone(), changeset_with_files(&["stale.rs"]));
     app.jobs.live_updates = LiveUpdatesState::DisabledByCli;
 
-    app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
-        .expect("tab should cycle to show");
+    app.cycle_diff_choice(1);
     app.jobs.pending_diff_load = None;
     app.document.options = DiffOptions {
         source: DiffSource::Show("HEAD".into()),
         ..DiffOptions::default()
     };
 
-    let should_quit = app
-        .handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
-        .expect("tab should cycle diff type");
+    app.cycle_diff_choice(1);
 
-    assert!(!should_quit);
     let load = app
         .jobs
         .pending_diff_load
         .as_ref()
-        .expect("tab should queue a fresh diff load");
+        .expect("cycling should queue a fresh diff load");
     assert_eq!(load.options, all_changes);
     assert_eq!(app.document.options.source, DiffSource::Show("HEAD".into()));
     assert_eq!(visible_paths(&app), vec!["all.rs"]);
@@ -922,24 +918,20 @@ fn cached_diff_choice_is_not_reused_during_pending_live_reload() {
     app.cache_loaded_diff(all_changes.clone(), changeset_with_files(&["stale.rs"]));
     app.mark_live_reload_pending();
 
-    app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
-        .expect("tab should cycle to show");
+    app.cycle_diff_choice(1);
     app.jobs.pending_diff_load = None;
     app.document.options = DiffOptions {
         source: DiffSource::Show("HEAD".into()),
         ..DiffOptions::default()
     };
 
-    let should_quit = app
-        .handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
-        .expect("tab should cycle diff type");
+    app.cycle_diff_choice(1);
 
-    assert!(!should_quit);
     let load = app
         .jobs
         .pending_diff_load
         .as_ref()
-        .expect("tab should queue a fresh diff load");
+        .expect("cycling should queue a fresh diff load");
     assert_eq!(load.options, all_changes);
     assert_eq!(app.document.options.source, DiffSource::Show("HEAD".into()));
     assert_eq!(visible_paths(&app), vec!["all.rs"]);
@@ -996,12 +988,10 @@ fn cycling_back_to_current_diff_clears_pending_load() {
         DiffLayoutMode::Unified,
     );
 
-    app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
-        .expect("tab should queue next diff type");
+    app.cycle_diff_choice(1);
     assert!(app.jobs.pending_diff_load.is_some());
 
-    app.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT))
-        .expect("shift-tab should return to current diff type");
+    app.cycle_diff_choice(-1);
 
     assert_eq!(app.document.options, DiffOptions::default());
     assert!(app.jobs.pending_diff_load.is_none());

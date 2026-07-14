@@ -156,16 +156,32 @@ fn configured_leader_help_key_filters_help_menu_when_open() {
 }
 
 #[test]
-fn m_opens_diff_source_menu() {
+fn m_m_opens_diff_source_menu() {
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
 
     app.handle_key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE))
-        .expect("m should be handled");
+        .expect("first m should start the source prefix");
+    app.handle_key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE))
+        .expect("second m should open the source menu");
 
     assert!(app.input.key_prefix_pending.is_none());
     assert!(app.overlays.diff_menu_is_open());
     assert_eq!(app.highlighted_diff_choice(), Some(DiffChoice::Show));
+}
+
+#[test]
+fn m_r_opens_review_target_input() {
+    let changeset = changeset_with_context_lines(1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE))
+        .expect("m should start the source prefix");
+    app.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE))
+        .expect("m r should open review target input");
+
+    assert!(app.input.key_prefix_pending.is_none());
+    assert!(app.overlays.review_input_is_open());
 }
 
 #[test]
@@ -329,7 +345,6 @@ fn help_menu_lines_list_keybindings() {
     assert!(text.iter().any(|line| line.contains("j/k")));
     assert!(text.iter().any(|line| line.contains("n/p")));
     assert!(text.iter().any(|line| line.contains("[/]")));
-    assert!(text.iter().any(|line| line.contains("(/)")));
     assert!(text.iter().any(|line| line.contains(",/.")));
     assert!(text.iter().any(|line| line.contains(" c")));
     assert!(
@@ -694,7 +709,7 @@ fn diff_menu_lists_all_changes_first() {
 }
 
 #[test]
-fn tab_does_not_switch_range_diff_to_branch_or_worktree() {
+fn cycling_does_not_switch_range_diff_to_branch_or_worktree() {
     let options = DiffOptions {
         source: DiffSource::Range {
             left: "main".into(),
@@ -711,11 +726,8 @@ fn tab_does_not_switch_range_diff_to_branch_or_worktree() {
     app.refs.branch_head = Some("feature".to_owned());
     app.refs.current_head = Some("main".to_owned());
 
-    let should_quit = app
-        .handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
-        .expect("tab should be handled");
+    app.cycle_diff_choice(1);
 
-    assert!(!should_quit);
     assert!(app.jobs.pending_diff_load.is_none());
     assert_eq!(app.document.options, options);
 }
@@ -2300,7 +2312,7 @@ fn colorscheme_picker_previews_first_hovered_theme() {
 }
 
 #[test]
-fn tab_from_review_diff_cycles_to_all_changes() {
+fn cycling_from_review_diff_selects_all_changes() {
     let options = DiffOptions {
         source: DiffSource::Patch(PatchSource::Review {
             label: "review owner/repo#123".into(),
@@ -2314,21 +2326,18 @@ fn tab_from_review_diff_cycles_to_all_changes() {
         DiffLayoutMode::Unified,
     );
 
-    let should_quit = app
-        .handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
-        .expect("tab should cycle from review to all changes");
+    app.cycle_diff_choice(1);
 
-    assert!(!should_quit);
     let load = app
         .jobs
         .pending_diff_load
         .as_ref()
-        .expect("tab should queue all-changes diff load");
+        .expect("cycling should queue all-changes diff load");
     assert_eq!(load.options.source, DiffSource::Worktree);
 }
 
 #[test]
-fn tab_from_pending_review_load_cancels_to_current_all_changes() {
+fn cycling_from_pending_review_load_cancels_to_current_all_changes() {
     let mut app = DiffApp::new(
         DiffOptions::default(),
         changeset_with_context_lines(1),
@@ -2336,11 +2345,8 @@ fn tab_from_pending_review_load_cancels_to_current_all_changes() {
     );
     app.jobs.pending_review_load = Some(pending_review_load());
 
-    let should_quit = app
-        .handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
-        .expect("tab should cycle pending review to all changes");
+    app.cycle_diff_choice(1);
 
-    assert!(!should_quit);
     assert!(app.jobs.pending_review_load.is_none());
     assert!(app.jobs.pending_diff_load.is_none());
     assert_eq!(app.document.options, DiffOptions::default());

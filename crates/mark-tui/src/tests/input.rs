@@ -1151,12 +1151,18 @@ fn flat_action_keys_are_unmapped_under_leader() {
 }
 
 #[test]
-fn default_m_key_opens_diff_menu() {
+fn default_m_m_keys_open_diff_menu() {
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
 
     app.handle_key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE))
-        .expect("m should open diff menu");
+        .expect("first m should start the source prefix");
+
+    assert!(app.input.key_prefix_pending.is_some());
+    assert!(!app.overlays.diff_menu_is_open());
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE))
+        .expect("second m should open diff menu");
 
     assert!(app.input.key_prefix_pending.is_none());
     assert!(app.overlays.diff_menu_is_open());
@@ -1745,43 +1751,30 @@ fn number_keys_do_not_switch_diff_choice() {
 }
 
 #[test]
-fn tab_keys_cycle_diff_choice() {
+fn tab_keys_move_between_files() {
     let mut app = DiffApp::new(
         DiffOptions::default(),
-        changeset_with_context_lines(1),
+        changeset_with_files(&["a.rs", "b.rs", "c.rs"]),
         DiffLayoutMode::Unified,
     );
 
     let should_quit = app
         .handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
-        .expect("tab should cycle diff type");
+        .expect("tab should move to the next file");
 
     assert!(!should_quit);
-    let load = app
-        .jobs
-        .pending_diff_load
-        .as_ref()
-        .expect("tab should queue diff load");
-    assert_eq!(load.options.source, DiffSource::Show("HEAD".into()));
+    assert_eq!(app.sidebar.selected_file, FILE_1);
+    assert!(app.jobs.pending_diff_load.is_none());
 
-    app.jobs.pending_diff_load = None;
-    app.document.options = DiffOptions {
-        source: DiffSource::Show("HEAD".into()),
-        ..DiffOptions::default()
-    };
     app.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT))
-        .expect("shift-tab should cycle diff type backwards");
+        .expect("shift-tab should move to the previous file");
 
-    let load = app
-        .jobs
-        .pending_diff_load
-        .as_ref()
-        .expect("shift-tab should queue diff load");
-    assert_eq!(load.options.source, DiffSource::Worktree);
+    assert_eq!(app.sidebar.selected_file, FILE_0);
+    assert!(app.jobs.pending_diff_load.is_none());
 }
 
 #[test]
-fn cached_tab_key_switches_diff_choice_without_loading() {
+fn cached_diff_choice_switches_without_loading() {
     let mut app = DiffApp::new(
         DiffOptions::default(),
         changeset_with_files(&["all.rs"]),
@@ -1803,7 +1796,7 @@ fn cached_tab_key_switches_diff_choice_without_loading() {
 }
 
 #[test]
-fn repeated_tab_uses_pending_diff_choice_for_next_target() {
+fn repeated_diff_choice_cycle_uses_pending_choice_for_next_target() {
     let mut app = DiffApp::new(
         DiffOptions::default(),
         changeset_with_context_lines(1),
@@ -1812,16 +1805,14 @@ fn repeated_tab_uses_pending_diff_choice_for_next_target() {
     app.refs.branch_base = Some("main".to_owned());
     app.refs.current_head = Some("feature".to_owned());
 
-    app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
-        .expect("tab should queue branch");
-    app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
-        .expect("tab should advance from pending branch to show");
+    app.cycle_diff_choice(1);
+    app.cycle_diff_choice(1);
 
     let load = app
         .jobs
         .pending_diff_load
         .as_ref()
-        .expect("second tab should queue diff load");
+        .expect("second cycle should queue diff load");
     assert_eq!(load.options.source, DiffSource::Show("HEAD".into()));
 }
 

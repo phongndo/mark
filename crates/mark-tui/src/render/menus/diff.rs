@@ -142,7 +142,7 @@ pub(crate) fn draw_review_input(frame: &mut Frame<'_>, app: &DiffApp, area: Rect
     let bg = base_bg(app.config.theme);
     let input = text_with_cursor(&app.overlays.review_input, app.overlays.review_input_cursor);
     let prompt = fit_padded(&format!("> {input}"), inner.width as usize);
-    let hint = fit_padded("Review ID for this repo", inner.width as usize);
+    let hint = fit_padded("Review ID or URL", inner.width as usize);
     let prompt_style = Style::default()
         .fg(selector_prompt_color(app.config.theme))
         .bg(bg);
@@ -179,7 +179,7 @@ pub(crate) fn review_input_area(app: &DiffApp, area: Rect) -> Option<Rect> {
         .review_input
         .width()
         .saturating_add(6)
-        .max("Review ID for this repo".width());
+        .max("Review ID or URL".width());
     let width = floating_menu_max_width(area, selector_menu_outer_width(content_width.max(36)));
     let height = floating_menu_max_height(area, 4);
     if width == 0 || height == 0 {

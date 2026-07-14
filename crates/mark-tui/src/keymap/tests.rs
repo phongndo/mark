@@ -181,6 +181,53 @@ fn new_view_defaults_allow_overlapping_mark_draft_bindings() {
 }
 
 #[test]
+fn new_source_and_file_defaults_do_not_conflict_with_existing_bindings() {
+    let keymap = Keymap::parse(
+        r#"
+            [keymap.global]
+            diff_menu = "m"
+            next_diff_type = "tab"
+            previous_diff_type = "shift-tab"
+            "#,
+    )
+    .expect("existing source and tab bindings should take precedence over new defaults");
+
+    assert_eq!(keymap.global_action_label(GlobalAction::DiffMenu), "m");
+    assert_eq!(
+        keymap.global_action_label(GlobalAction::ReviewTarget),
+        "unbound"
+    );
+    assert_eq!(
+        keymap.global_action_label(GlobalAction::HeadBranch),
+        "unbound"
+    );
+    assert_eq!(
+        keymap.global_action_label(GlobalAction::BaseBranch),
+        "unbound"
+    );
+    assert_eq!(
+        keymap.global_action_label(GlobalAction::CommitPicker),
+        "unbound"
+    );
+    assert_eq!(
+        keymap.global_action_label(GlobalAction::NextFile),
+        "unbound"
+    );
+    assert_eq!(
+        keymap.global_action_label(GlobalAction::PreviousFile),
+        "unbound"
+    );
+    assert_eq!(
+        keymap.global_action_label(GlobalAction::NextDiffType),
+        "Tab"
+    );
+    assert_eq!(
+        keymap.global_action_label(GlobalAction::PreviousDiffType),
+        "Shift-Tab"
+    );
+}
+
+#[test]
 fn default_copy_error_log_matches_hunk_diff_binding() {
     let keymap = Keymap::default();
 
@@ -231,12 +278,34 @@ fn default_mark_bindings_are_configurable_actions() {
 #[test]
 fn default_review_actions_use_mnemonic_keys() {
     let keymap = Keymap::default();
+    let m = KeyPress::from(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE));
 
-    assert!(!keymap.is_prefix(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE)));
+    assert!(keymap.is_prefix(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE)));
     assert!(!keymap.is_prefix(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE)));
-    assert!(keymap.matches_single(
+    assert!(keymap.matches_prefix(
         GlobalAction::DiffMenu,
+        m,
         KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE)
+    ));
+    assert!(keymap.matches_prefix(
+        GlobalAction::ReviewTarget,
+        m,
+        KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE)
+    ));
+    assert!(keymap.matches_prefix(
+        GlobalAction::CommitPicker,
+        m,
+        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE)
+    ));
+    assert!(keymap.matches_prefix(
+        GlobalAction::HeadBranch,
+        m,
+        KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE)
+    ));
+    assert!(keymap.matches_prefix(
+        GlobalAction::BaseBranch,
+        m,
+        KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE)
     ));
     assert!(keymap.matches_single(
         GlobalAction::OptionsMenu,
@@ -284,9 +353,17 @@ fn default_review_actions_use_mnemonic_keys() {
     ));
     assert!(keymap.matches_single(
         GlobalAction::PreviousFile,
-        KeyEvent::new(KeyCode::Char('('), KeyModifiers::NONE)
+        KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)
     ));
     assert!(keymap.matches_single(
+        GlobalAction::NextFile,
+        KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)
+    ));
+    assert!(!keymap.matches_single(
+        GlobalAction::PreviousFile,
+        KeyEvent::new(KeyCode::Char('('), KeyModifiers::NONE)
+    ));
+    assert!(!keymap.matches_single(
         GlobalAction::NextFile,
         KeyEvent::new(KeyCode::Char(')'), KeyModifiers::NONE)
     ));
@@ -311,15 +388,21 @@ fn default_review_actions_use_mnemonic_keys() {
         KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE)
     ));
     assert_eq!(
-        keymap.global_action_label(GlobalAction::HeadBranch),
-        "unbound"
+        keymap.global_action_label(GlobalAction::ReviewTarget),
+        "m r"
     );
-    assert_eq!(
-        keymap.global_action_label(GlobalAction::BaseBranch),
-        "unbound"
-    );
+    assert_eq!(keymap.global_action_label(GlobalAction::HeadBranch), "m h");
+    assert_eq!(keymap.global_action_label(GlobalAction::BaseBranch), "m b");
     assert_eq!(
         keymap.global_action_label(GlobalAction::CommitPicker),
+        "m c"
+    );
+    assert_eq!(
+        keymap.global_action_label(GlobalAction::NextDiffType),
+        "unbound"
+    );
+    assert_eq!(
+        keymap.global_action_label(GlobalAction::PreviousDiffType),
         "unbound"
     );
     assert!(!keymap.is_prefix(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::NONE)));

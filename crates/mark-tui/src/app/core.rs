@@ -37,6 +37,7 @@ pub(crate) const NORMAL_GLOBAL_ACTIONS: &[GlobalAction] = &[
     GlobalAction::FileFilter,
     GlobalAction::Grep,
     GlobalAction::DiffMenu,
+    GlobalAction::ReviewTarget,
     GlobalAction::HeadBranch,
     GlobalAction::BaseBranch,
     GlobalAction::CommitPicker,

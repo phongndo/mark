@@ -231,7 +231,7 @@ impl DiffApp {
     fn submit_review_input_with(&mut self, start_review_load: impl FnOnce(&mut Self, String)) {
         let target = self.overlays.review_input.trim().to_owned();
         if target.is_empty() {
-            self.set_error_log("review unavailable: enter a review ID");
+            self.set_error_log("review unavailable: enter a review ID or URL");
             return;
         }
 
