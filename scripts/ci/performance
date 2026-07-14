@@ -1,0 +1,61 @@
+#!/usr/bin/env sh
+set -eux
+
+mode="${1:-smoke}"
+case "$mode" in
+  smoke | extended) ;;
+  *)
+    echo "usage: scripts/ci/performance [smoke|extended]" >&2
+    exit 2
+    ;;
+esac
+
+tmp_root="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
+work_dir="$(mktemp -d "$tmp_root/mark-ci-performance.XXXXXX")"
+trap 'rm -rf "$work_dir"' EXIT INT TERM
+
+if [ "$mode" = extended ]; then
+  cargo build -p mark-cli --release --locked
+  scripts/check-startup target/release/mark 2.0
+fi
+
+cargo run -p mark-bench --locked -- fixtures \
+  --out "$work_dir/many-small" \
+  --scenario many-small-files \
+  --force
+cargo run -p mark-bench --locked -- measure \
+  --fixtures "$work_dir/many-small" \
+  --scenario many-small-files \
+  --json
+
+cargo run -p mark-bench --locked -- fixtures \
+  --out "$work_dir/mega-diff" \
+  --scenario mega-diff-1m \
+  --force
+if [ "$mode" = extended ]; then
+  cargo run -p mark-bench --locked -- measure \
+    --fixtures "$work_dir/mega-diff" \
+    --scenario mega-diff-1m \
+    --max-scroll-steps 20 \
+    --assert-max-rss-ratio 3.0 \
+    --json
+else
+  cargo run -p mark-bench --locked -- measure \
+    --fixtures "$work_dir/mega-diff" \
+    --scenario mega-diff-1m \
+    --max-scroll-steps 20 \
+    --json
+fi
+
+cargo run -p mark-syntax --locked --release --example bundle-measure -- \
+  --assert-max-bundle-bytes 9000000
+
+if [ "$mode" = extended ]; then
+  cargo run -p mark-syntax --locked --release --example profile-cold -- \
+    --mode process-cold \
+    --assets assets/tm-grammars/languages \
+    --scope source.rust \
+    --assert-min-mb-s 0.05 \
+    crates/mark-syntax/tests/fixtures/textmate/rust/stress.rs \
+    1
+fi

@@ -155,6 +155,7 @@ export async function runConformance(options = {}) {
   }
 
   const onig = await loadOniguruma()
+  const markExecutable = options.markExecutable ?? buildMarkExecutable()
   const records = []
   for (const testCase of selectedCases) {
     const scanner = new onig.OnigScanner([testCase.pattern])
@@ -166,7 +167,7 @@ export async function runConformance(options = {}) {
       onigError = error.message
       onigMatch = null
     }
-    const mark = runMark(testCase)
+    const mark = runMark(testCase, markExecutable)
     const documentedDegradation = testCase.expectedDegradation === 'unsupported-no-match'
     const expectedResult = documentedDegradation
       ? onigMatch != null && mark.match == null
@@ -212,13 +213,33 @@ async function loadOniguruma() {
   return onig
 }
 
-function runMark(testCase) {
-  const args = ['run', '-q', '-p', 'mark-syntax', '--example', 'regex-parse', '--', '--match', '--engine', testCase.engine]
+function buildMarkExecutable() {
+  const result = spawnSync(
+    'cargo',
+    ['build', '-q', '-p', 'mark-syntax', '--example', 'regex-parse', '--message-format=json'],
+    { encoding: 'utf8' },
+  )
+  if (result.status !== 0) {
+    throw new Error(result.stderr || result.stdout || `cargo build exited ${result.status}`)
+  }
+  for (const line of result.stdout.split(/\r?\n/)) {
+    if (!line) continue
+    let message
+    try { message = JSON.parse(line) } catch { continue }
+    if (message.reason === 'compiler-artifact' && message.target?.name === 'regex-parse' && message.executable) {
+      return message.executable
+    }
+  }
+  throw new Error('cargo did not report the regex-parse executable')
+}
+
+function runMark(testCase, executable) {
+  const args = ['--match', '--engine', testCase.engine]
   if (testCase.from != null) args.push('--from', String(testCase.from))
   if (testCase.allowA) args.push('--allow-a')
   if (testCase.gPos != null) args.push('--allow-g', String(testCase.gPos))
   args.push(testCase.pattern, testCase.line)
-  const result = spawnSync('cargo', args, { encoding: 'utf8' })
+  const result = spawnSync(executable, args, { encoding: 'utf8' })
   if (result.status !== 0) return { error: result.stderr || result.stdout, status: result.status }
   const lines = result.stdout.split(/\r?\n/)
   const matchLine = lines.find(line => line.startsWith('match: '))

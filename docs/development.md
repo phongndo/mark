@@ -48,12 +48,21 @@ pre-push enables the slower `full` and `pi` profiles for affected files.
 ```sh
 just check
 just ci-check
+just ci-rust
+just ci-generated
+just ci-performance
 mise x -- hk check --all --plan
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo test --workspace --all-targets --all-features --locked
 cargo build -p mark-cli --locked
 ```
+
+The `scripts/ci/` suites are the canonical commands used by GitHub Actions and
+the matching `just ci-*` recipes. `just ci-check` runs the complete local CI
+suite. Pull requests classify changed paths and run only affected suites, then
+join them behind the single `CI gate` check. See [Continuous
+integration](ci.md) for the workflow graph and required repository settings.
 
 For the Pi package:
 
@@ -73,17 +82,18 @@ pi -e ./pi-mark/extensions/pi-mark.ts
 
 Use the cheapest check that proves the change first:
 
-1. `rust-analyzer diagnostics .`
-2. `cargo fmt --all --check`
+1. `cargo fmt --all --check`
+2. Focused unit test, for example `cargo test -p mark-tui filter`
 3. `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`
-4. Focused unit test, for example `cargo test -p mark-tui filter`
-5. Focused integration or smoke test
-6. `cargo test --workspace --all-targets --all-features --locked`
-7. `cargo build --workspace --all-targets --all-features --locked`
+4. Focused integration or smoke test
+5. `just ci-rust`
+6. The affected generated or performance suite
+7. `just ci-check`
 
-Full builds are most useful for public API changes, build config changes,
-dependency changes, generated code, toolchains, release packaging, or broad
-cross-crate behavior.
+The scheduled Extended validation workflow owns rust-analyzer diagnostics,
+shared-runner performance thresholds, and the four-platform test matrix. Pull
+request CI retains deterministic performance smoke coverage without making
+machine-sensitive latency thresholds a merge gate.
 
 ## Local smoke tests
 
@@ -117,8 +127,13 @@ profile silently forfeits most of the gain.
 The main `mark` binary release uses GitHub Releases.
 
 1. Update the workspace package version in [`Cargo.toml`](../Cargo.toml).
-2. Merge the change.
-3. Push a `vX.Y.Z` tag, or run the Release workflow manually.
+2. Merge the change and wait for the exact `main` commit to pass `CI gate`.
+3. Push a `vX.Y.Z` tag, or run the Release workflow manually from `main`.
+
+Release refuses a tag outside `main`, a stale manual-dispatch SHA, a version
+mismatch, or a source commit without a successful CI push run. The qualified
+source is then built once per target; the release workflow does not repeat the
+complete test suite on every platform.
 
 The Release workflow builds macOS and Linux assets named like:
 
@@ -133,8 +148,10 @@ Those names are part of the installer contract.
 
 ## Nightly flow
 
-The Nightly workflow publishes the latest `main` commit to a mutable `vnightly`
-GitHub prerelease. The installer treats it as an explicit version channel:
+The Nightly workflow runs daily at 08:00 UTC (or manually from `main`) and
+publishes the latest CI-qualified `main` commit to a mutable `vnightly` GitHub
+prerelease. It does not run after every push. The installer treats it as an
+explicit version channel:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/phongndo/mark/main/scripts/install.sh | MARK_VERSION=nightly sh
@@ -159,8 +176,9 @@ the channel and source commit.
 `pi-mark` is published separately to npm.
 
 1. Update `pi-mark/package.json` version.
-2. Merge the change.
-3. Run the `Publish pi-mark` workflow.
+2. Merge the change and wait for the exact `main` commit to pass `CI gate`.
+3. Run the `Publish pi-mark` workflow from `main`.
 
-The workflow validates the package, publishes with npm provenance, and can
-create a `pi-mark-vX.Y.Z` GitHub release.
+The workflow requires the current CI-qualified `main` tip, validates the
+package, publishes with npm provenance, and can create a `pi-mark-vX.Y.Z`
+GitHub release.

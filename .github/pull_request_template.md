@@ -13,11 +13,11 @@
 
 ## Verification
 
-- [ ] `cargo check --workspace --all-targets --all-features --locked`
-- [ ] `cargo fmt --all --check`
-- [ ] `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`
+- [ ] `just ci-rust`
+- [ ] `just ci-generated`
+- [ ] `just ci-performance`
+- [ ] `just ci-check`
 - [ ] `cargo test --workspace --all-targets --all-features --locked`
-- [ ] `cargo build --workspace --all-targets --all-features --locked`
 - [ ] `cd pi-mark && pnpm run check`
 - Not run:
 

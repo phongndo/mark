@@ -6,8 +6,19 @@ setup:
 check:
     HK_PROFILE=full mise x -- hk check --all --check
 
-ci-check:
-    HK_PROFILE=full,pi,ci mise x -- hk check --all --check --no-fail-fast
+ci-check: ci-rust ci-generated ci-performance pi-check ci-workflows
+
+ci-rust:
+    scripts/ci/rust
+
+ci-generated:
+    scripts/ci/generated
+
+ci-performance:
+    scripts/ci/performance smoke
+
+ci-workflows:
+    mise x -- actionlint -color
 
 fix:
     mise x -- hk fix --all

@@ -1,0 +1,19 @@
+#!/usr/bin/env sh
+set -eux
+
+export PYTHONDONTWRITEBYTECODE=1
+
+npm ci --prefix tools/golden-oracle
+python3 -m unittest discover -s tools -p 'test_*.py'
+
+node tools/vendor-shiki-grammars.mjs --check
+node --test tools/test-generate-textmate-cases.mjs
+node tools/generate-textmate-cases.mjs --check
+python3 tools/build-textmate-corpora.py --check
+python3 tools/generate-language-status.py --check
+
+node tools/generate-goldens.mjs --check
+node tools/regex-conformance.mjs
+node --test tools/test-grammar-stats.mjs
+node tools/grammar-stats.mjs --fail-on-gaps --examples 0 > "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/grammar-gaps.json"
+python3 tools/check-language-docs.py --check

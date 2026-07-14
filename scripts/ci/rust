@@ -1,0 +1,12 @@
+#!/usr/bin/env sh
+set -eux
+
+export MARK_TEXTMATE_STRICT="${MARK_TEXTMATE_STRICT:-1}"
+
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo test --workspace --all-targets --all-features --locked -- \
+  --skip manifest_golden_cases_match_or_are_allowlisted \
+  --skip manifest_golden_cases_have_no_budget_degradation
+scripts/check-architecture
+scripts/smoke-installer-update

@@ -1,148 +1,112 @@
 name: Nightly
 
 on:
-  push:
-    branches:
-      - main
   schedule:
     - cron: "0 8 * * *"
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
   group: nightly
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
-  CARGO_TERM_COLOR: always
   NIGHTLY_TAG: vnightly
 
 jobs:
-  validate-source:
-    name: Validate nightly source
+  prepare:
+    name: Qualify nightly source
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      source_sha: ${{ steps.source.outputs.source_sha }}
 
     steps:
-      - name: Ensure workflow is running from main
+      - name: Checkout source
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Require current CI-qualified main
+        id: source
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
 
           expected_ref="refs/heads/$DEFAULT_BRANCH"
           if [[ "$GITHUB_REF" != "$expected_ref" ]]; then
-            echo "::error::Nightly releases must be built from $expected_ref; rerun this workflow from the $DEFAULT_BRANCH branch."
+            echo "nightly must run from $expected_ref" >&2
+            exit 1
+          fi
+          main_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$DEFAULT_BRANCH" --jq .object.sha)"
+          if [[ "$GITHUB_SHA" != "$main_sha" ]]; then
+            echo "nightly source $GITHUB_SHA is not the current $DEFAULT_BRANCH tip $main_sha" >&2
             exit 1
           fi
 
+          gh api \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/quality.yml/runs?head_sha=$GITHUB_SHA&status=success&per_page=100" |
+            scripts/ci/verify-workflow-run.py \
+              --sha "$GITHUB_SHA" \
+              --branch "$DEFAULT_BRANCH" \
+              --event push
+
+          echo "source_sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+
   build:
-    name: Build ${{ matrix.target }}
-    needs: validate-source
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-14
-            target: aarch64-apple-darwin
-          - os: macos-15-intel
-            target: x86_64-apple-darwin
-          - os: ubuntu-24.04
-            target: x86_64-unknown-linux-gnu
-          - os: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-gnu
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          target: ${{ matrix.target }}
-
-      - name: Cache Rust builds
-        uses: Swatinem/rust-cache@v2
-
-      - name: Test
-        env:
-          MARK_BUILD_CHANNEL: nightly
-          MARK_BUILD_COMMIT: ${{ github.sha }}
-        run: cargo test --workspace --all-targets --all-features --locked --target ${{ matrix.target }}
-
-      - name: Build nightly binary
-        env:
-          MARK_BUILD_CHANNEL: nightly
-          MARK_BUILD_COMMIT: ${{ github.sha }}
-        run: cargo build --release -p mark-cli --locked --target ${{ matrix.target }}
-
-      - name: Package nightly asset
-        shell: bash
-        run: |
-          package="mark-${NIGHTLY_TAG}-${{ matrix.target }}"
-          binary="target/${{ matrix.target }}/release/mark"
-          asset="dist/${package}.tar.gz"
-
-          test -x "$binary"
-          mkdir -p "dist/$package"
-          install -m 755 "$binary" "dist/$package/mark"
-          cp README.md LICENSE "dist/$package/"
-          printf '%s\n' "$GITHUB_SHA" > "dist/$package/REVISION"
-          tar -czf "$asset" -C dist "$package"
-
-          if command -v shasum >/dev/null 2>&1; then
-            (cd dist && shasum -a 256 "${package}.tar.gz" > "${package}.tar.gz.sha256")
-          else
-            (cd dist && sha256sum "${package}.tar.gz" > "${package}.tar.gz.sha256")
-          fi
-
-      - name: Upload nightly asset
-        uses: actions/upload-artifact@v7
-        with:
-          name: mark-nightly-${{ matrix.target }}
-          if-no-files-found: error
-          path: |
-            dist/*.tar.gz
-            dist/*.sha256
+    name: Build nightly assets
+    needs: prepare
+    uses: ./.github/workflows/build-dist.yml
+    with:
+      channel: nightly
+      release_tag: vnightly
+      source_sha: ${{ needs.prepare.outputs.source_sha }}
 
   publish:
     name: Publish nightly release
-    needs: build
+    needs:
+      - prepare
+      - build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: nightly
     permissions:
+      actions: read
       contents: write
 
     steps:
       - name: Download nightly assets
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           path: dist
           merge-multiple: true
 
+      - name: Verify nightly assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(find dist -maxdepth 1 -name '*.tar.gz' | wc -l)" -eq 4 ]]
+          [[ "$(find dist -maxdepth 1 -name '*.sha256' | wc -l)" -eq 4 ]]
+          (cd dist && sha256sum --check ./*.sha256)
+
       - name: Publish mutable nightly release
         env:
           GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
         shell: bash
         run: |
           set -euo pipefail
 
-          gh release delete "$NIGHTLY_TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --cleanup-tag \
-            --yes || true
-          gh api -X DELETE \
-            "repos/$GITHUB_REPOSITORY/git/refs/tags/$NIGHTLY_TAG" \
-            >/dev/null 2>&1 || true
-
           cat > release-notes.md <<EOF
-          Nightly build from main.
+          Nightly build from CI-qualified main.
 
-          Commit: $GITHUB_SHA
+          Commit: $SOURCE_SHA
 
           Switch mark to nightly:
 
@@ -157,10 +121,31 @@ jobs:
           \`\`\`
           EOF
 
-          gh release create "$NIGHTLY_TAG" dist/*.tar.gz dist/*.sha256 \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
-            --prerelease \
-            --latest=false \
-            --title "mark nightly" \
-            --notes-file release-notes.md
+          if gh release view "$NIGHTLY_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$NIGHTLY_TAG" dist/*.tar.gz dist/*.sha256 \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+            gh release edit "$NIGHTLY_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --prerelease \
+              --target "$SOURCE_SHA" \
+              --title "mark nightly" \
+              --notes-file release-notes.md
+            if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$NIGHTLY_TAG" >/dev/null 2>&1; then
+              gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$NIGHTLY_TAG" \
+                -f sha="$SOURCE_SHA" \
+                -F force=true >/dev/null
+            else
+              gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" \
+                -f ref="refs/tags/$NIGHTLY_TAG" \
+                -f sha="$SOURCE_SHA" >/dev/null
+            fi
+          else
+            gh release create "$NIGHTLY_TAG" dist/*.tar.gz dist/*.sha256 \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$SOURCE_SHA" \
+              --prerelease \
+              --latest=false \
+              --title "mark nightly" \
+              --notes-file release-notes.md
+          fi

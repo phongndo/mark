@@ -12,8 +12,7 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
-import { spawnSync } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
+import { generateTextMateGolden } from './textmate-oracle.mjs'
 
 const DEFAULT_MANIFEST = 'crates/mark-syntax/tests/fixtures/textmate/cases.toml'
 
@@ -81,8 +80,6 @@ if (selectedCases.length === 0) {
   process.exit(1)
 }
 
-const toolDir = path.dirname(fileURLToPath(import.meta.url))
-const dumperPath = path.join(toolDir, 'golden-dump.mjs')
 const tempRoot = args.check ? await fs.mkdtemp(path.join(os.tmpdir(), 'mark-goldens-')) : null
 let failures = 0
 
@@ -108,20 +105,23 @@ async function runCase(testCase, index) {
 
   await fs.mkdir(path.dirname(outPath), { recursive: true })
 
-  const dumpArgs = [
-    dumperPath,
-    '--grammar', grammarPath,
-    '--scope', testCase.scope,
-    '--language', testCase.language,
-    '--file', testCase.fixture,
-    '--out', outPath,
-  ]
-  for (const embedded of testCase.embedded) {
-    dumpArgs.push('--embedded', `${embedded.scope}=${await resolveManifestPath(embedded.grammar)}`)
+  try {
+    const output = await generateTextMateGolden({
+      grammarPath,
+      scopeName: testCase.scope,
+      language: testCase.language,
+      sourcePath: path.resolve(fixtureCwd, testCase.fixture),
+      sourceLabel: testCase.fixture,
+      embedded: await Promise.all(testCase.embedded.map(async item => ({
+        scope: item.scope,
+        grammarPath: await resolveManifestPath(item.grammar),
+      }))),
+    })
+    await fs.writeFile(outPath, output)
+  } catch (error) {
+    console.error(`${testCase.language}: oracle failed: ${error.stack ?? error.message}`)
+    return false
   }
-
-  const result = spawnSync(process.execPath, dumpArgs, { cwd: fixtureCwd, stdio: 'inherit' })
-  if (result.status !== 0) return false
 
   if (args.check) {
     let actual
