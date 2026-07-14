@@ -1492,6 +1492,21 @@ fn mouse_wheel_over_file_sidebar_scrolls_sidebar_only() {
 }
 
 #[test]
+fn folder_header_click_is_consumed_and_file_rows_remain_selectable() {
+    let changeset = changeset_with_files(&["src/a.rs", "src/b.rs"]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.sidebar.file_sidebar_open = true;
+    app.sidebar.file_sidebar_render_width = 34;
+    app.set_viewport_rows(4);
+
+    assert!(app.handle_file_sidebar_click(1, 1));
+    assert_eq!(app.sidebar.selected_file, FILE_0);
+
+    assert!(app.handle_file_sidebar_click(1, 3));
+    assert_eq!(app.sidebar.selected_file, FILE_1);
+}
+
+#[test]
 fn horizontal_mouse_wheel_over_file_sidebar_is_ignored() {
     let changeset = changeset_with_line_text("abcdefghijkl");
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);

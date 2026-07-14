@@ -128,11 +128,11 @@ impl DiffApp {
             .sidebar
             .file_sidebar_scroll
             .saturating_add(usize::from(row - 1));
-        let Some(file) = self.document.model.visible_files().get(position).copied() else {
-            return false;
-        };
+        let file = crate::render::sidebar::file_sidebar_file_at_row(self, position);
 
-        self.select_file(file.get());
+        if let Some(file) = file {
+            self.select_file(file.get());
+        }
         true
     }
 

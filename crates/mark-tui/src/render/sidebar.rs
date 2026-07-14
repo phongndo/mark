@@ -9,14 +9,25 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::{
     app::DiffApp,
+    model::FileIndex,
     render::{
         style::{base_bg, file_sidebar_style, header_bg},
         text::{fit, fit_padded, fit_with_ellipsis, status_code},
     },
     theme::{
-        DiffTheme, FILE_SIDEBAR_MAX_WIDTH, FILE_SIDEBAR_MIN_DIFF_WIDTH, FILE_SIDEBAR_MIN_WIDTH,
+        DiffTheme, FILE_SIDEBAR_DEFAULT_WIDTH, FILE_SIDEBAR_MIN_DIFF_WIDTH, FILE_SIDEBAR_MIN_WIDTH,
     },
 };
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum FileSidebarEntry<'a> {
+    Group(&'a str),
+    File {
+        index: FileIndex,
+        file: &'a mark_diff::DiffFile,
+        name: &'a str,
+    },
+}
 
 pub(crate) fn file_sidebar_width(app: &DiffApp, area_width: u16) -> u16 {
     if !app.sidebar.file_sidebar_open {
@@ -30,7 +41,7 @@ pub(crate) fn file_sidebar_width(app: &DiffApp, area_width: u16) -> u16 {
 
     app.sidebar
         .file_sidebar_width
-        .unwrap_or_else(|| file_sidebar_desired_width(app))
+        .unwrap_or(FILE_SIDEBAR_DEFAULT_WIDTH)
         .clamp(FILE_SIDEBAR_MIN_WIDTH, max_width)
 }
 
@@ -43,30 +54,55 @@ pub(crate) fn max_file_sidebar_width(area_width: u16) -> u16 {
     }
 }
 
-pub(crate) fn file_sidebar_desired_width(app: &DiffApp) -> u16 {
-    let content_width = app
-        .document
-        .model
-        .visible_files()
+pub(crate) fn file_sidebar_entries(app: &DiffApp) -> Vec<FileSidebarEntry<'_>> {
+    let mut entries = Vec::new();
+    let mut active_group = None;
+
+    for file_index in app.document.model.visible_files().iter().copied() {
+        let Some(file) = app.document.changeset.files.get(file_index.get()) else {
+            continue;
+        };
+        let (group, name) = split_sidebar_path(file.display_path());
+
+        if group != active_group {
+            active_group = group;
+            if let Some(group) = group {
+                entries.push(FileSidebarEntry::Group(group));
+            }
+        }
+
+        entries.push(FileSidebarEntry::File {
+            index: file_index,
+            file,
+            name,
+        });
+    }
+
+    entries
+}
+
+pub(crate) fn file_sidebar_entry_count(app: &DiffApp) -> usize {
+    file_sidebar_entries(app).len()
+}
+
+pub(crate) fn file_sidebar_file_row(app: &DiffApp, file: FileIndex) -> Option<usize> {
+    file_sidebar_entries(app)
         .iter()
-        .filter_map(|file| app.document.changeset.files.get(file.get()))
-        .map(|file| {
-            let stats = file_sidebar_stats(file);
-            let stats_width = if stats.is_empty() {
-                0
-            } else {
-                stats.width().saturating_add(2)
-            };
-            status_code(file.status())
-                .width()
-                .saturating_add(2)
-                .saturating_add(file.display_path().width())
-                .saturating_add(stats_width)
-        })
-        .max()
-        .unwrap_or_else(|| " Files".width());
-    let desired = content_width.saturating_add(1).min(usize::from(u16::MAX)) as u16;
-    desired.clamp(FILE_SIDEBAR_MIN_WIDTH, FILE_SIDEBAR_MAX_WIDTH)
+        .position(|entry| matches!(entry, FileSidebarEntry::File { index, .. } if *index == file))
+}
+
+pub(crate) fn file_sidebar_file_at_row(app: &DiffApp, row: usize) -> Option<FileIndex> {
+    match file_sidebar_entries(app).get(row) {
+        Some(FileSidebarEntry::File { index, .. }) => Some(*index),
+        Some(FileSidebarEntry::Group(_)) | None => None,
+    }
+}
+
+fn split_sidebar_path(path: &str) -> (Option<&str>, &str) {
+    match path.rsplit_once('/') {
+        Some((group, name)) if !group.is_empty() => (Some(group), name),
+        _ => (None, path),
+    }
 }
 
 pub(crate) fn draw_file_sidebar(frame: &mut Frame<'_>, app: &DiffApp, area: Rect) {
@@ -94,13 +130,14 @@ pub(crate) fn file_sidebar_lines(app: &DiffApp, width: usize, height: usize) -> 
     let mut lines = Vec::with_capacity(height);
     let visible_files = height;
     let content_width = width.saturating_sub(1);
+    let entries = file_sidebar_entries(app);
     for position in app.sidebar.file_sidebar_scroll
         ..app
             .sidebar
             .file_sidebar_scroll
             .saturating_add(visible_files)
     {
-        let Some(file_index) = app.document.model.visible_files().get(position).copied() else {
+        let Some(entry) = entries.get(position) else {
             lines.push(file_sidebar_line(
                 "",
                 Style::default().bg(base_bg(theme)),
@@ -109,16 +146,19 @@ pub(crate) fn file_sidebar_lines(app: &DiffApp, width: usize, height: usize) -> 
             ));
             continue;
         };
-        let Some(file) = app.document.changeset.files.get(file_index.get()) else {
-            continue;
-        };
 
-        lines.push(file_sidebar_entry_line(
-            file,
-            file_index == app.sidebar.selected_file,
-            content_width,
-            theme,
-        ));
+        lines.push(match entry {
+            FileSidebarEntry::Group(group) => file_sidebar_group_line(group, content_width, theme),
+            FileSidebarEntry::File {
+                index, file, name, ..
+            } => file_sidebar_entry_line(
+                file,
+                name,
+                *index == app.sidebar.selected_file,
+                content_width,
+                theme,
+            ),
+        });
     }
 
     lines
@@ -126,6 +166,7 @@ pub(crate) fn file_sidebar_lines(app: &DiffApp, width: usize, height: usize) -> 
 
 pub(crate) fn file_sidebar_entry_line(
     file: &mark_diff::DiffFile,
+    name: &str,
     selected: bool,
     content_width: usize,
     theme: DiffTheme,
@@ -152,7 +193,7 @@ pub(crate) fn file_sidebar_entry_line(
             .saturating_sub(gap_width);
         let stats_width = content_width.saturating_sub(left_width + gap_width);
 
-        let mut spans = file_sidebar_left_spans(file, left_width, status_style, body_style);
+        let mut spans = file_sidebar_left_spans(file, name, left_width, status_style, body_style);
         if gap_width > 0 {
             spans.push(Span::styled(" ", body_style));
         }
@@ -182,6 +223,7 @@ pub(crate) fn file_sidebar_entry_line(
     if left_width > 0 {
         spans.extend(file_sidebar_left_spans(
             file,
+            name,
             left_width,
             status_style,
             body_style,
@@ -269,6 +311,7 @@ pub(crate) fn file_sidebar_body_style(selected: bool, bg: Color, theme: DiffThem
 
 pub(crate) fn file_sidebar_left_spans(
     file: &mark_diff::DiffFile,
+    name: &str,
     width: usize,
     status_style: Style,
     body_style: Style,
@@ -287,13 +330,24 @@ pub(crate) fn file_sidebar_left_spans(
     vec![
         Span::styled(prefix, status_style),
         Span::styled(
-            fit_padded(
-                &fit_with_ellipsis(file.display_path(), path_width),
-                path_width,
-            ),
+            fit_padded(&fit_with_ellipsis(name, path_width), path_width),
             body_style,
         ),
     ]
+}
+
+pub(crate) fn file_sidebar_group_line(
+    group: &str,
+    content_width: usize,
+    theme: DiffTheme,
+) -> Line<'static> {
+    let style = Style::default().fg(theme.muted).bg(base_bg(theme));
+    let label = format!(" {group}/");
+    let text = fit_padded(&fit_with_ellipsis(&label, content_width), content_width);
+    Line::from(vec![
+        Span::styled(text, style),
+        file_sidebar_separator(theme),
+    ])
 }
 
 pub(crate) fn file_sidebar_stats(file: &mark_diff::DiffFile) -> String {

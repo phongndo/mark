@@ -1,6 +1,8 @@
 use super::DiffApp;
 use crate::model::{FileIndex, HunkIndex};
-use crate::render::sidebar::max_file_sidebar_width;
+use crate::render::sidebar::{
+    file_sidebar_entry_count, file_sidebar_file_row, max_file_sidebar_width,
+};
 use crate::theme::FILE_SIDEBAR_MIN_WIDTH;
 
 impl DiffApp {
@@ -146,10 +148,7 @@ impl DiffApp {
     }
 
     pub(crate) fn ensure_file_sidebar_selection_visible(&mut self, visible_rows: usize) {
-        let Some(selected_position) = self
-            .document
-            .model
-            .visible_file_position(self.sidebar.selected_file.get())
+        let Some(selected_position) = file_sidebar_file_row(self, self.sidebar.selected_file)
         else {
             self.sidebar.file_sidebar_scroll = 0;
             return;
@@ -167,11 +166,7 @@ impl DiffApp {
                 .file_sidebar_scroll
                 .saturating_add(visible_rows)
         {
-            self.sidebar.file_sidebar_scroll = self
-                .document
-                .model
-                .visible_file_position(self.sidebar.selected_file.get())
-                .unwrap_or_default()
+            self.sidebar.file_sidebar_scroll = selected_position
                 .saturating_add(1)
                 .saturating_sub(visible_rows);
         }
@@ -183,10 +178,6 @@ impl DiffApp {
     }
 
     pub(crate) fn max_file_sidebar_scroll(&self, visible_rows: usize) -> usize {
-        self.document
-            .model
-            .visible_files()
-            .len()
-            .saturating_sub(visible_rows.max(1))
+        file_sidebar_entry_count(self).saturating_sub(visible_rows.max(1))
     }
 }

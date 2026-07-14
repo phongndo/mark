@@ -788,6 +788,31 @@ fn file_sidebar_tracks_selected_file() {
 }
 
 #[test]
+fn grouped_file_sidebar_tracks_selected_file_rows() {
+    let changeset = changeset_with_files(&["src/a.rs", "src/b.rs", "docs/c.rs"]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.sidebar.file_sidebar_open = true;
+    app.set_viewport_rows(2);
+    app.sidebar.selected_file = FILE_2;
+
+    app.ensure_file_sidebar_selection_visible(app.visible_file_sidebar_rows());
+
+    assert_eq!(app.sidebar.file_sidebar_scroll, 3);
+    let lines = file_sidebar_lines(&app, 24, 2);
+    assert!(line_text(&lines[0]).contains("docs/"));
+    assert!(line_text(&lines[1]).contains(" M c.rs"));
+}
+
+#[test]
+fn file_sidebar_opens_at_hunk_default_width() {
+    let changeset = changeset_with_files(&["a.rs"]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.sidebar.file_sidebar_open = true;
+
+    assert_eq!(file_sidebar_width(&app, 100), 34);
+}
+
+#[test]
 fn replace_changeset_keeps_remapped_file_sidebar_selection_visible() {
     let changeset = changeset_with_files(&["a.rs", "b.rs", "c.rs", "d.rs", "e.rs"]);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
@@ -820,37 +845,40 @@ fn file_sidebar_renders_changed_file_summary() {
     app.sidebar.file_sidebar_open = true;
     app.sidebar.selected_file = FILE_1;
 
-    let lines = file_sidebar_lines(&app, 24, 2);
-    let additions = lines[1]
+    let lines = file_sidebar_lines(&app, 24, 3);
+    let additions = lines[2]
         .spans
         .iter()
         .find(|span| span.content.as_ref() == "+12")
         .expect("additions should render as their own span");
-    let deletions = lines[1]
+    let deletions = lines[2]
         .spans
         .iter()
         .find(|span| span.content.as_ref() == "-0")
         .expect("deletions should render as their own span");
 
-    assert!(line_text(&lines[0]).contains(" M src/lib.rs"));
-    assert!(line_text(&lines[1]).contains(" A README.md"));
-    assert!(line_text(&lines[1]).contains("+12 -0"));
-    assert_eq!(lines[0].spans[0].content.as_ref(), " M ");
-    assert_eq!(lines[0].spans[0].style.fg, Some(DiffTheme::default().hunk));
+    assert!(line_text(&lines[0]).contains("src/"));
+    assert_eq!(lines[0].spans[0].style.fg, Some(DiffTheme::default().muted));
+    assert!(line_text(&lines[1]).contains(" M lib.rs"));
+    assert!(!line_text(&lines[1]).contains("src/"));
+    assert!(line_text(&lines[2]).contains(" A README.md"));
+    assert!(line_text(&lines[2]).contains("+12 -0"));
+    assert_eq!(lines[1].spans[0].content.as_ref(), " M ");
+    assert_eq!(lines[1].spans[0].style.fg, Some(DiffTheme::default().hunk));
     assert!(
-        lines[0].spans[0]
+        lines[1].spans[0]
             .style
             .add_modifier
             .contains(Modifier::BOLD)
     );
     assert_eq!(
-        lines[0].spans[1].style.fg,
+        lines[1].spans[1].style.fg,
         Some(DiffTheme::default().foreground)
     );
     assert_eq!(additions.style.fg, Some(DiffTheme::default().addition_fg));
     assert_eq!(deletions.style.fg, Some(DiffTheme::default().deletion_fg));
     assert!(
-        lines[1].spans[0]
+        lines[2].spans[0]
             .style
             .add_modifier
             .contains(Modifier::BOLD)
@@ -866,8 +894,8 @@ fn file_sidebar_truncates_long_paths_before_stats() {
     changeset.files[0].deletions = 3910;
     let app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
 
-    let lines = file_sidebar_lines(&app, 32, 1);
-    let text = line_text(&lines[0]);
+    let lines = file_sidebar_lines(&app, 32, 2);
+    let text = line_text(&lines[1]);
 
     assert_eq!(text.width(), 32);
     assert!(text.contains("..."));
