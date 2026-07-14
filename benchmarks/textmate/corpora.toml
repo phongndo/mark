@@ -27,7 +27,7 @@ language = "markdown"
 scope = "text.html.markdown"
 bytes = 36254
 tokenizer_lines = 1134
-sha256 = "16a7399420de1805a03d4a5bfeaced427bed793bbeca4e0b5915479d999e5bb8"
+sha256 = "b134acfccfd423313ceae8ec8e33934c72ec54a92b0d0d8d2dd8322c3a613184"
 
 [[corpus]]
 id = "core-repeated"
