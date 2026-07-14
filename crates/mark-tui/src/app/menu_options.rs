@@ -25,6 +25,7 @@ impl DiffApp {
             context_expansion: self.config.theme.diff.context_expansion,
             syntax_enabled: self.config.syntax.is_some(),
             line_wrapping: self.viewport.line_wrapping,
+            horizontal_scroll_locked: self.viewport.horizontal_scroll_locked,
             decorations: self.config.decoration_preference,
             color_scheme: self.config.color_scheme,
             notification_mode: self.config.syntax_settings.notifications.mode(),
@@ -154,6 +155,9 @@ impl DiffApp {
             OptionsMenuItem::LineWrapping => {
                 on_off_search(self.overlays.options_menu_draft.line_wrapping)
             }
+            OptionsMenuItem::HorizontalScrollLock => {
+                on_off_search(self.overlays.options_menu_draft.horizontal_scroll_locked)
+            }
             OptionsMenuItem::Decorations => {
                 decoration_preference_label(self.overlays.options_menu_draft.decorations).to_owned()
             }
@@ -203,6 +207,9 @@ impl DiffApp {
             }
             OptionsMenuItem::LineWrapping => {
                 checkbox(self.overlays.options_menu_draft.line_wrapping)
+            }
+            OptionsMenuItem::HorizontalScrollLock => {
+                checkbox(self.overlays.options_menu_draft.horizontal_scroll_locked)
             }
             OptionsMenuItem::Decorations => {
                 format!(
@@ -291,6 +298,10 @@ impl DiffApp {
                 self.overlays.options_menu_draft.line_wrapping =
                     !self.overlays.options_menu_draft.line_wrapping;
             }
+            OptionsMenuItem::HorizontalScrollLock => {
+                self.overlays.options_menu_draft.horizontal_scroll_locked =
+                    !self.overlays.options_menu_draft.horizontal_scroll_locked;
+            }
             OptionsMenuItem::Decorations => {
                 self.overlays.options_menu_draft.decorations =
                     next_decoration_preference(self.overlays.options_menu_draft.decorations, delta);
@@ -361,17 +372,10 @@ impl DiffApp {
             self.set_syntax_enabled(draft.syntax_enabled);
         }
         if draft.line_wrapping != self.viewport.line_wrapping {
-            let next_scroll = if draft.line_wrapping {
-                self.wrapped_visual_scroll_for_model_row(self.viewport.scroll)
-            } else {
-                self.model_row_at_scroll(self.viewport.scroll)
-                    .map(|(row, _)| row)
-                    .unwrap_or_default()
-            };
-            self.viewport.line_wrapping = draft.line_wrapping;
-            self.set_scroll(next_scroll);
-            self.set_horizontal_scroll(self.viewport.horizontal_scroll);
-            self.runtime.dirty = true;
+            self.set_line_wrapping(draft.line_wrapping);
+        }
+        if draft.horizontal_scroll_locked != self.viewport.horizontal_scroll_locked {
+            self.set_horizontal_scroll_lock(draft.horizontal_scroll_locked);
         }
         if notification_settings != self.config.syntax_settings.notifications {
             self.config.syntax_settings.notifications = notification_settings;

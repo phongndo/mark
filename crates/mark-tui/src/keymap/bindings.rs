@@ -36,6 +36,8 @@ impl Keymap {
         let mut stored_menu = stored.menu;
         let mut stored_annotation_menu = stored.annotation_menu;
         let copy_marks_configured = stored_global.copy_marks.is_some();
+        let line_wrapping_configured = stored_global.line_wrapping.is_some();
+        let horizontal_scroll_lock_configured = stored_global.horizontal_scroll_lock.is_some();
 
         if let Some(leader) = stored_global.leader.take() {
             parse_key_press(&leader)?;
@@ -46,7 +48,14 @@ impl Keymap {
             set_sequences(keymap.global_sequences_mut(spec.action), configured)?;
         }
         if !copy_marks_configured {
-            keymap.clear_default_copy_marks_on_conflict();
+            keymap.clear_default_on_conflict(GlobalAction::CopyMarks);
+        }
+        // New default bindings must not invalidate configs that already used those keys.
+        if !line_wrapping_configured {
+            keymap.clear_default_on_conflict(GlobalAction::LineWrapping);
+        }
+        if !horizontal_scroll_lock_configured {
+            keymap.clear_default_on_conflict(GlobalAction::HorizontalScrollLock);
         }
 
         for spec in MENU_ACTION_SPECS {
@@ -139,21 +148,26 @@ impl Keymap {
         validate_conflicts("keymap.annotation_menu", &bindings)
     }
 
-    fn clear_default_copy_marks_on_conflict(&mut self) {
-        let copy_marks = self.global_sequences(GlobalAction::CopyMarks);
+    fn clear_default_on_conflict(&mut self, action: GlobalAction) {
+        let defaults = self.global_sequences(action);
+        let conflict_group = GLOBAL_ACTION_SPECS
+            .iter()
+            .find(|spec| spec.action == action)
+            .expect("global action must have a spec")
+            .conflict_group;
         let conflicts = GLOBAL_ACTION_SPECS
             .iter()
-            .filter(|spec| spec.action != GlobalAction::CopyMarks)
+            .filter(|spec| spec.action != action && spec.conflict_group == conflict_group)
             .map(|spec| self.global_sequences(spec.action))
             .any(|bindings| {
                 bindings.iter().any(|sequence| {
-                    copy_marks
+                    defaults
                         .iter()
-                        .any(|copy| sequences_conflict(copy, sequence))
+                        .any(|default| sequences_conflict(default, sequence))
                 })
             });
         if conflicts {
-            self.global_sequences_mut(GlobalAction::CopyMarks).clear();
+            self.global_sequences_mut(action).clear();
         }
     }
 }
@@ -229,6 +243,8 @@ struct StoredGlobalKeymap {
     collapse_context_all: Option<KeySpec>,
     quit: Option<KeySpec>,
     layout: Option<KeySpec>,
+    line_wrapping: Option<KeySpec>,
+    horizontal_scroll_lock: Option<KeySpec>,
     edit_hunk: Option<KeySpec>,
     save_mark: Option<KeySpec>,
     cancel_mark: Option<KeySpec>,
@@ -265,6 +281,8 @@ impl StoredGlobalKeymap {
             GlobalAction::CollapseContextAll => self.collapse_context_all.take(),
             GlobalAction::Quit => self.quit.take(),
             GlobalAction::Layout => self.layout.take(),
+            GlobalAction::LineWrapping => self.line_wrapping.take(),
+            GlobalAction::HorizontalScrollLock => self.horizontal_scroll_lock.take(),
             GlobalAction::EditHunk => self.edit_hunk.take(),
             GlobalAction::SaveMark => self.save_mark.take(),
             GlobalAction::CancelMark => self.cancel_mark.take(),

@@ -51,6 +51,8 @@ pub(crate) const NORMAL_GLOBAL_ACTIONS: &[GlobalAction] = &[
     GlobalAction::ExpandContextDown,
     GlobalAction::CollapseContextAll,
     GlobalAction::Layout,
+    GlobalAction::LineWrapping,
+    GlobalAction::HorizontalScrollLock,
     GlobalAction::EditHunk,
     GlobalAction::CopyMarks,
     GlobalAction::CopyErrorLog,

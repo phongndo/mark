@@ -64,6 +64,46 @@ fn large_diff_remains_horizontally_scrollable_without_eager_widths() {
 }
 
 #[test]
+fn x_toggles_horizontal_scroll_lock() {
+    let changeset = changeset_with_line_text("abcdefghijkl");
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_width(18);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE))
+        .expect("x should lock horizontal scrolling");
+    assert!(app.viewport.horizontal_scroll_locked);
+    assert!(app.notifications.toasts.is_empty());
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE))
+        .expect("horizontal movement should be handled while locked");
+    assert_eq!(app.viewport.horizontal_scroll, 0);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE))
+        .expect("x should unlock horizontal scrolling");
+    app.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE))
+        .expect("horizontal movement should be handled while unlocked");
+    assert!(!app.viewport.horizontal_scroll_locked);
+    assert_eq!(app.viewport.horizontal_scroll, HORIZONTAL_SCROLL_STEP);
+}
+
+#[test]
+fn w_toggles_line_wrapping() {
+    let changeset = changeset_with_line_text("abcdefghijkl");
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_width(18);
+    app.set_horizontal_scroll(HORIZONTAL_SCROLL_STEP);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::NONE))
+        .expect("w should enable line wrapping");
+    assert!(app.viewport.line_wrapping);
+    assert_eq!(app.viewport.horizontal_scroll, 0);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::NONE))
+        .expect("w should disable line wrapping");
+    assert!(!app.viewport.line_wrapping);
+}
+
+#[test]
 fn max_scroll_stays_zero_when_annotated_diff_fits_viewport() {
     use crate::annotation::AnnotationKey;
 

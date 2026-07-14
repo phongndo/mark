@@ -27,6 +27,8 @@ pub(crate) enum GlobalAction {
     CollapseContextAll,
     Quit,
     Layout,
+    LineWrapping,
+    HorizontalScrollLock,
     EditHunk,
     SaveMark,
     CancelMark,
@@ -170,6 +172,12 @@ const GLOBAL_ACTION_SPECS: &[GlobalActionSpec] = &[
     ),
     global_action_spec!(GlobalAction::Quit, "quit", ["q"]),
     global_action_spec!(GlobalAction::Layout, "layout", ["s"]),
+    global_action_spec!(GlobalAction::LineWrapping, "line_wrapping", ["w"]),
+    global_action_spec!(
+        GlobalAction::HorizontalScrollLock,
+        "horizontal_scroll_lock",
+        ["x"]
+    ),
     global_action_spec!(GlobalAction::EditHunk, "edit_hunk", ["ctrl-g"], 1),
     global_action_spec!(
         GlobalAction::SaveMark,

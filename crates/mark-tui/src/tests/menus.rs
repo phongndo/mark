@@ -1277,6 +1277,7 @@ context_expand = 7
             context_expansion: DiffContextExpansion::Full,
             syntax_enabled: false,
             line_wrapping: true,
+            horizontal_scroll_locked: true,
             decorations: DecorationPreference::Minimal,
             color_scheme: ColorSchemeChoice::Tokyonight,
             notification_mode: NotificationMode::Debug,
@@ -1362,6 +1363,7 @@ max_visible = 3
         context_expansion: DiffContextExpansion::Full,
         syntax_enabled: false,
         line_wrapping: true,
+        horizontal_scroll_locked: true,
         decorations: DecorationPreference::Minimal,
         color_scheme: ColorSchemeChoice::Tokyonight,
         notification_mode: NotificationMode::Debug,
@@ -1374,6 +1376,7 @@ max_visible = 3
         OptionsMenuItem::Layout,
         OptionsMenuItem::ContextExpansion,
         OptionsMenuItem::LineWrapping,
+        OptionsMenuItem::HorizontalScrollLock,
         OptionsMenuItem::SyntaxHighlighting,
         OptionsMenuItem::Decorations,
         OptionsMenuItem::LiveReload,
@@ -1466,7 +1469,7 @@ fn options_menu_toggles_syntax_highlighting() {
     )));
 
     app.open_options_menu();
-    app.move_options_menu_selection(2);
+    app.move_options_menu_selection(3);
     assert_eq!(
         app.highlighted_option(),
         Some(OptionsMenuItem::SyntaxHighlighting)
@@ -1491,7 +1494,7 @@ fn options_menu_keeps_failed_syntax_enable_session_only() {
     );
 
     app.open_options_menu();
-    app.move_options_menu_selection(2);
+    app.move_options_menu_selection(3);
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .expect("enter should try to enable syntax highlighting");
 
@@ -1526,12 +1529,39 @@ fn options_menu_toggles_line_wrapping_and_clamps_horizontal_scroll() {
 }
 
 #[test]
+fn options_menu_toggles_horizontal_scroll_lock() {
+    let changeset = changeset_with_line_text(&"a".repeat(120));
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_width(40);
+
+    app.open_options_menu();
+    app.move_options_menu_selection(2);
+    assert_eq!(
+        app.highlighted_option(),
+        Some(OptionsMenuItem::HorizontalScrollLock)
+    );
+    assert_eq!(
+        app.option_value(OptionsMenuItem::HorizontalScrollLock),
+        "[ ]"
+    );
+
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("enter should lock horizontal scrolling");
+
+    assert!(app.viewport.horizontal_scroll_locked);
+    assert_eq!(
+        app.option_value(OptionsMenuItem::HorizontalScrollLock),
+        "[x]"
+    );
+}
+
+#[test]
 fn options_menu_cycles_decorations_session_only() {
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
 
     app.open_options_menu();
-    app.set_options_menu_selection(3);
+    app.set_options_menu_selection(4);
     assert_eq!(app.highlighted_option(), Some(OptionsMenuItem::Decorations));
     assert_eq!(app.option_value(OptionsMenuItem::Decorations), "[auto]");
 
@@ -1561,7 +1591,7 @@ fn options_menu_cycles_notification_settings() {
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
 
     app.open_options_menu();
-    app.set_options_menu_selection(6);
+    app.set_options_menu_selection(7);
     assert_eq!(
         app.highlighted_option(),
         Some(OptionsMenuItem::NotificationMode)
@@ -1574,7 +1604,7 @@ fn options_menu_cycles_notification_settings() {
     );
     assert!(app.notifications.toasts.debug_enabled());
 
-    app.set_options_menu_selection(7);
+    app.set_options_menu_selection(8);
     assert_eq!(app.highlighted_option(), Some(OptionsMenuItem::ToastCorner));
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .expect("enter should cycle toast corner");
@@ -1584,7 +1614,7 @@ fn options_menu_cycles_notification_settings() {
     );
     assert_eq!(app.notifications.toasts.corner(), ToastCorner::BottomRight);
 
-    app.set_options_menu_selection(8);
+    app.set_options_menu_selection(9);
     assert_eq!(
         app.highlighted_option(),
         Some(OptionsMenuItem::ToastTimeout)
@@ -1593,7 +1623,7 @@ fn options_menu_cycles_notification_settings() {
         .expect("right should cycle toast timeout");
     assert_eq!(app.config.syntax_settings.notifications.timeout_ms(), 2_500);
 
-    app.set_options_menu_selection(9);
+    app.set_options_menu_selection(10);
     assert_eq!(
         app.highlighted_option(),
         Some(OptionsMenuItem::ToastMaxVisible)
@@ -1615,7 +1645,7 @@ fn options_menu_cycles_custom_notification_values_to_nearest_choices_session_onl
     );
 
     app.open_options_menu();
-    app.set_options_menu_selection(8);
+    app.set_options_menu_selection(9);
     assert_eq!(
         app.highlighted_option(),
         Some(OptionsMenuItem::ToastTimeout)
@@ -1625,7 +1655,7 @@ fn options_menu_cycles_custom_notification_values_to_nearest_choices_session_onl
     assert_eq!(app.config.syntax_settings.notifications.timeout_ms(), 2_500);
     assert_eq!(app.config.last_persisted_options_menu_draft, None);
 
-    app.set_options_menu_selection(9);
+    app.set_options_menu_selection(10);
     assert_eq!(
         app.highlighted_option(),
         Some(OptionsMenuItem::ToastMaxVisible)
@@ -1693,7 +1723,7 @@ fn options_menu_colorscheme_input_selects_draft_and_applies_on_enter() {
     app.config.theme = DiffTheme::system();
 
     app.open_options_menu();
-    app.move_options_menu_selection(4);
+    app.move_options_menu_selection(5);
     assert_eq!(app.highlighted_option(), Some(OptionsMenuItem::ColorScheme));
 
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
@@ -1741,7 +1771,7 @@ fn colorscheme_picker_mouse_selection_persists_draft() {
     app.config.theme = DiffTheme::system();
 
     app.open_options_menu();
-    app.move_options_menu_selection(4);
+    app.move_options_menu_selection(5);
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .expect("enter should open colorscheme picker");
     let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 20))
@@ -1790,7 +1820,7 @@ fn colorscheme_picker_mouse_dismiss_keeps_options_menu_open() {
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
 
     app.open_options_menu();
-    app.move_options_menu_selection(4);
+    app.move_options_menu_selection(5);
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .expect("enter should open colorscheme picker");
     assert!(app.overlays.color_scheme_picker_is_open());
@@ -1831,6 +1861,7 @@ fn options_menu_omits_branch_options_for_branch_diff() {
         [
             OptionsMenuItem::Layout,
             OptionsMenuItem::LineWrapping,
+            OptionsMenuItem::HorizontalScrollLock,
             OptionsMenuItem::SyntaxHighlighting,
             OptionsMenuItem::Decorations,
             OptionsMenuItem::ColorScheme,
@@ -1873,7 +1904,7 @@ fn options_menu_live_reload_toggles_without_reloading_diff() {
     assert!(app.jobs.live_updates.enabled());
 
     app.open_options_menu();
-    app.move_options_menu_selection(5);
+    app.move_options_menu_selection(6);
     assert_eq!(app.highlighted_option(), Some(OptionsMenuItem::LiveReload));
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .expect("enter should toggle live reload");
@@ -1889,7 +1920,7 @@ fn options_menu_reenabling_live_reload_reloads_diff() {
     app.jobs.live_updates = LiveUpdatesState::DisabledByUser;
 
     app.open_options_menu();
-    app.move_options_menu_selection(5);
+    app.move_options_menu_selection(6);
     assert_eq!(app.highlighted_option(), Some(OptionsMenuItem::LiveReload));
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .expect("enter should toggle live reload");
@@ -1910,7 +1941,7 @@ fn options_menu_does_not_enable_live_reload_when_watch_is_disabled() {
     app.jobs.live_updates = LiveUpdatesState::DisabledByCli;
 
     app.open_options_menu();
-    app.move_options_menu_selection(5);
+    app.move_options_menu_selection(6);
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .expect("enter should be handled");
 
@@ -1978,7 +2009,7 @@ fn options_menu_scrolls_selected_setting_into_short_terminal() {
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
     app.open_options_menu();
-    app.set_options_menu_selection(4);
+    app.set_options_menu_selection(5);
     let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 5))
         .expect("test terminal should be created");
 
@@ -2109,7 +2140,7 @@ fn colorscheme_picker_draws_input_dropdown() {
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
     app.open_options_menu();
-    app.move_options_menu_selection(4);
+    app.move_options_menu_selection(5);
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .expect("enter should open colorscheme picker");
     app.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE))
@@ -2177,7 +2208,7 @@ fn colorscheme_picker_previews_hovered_theme_and_reverts_on_close() {
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
     app.open_options_menu();
-    app.move_options_menu_selection(4);
+    app.move_options_menu_selection(5);
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .expect("enter should open colorscheme picker");
     let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 20))
@@ -2231,7 +2262,7 @@ fn colorscheme_picker_previews_first_hovered_theme() {
     app.config.color_scheme = ColorSchemeChoice::System;
     app.config.theme = DiffTheme::system();
     app.open_options_menu();
-    app.move_options_menu_selection(4);
+    app.move_options_menu_selection(5);
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
         .expect("enter should open colorscheme picker");
     let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 20))

@@ -237,6 +237,7 @@ pub(crate) enum OptionsMenuItem {
     ContextExpansion,
     SyntaxHighlighting,
     LineWrapping,
+    HorizontalScrollLock,
     Decorations,
     ColorScheme,
     NotificationMode,
@@ -253,6 +254,7 @@ pub(crate) const COMMON_OPTIONS_MENU_ITEMS: &[OptionsMenuItem] = &[
     // Review-view controls: most likely to vary per session.
     OptionsMenuItem::Layout,
     OptionsMenuItem::LineWrapping,
+    OptionsMenuItem::HorizontalScrollLock,
     OptionsMenuItem::SyntaxHighlighting,
     // Presentation controls: visual preferences and terminal fit.
     OptionsMenuItem::Decorations,
@@ -273,6 +275,7 @@ pub(crate) fn option_label(item: OptionsMenuItem) -> &'static str {
         OptionsMenuItem::ContextExpansion => "Context expand",
         OptionsMenuItem::SyntaxHighlighting => "Syntax highlighting",
         OptionsMenuItem::LineWrapping => "Line wrapping",
+        OptionsMenuItem::HorizontalScrollLock => "Horizontal scroll lock",
         OptionsMenuItem::Decorations => "Decorations",
         OptionsMenuItem::ColorScheme => "Colorscheme",
         OptionsMenuItem::NotificationMode => "Notification mode",
@@ -321,6 +324,7 @@ pub(crate) struct OptionsDraft {
     pub(crate) context_expansion: DiffContextExpansion,
     pub(crate) syntax_enabled: bool,
     pub(crate) line_wrapping: bool,
+    pub(crate) horizontal_scroll_locked: bool,
     pub(crate) decorations: DecorationPreference,
     pub(crate) color_scheme: ColorSchemeChoice,
     pub(crate) notification_mode: NotificationMode,

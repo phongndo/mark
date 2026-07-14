@@ -59,6 +59,10 @@ impl DiffApp {
     }
 
     pub(crate) fn scroll_horizontally_by(&mut self, delta: isize) {
+        if self.viewport.horizontal_scroll_locked {
+            return;
+        }
+
         let next = if delta < 0 {
             self.viewport
                 .horizontal_scroll
@@ -78,6 +82,41 @@ impl DiffApp {
             self.clear_diff_mouse_hover();
             self.runtime.dirty = true;
         }
+    }
+
+    pub(crate) fn toggle_horizontal_scroll_lock(&mut self) {
+        self.set_horizontal_scroll_lock(!self.viewport.horizontal_scroll_locked);
+    }
+
+    pub(crate) fn set_horizontal_scroll_lock(&mut self, locked: bool) {
+        if locked == self.viewport.horizontal_scroll_locked {
+            return;
+        }
+
+        self.viewport.horizontal_scroll_locked = locked;
+        self.runtime.dirty = true;
+    }
+
+    pub(crate) fn toggle_line_wrapping(&mut self) {
+        self.set_line_wrapping(!self.viewport.line_wrapping);
+    }
+
+    pub(crate) fn set_line_wrapping(&mut self, enabled: bool) {
+        if enabled == self.viewport.line_wrapping {
+            return;
+        }
+
+        let next_scroll = if enabled {
+            self.wrapped_visual_scroll_for_model_row(self.viewport.scroll)
+        } else {
+            self.model_row_at_scroll(self.viewport.scroll)
+                .map(|(row, _)| row)
+                .unwrap_or_default()
+        };
+        self.viewport.line_wrapping = enabled;
+        self.set_scroll(next_scroll);
+        self.set_horizontal_scroll(self.viewport.horizontal_scroll);
+        self.runtime.dirty = true;
     }
 
     pub(crate) fn set_scroll(&mut self, scroll: usize) {

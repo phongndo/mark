@@ -26,6 +26,8 @@ pub(crate) enum AppAction {
     ExpandContextDown,
     CollapseContextAll,
     ToggleLayout,
+    ToggleLineWrapping,
+    ToggleHorizontalScrollLock,
     EditHunk,
     CopyMarks,
     CopyErrorLog,
@@ -59,6 +61,8 @@ impl AppAction {
             GlobalAction::ExpandContextDown => Self::ExpandContextDown,
             GlobalAction::CollapseContextAll => Self::CollapseContextAll,
             GlobalAction::Layout => Self::ToggleLayout,
+            GlobalAction::LineWrapping => Self::ToggleLineWrapping,
+            GlobalAction::HorizontalScrollLock => Self::ToggleHorizontalScrollLock,
             GlobalAction::EditHunk => Self::EditHunk,
             GlobalAction::CopyMarks => Self::CopyMarks,
             GlobalAction::CopyErrorLog => Self::CopyErrorLog,
@@ -157,6 +161,14 @@ impl DiffApp {
             }
             AppAction::ToggleLayout => {
                 self.toggle_layout();
+                Ok(ActionOutcome::consumed())
+            }
+            AppAction::ToggleLineWrapping => {
+                self.toggle_line_wrapping();
+                Ok(ActionOutcome::consumed())
+            }
+            AppAction::ToggleHorizontalScrollLock => {
+                self.toggle_horizontal_scroll_lock();
                 Ok(ActionOutcome::consumed())
             }
             AppAction::EditHunk => Ok(ActionOutcome::effect(AppEffect::OpenFocusedHunkInEditor)),

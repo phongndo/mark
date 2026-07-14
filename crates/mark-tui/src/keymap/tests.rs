@@ -132,7 +132,52 @@ fn keymap_loads_legacy_syntax_toml_keymaps() {
             GlobalAction::Quit,
             KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)
         ));
+        assert_eq!(
+            keymap.global_action_label(GlobalAction::HorizontalScrollLock),
+            "unbound"
+        );
     });
+}
+
+#[test]
+fn new_view_defaults_do_not_conflict_with_existing_custom_bindings() {
+    let keymap = Keymap::parse(
+        r#"
+            [keymap.global]
+            reload = "w"
+            quit = "x"
+            "#,
+    )
+    .expect("existing custom bindings should take precedence over new defaults");
+
+    assert_eq!(
+        keymap.global_action_label(GlobalAction::LineWrapping),
+        "unbound"
+    );
+    assert_eq!(
+        keymap.global_action_label(GlobalAction::HorizontalScrollLock),
+        "unbound"
+    );
+}
+
+#[test]
+fn new_view_defaults_allow_overlapping_mark_draft_bindings() {
+    let keymap = Keymap::parse(
+        r#"
+            [keymap.global]
+            save_mark = "w"
+            cancel_mark = "x"
+            "#,
+    )
+    .expect("draft-only bindings may overlap normal global bindings");
+
+    assert_eq!(keymap.global_action_label(GlobalAction::LineWrapping), "w");
+    assert_eq!(
+        keymap.global_action_label(GlobalAction::HorizontalScrollLock),
+        "x"
+    );
+    assert_eq!(keymap.global_action_label(GlobalAction::SaveMark), "w");
+    assert_eq!(keymap.global_action_label(GlobalAction::CancelMark), "x");
 }
 
 #[test]
@@ -208,6 +253,14 @@ fn default_review_actions_use_mnemonic_keys() {
     assert!(keymap.matches_single(
         GlobalAction::Layout,
         KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE)
+    ));
+    assert!(keymap.matches_single(
+        GlobalAction::LineWrapping,
+        KeyEvent::new(KeyCode::Char('w'), KeyModifiers::NONE)
+    ));
+    assert!(keymap.matches_single(
+        GlobalAction::HorizontalScrollLock,
+        KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)
     ));
     assert!(!keymap.matches_single(
         GlobalAction::EditHunk,

@@ -68,6 +68,14 @@ pub(crate) const HELP_MENU_ROWS: &[HelpMenuRow] = &[
         "toggle file sidebar",
     ),
     HelpMenuRow::Binding(HelpMenuKey::Global(GlobalAction::Layout), "split / unified"),
+    HelpMenuRow::Binding(
+        HelpMenuKey::Global(GlobalAction::LineWrapping),
+        "toggle line wrapping",
+    ),
+    HelpMenuRow::Binding(
+        HelpMenuKey::Global(GlobalAction::HorizontalScrollLock),
+        "lock / unlock horizontal scroll",
+    ),
     HelpMenuRow::Binding(HelpMenuKey::Global(GlobalAction::Reload), "reload diff"),
     HelpMenuRow::Binding(HelpMenuKey::Global(GlobalAction::DiffMenu), "diff selector"),
     HelpMenuRow::Binding(
