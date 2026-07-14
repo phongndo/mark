@@ -32,23 +32,23 @@ class CatalogPerformanceTests(unittest.TestCase):
     def test_completed_count_policy_cannot_be_lowered_with_regenerated_outputs(self):
         policy = {
             "expectedCounts": {
-                "publicLanguages": 256,
-                "validatedLanguages": 256,
-                "oracleLanguages": 256,
-                "stressCorpusLanguages": 256,
+                "publicLanguages": 264,
+                "validatedLanguages": 264,
+                "oracleLanguages": 264,
+                "stressCorpusLanguages": 264,
             }
         }
-        with self.assertRaisesRegex(ValueError, "validatedLanguages=256, found 255"):
+        with self.assertRaisesRegex(ValueError, "validatedLanguages=264, found 263"):
             CORPORA.assert_locked_counts(
-                policy, public=256, validated=255, oracle=256, stress_corpus=256
+                policy, public=264, validated=263, oracle=264, stress_corpus=264
             )
         policy["schemaVersion"] = 1
         policy["expectedCounts"] = dict(policy["expectedCounts"])
-        policy["expectedCounts"]["validatedLanguages"] = 255
+        policy["expectedCounts"]["validatedLanguages"] = 263
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "policy.json").write_text(json.dumps(policy))
-            with self.assertRaisesRegex(ValueError, "must remain locked at 256"):
+            with self.assertRaisesRegex(ValueError, "must remain locked at 264"):
                 CORPORA.load_policy(root, Path("policy.json"))
 
     def test_corpus_check_rejects_regenerated_count_drift(self):

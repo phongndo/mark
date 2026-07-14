@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "publicLanguages": 256,
-  "grammarAssets": 260,
+  "publicLanguages": 264,
+  "grammarAssets": 268,
   "shiki": {
     "version": "3.23.0",
     "commit": "1850697815131b3e4ab6a5ac794c58af10bc1c4b"
@@ -239,6 +239,16 @@
       "target": "pinned-package",
       "reference": "@shikijs/langs@3.23.0:asm.mjs",
       "dependencies": []
+    },
+    {
+      "language": "assemblyscript",
+      "scopeName": "source.assemblyscript",
+      "canonicalSha256": "d920e6d028c05a83ade1d6a617ba2557a1393d6d272c58a18821512c7553df44",
+      "target": "pinned-package",
+      "reference": "https://github.com/AssemblyScript/assemblyscript@0.28.19:mark profile: source.ts",
+      "dependencies": [
+        "source.ts"
+      ]
     },
     {
       "language": "astro",
@@ -546,6 +556,16 @@
       "target": "pinned-package",
       "reference": "@shikijs/langs@3.23.0:csv.mjs",
       "dependencies": []
+    },
+    {
+      "language": "cuda",
+      "scopeName": "source.cuda-cpp",
+      "canonicalSha256": "eab06b207ec7dfbff650602abbb52e55c33f355bbcc7c2c080e502dde7baca2f",
+      "target": "pinned-package",
+      "reference": "https://github.com/kriegalex/vscode-cuda@0.1.1:syntaxes/cuda.tmLanguage.json",
+      "dependencies": [
+        "source.cpp"
+      ]
     },
     {
       "language": "cue",
@@ -1611,6 +1631,14 @@
       "dependencies": []
     },
     {
+      "language": "metal",
+      "scopeName": "source.metal",
+      "canonicalSha256": "afb56276b9e6a17031c661e8e9b11e5d5370575adab8154d84b357fe09921432",
+      "target": "pinned-package",
+      "reference": "https://github.com/computer-graphics-tools/metal-analyzer@0.1.22:editors/code/syntaxes/metal.tmLanguage.json",
+      "dependencies": []
+    },
+    {
       "language": "mipsasm",
       "scopeName": "source.mips",
       "canonicalSha256": "d64a6473a3546a57e6fd73538ae7f9e0c0842c85ffcd42867f723d542fdc268a",
@@ -1757,6 +1785,16 @@
       "target": "pinned-package",
       "reference": "@shikijs/langs@3.23.0:odin.mjs",
       "dependencies": []
+    },
+    {
+      "language": "opencl",
+      "scopeName": "source.opencl",
+      "canonicalSha256": "606a7e262a9c92ebda19030c3cc012700f8057880c1aba8b5a6bc2c80f3ddf16",
+      "target": "pinned-package",
+      "reference": "https://github.com/Galarius/vscode-opencl@0.10.0:contributes/opencl.tmLanguage.json",
+      "dependencies": [
+        "source.cpp"
+      ]
     },
     {
       "language": "openscad",
@@ -2005,6 +2043,14 @@
       "dependencies": []
     },
     {
+      "language": "rego",
+      "scopeName": "source.rego",
+      "canonicalSha256": "041971ce992d277353add44e44197ff049c5a0da22434a67df0d6befae8a90b2",
+      "target": "pinned-package",
+      "reference": "https://github.com/open-policy-agent/vscode-opa@0.23.0:syntaxes/Rego.tmLanguage",
+      "dependencies": []
+    },
+    {
       "language": "rel",
       "scopeName": "source.rel",
       "canonicalSha256": "29bf290207f2db7f6ba4f4fb1363c459b8825ee4928b5a938406c9040dba46fb",
@@ -2205,6 +2251,14 @@
       ]
     },
     {
+      "language": "spirv",
+      "scopeName": "source.spirv",
+      "canonicalSha256": "ab632edfa2cf0a1c5ece50e8d6b6dbc7d830a2241f3fe22f24de3114fd473f01",
+      "target": "pinned-package",
+      "reference": "https://github.com/KhronosGroup/SPIRV-Tools@0.0.1:utils/vscode/spirv.json",
+      "dependencies": []
+    },
+    {
       "language": "splunk",
       "scopeName": "source.splunk_search",
       "canonicalSha256": "e0e59336a1d7316db6cc9cf2e940e07d4ded80c7d3f156d7c9da61500061fa43",
@@ -2226,6 +2280,14 @@
       "canonicalSha256": "fca0131fcdca0d7bfe9283486824720dd887e029a86f7fb5ab0da05566073fc8",
       "target": "pinned-package",
       "reference": "@shikijs/langs@3.23.0:ssh-config.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "starlark",
+      "scopeName": "source.starlark",
+      "canonicalSha256": "1495214fbffe6012b34fa7288df5617b9ff493641d104bcf18cd03c155f3cfbb",
+      "target": "pinned-package",
+      "reference": "https://github.com/bazel-contrib/vscode-bazel@0.14.0:syntaxes/starlark.tmLanguage.json",
       "dependencies": []
     },
     {
@@ -2609,6 +2671,14 @@
       "canonicalSha256": "1172e26e1208ca881dcca830c1831cde55d76529d04ea3f86d57e3446ef354d7",
       "target": "pinned-package",
       "reference": "@shikijs/langs@3.23.0:wasm.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "webidl",
+      "scopeName": "source.webidl",
+      "canonicalSha256": "98c935a4209fa038f9b31a5ab0a31f9c908704184e2d14ff72e9ea3628f24a85",
+      "target": "pinned-package",
+      "reference": "https://github.com/nberlette/vscode-webidl@0.2.0:syntaxes/webidl.tmLanguage.json",
       "dependencies": []
     },
     {

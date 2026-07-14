@@ -81,14 +81,15 @@ so TUI queue/LRU layers do not need a redesign:
 ## Public language catalog
 
 <!-- BEGIN GENERATED: language-counts -->
-Completed generated coverage: **256 supported public language IDs**, **256 validated**, **256 oracle-covered**, and **256 in the catalog stress corpus**. The locked quality contract is 256/256 validated; the deterministic validation policy locks all four counts and the exact catalog identity (SHA-256 of the sorted public-ID list), so regeneration cannot make a lost public-ID basic/stress contract look complete or swap one language for another. See [`language-status.md`](language-status.md) for the generated ledger.
+Completed generated coverage: **264 supported public language IDs**, **264 validated**, **264 oracle-covered**, and **264 in the catalog stress corpus**. The locked quality contract is 264/264 validated; the deterministic validation policy locks all four counts and the exact catalog identity (SHA-256 of the sorted public-ID list), so regeneration cannot make a lost public-ID basic/stress contract look complete or swap one language for another. See [`language-status.md`](language-status.md) for the generated ledger.
 <!-- END GENERATED: language-counts -->
 
-The native catalog is the full pinned Shiki language set plus the MLIR grammar
-imported from LLVM, vendored under `assets/tm-grammars/languages/`. The active
-public ids are listed in `assets/tm-grammars/coverage.toml`; private dependency
-blobs such as `yang` and `twig-source` are embedded but hidden from user-facing
-language selection.
+The native catalog is the full pinned Shiki language set plus audited external
+grammars vendored under `assets/tm-grammars/languages/`. The active public IDs
+are listed in `assets/tm-grammars/coverage.toml`; dependency-only blobs such as
+`twig-source`, `yaml-1.2`, and `yaml-embedded` remain hidden from user-facing
+language selection. Planned catalog batches are tracked in
+[`future-language-support.md`](future-language-support.md).
 
 The original core regression set remains covered by fixtures and includes:
 
@@ -135,8 +136,9 @@ Path detection reads the checked-in
 `assets/tm-grammars/language-metadata.json` contract, generated
 deterministically from the pinned registration aliases and grammar
 `fileTypes`, then merges the curated mappings in `catalog.rs`. The contract
-covers all 256 public IDs (253 Shiki IDs plus `mlir`, `ignore`, and `yang`). Tests compare every
-alias, extension, and basename exactly with the built catalog and require all
+covers all 264 public IDs (253 Shiki IDs plus 11 additional public grammars).
+Tests compare every alias, extension, and basename exactly with the built
+catalog and require all
 collisions to have explicit precedence or suppression; ambiguous entries are
 never skipped. Generic `.conf` files use `apache`, `.v` files use `verilog`,
 and `.js` files use `javascript`. Losing generated extensions are omitted,
@@ -181,7 +183,7 @@ The first command atomically writes
 report whose catalog membership, corpus digest, or policy floor is stale. New
 validated languages also need an explicit ISO date in
 `benchmarks/textmate/language-promotions.json`; dates are never inferred from
-the current day. Every current entry is 2026-07-14 because all 256 promotions
+the current day. Every current entry is 2026-07-14 because all 264 promotions
 were re-locked in that final completed batch, not because the generator assigned
 a global rollout date.
 
@@ -420,7 +422,7 @@ documented reference runner. Commit the reviewed timing decision to
 `tools/textmate-golden-scale-policy.json` rather than silently changing CI.
 
 <!-- BEGIN GENERATED: golden-scale-policy -->
-Static gate: measure at **124 manifest cases**, after **1 warmup** and **5 timed runs**. Keep the suite unsharded at p95 ≤ **60 s**; above that, choose a reviewed count of at most **8 stable language-ID shards** whose maximum p95 is ≤ **45 s**. Final scale is at least **512 cases** for **256 public IDs**. Use nearest-rank p95 on **local development machine (L0.6 baseline)**. Current decision: **528 cases** measured at **62.29 s p95**, above the **60 s** trigger, so CI runs **4 shards**. Measured per-shard p95 (2026-07-14): shard 0 = 17.13 s, shard 1 = 21.41 s, shard 2 = 8.42 s, shard 3 = 13.72 s; maximum **21.41 s** ≤ the **45 s** shard target.
+Static gate: measure at **124 manifest cases**, after **1 warmup** and **5 timed runs**. Keep the suite unsharded at p95 ≤ **60 s**; above that, choose a reviewed count of at most **8 stable language-ID shards** whose maximum p95 is ≤ **45 s**. Final scale is at least **528 cases** for **264 public IDs**. Use nearest-rank p95 on **local development machine (L0.6 baseline)**. Current decision: **544 cases** measured at **62.41 s p95**, above the **60 s** trigger, so CI runs **4 shards**. Measured per-shard p95 (2026-07-14): shard 0 = 17.11 s, shard 1 = 21.76 s, shard 2 = 8.57 s, shard 3 = 13.88 s; maximum **21.76 s** ≤ the **45 s** shard target.
 <!-- END GENERATED: golden-scale-policy -->
 
 If sharding is required, assign all cases for one public language to the same

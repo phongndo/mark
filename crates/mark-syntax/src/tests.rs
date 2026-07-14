@@ -111,6 +111,7 @@ fn detects_bundled_language_paths_and_basenames() {
         detect_language_from_path("WORKSPACE").as_deref(),
         Some("starlark")
     );
+    assert_eq!(detect_language_from_path(".bazelrc"), None);
     assert_eq!(
         detect_language_from_path("src/module.mjs").as_deref(),
         Some("javascript")
@@ -145,7 +146,7 @@ fn tex_extension_uses_vscode_latex_language() {
 
 #[test]
 fn backend_catalog_contains_the_core_pack() {
-    assert_eq!(installed_language_set().len(), 256);
+    assert_eq!(installed_language_set().len(), 264);
     assert!(core_enabled_language_set().contains("rust"));
     assert!(core_enabled_language_set().contains("bash"));
     assert!(core_language_set().contains("rust"));

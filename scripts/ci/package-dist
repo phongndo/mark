@@ -39,6 +39,18 @@ rm -rf "$package_dir"
 mkdir -p "$package_dir"
 install -m 755 "$binary" "$package_dir/mark"
 cp README.md LICENSE "$package_dir/"
+notices="$package_dir/THIRD_PARTY_NOTICES"
+: > "$notices"
+for notice in assets/tm-grammars/licenses/*.license; do
+  notice_name="${notice##*/}"
+  {
+    printf '%s\n' '================================================================================'
+    printf '%s\n' "$notice_name"
+    printf '%s\n\n' '================================================================================'
+    cat "$notice"
+    printf '\n\n'
+  } >> "$notices"
+done
 if [ -n "$revision" ]; then
   printf '%s\n' "$revision" > "$package_dir/REVISION"
 fi

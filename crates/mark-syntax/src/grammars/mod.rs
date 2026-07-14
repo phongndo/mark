@@ -118,8 +118,8 @@ mod tests {
         let bundle = embedded_bundle();
         // Full public catalog plus private dependency blobs. `coverage.toml`
         // decides which embedded blobs are public catalog entries.
-        assert_eq!(bundle.languages.len(), 256);
-        assert_eq!(bundle.grammar_blobs.len(), 260);
+        assert_eq!(bundle.languages.len(), 264);
+        assert_eq!(bundle.grammar_blobs.len(), 268);
         assert!(
             bundle
                 .grammar_blob_for_scope("source.cpp.embedded.macro")
@@ -176,6 +176,33 @@ mod tests {
             Some("docker")
         );
         assert_eq!(bundle.detect_language_from_path("Makefile"), Some("make"));
+        assert_eq!(bundle.detect_language_from_path("BUILD"), Some("starlark"));
+        assert_eq!(bundle.detect_language_from_path(".bazelrc"), None);
+        assert_eq!(
+            bundle.detect_language_from_path("kernels/scale.cu"),
+            Some("cuda")
+        );
+        assert_eq!(
+            bundle.detect_language_from_path("shaders/module.spvasm"),
+            Some("spirv")
+        );
+        assert_eq!(
+            bundle.detect_language_from_path("kernels/scale.cl"),
+            Some("opencl")
+        );
+        assert_eq!(
+            bundle.detect_language_from_path("shaders/main.metal"),
+            Some("metal")
+        );
+        assert_eq!(
+            bundle.detect_language_from_path("policy/authz.rego"),
+            Some("rego")
+        );
+        assert_eq!(
+            bundle.detect_language_from_path("interfaces/catalog.webidl"),
+            Some("webidl")
+        );
+        assert_eq!(bundle.canonical_language("asc"), Some("assemblyscript"));
         assert_eq!(
             bundle.detect_language_from_path(".gitignore"),
             Some("ignore")
@@ -219,6 +246,114 @@ mod tests {
     }
 
     #[test]
+    fn embedded_bundle_preserves_external_license_provenance() {
+        let expected = [
+            (
+                "assemblyscript",
+                "https://github.com/AssemblyScript/assemblyscript",
+                "0.28.19",
+                "ASSEMBLYSCRIPT NOTICE",
+            ),
+            (
+                "cuda",
+                "https://github.com/kriegalex/vscode-cuda",
+                "0.1.1",
+                "Copyright (c) 2017 Marco L.",
+            ),
+            (
+                "metal",
+                "https://github.com/computer-graphics-tools/metal-analyzer",
+                "0.1.22",
+                "Copyright (c) 2026 Computer Graphics Tools",
+            ),
+            (
+                "opencl",
+                "https://github.com/Galarius/vscode-opencl",
+                "0.10.0",
+                "Copyright (c) 2017 Ilya Shoshin",
+            ),
+            (
+                "rego",
+                "https://github.com/open-policy-agent/vscode-opa",
+                "0.23.0",
+                "Apache License",
+            ),
+            (
+                "spirv",
+                "https://github.com/KhronosGroup/SPIRV-Tools",
+                "0.0.1",
+                "Apache License",
+            ),
+            (
+                "starlark",
+                "https://github.com/bazel-contrib/vscode-bazel",
+                "0.14.0",
+                "Copyright (c) 2015 MagicStack Inc.",
+            ),
+            (
+                "webidl",
+                "https://github.com/nberlette/vscode-webidl",
+                "0.2.0",
+                "Copyright (c) 2026 Nicholas Berlette.",
+            ),
+        ];
+        let licenses = bundled_licenses();
+        for (language, repository, revision, notice) in expected {
+            let license = licenses
+                .iter()
+                .find(|license| license.language == language)
+                .unwrap_or_else(|| panic!("missing license metadata for {language}"));
+            assert_eq!(license.upstream_url, repository, "{language}");
+            assert_eq!(license.source_revision, revision, "{language}");
+            assert!(license.license_text.contains(notice), "{language}");
+        }
+
+        let existing_external = [
+            ("dart", "https://github.com/microsoft/vscode", "1.128.0"),
+            (
+                "handlebars",
+                "https://github.com/microsoft/vscode",
+                "1.128.0",
+            ),
+            ("ignore", "https://github.com/microsoft/vscode", "1.128.0"),
+            (
+                "js-regexp",
+                "https://github.com/microsoft/vscode",
+                "1.128.0",
+            ),
+            ("php", "https://github.com/microsoft/vscode", "1.128.0"),
+            ("pug", "https://github.com/microsoft/vscode", "1.128.0"),
+            ("r", "https://github.com/microsoft/vscode", "1.128.0"),
+            ("rst", "https://github.com/microsoft/vscode", "1.128.0"),
+            ("yaml", "https://github.com/microsoft/vscode", "1.128.0"),
+            ("yaml-1.2", "https://github.com/microsoft/vscode", "1.128.0"),
+            (
+                "yaml-embedded",
+                "https://github.com/microsoft/vscode",
+                "1.128.0",
+            ),
+            (
+                "yang",
+                "https://github.com/marko2276/yang-vscode-syntax",
+                "0.1.3",
+            ),
+            (
+                "mlir",
+                "https://github.com/llvm/llvm-project",
+                "llvmorg-18.1.8",
+            ),
+        ];
+        for (language, repository, revision) in existing_external {
+            let license = licenses
+                .iter()
+                .find(|license| license.language == language)
+                .unwrap_or_else(|| panic!("missing license metadata for {language}"));
+            assert_eq!(license.upstream_url, repository, "{language}");
+            assert_eq!(license.source_revision, revision, "{language}");
+        }
+    }
+
+    #[test]
     fn pinned_language_metadata_matches_every_public_catalog_entry() {
         #[derive(serde::Deserialize)]
         #[serde(rename_all = "camelCase")]
@@ -245,8 +380,8 @@ mod tests {
         .unwrap();
         let bundle = embedded_bundle();
         assert_eq!(manifest.schema_version, 1);
-        assert_eq!(manifest.languages.len(), 256);
-        assert_eq!(bundle.languages.len(), 256);
+        assert_eq!(manifest.languages.len(), 264);
+        assert_eq!(bundle.languages.len(), 264);
 
         let metadata_by_id = manifest
             .languages

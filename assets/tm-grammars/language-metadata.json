@@ -161,6 +161,14 @@
       "basenames": []
     },
     {
+      "id": "assemblyscript",
+      "aliases": [
+        "asc"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
       "id": "astro",
       "aliases": [],
       "extensions": [
@@ -434,6 +442,15 @@
       "aliases": [],
       "extensions": [
         "csv"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "cuda",
+      "aliases": [],
+      "extensions": [
+        "cu",
+        "cuh"
       ],
       "basenames": []
     },
@@ -1267,6 +1284,16 @@
       "basenames": []
     },
     {
+      "id": "metal",
+      "aliases": [
+        "msl"
+      ],
+      "extensions": [
+        "metal"
+      ],
+      "basenames": []
+    },
+    {
       "id": "mipsasm",
       "aliases": [
         "mips"
@@ -1399,6 +1426,15 @@
       "id": "odin",
       "aliases": [],
       "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "opencl",
+      "aliases": [],
+      "extensions": [
+        "cl",
+        "ocl"
+      ],
       "basenames": []
     },
     {
@@ -1639,6 +1675,14 @@
       "basenames": []
     },
     {
+      "id": "rego",
+      "aliases": [],
+      "extensions": [
+        "rego"
+      ],
+      "basenames": []
+    },
+    {
       "id": "rel",
       "aliases": [],
       "extensions": [],
@@ -1810,6 +1854,17 @@
       "basenames": []
     },
     {
+      "id": "spirv",
+      "aliases": [
+        "spir-v",
+        "spirv-asm"
+      ],
+      "extensions": [
+        "spvasm"
+      ],
+      "basenames": []
+    },
+    {
       "id": "splunk",
       "aliases": [
         "spl"
@@ -1833,6 +1888,22 @@
         "ssh_config",
         "ssh/config",
         "sshd_config"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "starlark",
+      "aliases": [
+        "bazel"
+      ],
+      "extensions": [
+        "bazel",
+        "build",
+        "bzl",
+        "bzlmod",
+        "sky",
+        "star",
+        "workspace"
       ],
       "basenames": []
     },
@@ -2136,6 +2207,15 @@
       "id": "wasm",
       "aliases": [],
       "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "webidl",
+      "aliases": [],
+      "extensions": [
+        "idl",
+        "webidl"
+      ],
       "basenames": []
     },
     {

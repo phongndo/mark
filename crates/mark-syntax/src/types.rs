@@ -462,7 +462,6 @@ pub(crate) const BASENAME_LANGUAGES: &[(&str, &str)] = &[
     ("gnumakefile", "make"),
     ("bsdmakefile", "make"),
     ("cmakelists.txt", "cmake"),
-    (".bazelrc", "starlark"),
     (".clang-format", "yaml"),
     (".clang-tidy", "yaml"),
     (".dockerignore", "ignore"),

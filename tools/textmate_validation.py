@@ -18,12 +18,12 @@ EXPECTED_COUNT_KEYS = (
     "oracleLanguages",
     "stressCorpusLanguages",
 )
-LOCKED_COMPLETED_COUNT = 256
+LOCKED_COMPLETED_COUNT = 264
 # SHA-256 of the sorted, newline-joined public catalog IDs. Locks the exact
-# 256-language identity: a coverage edit that swaps one language for another
-# keeps every count at 256 and regenerates cleanly, so the count locks alone
+# 264-language identity: a coverage edit that swaps one language for another
+# keeps every count at 264 and regenerates cleanly, so the count locks alone
 # would not notice.
-LOCKED_CATALOG_SHA256 = "d784d8e91d1e413425af2b070d6da4a0c5ea6f8598cb0e07c62057f85b14840d"
+LOCKED_CATALOG_SHA256 = "5447bcb68e371a9c5152d2d2b0ff262f86742018da622437025a87cb0a91a7f1"
 
 
 @dataclass(frozen=True)

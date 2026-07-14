@@ -1039,6 +1039,28 @@ fixture = "crates/mark-syntax/tests/fixtures/textmate/asm/stress.asm"
 golden = "crates/mark-syntax/tests/fixtures/textmate/asm/stress.golden.jsonl"
 
 [[case]]
+language = "assemblyscript"
+scope = "source.assemblyscript"
+grammar = "assets/tm-grammars/languages/assemblyscript.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/assemblyscript/basic.ts"
+golden = "crates/mark-syntax/tests/fixtures/textmate/assemblyscript/basic.golden.jsonl"
+
+[[case.embedded]]
+scope = "source.ts"
+grammar = "assets/tm-grammars/languages/typescript.tmLanguage.json"
+
+[[case]]
+language = "assemblyscript"
+scope = "source.assemblyscript"
+grammar = "assets/tm-grammars/languages/assemblyscript.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/assemblyscript/stress.ts"
+golden = "crates/mark-syntax/tests/fixtures/textmate/assemblyscript/stress.golden.jsonl"
+
+[[case.embedded]]
+scope = "source.ts"
+grammar = "assets/tm-grammars/languages/typescript.tmLanguage.json"
+
+[[case]]
 language = "astro"
 scope = "source.astro"
 grammar = "assets/tm-grammars/languages/astro.tmLanguage.json"
@@ -1833,6 +1855,68 @@ scope = "text.csv"
 grammar = "assets/tm-grammars/languages/csv.tmLanguage.json"
 fixture = "crates/mark-syntax/tests/fixtures/textmate/csv/stress.csv"
 golden = "crates/mark-syntax/tests/fixtures/textmate/csv/stress.golden.jsonl"
+
+[[case]]
+language = "cuda"
+scope = "source.cuda-cpp"
+grammar = "assets/tm-grammars/languages/cuda.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/cuda/basic.cu"
+golden = "crates/mark-syntax/tests/fixtures/textmate/cuda/basic.golden.jsonl"
+
+[[case.embedded]]
+scope = "source.c"
+grammar = "assets/tm-grammars/languages/c.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.cpp"
+grammar = "assets/tm-grammars/languages/cpp.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.cpp.embedded.macro"
+grammar = "assets/tm-grammars/languages/cpp-macro.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.glsl"
+grammar = "assets/tm-grammars/languages/glsl.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.regexp.python"
+grammar = "assets/tm-grammars/languages/regexp.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.sql"
+grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"
+
+[[case]]
+language = "cuda"
+scope = "source.cuda-cpp"
+grammar = "assets/tm-grammars/languages/cuda.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/cuda/stress.cu"
+golden = "crates/mark-syntax/tests/fixtures/textmate/cuda/stress.golden.jsonl"
+
+[[case.embedded]]
+scope = "source.c"
+grammar = "assets/tm-grammars/languages/c.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.cpp"
+grammar = "assets/tm-grammars/languages/cpp.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.cpp.embedded.macro"
+grammar = "assets/tm-grammars/languages/cpp-macro.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.glsl"
+grammar = "assets/tm-grammars/languages/glsl.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.regexp.python"
+grammar = "assets/tm-grammars/languages/regexp.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.sql"
+grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"
 
 [[case]]
 language = "cue"
@@ -9659,6 +9743,20 @@ fixture = "crates/mark-syntax/tests/fixtures/textmate/mermaid/stress.md"
 golden = "crates/mark-syntax/tests/fixtures/textmate/mermaid/stress.golden.jsonl"
 
 [[case]]
+language = "metal"
+scope = "source.metal"
+grammar = "assets/tm-grammars/languages/metal.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/metal/basic.metal"
+golden = "crates/mark-syntax/tests/fixtures/textmate/metal/basic.golden.jsonl"
+
+[[case]]
+language = "metal"
+scope = "source.metal"
+grammar = "assets/tm-grammars/languages/metal.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/metal/stress.metal"
+golden = "crates/mark-syntax/tests/fixtures/textmate/metal/stress.golden.jsonl"
+
+[[case]]
 language = "mipsasm"
 scope = "source.mips"
 grammar = "assets/tm-grammars/languages/mipsasm.tmLanguage.json"
@@ -10482,6 +10580,68 @@ fixture = "crates/mark-syntax/tests/fixtures/textmate/odin/stress.odin"
 golden = "crates/mark-syntax/tests/fixtures/textmate/odin/stress.golden.jsonl"
 
 [[case]]
+language = "opencl"
+scope = "source.opencl"
+grammar = "assets/tm-grammars/languages/opencl.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/opencl/basic.cl"
+golden = "crates/mark-syntax/tests/fixtures/textmate/opencl/basic.golden.jsonl"
+
+[[case.embedded]]
+scope = "source.c"
+grammar = "assets/tm-grammars/languages/c.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.cpp"
+grammar = "assets/tm-grammars/languages/cpp.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.cpp.embedded.macro"
+grammar = "assets/tm-grammars/languages/cpp-macro.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.glsl"
+grammar = "assets/tm-grammars/languages/glsl.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.regexp.python"
+grammar = "assets/tm-grammars/languages/regexp.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.sql"
+grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"
+
+[[case]]
+language = "opencl"
+scope = "source.opencl"
+grammar = "assets/tm-grammars/languages/opencl.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/opencl/stress.cl"
+golden = "crates/mark-syntax/tests/fixtures/textmate/opencl/stress.golden.jsonl"
+
+[[case.embedded]]
+scope = "source.c"
+grammar = "assets/tm-grammars/languages/c.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.cpp"
+grammar = "assets/tm-grammars/languages/cpp.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.cpp.embedded.macro"
+grammar = "assets/tm-grammars/languages/cpp-macro.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.glsl"
+grammar = "assets/tm-grammars/languages/glsl.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.regexp.python"
+grammar = "assets/tm-grammars/languages/regexp.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.sql"
+grammar = "assets/tm-grammars/languages/sql.tmLanguage.json"
+
+[[case]]
 language = "openscad"
 scope = "source.scad"
 grammar = "assets/tm-grammars/languages/openscad.tmLanguage.json"
@@ -11092,6 +11252,20 @@ scope = "source.regexp.python"
 grammar = "assets/tm-grammars/languages/regexp.tmLanguage.json"
 fixture = "crates/mark-syntax/tests/fixtures/textmate/regexp/stress.re"
 golden = "crates/mark-syntax/tests/fixtures/textmate/regexp/stress.golden.jsonl"
+
+[[case]]
+language = "rego"
+scope = "source.rego"
+grammar = "assets/tm-grammars/languages/rego.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/rego/basic.rego"
+golden = "crates/mark-syntax/tests/fixtures/textmate/rego/basic.golden.jsonl"
+
+[[case]]
+language = "rego"
+scope = "source.rego"
+grammar = "assets/tm-grammars/languages/rego.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/rego/stress.rego"
+golden = "crates/mark-syntax/tests/fixtures/textmate/rego/stress.golden.jsonl"
 
 [[case]]
 language = "rel"
@@ -12834,6 +13008,20 @@ scope = "source.turtle"
 grammar = "assets/tm-grammars/languages/turtle.tmLanguage.json"
 
 [[case]]
+language = "spirv"
+scope = "source.spirv"
+grammar = "assets/tm-grammars/languages/spirv.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/spirv/basic.spvasm"
+golden = "crates/mark-syntax/tests/fixtures/textmate/spirv/basic.golden.jsonl"
+
+[[case]]
+language = "spirv"
+scope = "source.spirv"
+grammar = "assets/tm-grammars/languages/spirv.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/spirv/stress.spvasm"
+golden = "crates/mark-syntax/tests/fixtures/textmate/spirv/stress.golden.jsonl"
+
+[[case]]
 language = "splunk"
 scope = "source.splunk_search"
 grammar = "assets/tm-grammars/languages/splunk.tmLanguage.json"
@@ -12881,6 +13069,20 @@ scope = "source.ssh-config"
 grammar = "assets/tm-grammars/languages/ssh-config.tmLanguage.json"
 fixture = "crates/mark-syntax/tests/fixtures/textmate/ssh-config/stress.conf"
 golden = "crates/mark-syntax/tests/fixtures/textmate/ssh-config/stress.golden.jsonl"
+
+[[case]]
+language = "starlark"
+scope = "source.starlark"
+grammar = "assets/tm-grammars/languages/starlark.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/starlark/basic.bzl"
+golden = "crates/mark-syntax/tests/fixtures/textmate/starlark/basic.golden.jsonl"
+
+[[case]]
+language = "starlark"
+scope = "source.starlark"
+grammar = "assets/tm-grammars/languages/starlark.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/starlark/stress.bzl"
+golden = "crates/mark-syntax/tests/fixtures/textmate/starlark/stress.golden.jsonl"
 
 [[case]]
 language = "stata"
@@ -15295,6 +15497,20 @@ scope = "source.wat"
 grammar = "assets/tm-grammars/languages/wasm.tmLanguage.json"
 fixture = "crates/mark-syntax/tests/fixtures/textmate/wasm/stress.wat"
 golden = "crates/mark-syntax/tests/fixtures/textmate/wasm/stress.golden.jsonl"
+
+[[case]]
+language = "webidl"
+scope = "source.webidl"
+grammar = "assets/tm-grammars/languages/webidl.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/webidl/basic.webidl"
+golden = "crates/mark-syntax/tests/fixtures/textmate/webidl/basic.golden.jsonl"
+
+[[case]]
+language = "webidl"
+scope = "source.webidl"
+grammar = "assets/tm-grammars/languages/webidl.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/webidl/stress.webidl"
+golden = "crates/mark-syntax/tests/fixtures/textmate/webidl/stress.golden.jsonl"
 
 [[case]]
 language = "wenyan"

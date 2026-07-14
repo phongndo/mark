@@ -102,6 +102,10 @@ def build_report(verify_vscode: bool) -> dict[str, object]:
         for required in ("source", "version", "license", "module"):
             if not record.get(required):
                 raise SystemExit(f"{language}: missing provenance field {required}")
+        if notice := record.get("licenseTextPath"):
+            notice_path = ROOT / "assets/tm-grammars" / notice
+            if not notice_path.is_file():
+                raise SystemExit(f"{language}: missing license notice {notice}")
         target = "pinned-package"
         reference_name = record.get("package") or record.get("repository") or record["source"]
         reference = f"{reference_name}@{record['version']}:{record['module']}"

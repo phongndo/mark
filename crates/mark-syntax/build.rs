@@ -84,6 +84,15 @@ struct LicenseEntry {
     source_revision: String,
 }
 
+#[derive(Debug, Clone)]
+struct AssetLicense {
+    source_path: String,
+    upstream_url: String,
+    spdx_id: String,
+    license_text: String,
+    source_revision: String,
+}
+
 fn main() {
     println!("cargo:rustc-check-cfg=cfg(rust_analyzer)");
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("manifest dir"));
@@ -169,29 +178,74 @@ fn build_bundle(assets: &Path, input_hash: u64) -> Result<Vec<u8>, String> {
         .and_then(|v| v.as_str())
         .unwrap_or_default()
         .to_owned();
-    let license_by_language = licenses
+    let mut license_by_language = BTreeMap::new();
+    for asset in licenses
         .get("assets")
         .and_then(|v| v.as_array())
         .into_iter()
         .flatten()
-        .filter_map(|asset| {
-            Some((
-                asset.get("language")?.as_str()?.to_owned(),
-                (
-                    asset
-                        .get("path")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default()
-                        .to_owned(),
-                    asset
-                        .get("license")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or(default_license.as_str())
-                        .to_owned(),
-                ),
-            ))
-        })
-        .collect::<BTreeMap<_, _>>();
+    {
+        let Some(language) = asset
+            .get("language")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned)
+        else {
+            continue;
+        };
+        let license_text = asset
+            .get("licenseTextPath")
+            .and_then(|v| v.as_str())
+            .filter(|path| !path.is_empty())
+            .map(|path| {
+                fs::read_to_string(assets.join(path))
+                    .map_err(|error| format!("read license notice {path}: {error}"))
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let asset_repository = asset
+            .get("repository")
+            .and_then(|v| v.as_str())
+            .filter(|repository| !repository.is_empty());
+        let asset_revision = asset
+            .get("version")
+            .and_then(|v| v.as_str())
+            .filter(|version| !version.is_empty());
+        if asset_repository.is_none()
+            && asset_revision
+                .map(|version| version != source_revision.as_str())
+                .unwrap_or(false)
+        {
+            return Err(format!(
+                "license asset {language} overrides the source version without a repository"
+            ));
+        }
+        if asset_repository.is_some() && asset_revision.is_none() {
+            return Err(format!(
+                "license asset {language} overrides the source repository without a version"
+            ));
+        }
+        license_by_language.insert(
+            language,
+            AssetLicense {
+                source_path: asset
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_owned(),
+                upstream_url: asset_repository.unwrap_or(upstream_url.as_str()).to_owned(),
+                spdx_id: asset
+                    .get("license")
+                    .and_then(|v| v.as_str())
+                    .filter(|license| !license.is_empty())
+                    .unwrap_or(default_license.as_str())
+                    .to_owned(),
+                license_text,
+                source_revision: asset_revision
+                    .unwrap_or(source_revision.as_str())
+                    .to_owned(),
+            },
+        );
+    }
 
     let grammars = collect_grammars(assets)?;
     let grammar_by_language = grammars
@@ -208,17 +262,23 @@ fn build_bundle(assets: &Path, input_hash: u64) -> Result<Vec<u8>, String> {
 
     let mut licenses_out = Vec::new();
     for grammar in &grammars {
-        let (source_path, spdx_id) = license_by_language
+        let license = license_by_language
             .get(&grammar.language)
             .cloned()
-            .unwrap_or_else(|| (grammar.path.clone(), default_license.clone()));
+            .unwrap_or_else(|| AssetLicense {
+                source_path: grammar.path.clone(),
+                upstream_url: upstream_url.clone(),
+                spdx_id: default_license.clone(),
+                license_text: String::new(),
+                source_revision: source_revision.clone(),
+            });
         licenses_out.push(LicenseEntry {
             language: grammar.language.clone(),
-            source_path,
-            upstream_url: upstream_url.clone(),
-            spdx_id,
-            license_text: String::new(),
-            source_revision: source_revision.clone(),
+            source_path: license.source_path,
+            upstream_url: license.upstream_url,
+            spdx_id: license.spdx_id,
+            license_text: license.license_text,
+            source_revision: license.source_revision,
         });
     }
 

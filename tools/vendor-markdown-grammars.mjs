@@ -57,6 +57,7 @@ for (const [name, scopeName] of assets) {
 }
 
 const vscodeRoot = '/Applications/Visual Studio Code.app/Contents/Resources/app/extensions'
+const vscodeRepository = 'https://github.com/microsoft/vscode'
 const vscodeAssets = [
   ['ignore', 'source.ignore', 'git-base/syntaxes/ignore.tmLanguage.json'],
   ['js-regexp', 'source.js.regexp', 'javascript/syntaxes/Regular Expressions (JavaScript).tmLanguage'],
@@ -82,6 +83,7 @@ for (const [name, scopeName, relativeSource] of vscodeAssets) {
     path: relativePath,
     source: 'Visual Studio Code built-in extension',
     package: 'microsoft/vscode',
+    repository: vscodeRepository,
     version: '1.128.0',
     license: 'MIT',
     privateDependency: true,
@@ -120,7 +122,8 @@ for (const [name, scopeName, relativeSource] of vscodeAssets) {
   imported.push({
     language: 'yang', grammarName: grammar.name ?? 'yang', scopeName: 'source.yang',
     module: url, path: relativePath, source: 'marko2276/yang-vscode-syntax',
-    package: 'marko2276.yang', version: '0.1.3', license: 'MIT', privateDependency: true,
+    package: 'marko2276.yang', repository: 'https://github.com/marko2276/yang-vscode-syntax',
+    version: '0.1.3', license: 'MIT', privateDependency: true,
   })
 }
 

@@ -2,17 +2,25 @@
 # Skeleton only: build.rs reads coverage.toml, not this file. Copy this
 # over coverage.toml only when the Phase G public-catalog gates are met.
 public_language_count = 253
-asset_grammar_count = 260
-private_dependency_count = 7
+asset_grammar_count = 268
+private_dependency_count = 15
 kept_count = 253
 remapped_count = 0
 
 # Additional non-Shiki or compatibility assets preserved alongside Shiki.
 private_assets = [
+  "assemblyscript",
+  "cuda",
   "ignore",
   "js-regexp",
+  "metal",
   "mlir",
+  "opencl",
+  "rego",
+  "spirv",
+  "starlark",
   "twig-source",
+  "webidl",
   "yaml-1.2",
   "yaml-embedded",
   "yang",

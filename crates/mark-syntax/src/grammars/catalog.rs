@@ -264,6 +264,7 @@ pub const EXTENSION_ALIASES: &[(&str, &str)] = &[
 pub const EXTENSION_PRECEDENCE: &[(&str, &str)] = &[
     ("asm", "asm"),
     ("bib", "bibtex"),
+    ("cl", "opencl"),
     ("conf", "apache"),
     ("gs", "genie"),
     ("hcl", "terraform"),
@@ -303,7 +304,6 @@ pub const BASENAME_ALIASES: &[(&str, &str)] = &[
     ("GNUmakefile", "make"),
     ("BSDmakefile", "make"),
     ("CMakeLists.txt", "cmake"),
-    (".bazelrc", "starlark"),
     (".clang-format", "yaml"),
     (".clang-tidy", "yaml"),
     (".dockerignore", "ignore"),
@@ -396,6 +396,7 @@ mod tests {
         assert!(!extensions_for_language("v").contains(&"v".to_owned()));
         assert!(extensions_for_language("verilog").contains(&"v".to_owned()));
 
+        assert_eq!(extension_precedence("cl"), Some(Some("opencl")));
         assert_eq!(extension_override("js"), Some("javascript"));
         assert!(extensions_for_language("javascript").contains(&"js".to_owned()));
         assert!(extensions_for_language("c").contains(&"h".to_owned()));

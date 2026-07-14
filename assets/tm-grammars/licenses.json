@@ -207,6 +207,18 @@
       "license": "MIT"
     },
     {
+      "language": "assemblyscript",
+      "grammarName": "AssemblyScript",
+      "scopeName": "source.assemblyscript",
+      "module": "mark profile: source.ts",
+      "path": "assets/tm-grammars/languages/assemblyscript.tmLanguage.json",
+      "source": "AssemblyScript/assemblyscript",
+      "repository": "https://github.com/AssemblyScript/assemblyscript",
+      "version": "0.28.19",
+      "license": "Apache-2.0",
+      "licenseTextPath": "licenses/assemblyscript.tmLanguage.license"
+    },
+    {
       "language": "astro",
       "grammarName": "astro",
       "scopeName": "source.astro",
@@ -537,6 +549,18 @@
       "license": "MIT"
     },
     {
+      "language": "cuda",
+      "grammarName": "CUDA C++",
+      "scopeName": "source.cuda-cpp",
+      "module": "syntaxes/cuda.tmLanguage.json",
+      "path": "assets/tm-grammars/languages/cuda.tmLanguage.json",
+      "source": "kriegalex/vscode-cuda",
+      "repository": "https://github.com/kriegalex/vscode-cuda",
+      "version": "0.1.1",
+      "license": "MIT",
+      "licenseTextPath": "licenses/cuda.tmLanguage.license"
+    },
+    {
       "language": "cue",
       "grammarName": "cue",
       "scopeName": "source.cue",
@@ -577,6 +601,7 @@
       "path": "assets/tm-grammars/languages/dart.tmLanguage.json",
       "source": "Visual Studio Code built-in extension",
       "package": "microsoft/vscode",
+      "repository": "https://github.com/microsoft/vscode",
       "version": "1.128.0",
       "license": "MIT"
     },
@@ -1039,6 +1064,7 @@
       "path": "assets/tm-grammars/languages/handlebars.tmLanguage.json",
       "source": "Visual Studio Code built-in extension",
       "package": "microsoft/vscode",
+      "repository": "https://github.com/microsoft/vscode",
       "version": "1.128.0",
       "license": "MIT"
     },
@@ -1171,6 +1197,7 @@
       "path": "assets/tm-grammars/languages/ignore.tmLanguage.json",
       "source": "Visual Studio Code built-in extension",
       "package": "microsoft/vscode",
+      "repository": "https://github.com/microsoft/vscode",
       "version": "1.128.0",
       "license": "MIT"
     },
@@ -1259,6 +1286,7 @@
       "path": "assets/tm-grammars/languages/js-regexp.tmLanguage.json",
       "source": "Visual Studio Code built-in extension",
       "package": "microsoft/vscode",
+      "repository": "https://github.com/microsoft/vscode",
       "version": "1.128.0",
       "license": "MIT",
       "privateDependency": true
@@ -1594,6 +1622,18 @@
       "license": "MIT"
     },
     {
+      "language": "metal",
+      "grammarName": "Metal",
+      "scopeName": "source.metal",
+      "module": "editors/code/syntaxes/metal.tmLanguage.json",
+      "path": "assets/tm-grammars/languages/metal.tmLanguage.json",
+      "source": "computer-graphics-tools/metal-analyzer",
+      "repository": "https://github.com/computer-graphics-tools/metal-analyzer",
+      "version": "0.1.22",
+      "license": "MIT",
+      "licenseTextPath": "licenses/metal.tmLanguage.license"
+    },
+    {
       "language": "mipsasm",
       "grammarName": "mipsasm",
       "scopeName": "source.mips",
@@ -1770,6 +1810,18 @@
       "license": "MIT"
     },
     {
+      "language": "opencl",
+      "grammarName": "OpenCL",
+      "scopeName": "source.opencl",
+      "module": "contributes/opencl.tmLanguage.json",
+      "path": "assets/tm-grammars/languages/opencl.tmLanguage.json",
+      "source": "Galarius/vscode-opencl",
+      "repository": "https://github.com/Galarius/vscode-opencl",
+      "version": "0.10.0",
+      "license": "MIT",
+      "licenseTextPath": "licenses/opencl.tmLanguage.license"
+    },
+    {
       "language": "openscad",
       "grammarName": "openscad",
       "scopeName": "source.scad",
@@ -1810,6 +1862,7 @@
       "path": "assets/tm-grammars/languages/php.tmLanguage.json",
       "source": "Visual Studio Code built-in extension",
       "package": "microsoft/vscode",
+      "repository": "https://github.com/microsoft/vscode",
       "version": "1.128.0",
       "license": "MIT"
     },
@@ -1931,6 +1984,7 @@
       "path": "assets/tm-grammars/languages/pug.tmLanguage.json",
       "source": "Visual Studio Code built-in extension",
       "package": "microsoft/vscode",
+      "repository": "https://github.com/microsoft/vscode",
       "version": "1.128.0",
       "license": "MIT",
       "transformation": "source.sass and source.stylus includes renamed to preserve VS Code built-in unresolved-include behavior"
@@ -2009,6 +2063,7 @@
       "path": "assets/tm-grammars/languages/r.tmLanguage.json",
       "source": "Visual Studio Code built-in extension",
       "package": "microsoft/vscode",
+      "repository": "https://github.com/microsoft/vscode",
       "version": "1.128.0",
       "license": "MIT"
     },
@@ -2068,6 +2123,18 @@
       "license": "MIT"
     },
     {
+      "language": "rego",
+      "grammarName": "Rego",
+      "scopeName": "source.rego",
+      "module": "syntaxes/Rego.tmLanguage",
+      "path": "assets/tm-grammars/languages/rego.tmLanguage.json",
+      "source": "open-policy-agent/vscode-opa",
+      "repository": "https://github.com/open-policy-agent/vscode-opa",
+      "version": "0.23.0",
+      "license": "Apache-2.0",
+      "licenseTextPath": "licenses/rego.tmLanguage.license"
+    },
+    {
       "language": "rel",
       "grammarName": "rel",
       "scopeName": "source.rel",
@@ -2119,6 +2186,7 @@
       "path": "assets/tm-grammars/languages/rst.tmLanguage.json",
       "source": "Visual Studio Code built-in extension",
       "package": "microsoft/vscode",
+      "repository": "https://github.com/microsoft/vscode",
       "version": "1.128.0",
       "license": "MIT",
       "transformation": "source.cmake include renamed to preserve VS Code built-in unresolved-include behavior"
@@ -2289,6 +2357,18 @@
       "license": "MIT"
     },
     {
+      "language": "spirv",
+      "grammarName": "SPIR-V",
+      "scopeName": "source.spirv",
+      "module": "utils/vscode/spirv.json",
+      "path": "assets/tm-grammars/languages/spirv.tmLanguage.json",
+      "source": "KhronosGroup/SPIRV-Tools",
+      "repository": "https://github.com/KhronosGroup/SPIRV-Tools",
+      "version": "0.0.1",
+      "license": "Apache-2.0",
+      "licenseTextPath": "licenses/spirv.tmLanguage.license"
+    },
+    {
       "language": "splunk",
       "grammarName": "splunk",
       "scopeName": "source.splunk_search",
@@ -2320,6 +2400,18 @@
       "package": "@shikijs/langs",
       "version": "3.23.0",
       "license": "MIT"
+    },
+    {
+      "language": "starlark",
+      "grammarName": "Starlark",
+      "scopeName": "source.starlark",
+      "module": "syntaxes/starlark.tmLanguage.json",
+      "path": "assets/tm-grammars/languages/starlark.tmLanguage.json",
+      "source": "bazel-contrib/vscode-bazel",
+      "repository": "https://github.com/bazel-contrib/vscode-bazel",
+      "version": "0.14.0",
+      "license": "MIT",
+      "licenseTextPath": "licenses/starlark.tmLanguage.license"
     },
     {
       "language": "stata",
@@ -2730,6 +2822,18 @@
       "license": "MIT"
     },
     {
+      "language": "webidl",
+      "grammarName": "WebIDL",
+      "scopeName": "source.webidl",
+      "module": "syntaxes/webidl.tmLanguage.json",
+      "path": "assets/tm-grammars/languages/webidl.tmLanguage.json",
+      "source": "nberlette/vscode-webidl",
+      "repository": "https://github.com/nberlette/vscode-webidl",
+      "version": "0.2.0",
+      "license": "MIT",
+      "licenseTextPath": "licenses/webidl.tmLanguage.license"
+    },
+    {
       "language": "wenyan",
       "grammarName": "wenyan",
       "scopeName": "source.wenyan",
@@ -2814,6 +2918,7 @@
       "path": "assets/tm-grammars/languages/yaml.tmLanguage.json",
       "source": "Visual Studio Code built-in extension",
       "package": "microsoft/vscode",
+      "repository": "https://github.com/microsoft/vscode",
       "version": "1.128.0",
       "license": "MIT"
     },
@@ -2825,6 +2930,7 @@
       "path": "assets/tm-grammars/languages/yaml-1.2.tmLanguage.json",
       "source": "Visual Studio Code built-in extension",
       "package": "microsoft/vscode",
+      "repository": "https://github.com/microsoft/vscode",
       "version": "1.128.0",
       "license": "MIT",
       "privateDependency": true
@@ -2837,6 +2943,7 @@
       "path": "assets/tm-grammars/languages/yaml-embedded.tmLanguage.json",
       "source": "Visual Studio Code built-in extension",
       "package": "microsoft/vscode",
+      "repository": "https://github.com/microsoft/vscode",
       "version": "1.128.0",
       "license": "MIT",
       "privateDependency": true
@@ -2849,6 +2956,7 @@
       "path": "assets/tm-grammars/languages/yang.tmLanguage.json",
       "source": "marko2276/yang-vscode-syntax",
       "package": "marko2276.yang",
+      "repository": "https://github.com/marko2276/yang-vscode-syntax",
       "version": "0.1.3",
       "license": "MIT"
     },
