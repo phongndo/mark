@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
   "expectedCounts": {
-    "publicLanguages": 254,
-    "validatedLanguages": 254,
-    "oracleLanguages": 254,
-    "stressCorpusLanguages": 254
+    "publicLanguages": 256,
+    "validatedLanguages": 256,
+    "oracleLanguages": 256,
+    "stressCorpusLanguages": 256
   },
   "minimumStressMbPerSecond": 2.0,
   "strictContractIntroduced": "2026-07-12",
-  "finalPromotionBatchDate": "2026-07-12"
+  "finalPromotionBatchDate": "2026-07-14"
 }

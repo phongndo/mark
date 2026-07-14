@@ -28,6 +28,7 @@
       "hcl",
       "hjson",
       "http",
+      "ignore",
       "ini",
       "jinja",
       "jinja-html",
@@ -152,7 +153,8 @@
       "wgsl",
       "wikitext",
       "wit",
-      "xsl"
+      "xsl",
+      "yang"
     ],
     "C": [
       "angular-expression",

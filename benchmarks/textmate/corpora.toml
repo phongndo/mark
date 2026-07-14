@@ -27,7 +27,7 @@ language = "markdown"
 scope = "text.html.markdown"
 bytes = 36254
 tokenizer_lines = 1134
-sha256 = "dbab9c0656884104eafcb1e8cb181bea5f597e6a649dac932570ca97dd9d9824"
+sha256 = "d8b9b1b8117071319f99f33b65cdb927b2def7bf4167fef96aa4122b7fd239f5"
 
 [[corpus]]
 id = "core-repeated"
@@ -44,10 +44,10 @@ sha256 = "7dced6109443b5786b960cf5530a335509e0667845603c53a56edffacbab8b99"
 id = "catalog-repeated"
 path = "target/textmate-performance/corpora/catalog-repeated"
 builder = "tools/build-textmate-corpora.py"
-languages = 254
-bytes = 21945375
-tokenizer_lines = 734618
-sha256 = "3f8c9406fd545dcaea8d40d589ac3015bb71054b245e9f16d1d680233a7199e2"
+languages = 256
+bytes = 22113549
+tokenizer_lines = 746867
+sha256 = "c62e4a83890fdb447d147051f8e336c539ccca887dd3621f32e5369a143a0fc0"
 
 # Xcode Command Line Tools libc++ corpus used by the checkpoint profile.
 [[corpus]]

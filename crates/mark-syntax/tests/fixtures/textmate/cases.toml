@@ -5472,6 +5472,20 @@ fixture = "crates/mark-syntax/tests/fixtures/textmate/hy/stress.hy"
 golden = "crates/mark-syntax/tests/fixtures/textmate/hy/stress.golden.jsonl"
 
 [[case]]
+language = "ignore"
+scope = "source.ignore"
+grammar = "assets/tm-grammars/languages/ignore.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/ignore/basic.gitignore"
+golden = "crates/mark-syntax/tests/fixtures/textmate/ignore/basic.golden.jsonl"
+
+[[case]]
+language = "ignore"
+scope = "source.ignore"
+grammar = "assets/tm-grammars/languages/ignore.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/ignore/stress.gitignore"
+golden = "crates/mark-syntax/tests/fixtures/textmate/ignore/stress.golden.jsonl"
+
+[[case]]
 language = "imba"
 scope = "source.imba"
 grammar = "assets/tm-grammars/languages/imba.tmLanguage.json"
@@ -15457,6 +15471,20 @@ grammar = "assets/tm-grammars/languages/yaml-1.2.tmLanguage.json"
 [[case.embedded]]
 scope = "source.yaml.embedded"
 grammar = "assets/tm-grammars/languages/yaml-embedded.tmLanguage.json"
+
+[[case]]
+language = "yang"
+scope = "source.yang"
+grammar = "assets/tm-grammars/languages/yang.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/yang/basic.yang"
+golden = "crates/mark-syntax/tests/fixtures/textmate/yang/basic.golden.jsonl"
+
+[[case]]
+language = "yang"
+scope = "source.yang"
+grammar = "assets/tm-grammars/languages/yang.tmLanguage.json"
+fixture = "crates/mark-syntax/tests/fixtures/textmate/yang/stress.yang"
+golden = "crates/mark-syntax/tests/fixtures/textmate/yang/stress.golden.jsonl"
 
 [[case]]
 language = "zenscript"

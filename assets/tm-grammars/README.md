@@ -9,7 +9,7 @@ behavior audit found observable differences. Pug preserves VS Code's unresolved
 Sass/Stylus includes and reStructuredText preserves VS Code's unresolved CMake
 include despite Mark bundling those languages independently. The YAML root is
 bundled with its private YAML 1.2 and embedded dependency grammars.
-`coverage.toml` is the source of truth for the public language ids (254
+`coverage.toml` is the source of truth for the public language ids (256
 languages) and the private dependency blobs embedded alongside them.
 
 Private dependency grammars are also embedded without becoming public catalog

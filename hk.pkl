@@ -10,7 +10,7 @@ exclude = List(
 // TextMate golden fixtures are verbatim oracle inputs: they deliberately
 // carry trailing whitespace, exact EOF newline structure, and un-rustfmt'd
 // long lines as edge-case coverage. Any hook that rewrites file bytes would
-// desync them from the checked-in goldens and break the 254/254 contract.
+// desync them from the checked-in goldens and break the 256/256 contract.
 local grammarFixtures = "crates/mark-syntax/tests/fixtures/**"
 
 local architectureGlobs = List(
@@ -46,7 +46,7 @@ local hygiene = new Mapping<String, Step | Group> {
   }
   ["private-key"] = Builtins.detect_private_key
   // Generated oracle goldens are large by nature and required checked-in
-  // by the 254/254 validation contract.
+  // by the 256/256 validation contract.
   ["large-file"] = (Builtins.check_added_large_files) {
     exclude = List("crates/mark-syntax/tests/fixtures/textmate/**/*.golden.jsonl")
   }

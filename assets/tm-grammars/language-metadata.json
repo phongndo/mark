@@ -984,6 +984,12 @@
       "basenames": []
     },
     {
+      "id": "ignore",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
       "id": "imba",
       "aliases": [],
       "extensions": [
@@ -2201,6 +2207,14 @@
         "yaml",
         "yaml-tmlanguage",
         "yml"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "yang",
+      "aliases": [],
+      "extensions": [
+        "yang"
       ],
       "basenames": []
     },

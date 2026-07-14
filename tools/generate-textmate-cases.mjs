@@ -135,7 +135,7 @@ function resolveOptions(options) {
     coverage: resolveFromRoot(root, options.coverage ?? DEFAULT_COVERAGE),
     divergences: resolveFromRoot(root, options.divergences ?? DEFAULT_DIVERGENCES),
     policy: resolveFromRoot(root, options.policy ?? DEFAULT_POLICY),
-    lockedCount: options.lockedCount ?? 254,
+    lockedCount: options.lockedCount ?? 256,
     check: options.check ?? false,
   }
 }

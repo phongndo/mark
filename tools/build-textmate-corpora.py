@@ -311,7 +311,8 @@ def main() -> int:
         except (OSError, ValueError) as error:
             print(error, file=sys.stderr)
             return 1
-        print("TextMate corpus manifest and locked 254/254 membership are current")
+        count = len(snapshot.public_ids)
+        print(f"TextMate corpus manifest and locked {count}/{count} membership are current")
         return 0
     print(json.dumps({"manifest": str(path.relative_to(ROOT)), **manifest}, indent=2))
     return 0

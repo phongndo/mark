@@ -3123,8 +3123,8 @@ mod tests {
 
         assert_eq!(inputs.len(), 1);
         assert_eq!(inputs[0].path, file);
-        assert_eq!(inputs[0].language, "git-ignore");
-        assert_eq!(inputs[0].shiki_language, "git-ignore");
+        assert_eq!(inputs[0].language, "ignore");
+        assert_eq!(inputs[0].shiki_language, "ignore");
 
         fs::remove_dir_all(dir).expect("test directory should be removed");
     }

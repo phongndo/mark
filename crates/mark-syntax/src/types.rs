@@ -419,9 +419,10 @@ pub(crate) const LANGUAGE_ALIASES: &[(&str, &str)] = &[
     ("cxx", "cpp"),
     ("docker", "dockerfile"),
     ("gradle", "groovy"),
-    ("gitignore", "git-ignore"),
+    ("git-ignore", "ignore"),
+    ("gitignore", "ignore"),
     ("hcl", "terraform"),
-    ("ignorefile", "git-ignore"),
+    ("ignorefile", "ignore"),
     ("ipynb", "json"),
     ("js", "javascript"),
     ("jsx", "jsx"),
@@ -464,8 +465,8 @@ pub(crate) const BASENAME_LANGUAGES: &[(&str, &str)] = &[
     (".bazelrc", "starlark"),
     (".clang-format", "yaml"),
     (".clang-tidy", "yaml"),
-    (".dockerignore", "git-ignore"),
-    (".gitignore", "git-ignore"),
+    (".dockerignore", "ignore"),
+    (".gitignore", "ignore"),
 ];
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

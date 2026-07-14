@@ -118,7 +118,7 @@ mod tests {
         let bundle = embedded_bundle();
         // Full public catalog plus private dependency blobs. `coverage.toml`
         // decides which embedded blobs are public catalog entries.
-        assert_eq!(bundle.languages.len(), 254);
+        assert_eq!(bundle.languages.len(), 256);
         assert_eq!(bundle.grammar_blobs.len(), 260);
         assert!(
             bundle
@@ -141,6 +141,7 @@ mod tests {
         );
         assert_eq!(bundle.canonical_language("bash"), Some("shellscript"));
         assert_eq!(bundle.canonical_language("sh"), Some("shellscript"));
+        assert_eq!(bundle.canonical_language("git-ignore"), Some("ignore"));
         assert_eq!(
             bundle.detect_language_from_path("script.sh"),
             Some("shellscript")
@@ -175,6 +176,14 @@ mod tests {
             Some("docker")
         );
         assert_eq!(bundle.detect_language_from_path("Makefile"), Some("make"));
+        assert_eq!(
+            bundle.detect_language_from_path(".gitignore"),
+            Some("ignore")
+        );
+        assert_eq!(
+            bundle.detect_language_from_path("models/catalog.yang"),
+            Some("yang")
+        );
         assert_eq!(
             bundle.detect_language_from_path("main.tf"),
             Some("terraform")
@@ -236,8 +245,8 @@ mod tests {
         .unwrap();
         let bundle = embedded_bundle();
         assert_eq!(manifest.schema_version, 1);
-        assert_eq!(manifest.languages.len(), 254);
-        assert_eq!(bundle.languages.len(), 254);
+        assert_eq!(manifest.languages.len(), 256);
+        assert_eq!(bundle.languages.len(), 256);
 
         let metadata_by_id = manifest
             .languages

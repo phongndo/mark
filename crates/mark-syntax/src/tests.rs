@@ -34,14 +34,39 @@ fn maps_common_basenames_to_language_names() {
         "starlark"
     );
     assert_eq!(normalize_language_name(".clang-format".to_owned()), "yaml");
+    assert_eq!(normalize_language_name(".gitignore".to_owned()), "ignore");
+    assert_eq!(normalize_language_name("gitignore".to_owned()), "ignore");
+    assert_eq!(normalize_language_name("ignorefile".to_owned()), "ignore");
+    assert_eq!(normalize_language_name("git-ignore".to_owned()), "ignore");
     assert_eq!(
-        normalize_language_name(".gitignore".to_owned()),
-        "git-ignore"
+        normalize_language_name(".dockerignore".to_owned()),
+        "ignore"
+    );
+}
+
+#[test]
+fn legacy_git_ignore_alias_works_through_primary_apis() {
+    let languages = SyntaxLanguageSet {
+        enabled: BTreeSet::from(["ignore".to_owned()]),
+        extensions: Vec::new(),
+        filenames: Vec::new(),
+    };
+
+    assert_eq!(
+        languages.language_for_path(".gitignore").as_deref(),
+        Some("ignore")
     );
     assert_eq!(
-        normalize_language_name("gitignore".to_owned()),
-        "git-ignore"
+        languages.language_for_path(".dockerignore").as_deref(),
+        Some("ignore")
     );
+
+    let mut highlighter = SyntaxHighlighter::new();
+    let highlighted = highlighter
+        .highlight("git-ignore", "target/\n*.log\n")
+        .expect("the legacy git-ignore id should resolve to the ignore grammar");
+    assert!(!highlighted.lines.is_empty());
+    assert!(highlighter.loaded_languages.contains("ignore"));
 }
 
 #[test]
@@ -120,7 +145,7 @@ fn tex_extension_uses_vscode_latex_language() {
 
 #[test]
 fn backend_catalog_contains_the_core_pack() {
-    assert_eq!(installed_language_set().len(), 254);
+    assert_eq!(installed_language_set().len(), 256);
     assert!(core_enabled_language_set().contains("rust"));
     assert!(core_enabled_language_set().contains("bash"));
     assert!(core_language_set().contains("rust"));
@@ -1065,13 +1090,13 @@ fn clean_config_preserves_core_aliases_and_the_supplied_catalog() {
         ],
         ..StoredSyntaxConfig::default()
     };
-    let available = BTreeSet::from(["git-ignore".to_owned()]);
+    let available = BTreeSet::from(["ignore".to_owned()]);
 
     let result = clean_language_config(&mut config, &available);
 
     assert_eq!(result.stale_records_removed, 1);
     assert_eq!(result.enabled_languages_kept, 2);
-    assert_eq!(config.languages, vec!["bash", "git-ignore"]);
+    assert_eq!(config.languages, vec!["bash", "ignore"]);
 }
 
 #[test]
@@ -1087,14 +1112,14 @@ fn clean_cache_normalizes_custom_mapping_language_aliases() {
         }],
         ..StoredSyntaxConfig::default()
     };
-    let available = BTreeSet::from(["git-ignore".to_owned()]);
+    let available = BTreeSet::from(["ignore".to_owned()]);
 
     let result = clean_language_config(&mut config, &available);
 
     assert_eq!(result.stale_records_removed, 0);
     assert_eq!(result.enabled_languages_kept, 0);
-    assert_eq!(config.extensions[0].language, "git-ignore");
-    assert_eq!(config.filenames[0].language, "git-ignore");
+    assert_eq!(config.extensions[0].language, "ignore");
+    assert_eq!(config.filenames[0].language, "ignore");
 }
 
 #[test]
@@ -1122,19 +1147,19 @@ fn remove_languages_removes_alias_custom_mappings() {
             },
         ],
     };
-    let requested = BTreeSet::from(["git-ignore".to_owned()]);
+    let requested = normalize_language_names(&["git-ignore".to_owned()]);
 
     let result = remove_languages_from_config(&mut config, &requested);
 
     assert_eq!(
         result,
         SyntaxRemoveResult {
-            removed: vec!["git-ignore".to_owned()],
+            removed: vec!["ignore".to_owned()],
             missing: Vec::new(),
             kept_core: Vec::new(),
             removed_custom_mappings: vec![
-                "*.ignore -> git-ignore".to_owned(),
-                ".gitignore -> git-ignore".to_owned(),
+                "*.ignore -> ignore".to_owned(),
+                ".gitignore -> ignore".to_owned(),
             ],
         }
     );

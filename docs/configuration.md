@@ -123,7 +123,7 @@ Supported values:
 - `all` - currently equivalent to `builtin`; kept for config compatibility.
 
 <!-- BEGIN GENERATED: language-counts -->
-The bundled native backend supports **254 public language IDs**. **254 are validated** by the complete generated contract; **0 more are supported** by real bundled grammars and the catalog-wide smoke/budget gate. See [`language-status.md`](language-status.md) for the generated per-language ledger, or run `mark syntax available --installed` for the runtime catalog.
+The bundled native backend supports **256 public language IDs**. **256 are validated** by the complete generated contract; **0 more are supported** by real bundled grammars and the catalog-wide smoke/budget gate. See [`language-status.md`](language-status.md) for the generated per-language ledger, or run `mark syntax available --installed` for the runtime catalog.
 <!-- END GENERATED: language-counts -->
 
 Use `mark --no-syntax`, `mark diff --no-syntax`, `mark show --no-syntax`, or

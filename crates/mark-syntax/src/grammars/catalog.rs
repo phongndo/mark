@@ -44,7 +44,7 @@ pub const LANGUAGE_ALIASES: &[(&str, &str)] = &[
     ("dmm", "dream-maker"),
     ("docker", "dockerfile"),
     ("dockerfile", "docker"),
-    ("dockerignore", "git-ignore"),
+    ("dockerignore", "ignore"),
     ("edn", "clojure"),
     ("el", "emacs-lisp"),
     ("elisp", "emacs-lisp"),
@@ -67,6 +67,7 @@ pub const LANGUAGE_ALIASES: &[(&str, &str)] = &[
     ("gjs", "glimmer-js"),
     ("gdscript", "gdscript-godot-engine"),
     ("gts", "glimmer-ts"),
+    ("git-ignore", "ignore"),
     ("git-rebase", "git-rebase-todo"),
     ("gql", "graphql"),
     ("graphqls", "graphql"),
@@ -109,7 +110,8 @@ pub const LANGUAGE_ALIASES: &[(&str, &str)] = &[
     ("msg", "rosmsg"),
     ("nb", "wolfram"),
     ("ndjson", "json"),
-    ("ignorefile", "git-ignore"),
+    ("gitignore", "ignore"),
+    ("ignorefile", "ignore"),
     ("js", "javascript"),
     ("javascript-babel", "jsx"),
     ("jsx", "jsx"),
@@ -304,7 +306,14 @@ pub const BASENAME_ALIASES: &[(&str, &str)] = &[
     (".bazelrc", "starlark"),
     (".clang-format", "yaml"),
     (".clang-tidy", "yaml"),
-    (".dockerignore", "git-ignore"),
+    (".dockerignore", "ignore"),
+    (".eslintignore", "ignore"),
+    (".git-blame-ignore-revs", "ignore"),
+    (".gitignore", "ignore"),
+    (".npmignore", "ignore"),
+    (".prettierignore", "ignore"),
+    (".stylelintignore", "ignore"),
+    (".vercelignore", "ignore"),
 ];
 
 pub fn aliases_for_language(language: &str) -> Vec<String> {
@@ -398,6 +407,8 @@ mod tests {
         assert!(basenames_for_language("starlark").contains(&"BUILD".to_owned()));
         assert!(basenames_for_language("dockerfile").contains(&"Dockerfile".to_owned()));
         assert!(basenames_for_language("make").contains(&"Makefile".to_owned()));
+        assert!(basenames_for_language("ignore").contains(&".gitignore".to_owned()));
+        assert!(basenames_for_language("ignore").contains(&".dockerignore".to_owned()));
     }
 
     #[test]
@@ -405,6 +416,7 @@ mod tests {
         assert!(aliases_for_language("shellscript").contains(&"bash".to_owned()));
         assert!(aliases_for_language("shellscript").contains(&"sh".to_owned()));
         assert!(aliases_for_language("dockerfile").contains(&"docker".to_owned()));
+        assert!(aliases_for_language("ignore").contains(&"git-ignore".to_owned()));
         assert!(aliases_for_language("rust").contains(&"rs".to_owned()));
         assert!(aliases_for_language("typescript").contains(&"ts".to_owned()));
         assert!(extensions_for_language("python").contains(&"py".to_owned()));
