@@ -23,14 +23,56 @@ impl DiffApp {
     }
 
     pub(crate) fn move_focused_hunk(&mut self, delta: isize) {
-        let anchor = self.hunk_navigation_anchor_row();
-        let next = if delta < 0 {
-            self.document.model.previous_hunk_row(anchor)
-        } else {
-            self.document.model.next_hunk_row(anchor)
+        if delta == 0 {
+            return;
+        }
+
+        // This path is used only when ordinary scrolling is already clamped at
+        // the top or bottom. Moving focus must not recenter the viewport: doing
+        // so moves it away from the edge, and the next wheel/key event scrolls
+        // it back again, producing a focus/scroll loop.
+        let rendered_rows = self.rendered_diff_rows_for_viewport(self.viewport.viewport_rows);
+        let mut visible_hunks = Vec::new();
+        for rendered_row in rendered_rows {
+            let Some(hunk) = self
+                .document
+                .model
+                .row(rendered_row.model_row)
+                .and_then(|row| row.typed_hunk_key())
+            else {
+                continue;
+            };
+            if visible_hunks.last() != Some(&hunk) {
+                visible_hunks.push(hunk);
+            }
+        }
+        let Some(current) = self.focused_hunk_for_viewport(self.viewport.viewport_rows) else {
+            return;
         };
-        if let Some(row) = next {
-            self.focus_hunk_row(row);
+        let Some(current_index) = visible_hunks.iter().position(|hunk| *hunk == current) else {
+            return;
+        };
+        let target_index = if delta < 0 {
+            current_index.checked_sub(1)
+        } else {
+            current_index
+                .checked_add(1)
+                .filter(|index| *index < visible_hunks.len())
+        };
+        let Some((file, hunk)) = target_index.and_then(|index| visible_hunks.get(index).copied())
+        else {
+            return;
+        };
+
+        let previous_hunk = self.viewport.manual_hunk_focus;
+        let previous_file = self.sidebar.selected_file;
+        self.viewport.manual_hunk_focus = Some((file, hunk));
+        self.sidebar.selected_file = file;
+        self.ensure_file_sidebar_selection_visible(self.visible_file_sidebar_rows());
+        if self.viewport.manual_hunk_focus != previous_hunk
+            || self.sidebar.selected_file != previous_file
+        {
+            self.runtime.dirty = true;
         }
     }
 

@@ -14,7 +14,14 @@ use crate::{
     },
 };
 
+#[cfg(not(test))]
 const MAX_EAGER_SEARCH_WIDTH_LINES: usize = 200_000;
+#[cfg(test)]
+const MAX_EAGER_SEARCH_WIDTH_LINES: usize = 16;
+// A non-printable diff-line byte can expand to at most six terminal columns:
+// tabs occupy four, and an ASCII control renders as a six-column `\u{xx}`
+// escape. Multi-byte Unicode scalars have a lower columns-per-byte ratio.
+const MAX_DISPLAY_COLUMNS_PER_LINE_BYTE: usize = 6;
 #[cfg(not(test))]
 const PARALLEL_SEARCH_MIN_LINES: usize = 200_000;
 #[cfg(test)]
@@ -79,7 +86,7 @@ pub(crate) struct DiffSearchIndex {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct FileSearchIndex {
     filter_texts: Vec<String>,
-    max_line_width: Option<usize>,
+    max_line_width: usize,
 }
 
 impl DiffSearchIndex {
@@ -116,17 +123,17 @@ impl DiffSearchIndex {
                 }
                 filter_texts.push(file.status().label().to_ascii_lowercase());
 
-                let max_line_width = if compute_widths {
-                    let mut max_line_width = 0usize;
-                    for hunk in file.hunks() {
-                        for line in &hunk.lines {
+                let mut max_line_width = 0usize;
+                for hunk in file.hunks() {
+                    for line in &hunk.lines {
+                        if compute_widths {
                             max_line_width = max_line_width.max(display_width(&line.text_lossy()));
+                        } else {
+                            max_line_width = max_line_width
+                                .max(unindexed_line_width_bound(line.text_bytes().len()));
                         }
                     }
-                    Some(max_line_width)
-                } else {
-                    None
-                };
+                }
 
                 FileSearchIndex {
                     filter_texts,
@@ -289,18 +296,20 @@ impl DiffSearchIndex {
     }
 
     pub(crate) fn max_line_width(&self) -> usize {
-        self.files
-            .iter()
-            .filter_map(|file| file.max_line_width)
-            .max()
-            .unwrap_or_default()
+        self.max_line_width_from(self.files.iter())
     }
 
     pub(crate) fn max_line_width_for_files(&self, files: &[FileIndex]) -> usize {
+        self.max_line_width_from(files.iter().filter_map(|file| self.files.get(file.get())))
+    }
+
+    fn max_line_width_from<'a>(
+        &self,
+        files: impl IntoIterator<Item = &'a FileSearchIndex>,
+    ) -> usize {
         files
-            .iter()
-            .filter_map(|file| self.files.get(file.get()))
-            .filter_map(|file| file.max_line_width)
+            .into_iter()
+            .map(|file| file.max_line_width)
             .max()
             .unwrap_or_default()
     }
@@ -316,6 +325,14 @@ impl DiffSearchIndex {
                     .sum::<usize>(),
             )
     }
+}
+
+fn unindexed_line_width_bound(text_bytes: usize) -> usize {
+    // Do not inspect line payloads here: this fallback is specifically for
+    // diffs too large for an eager width scan. Span/String lengths are O(1),
+    // and six columns per byte conservatively covers tabs and escaped ASCII
+    // controls as well as Unicode and lossy decoding.
+    text_bytes.saturating_mul(MAX_DISPLAY_COLUMNS_PER_LINE_BYTE)
 }
 
 fn merge_search_sections(
@@ -684,7 +701,10 @@ mod tests {
         Changeset, DiffFile, DiffFileBody, DiffHunk, DiffLine, FileChange, HunkLineRanges, RepoRoot,
     };
 
-    use super::{DiffSearchIndex, SearchLineRef, find_ascii_case_insensitive};
+    use super::{
+        DiffSearchIndex, MAX_DISPLAY_COLUMNS_PER_LINE_BYTE, SearchLineRef,
+        find_ascii_case_insensitive,
+    };
     use crate::model::{DiffLineIndex, FileIndex, HunkIndex};
 
     #[test]
@@ -780,6 +800,71 @@ mod tests {
 
         assert!(result.visible_files.is_empty());
         assert!(result.grep_matches.is_empty());
+    }
+
+    #[test]
+    fn large_diff_bounds_width_by_the_widest_line_not_the_whole_patch() {
+        let patch = format!(
+            "diff --git a/src/lib.rs b/src/lib.rs\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1,17 +1,17 @@\n{}",
+            " short source line\n".repeat(17)
+        );
+        let patch: std::sync::Arc<[u8]> = patch.into_bytes().into();
+        let patch_bytes = patch.len();
+        let line_bytes = "short source line".len();
+        let expected_bound = line_bytes * MAX_DISPLAY_COLUMNS_PER_LINE_BYTE;
+        let changeset = Changeset {
+            repo: RepoRoot::new("."),
+            title: String::new(),
+            files: mark_diff::parse_patch_bytes(patch),
+            raw_patch: Changeset::empty_raw_patch(),
+        };
+
+        let index = DiffSearchIndex::new(&changeset);
+
+        assert!(changeset.raw_patch.is_empty());
+        assert!(patch_bytes > expected_bound);
+        assert_eq!(index.files[0].max_line_width, expected_bound);
+        assert_eq!(index.max_line_width(), expected_bound);
+        assert_eq!(
+            index.max_line_width_for_files(&[FileIndex::new(0)]),
+            expected_bound
+        );
+    }
+
+    #[test]
+    fn large_diff_considers_lines_from_every_patch_backing() {
+        let first_patch = format!(
+            "diff --git a/first b/first\n--- a/first\n+++ b/first\n@@ -1,9 +1,9 @@\n{}",
+            " short\n".repeat(9)
+        );
+        let first_patch: std::sync::Arc<[u8]> = first_patch.into_bytes().into();
+        let first_patch_bytes = first_patch.len();
+        let mut files = mark_diff::parse_patch_bytes(first_patch);
+
+        let wide_line = "x".repeat(first_patch_bytes.saturating_mul(6).saturating_add(1));
+        let second_patch = format!(
+            "diff --git a/second b/second\n--- a/second\n+++ b/second\n@@ -1,8 +1,8 @@\n {}\n{}",
+            wide_line,
+            " short\n".repeat(7)
+        );
+        let second_patch: std::sync::Arc<[u8]> = second_patch.into_bytes().into();
+        files.extend(mark_diff::parse_patch_bytes(second_patch));
+        let changeset = Changeset {
+            repo: RepoRoot::new("."),
+            title: String::new(),
+            files,
+            raw_patch: Changeset::empty_raw_patch(),
+        };
+
+        let index = DiffSearchIndex::new(&changeset);
+        let expected_bound = wide_line.len() * MAX_DISPLAY_COLUMNS_PER_LINE_BYTE;
+
+        assert_eq!(index.max_line_width(), expected_bound);
+        assert_eq!(
+            index.max_line_width_for_files(&[FileIndex::new(1)]),
+            expected_bound
+        );
+        assert!(index.max_line_width() > first_patch_bytes * 6);
     }
 
     fn changeset_with_hunk_header(header: &str) -> Changeset {

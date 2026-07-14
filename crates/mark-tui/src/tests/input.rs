@@ -51,6 +51,19 @@ fn app_clamps_horizontal_scroll_to_diff_content() {
 }
 
 #[test]
+fn large_diff_remains_horizontally_scrollable_without_eager_widths() {
+    // Tests use a reduced eager-width threshold of 16 lines.
+    let lines = vec!["abcdefghijkl"; 17];
+    let changeset = changeset_with_line_texts(&lines);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_width(18);
+
+    app.scroll_horizontally_by(HORIZONTAL_SCROLL_STEP as isize);
+
+    assert_eq!(app.viewport.horizontal_scroll, HORIZONTAL_SCROLL_STEP);
+}
+
+#[test]
 fn max_scroll_stays_zero_when_annotated_diff_fits_viewport() {
     use crate::annotation::AnnotationKey;
 
@@ -330,6 +343,31 @@ fn mouse_wheel_scrolls_then_accumulates_hunk_focus_at_edge_in_scrollable_diff() 
         app.focused_hunk_for_viewport(app.viewport.viewport_rows),
         Some(typed_hunk_key(next))
     );
+}
+
+#[test]
+fn mouse_wheel_focus_at_top_does_not_recenter_and_loop_back() {
+    let changeset = changeset_with_hunks_at(PathBuf::from("/repo"), &[1, 2, 3, 4, 5, 6, 7, 8]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(8);
+
+    assert!(app.max_scroll() > 0);
+    let top_hunks = visible_hunk_keys(&app);
+    assert!(top_hunks.len() >= 3);
+    app.viewport.manual_hunk_focus = Some(typed_hunk_key(
+        *top_hunks.last().expect("last visible hunk"),
+    ));
+
+    for expected in top_hunks.iter().rev().skip(1) {
+        for _ in 0..MOUSE_HUNK_FOCUS_SCROLL_TICKS {
+            mouse_scroll(&mut app, MouseEventKind::ScrollUp);
+        }
+        assert_eq!(app.viewport.scroll, 0);
+        assert_eq!(
+            app.focused_hunk_for_viewport(app.viewport.viewport_rows),
+            Some(typed_hunk_key(*expected))
+        );
+    }
 }
 
 #[test]
