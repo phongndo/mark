@@ -5,8 +5,8 @@
   working tree on top of `c6a176b`.
 - Host: arm64 macOS 26.5.2, 16 physical cores, 64 GiB RAM; rustc 1.88.0.
 - Method: `profile-cold --mode process-cold`, separate process per
-  measurement, 3 reps, per §7 of `docs/performance-plan.md`. CPU attribution
-  via `sample` on 300–1200-iteration loops.
+  measurement, 3 reps. CPU attribution via `sample` on 300–1200-iteration
+  loops.
 - Raw artifacts: `target/textmate-performance/reports/2026-07-12-e-phase/`.
 
 ## What changed

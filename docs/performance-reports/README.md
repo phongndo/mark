@@ -4,8 +4,9 @@ Committed summaries for performance runs that affect product decisions live in
 this directory. Raw JSON/counter/flamegraph artifacts should stay under ignored
 `target/textmate-performance/reports/<date>-<commit>/`.
 
-Use `docs/performance-plan.md` for the active benchmark protocol,
-acceptance gates, and optimization backlog.
+Each report records the benchmark protocol and gates used for that run.
+Deterministic performance checks live under `scripts/ci/`, with persisted
+benchmark policies under `benchmarks/`.
 
 ## Report template
 
@@ -30,4 +31,3 @@ acceptance gates, and optimization backlog.
 
 ## Follow-ups
 ```
-

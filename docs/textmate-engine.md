@@ -306,10 +306,9 @@ budgets, counters, and lazy per-language tokenizer instances are implemented.
 The existing TUI worker, file/hunk cache, and render integration now use the
 native backend.
 
-Current throughput numbers, hotspot diagnoses, and the remaining optimization
-backlog live in [`performance-plan.md`](performance-plan.md) — the interim
-measurement history that used to live here is superseded by that document's
-§1 tables.
+Current throughput measurements and hotspot diagnoses are recorded in
+[`performance-reports/`](performance-reports/). Theme-engine measurements live
+in [`textmate-theme-performance.md`](textmate-theme-performance.md).
 
 **Retained optimizations** (each validated with alternating-order,
 separate-process A/B runs, paired medians, and byte-exact scope streams):
@@ -345,13 +344,12 @@ history of this file):
   lookbehind positions, ASCII class branches, source line pre-counting,
   routing capture-free regexes through the position VM.
 
-### After phase 5 (not detailed here)
+### Ongoing validation
 
-Phase 6+ covers broadening conformance beyond the proving corpus and raising
-scanner throughput. The unavailable-backend shim has already been removed from
-the production path.
-The concrete performance sequence and acceptance gates are in
-[`performance-plan.md`](performance-plan.md).
+The fixture corpus and conformance tools continue to broaden coverage beyond
+the original proving set. The unavailable-backend shim has already been removed
+from the production path. Performance gates are enforced by the benchmark
+policies and CI scripts under `benchmarks/textmate/` and `scripts/ci/`.
 
 ## Reproducible oracle commands
 
@@ -509,4 +507,4 @@ changing tokenizer behavior.
 - Oracle: `tools/golden-dump.mjs`, `tools/generate-goldens.mjs`, `tools/golden-oracle/`
 - Assets: `assets/tm-grammars/`
 - Engine: `crates/mark-syntax/src/engine/`
-- Performance continuation plan: `docs/performance-plan.md`
+- Performance evidence: `docs/performance-reports/`, `docs/textmate-theme-performance.md`
