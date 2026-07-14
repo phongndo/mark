@@ -100,9 +100,11 @@ jobs:
               --branch "$DEFAULT_BRANCH" \
               --event push
 
-          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
-          echo "source_sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          {
+            echo "release_tag=$release_tag"
+            echo "source_sha=$GITHUB_SHA"
+            echo "version=$version"
+          } >> "$GITHUB_OUTPUT"
 
   build:
     name: Build release assets
