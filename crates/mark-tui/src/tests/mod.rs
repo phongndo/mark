@@ -17,7 +17,7 @@ use crate::render::{
         help_menu_bg, help_menu_content_rows, help_menu_lines, help_menu_list_visible_rows,
         help_menu_row_line, help_menu_row_spans, help_menu_title_color,
     },
-    sidebar::{file_sidebar_lines, file_sidebar_width},
+    sidebar::{draw_file_sidebar, file_sidebar_lines, file_sidebar_width},
     statusline::{
         draw_error_log, error_log_header_line, error_log_height, error_log_separator,
         filter_bar_line, filter_bar_visible, statusline_file_count_label, statusline_header_line,

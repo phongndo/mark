@@ -11,7 +11,7 @@ use crate::{
     app::DiffApp,
     model::FileIndex,
     render::{
-        style::{base_bg, file_sidebar_style, header_bg},
+        style::{diff_base_bg, file_sidebar_style, header_bg},
         text::{fit, fit_padded, fit_with_ellipsis, status_code},
     },
     theme::{
@@ -116,7 +116,7 @@ pub(crate) fn draw_file_sidebar(frame: &mut Frame<'_>, app: &DiffApp, area: Rect
             area.width as usize,
             area.height as usize,
         )))
-        .style(Style::default().bg(base_bg(app.config.theme))),
+        .style(Style::default().bg(diff_base_bg(app.config.theme))),
         area,
     );
 }
@@ -140,7 +140,7 @@ pub(crate) fn file_sidebar_lines(app: &DiffApp, width: usize, height: usize) -> 
         let Some(entry) = entries.get(position) else {
             lines.push(file_sidebar_line(
                 "",
-                Style::default().bg(base_bg(theme)),
+                Style::default().bg(diff_base_bg(theme)),
                 width,
                 theme,
             ));
@@ -179,7 +179,7 @@ pub(crate) fn file_sidebar_entry_line(
     let bg = if selected {
         header_bg(theme)
     } else {
-        base_bg(theme)
+        diff_base_bg(theme)
     };
     let status_style = file_sidebar_status_style(file.status(), bg, theme);
     let body_style = file_sidebar_body_style(selected, bg, theme);
@@ -341,7 +341,7 @@ pub(crate) fn file_sidebar_group_line(
     content_width: usize,
     theme: DiffTheme,
 ) -> Line<'static> {
-    let style = Style::default().fg(theme.muted).bg(base_bg(theme));
+    let style = Style::default().fg(theme.muted).bg(diff_base_bg(theme));
     let label = format!(" {group}/");
     let text = fit_padded(&fit_with_ellipsis(&label, content_width), content_width);
     Line::from(vec![
@@ -386,5 +386,8 @@ pub(crate) fn file_sidebar_separator(theme: DiffTheme) -> Span<'static> {
     } else {
         " "
     };
-    Span::styled(text, Style::default().fg(theme.muted).bg(base_bg(theme)))
+    Span::styled(
+        text,
+        Style::default().fg(theme.muted).bg(diff_base_bg(theme)),
+    )
 }

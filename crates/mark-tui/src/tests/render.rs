@@ -840,6 +840,44 @@ fn file_sidebar_opens_at_hunk_default_width() {
 }
 
 #[test]
+fn transparent_background_applies_to_file_sidebar_base() {
+    let changeset = changeset_with_files(&["a.rs", "b.rs"]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.config.theme = DiffTheme::catppuccin_mocha().with_transparent_background(true);
+
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(20, 3))
+        .expect("test terminal should be created");
+    terminal
+        .draw(|frame| {
+            let area = frame.area();
+            draw_file_sidebar(frame, &app, area);
+        })
+        .expect("file sidebar draw should succeed");
+
+    let buffer = terminal.backend().buffer();
+    for y in 1..buffer.area.height {
+        for x in 0..buffer.area.width {
+            assert_eq!(
+                buffer.cell((x, y)).expect("cell should exist").bg,
+                Color::Reset
+            );
+        }
+    }
+
+    assert_eq!(
+        buffer.cell((0, 0)).expect("selected cell should exist").bg,
+        app.config.theme.gutter_bg
+    );
+    assert_eq!(
+        buffer
+            .cell((19, 0))
+            .expect("separator cell should exist")
+            .bg,
+        Color::Reset
+    );
+}
+
+#[test]
 fn replace_changeset_keeps_remapped_file_sidebar_selection_visible() {
     let changeset = changeset_with_files(&["a.rs", "b.rs", "c.rs", "d.rs", "e.rs"]);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
