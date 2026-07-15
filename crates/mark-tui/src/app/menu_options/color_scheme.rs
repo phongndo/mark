@@ -1,5 +1,5 @@
 use super::super::{
-    COLOR_SCHEME_CHOICES, ColorSchemeChoice, DiffApp, MAX_COLOR_SCHEME_MENU_ROWS, OptionsMenuItem,
+    BUILTIN_THEMES, BuiltinTheme, DiffApp, MAX_COLOR_SCHEME_MENU_ROWS, OptionsMenuItem,
     color_scheme_config, color_scheme_label,
 };
 use crate::{
@@ -34,15 +34,15 @@ impl DiffApp {
         self.runtime.dirty = true;
     }
 
-    pub(crate) fn selectable_color_schemes(&self) -> Vec<ColorSchemeChoice> {
-        COLOR_SCHEME_CHOICES
+    pub(crate) fn selectable_color_schemes(&self) -> Vec<BuiltinTheme> {
+        BUILTIN_THEMES
             .iter()
             .copied()
             .filter(|choice| *choice != self.overlays.options_menu_draft.color_scheme)
             .collect()
     }
 
-    pub(crate) fn filtered_color_schemes(&self) -> Vec<ColorSchemeChoice> {
+    pub(crate) fn filtered_color_schemes(&self) -> Vec<BuiltinTheme> {
         let choices = self.selectable_color_schemes();
         let query = self
             .overlays
@@ -162,7 +162,7 @@ impl DiffApp {
         self.apply_options_menu_draft(OptionsMenuItem::ColorScheme);
     }
 
-    pub(crate) fn apply_color_scheme(&mut self, color_scheme: ColorSchemeChoice) {
+    pub(crate) fn apply_color_scheme(&mut self, color_scheme: BuiltinTheme) {
         let Some(config) = color_scheme_config(color_scheme) else {
             self.set_error_log("colorscheme custom cannot be reapplied from options");
             return;
@@ -176,7 +176,9 @@ impl DiffApp {
                     theme.with_syntax_rules(&self.config.syntax_settings.syntax_rules)
                 })
                 .map(|theme| {
-                    theme.with_transparent_background(self.config.theme_transparent_background)
+                    theme.with_transparent_background_override(
+                        self.config.theme_transparent_background,
+                    )
                 })
         }) {
             Ok(theme) => {

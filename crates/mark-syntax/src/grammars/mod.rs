@@ -450,7 +450,7 @@ mod tests {
         }
 
         let manifest: Manifest = serde_json::from_str(include_str!(
-            "../../../../assets/tm-grammars/language-metadata.json"
+            "../../../../assets/grammars/language-metadata.json"
         ))
         .unwrap();
         let bundle = embedded_bundle();

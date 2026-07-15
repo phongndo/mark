@@ -36,7 +36,7 @@ crates/mark-syntax/src/
     catalog.rs      # aliases / extensions / basenames for the bundle
   highlight.rs, language.rs, storage.rs, types.rs  # public config / API surface
 
-assets/tm-grammars/           # committed TextMate JSON (full public catalog + private deps)
+assets/grammars/           # committed TextMate JSON (full public catalog + private deps)
   SOURCE.toml                 # pin: @shikijs/langs@3.23.0
   licenses.json               # per-grammar license manifest
   coverage.toml               # active public/private grammar coverage manifest
@@ -85,8 +85,8 @@ Completed generated coverage: **264 supported public language IDs**, **264 valid
 <!-- END GENERATED: language-counts -->
 
 The native catalog is the full pinned Shiki language set plus audited external
-grammars vendored under `assets/tm-grammars/languages/`. The active public IDs
-are listed in `assets/tm-grammars/coverage.toml`; dependency-only blobs such as
+grammars vendored under `assets/grammars/languages/`. The active public IDs
+are listed in `assets/grammars/coverage.toml`; dependency-only blobs such as
 `twig-source`, `yaml-1.2`, and `yaml-embedded` remain hidden from user-facing
 language selection. Planned catalog batches are tracked in
 [`future-language-support.md`](future-language-support.md).
@@ -126,14 +126,14 @@ The original core regression set remains covered by fixtures and includes:
 | `typescript` | `typescript.tmLanguage.json` | `source.ts` |
 | `yaml` | `yaml.tmLanguage.json` | `source.yaml` |
 
-Grammar pin: `@shikijs/langs@3.23.0` (see `assets/tm-grammars/SOURCE.toml`).
+Grammar pin: `@shikijs/langs@3.23.0` (see `assets/grammars/SOURCE.toml`).
 
 The first-class extended fixtures include `zig`, `llvm`, `riscv`, `mipsasm`,
 `odin`, `asm`, `mojo`, `ocaml`, and `mlir`; adding more coverage is an asset and
 fixture decision, not an engine fork.
 
 Path detection reads the checked-in
-`assets/tm-grammars/language-metadata.json` contract, generated
+`assets/grammars/language-metadata.json` contract, generated
 deterministically from the pinned registration aliases and grammar
 `fileTypes`, then merges the curated mappings in `catalog.rs`. The contract
 covers all 264 public IDs (253 Shiki IDs plus 11 additional public grammars).
@@ -387,12 +387,12 @@ node tools/generate-goldens.mjs --case java
 node tools/golden-dump.mjs \
   --language rust \
   --scope source.rust \
-  --grammar assets/tm-grammars/languages/rust.tmLanguage.json \
+  --grammar assets/grammars/languages/rust.tmLanguage.json \
   --file crates/mark-syntax/tests/fixtures/textmate/rust/basic.rs \
   --out crates/mark-syntax/tests/fixtures/textmate/rust/basic.golden.jsonl
 
 # 6. Pattern feature inventory over vendored grammars
-node tools/grammar-stats.mjs assets/tm-grammars/languages
+node tools/grammar-stats.mjs assets/grammars/languages
 
 # 7. Small regex conformance report (needs cargo + oracle install)
 node tools/regex-conformance.mjs
@@ -521,6 +521,6 @@ changing tokenizer behavior.
 - Fixtures: `crates/mark-syntax/tests/fixtures/textmate/`
 - Harness: `crates/mark-syntax/tests/textmate_golden.rs`
 - Oracle: `tools/golden-dump.mjs`, `tools/generate-goldens.mjs`, `tools/golden-oracle/`
-- Assets: `assets/tm-grammars/`
+- Assets: `assets/grammars/`
 - Engine: `crates/mark-syntax/src/engine/`
 - Performance evidence: `docs/performance-reports/`, `docs/textmate-theme-performance.md`

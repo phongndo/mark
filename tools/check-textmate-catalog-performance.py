@@ -183,7 +183,7 @@ def main():
                 str(binary),
                 "--mode", "process-cold",
                 "--json",
-                "--assets", "assets/tm-grammars/languages",
+                "--assets", "assets/grammars/languages",
                 "--scope", fixture["scope"],
                 fixture["path"],
                 str(args.iterations),

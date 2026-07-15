@@ -748,7 +748,7 @@ impl DiffTheme {
         }
     }
 
-    fn with_exact_syntax(mut self, theme: BuiltinTextMateTheme) -> Self {
+    pub(crate) fn with_exact_syntax(mut self, theme: BuiltinTextMateTheme) -> Self {
         self.exact_syntax = Some(theme.get());
         self
     }

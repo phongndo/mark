@@ -433,7 +433,6 @@ pub(crate) const CONFIG_FILE: &str = "syntax.json";
 pub(crate) const LEGACY_CONFIG_FILE: &str = "tree-sitter.json";
 pub(crate) const SETTINGS_FILE: &str = "config.toml";
 pub(crate) const LEGACY_SETTINGS_FILE: &str = "syntax.toml";
-pub(crate) const COLORSCHEME_DIR: &str = "colorscheme";
 pub(crate) const BUNDLED_GRAMMAR_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub const DEFAULT_MAX_HIGHLIGHT_SOURCE_BYTES: usize = 1024 * 1024;
@@ -553,7 +552,7 @@ pub(crate) struct StoredSyntaxSettings {
     #[serde(default, flatten)]
     pub(crate) color_overrides: ColorOverrides,
     #[serde(default, alias = "background_transparent", alias = "transparent_bg")]
-    pub(crate) transparent_background: bool,
+    pub(crate) transparent_background: Option<bool>,
     #[serde(default)]
     pub(crate) diff: StoredDiffSettings,
     #[serde(default)]
@@ -743,6 +742,9 @@ pub struct SyntaxSettings {
     pub colors: ColorOverrides,
     pub syntax_rules: Vec<SyntaxRuleOverride>,
     pub transparent_background: bool,
+    /// The explicitly configured transparency value, if any. When absent,
+    /// theme-local transparency is preserved.
+    pub transparent_background_override: Option<bool>,
     pub diff: DiffSettings,
     pub notifications: NotificationSettings,
     pub annotations: AnnotationSettings,
@@ -762,6 +764,7 @@ impl Default for SyntaxSettings {
             colors: ColorOverrides::default(),
             syntax_rules: Vec::new(),
             transparent_background: false,
+            transparent_background_override: None,
             diff: DiffSettings::default(),
             notifications: NotificationSettings::default(),
             annotations: AnnotationSettings::default(),

@@ -1,8 +1,8 @@
 use super::{
-    ActiveOverlay, ActiveReferenceMenu, AnnotationState, AppConfigState, ColorSchemeChoice,
-    DiffApp, DocumentState, ERROR_LOG_DEFAULT_HEIGHT, FileSidebarState, FilterState, InputState,
-    JobState, LiveUpdatesState, MouseScroll, NotificationState, OptionsDraft, OverlayState,
-    ReferenceState, RuntimeState, SyntaxStartupMode, ViewportState, color_scheme_from_config,
+    ActiveOverlay, ActiveReferenceMenu, AnnotationState, AppConfigState, BuiltinTheme, DiffApp,
+    DocumentState, ERROR_LOG_DEFAULT_HEIGHT, FileSidebarState, FilterState, InputState, JobState,
+    LiveUpdatesState, MouseScroll, NotificationState, OptionsDraft, OverlayState, ReferenceState,
+    RuntimeState, SyntaxStartupMode, ViewportState, color_scheme_from_config,
     layout_override_from_setting, layout_setting_from_override, show_rev_from_options,
 };
 use crate::annotation::AnnotationStore;
@@ -323,7 +323,11 @@ impl DiffApp {
             theme
                 .with_color_overrides(&settings.colors)
                 .and_then(|theme| theme.with_syntax_rules(&settings.syntax_rules))
-                .map(|theme| theme.with_transparent_background(settings.transparent_background))
+                .map(|theme| {
+                    theme.with_transparent_background_override(
+                        settings.transparent_background_override,
+                    )
+                })
         }) {
             Ok(theme) => theme
                 .with_diff_settings(settings.diff)
@@ -333,12 +337,12 @@ impl DiffApp {
                     &mut startup_error_log,
                     format!("syntax theme ignored: {error}"),
                 );
-                color_scheme = ColorSchemeChoice::System;
+                color_scheme = BuiltinTheme::System;
                 DiffTheme::default()
                     .with_color_overrides(&settings.colors)
                     .and_then(|theme| theme.with_syntax_rules(&settings.syntax_rules))
                     .unwrap_or_else(|_| DiffTheme::default())
-                    .with_transparent_background(settings.transparent_background)
+                    .with_transparent_background_override(settings.transparent_background_override)
                     .with_diff_settings(settings.diff)
                     .with_decorations(decorations)
             }
@@ -346,7 +350,7 @@ impl DiffApp {
         let syntax_limits = settings.limits;
         let context_expansion = theme.diff.context_expansion;
         let theme_color_overrides = settings.colors.clone();
-        let theme_transparent_background = settings.transparent_background;
+        let theme_transparent_background = settings.transparent_background_override;
         let syntax = match &syntax_mode {
             SyntaxStartupMode::Config if settings.syntax_highlighting => {
                 syntax_runtime_for_diff(SyntaxRuntime::start(&settings), &mut startup_error_log)

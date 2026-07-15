@@ -5545,7 +5545,7 @@ mod tests {
     #[test]
     fn tokenizes_json_with_real_grammar() {
         let mut tokenizer = TextMateTokenizer::from_grammar(include_str!(
-            "../../../../assets/tm-grammars/languages/json.tmLanguage.json"
+            "../../../../assets/grammars/languages/json.tmLanguage.json"
         ))
         .unwrap();
         let line = tokenizer.tokenize_line_scopes("{\"ok\": true}", TokenizerState::default());
@@ -6919,7 +6919,7 @@ mod tests {
     #[test]
     fn tokenize_source_produces_shape_compatible_highlighted_text() {
         let mut tokenizer = TextMateTokenizer::from_grammar(include_str!(
-            "../../../../assets/tm-grammars/languages/json.tmLanguage.json"
+            "../../../../assets/grammars/languages/json.tmLanguage.json"
         ))
         .unwrap();
         let highlighted = tokenizer.tokenize_source("{\"ok\": true}\n");

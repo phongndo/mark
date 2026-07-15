@@ -871,7 +871,7 @@ mod tests {
             }],
             licenses: vec![LicenseEntry {
                 language: "rust".to_owned(),
-                source_path: "assets/tm-grammars/languages/rust.tmLanguage.json".to_owned(),
+                source_path: "assets/grammars/languages/rust.tmLanguage.json".to_owned(),
                 upstream_url: "https://example.invalid".to_owned(),
                 spdx_id: "MIT".to_owned(),
                 license_text: String::new(),

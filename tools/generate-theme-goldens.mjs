@@ -12,7 +12,7 @@ const check = process.argv.includes('--check')
 const fixture = 'crates/mark-syntax/tests/fixtures/textmate/latex/hw2-theme.tex'
 const outputs = [
   ['crates/mark-syntax/tests/fixtures/textmate/latex/hw2-theme.golden.jsonl', null],
-  ['crates/mark-syntax/tests/fixtures/textmate/latex/hw2-theme.theme.golden.jsonl', 'assets/tm-themes/github-dark-high-contrast.json'],
+  ['crates/mark-syntax/tests/fixtures/textmate/latex/hw2-theme.theme.golden.jsonl', 'assets/themes/github-dark-high-contrast.json'],
 ]
 const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'mark-theme-golden-'))
 try {
@@ -20,7 +20,7 @@ try {
     const generated = path.join(temporary, path.basename(output))
     const args = [
       'tools/golden-dump.mjs',
-      '--assets', 'assets/tm-grammars/languages',
+      '--assets', 'assets/grammars/languages',
       '--scope', 'text.tex.latex',
       '--language', 'latex',
       '--file', fixture,

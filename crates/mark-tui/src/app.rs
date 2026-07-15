@@ -73,8 +73,8 @@ pub(crate) use init::{
 };
 pub(crate) use mouse::{MouseScroll, MouseScrollDirection};
 pub(crate) use options::{
-    COLOR_SCHEME_CHOICES, COMMON_OPTIONS_MENU_ITEMS, ColorSchemeChoice, OptionsDraft,
-    OptionsMenuItem, checkbox, color_scheme_config, color_scheme_from_config, color_scheme_label,
+    BUILTIN_THEMES, BuiltinTheme, COMMON_OPTIONS_MENU_ITEMS, OptionsDraft, OptionsMenuItem,
+    checkbox, color_scheme_config, color_scheme_from_config, color_scheme_label,
     context_expansion_label, decoration_preference_label, layout_override_from_setting,
     layout_setting_from_override, layout_setting_label, next_decoration_preference,
     next_layout_setting, next_notification_mode, next_toast_corner, next_toast_max_visible,

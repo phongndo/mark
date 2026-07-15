@@ -13,7 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 STATUS = Path("docs/language-status.md")
-COVERAGE = Path("assets/tm-grammars/coverage.toml")
+COVERAGE = Path("assets/grammars/coverage.toml")
 CASES = Path("crates/mark-syntax/tests/fixtures/textmate/cases.toml")
 CORPORA = Path("benchmarks/textmate/corpora.toml")
 SCALE_POLICY = Path("tools/textmate-golden-scale-policy.json")

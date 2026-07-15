@@ -21,7 +21,7 @@ if [ ! -x "$profdata" ]; then
     exit 1
 fi
 
-assets="$root/assets/tm-grammars/languages"
+assets="$root/assets/grammars/languages"
 corpora="$root/target/textmate-performance/corpora/core-repeated"
 if [ ! -d "$corpora" ]; then
     echo "building training corpora (tools/build-textmate-corpora.py)..."

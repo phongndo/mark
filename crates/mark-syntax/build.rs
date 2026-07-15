@@ -100,7 +100,7 @@ fn main() {
         .parent()
         .and_then(Path::parent)
         .expect("workspace root");
-    let assets = workspace.join("assets/tm-grammars");
+    let assets = workspace.join("assets/grammars");
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
     let output_dir = out_dir.join("mark-syntax");
     let output = output_dir.join("bundle.bin");

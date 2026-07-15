@@ -11,10 +11,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 const TOOL_DIR = path.dirname(fileURLToPath(import.meta.url))
 const DEFAULT_ROOT = path.resolve(TOOL_DIR, '..')
 const DEFAULT_FIXTURES = 'crates/mark-syntax/tests/fixtures/textmate'
-const DEFAULT_GRAMMARS = 'assets/tm-grammars/languages'
+const DEFAULT_GRAMMARS = 'assets/grammars/languages'
 const DEFAULT_CONFIG = `${DEFAULT_FIXTURES}/cases.config.json`
 const DEFAULT_OUTPUT = `${DEFAULT_FIXTURES}/cases.toml`
-const DEFAULT_COVERAGE = 'assets/tm-grammars/coverage.toml'
+const DEFAULT_COVERAGE = 'assets/grammars/coverage.toml'
 const DEFAULT_DIVERGENCES = `${DEFAULT_FIXTURES}/divergences.toml`
 const DEFAULT_POLICY = 'benchmarks/textmate/validation-policy.json'
 const CONVENTIONAL_NAMES = /^(basic|stress|smoke)\.(.+)$/

@@ -471,7 +471,7 @@ fn default_options_draft() -> OptionsDraft {
         line_wrapping: false,
         horizontal_scroll_locked: false,
         decorations: DecorationPreference::Auto,
-        color_scheme: ColorSchemeChoice::System,
+        color_scheme: BuiltinTheme::System,
         notification_mode: NotificationMode::Default,
         toast_corner: ToastCorner::TopRight,
         toast_timeout_ms: 1_500,

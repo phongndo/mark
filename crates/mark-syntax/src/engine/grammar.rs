@@ -1138,7 +1138,7 @@ mod tests {
     fn dev_loader_keeps_json_begin_capture_zero() {
         let grammar = load_dev_grammar_from_str(
             GrammarId(0),
-            include_str!("../../../../assets/tm-grammars/languages/json.tmLanguage.json"),
+            include_str!("../../../../assets/grammars/languages/json.tmLanguage.json"),
         )
         .unwrap();
         let object_ref = grammar.repository.get("object").unwrap();
@@ -1158,7 +1158,7 @@ mod tests {
     fn dev_loader_accepts_vendored_json_grammar() {
         let grammar = load_dev_grammar_from_str(
             GrammarId(0),
-            include_str!("../../../../assets/tm-grammars/languages/json.tmLanguage.json"),
+            include_str!("../../../../assets/grammars/languages/json.tmLanguage.json"),
         )
         .unwrap();
         assert_eq!(grammar.scope_name, "source.json");

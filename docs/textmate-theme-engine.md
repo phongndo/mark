@@ -4,10 +4,11 @@ Mark preserves each token's complete TextMate scope stack and resolves it
 against theme selectors at render time. Changing a theme therefore does not
 retokenize source files.
 
-All named built-in themes use vendored TextMate rules. The four GitHub themes
-come from `github-vscode-themes@6.3.4`; Catppuccin, Gruvbox, and Tokyo Night
-come from `@shikijs/themes@3.23.0`. Sources, revisions, and checksums are
-recorded in `assets/tm-themes/SOURCE.toml`. Release builds embed the JSON and do
+All named built-in themes use vendored TextMate rules. Package-backed themes
+come from `github-vscode-themes@6.3.4` and `@shikijs/themes@3.23.0`; additional
+families use their pinned upstream editor palettes or VS Code themes. Sources,
+licenses, revisions, adaptations, and checksums are recorded in
+`assets/themes/SOURCE.toml`. Release builds embed the JSON and do
 not need Node, VS Code, network access, or files outside the binary.
 
 ## Comparison contract
@@ -32,7 +33,7 @@ Styles are composed in this order:
 With transparent backgrounds enabled, token backgrounds are omitted. `system`,
 ANSI, and user-provided Base16 schemes remain intentionally class-based because
 they are terminal palettes rather than VS Code TextMate themes. Every named RGB
-colorscheme uses exact scope selectors.
+theme uses exact scope selectors.
 
 Scope-aware overrides use the same selector parser and precedence rules:
 

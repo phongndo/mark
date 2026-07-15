@@ -20,7 +20,7 @@ npm install --prefix tools/golden-oracle
 ## Regenerate TextMate goldens
 
 From the repository root, with the pinned grammar assets under
-`assets/tm-grammars/`:
+`assets/grammars/`:
 
 ```sh
 # all cases in the manifest
@@ -40,7 +40,7 @@ Ad-hoc single file:
 node tools/golden-dump.mjs \
   --language rust \
   --scope source.rust \
-  --grammar assets/tm-grammars/languages/rust.tmLanguage.json \
+  --grammar assets/grammars/languages/rust.tmLanguage.json \
   --file crates/mark-syntax/tests/fixtures/textmate/rust/basic.rs \
   --out crates/mark-syntax/tests/fixtures/textmate/rust/basic.golden.jsonl
 ```
@@ -62,7 +62,7 @@ is also dev-only.
 node tools/vendor-shiki-grammars.mjs --check
 ```
 
-This verifies `assets/tm-grammars/languages/`, `coverage.toml`,
+This verifies `assets/grammars/languages/`, `coverage.toml`,
 `coverage.full-shiki.toml`, and `licenses.json` against the pinned
 `@shikijs/langs` package installed here.
 

@@ -1,6 +1,6 @@
 //! Cold-path profiling driver with explicit cache semantics.
 //!
-//! usage: profile-cold --mode line-cold --assets assets/tm-grammars/languages --scope source.rust <file> [iterations]
+//! usage: profile-cold --mode line-cold --assets assets/grammars/languages --scope source.rust <file> [iterations]
 
 #[cfg(feature = "alloc-trial")]
 #[global_allocator]

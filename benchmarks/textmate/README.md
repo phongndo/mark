@@ -9,7 +9,7 @@ highlighting and never serialize tokens inside the timed interval.
 cargo build --release -p mark-syntax --example profile-cold
 target/release/examples/profile-cold \
   --mode process-cold \
-  --assets assets/tm-grammars/languages \
+  --assets assets/grammars/languages \
   --scope source.rust \
   target/syntax-fixtures/syntax-large-rust/repo/src/bench1.rs 1
 ```
@@ -23,7 +23,7 @@ loads only the requested grammar's transitive external-include closure.
 npm install --prefix tools/golden-oracle
 node tools/textmate-bench.mjs \
   --mode process-cold \
-  --assets assets/tm-grammars/languages \
+  --assets assets/grammars/languages \
   --scope source.rust \
   --file target/syntax-fixtures/syntax-large-rust/repo/src/bench1.rs \
   --iterations 1 --json
@@ -35,13 +35,13 @@ Use `--mode same-driver --iterations 3` for repeated passes after one setup.
 
 ```sh
 node tools/golden-dump.mjs \
-  --assets assets/tm-grammars/languages \
+  --assets assets/grammars/languages \
   --scope text.html.markdown \
   --file benchmarks/textmate/corpora/markdown-embedded-private.md \
   --out /tmp/oracle.jsonl
 
 target/release/examples/tokenize \
-  --assets assets/tm-grammars/languages \
+  --assets assets/grammars/languages \
   --scope text.html.markdown \
   benchmarks/textmate/corpora/markdown-embedded-private.md >/tmp/native.jsonl
 

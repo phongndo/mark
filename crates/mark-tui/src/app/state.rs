@@ -1,5 +1,5 @@
 use super::{
-    AppEffect, ColorSchemeChoice, DIFF_PREFETCH_POLL, DiffCacheEntry, EDITOR_RELOAD_POLL,
+    AppEffect, BuiltinTheme, DIFF_PREFETCH_POLL, DiffCacheEntry, EDITOR_RELOAD_POLL,
     EditorReloadRequest, EditorReloadWorker, FILTER_WORKER_POLL, FilterWorker, MouseScroll,
     OptionsDraft, PendingDiffLoad, PendingDiffPrefetch, PendingFilterApply, PendingReviewLoad,
     SyntaxStartupMode, WrappedVisualLayout,
@@ -138,7 +138,7 @@ pub(crate) struct OverlayState {
     pub(crate) annotation_menu: SelectorState,
     pub(crate) options_menu_draft: OptionsDraft,
     pub(crate) color_scheme_picker: SelectorState,
-    pub(crate) color_scheme_preview_original: Option<(ColorSchemeChoice, DiffTheme)>,
+    pub(crate) color_scheme_preview_original: Option<(BuiltinTheme, DiffTheme)>,
     pub(crate) rendered_diff_menu_area: Option<Rect>,
     pub(crate) rendered_branch_menu_area: Option<Rect>,
     pub(crate) rendered_commit_menu_area: Option<Rect>,
@@ -308,7 +308,7 @@ impl OverlayState {
 
     pub(crate) fn close_color_scheme_picker(
         &mut self,
-    ) -> (bool, Option<(ColorSchemeChoice, DiffTheme)>) {
+    ) -> (bool, Option<(BuiltinTheme, DiffTheme)>) {
         if !self.color_scheme_picker_is_open() {
             return (false, None);
         }
@@ -693,9 +693,9 @@ pub(crate) struct AppConfigState {
     pub(crate) keymap: Keymap,
     pub(crate) theme: DiffTheme,
     pub(crate) decoration_preference: DecorationPreference,
-    pub(crate) color_scheme: ColorSchemeChoice,
+    pub(crate) color_scheme: BuiltinTheme,
     pub(crate) theme_color_overrides: ColorOverrides,
-    pub(crate) theme_transparent_background: bool,
+    pub(crate) theme_transparent_background: Option<bool>,
     pub(crate) settings_persistence_enabled: bool,
     #[cfg(test)]
     pub(crate) last_persisted_options_menu_draft: Option<(OptionsDraft, OptionsMenuItem)>,

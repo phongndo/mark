@@ -44,7 +44,7 @@ repository = "https://github.com/bazel-contrib/vscode-bazel"
 version = "0.14.0"
 source_commit = "6518f01fd1d401d0af9be2d355b3d1e68ba4efac"
 license = "MIT"
-license_notice = "assets/tm-grammars/licenses/starlark.tmLanguage.license"
+license_notice = "assets/grammars/licenses/starlark.tmLanguage.license"
 assets = ["starlark"]
 notes = "The upstream MagicPython-derived MIT notice is vendored separately; package registration aliases and file types are merged into the vendored JSON."
 
@@ -54,7 +54,7 @@ repository = "https://github.com/open-policy-agent/vscode-opa"
 version = "0.23.0"
 source_commit = "07cd6e94fe611e279de72570567203c81349ad3b"
 license = "Apache-2.0"
-license_notice = "assets/tm-grammars/licenses/rego.tmLanguage.license"
+license_notice = "assets/grammars/licenses/rego.tmLanguage.license"
 assets = ["rego"]
 
 [[additional_sources]]
@@ -63,7 +63,7 @@ repository = "https://github.com/kriegalex/vscode-cuda"
 version = "0.1.1"
 source_commit = "c4f6f083e13c125f7cbaea6f4b8914feeb7c1275"
 license = "MIT"
-license_notice = "assets/tm-grammars/licenses/cuda.tmLanguage.license"
+license_notice = "assets/grammars/licenses/cuda.tmLanguage.license"
 assets = ["cuda"]
 notes = "Package registration file types are merged into the vendored JSON; generic .h ownership remains with C."
 
@@ -73,7 +73,7 @@ repository = "https://github.com/KhronosGroup/SPIRV-Tools"
 version = "0.0.1"
 source_commit = "a153275e548fcbbcfcb5fababd5025108571364e"
 license = "Apache-2.0"
-license_notice = "assets/tm-grammars/licenses/spirv.tmLanguage.license"
+license_notice = "assets/grammars/licenses/spirv.tmLanguage.license"
 assets = ["spirv"]
 
 [[additional_sources]]
@@ -82,7 +82,7 @@ repository = "https://github.com/Galarius/vscode-opencl"
 version = "0.10.0"
 source_commit = "d01266e9e8762556e13418472415dc8c2656c3d3"
 license = "MIT"
-license_notice = "assets/tm-grammars/licenses/opencl.tmLanguage.license"
+license_notice = "assets/grammars/licenses/opencl.tmLanguage.license"
 assets = ["opencl"]
 notes = "The upstream registration and OpenCL vocabulary are preserved in a bounded root profile that delegates C++ lexical syntax to source.cpp; this avoids the upstream grammar's duplicated C++ rules and native budget degradation."
 
@@ -92,7 +92,7 @@ repository = "https://github.com/computer-graphics-tools/metal-analyzer"
 version = "0.1.22"
 source_commit = "f74c533b68351b4e58c286ca53d8ecc6ea92205a"
 license = "MIT"
-license_notice = "assets/tm-grammars/licenses/metal.tmLanguage.license"
+license_notice = "assets/grammars/licenses/metal.tmLanguage.license"
 assets = ["metal"]
 
 [[additional_sources]]
@@ -101,7 +101,7 @@ repository = "https://github.com/nberlette/vscode-webidl"
 version = "0.2.0"
 source_commit = "f2a7874438e787c3a0e57bfa4b2ebe30d90884e6"
 license = "MIT"
-license_notice = "assets/tm-grammars/licenses/webidl.tmLanguage.license"
+license_notice = "assets/grammars/licenses/webidl.tmLanguage.license"
 assets = ["webidl"]
 
 [[additional_sources]]
@@ -110,15 +110,15 @@ repository = "https://github.com/AssemblyScript/assemblyscript"
 version = "0.28.19"
 source_commit = "282903732b48ddb2e268092384969e0c1ecfb12b"
 license = "Apache-2.0"
-license_notice = "assets/tm-grammars/licenses/assemblyscript.tmLanguage.license"
+license_notice = "assets/grammars/licenses/assemblyscript.tmLanguage.license"
 assets = ["assemblyscript"]
 notes = "AssemblyScript uses TypeScript lexical syntax; the public root grammar delegates to the pinned source.ts grammar and remains explicit-selection-only because .ts is ambiguous."
 
 [paths]
-languages = "assets/tm-grammars/languages"
-licenses = "assets/tm-grammars/licenses.json"
-coverage = "assets/tm-grammars/coverage.toml"
-language_metadata = "assets/tm-grammars/language-metadata.json"
+languages = "assets/grammars/languages"
+licenses = "assets/grammars/licenses.json"
+coverage = "assets/grammars/coverage.toml"
+language_metadata = "assets/grammars/language-metadata.json"
 
 [policy]
 grammar_sources_committed_as_text = true

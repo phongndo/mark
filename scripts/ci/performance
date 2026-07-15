@@ -53,7 +53,7 @@ cargo run -p mark-syntax --locked --release --example bundle-measure -- \
 if [ "$mode" = extended ]; then
   cargo run -p mark-syntax --locked --release --example profile-cold -- \
     --mode process-cold \
-    --assets assets/tm-grammars/languages \
+    --assets assets/grammars/languages \
     --scope source.rust \
     --assert-min-mb-s 0.05 \
     crates/mark-syntax/tests/fixtures/textmate/rust/stress.rs \

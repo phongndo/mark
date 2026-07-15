@@ -19,7 +19,7 @@ except ModuleNotFoundError:  # Imported as tools.generate_language_status in tes
 ROOT = Path(__file__).resolve().parents[1]
 CASES = Path("crates/mark-syntax/tests/fixtures/textmate/cases.toml")
 DIVERGENCES = Path("crates/mark-syntax/tests/fixtures/textmate/divergences.toml")
-COVERAGE = Path("assets/tm-grammars/coverage.toml")
+COVERAGE = Path("assets/grammars/coverage.toml")
 CORPORA = Path("benchmarks/textmate/corpora.toml")
 VALIDATION_POLICY = Path("benchmarks/textmate/validation-policy.json")
 PERFORMANCE_REPORT = Path("benchmarks/textmate/catalog-performance.json")

@@ -1335,7 +1335,7 @@ fn options_menu_toggles_setting_on_enter() {
 }
 
 #[test]
-fn options_menu_persistence_writes_only_colorscheme() {
+fn options_menu_persistence_writes_only_theme_and_migrates_legacy_key() {
     let dir = temp_test_dir("settings-menu-persist-colorscheme-only");
     let path = dir.join("config.toml");
     fs::create_dir_all(&dir).expect("test dir should be created");
@@ -1372,7 +1372,7 @@ context_expand = 7
             line_wrapping: true,
             horizontal_scroll_locked: true,
             decorations: DecorationPreference::Minimal,
-            color_scheme: ColorSchemeChoice::Tokyonight,
+            color_scheme: BuiltinTheme::Tokyonight,
             notification_mode: NotificationMode::Debug,
             toast_corner: ToastCorner::BottomLeft,
             toast_timeout_ms: 5_000,
@@ -1394,7 +1394,8 @@ context_expand = 7
     assert_eq!(saved["live_reload"].as_bool(), Some(true));
     assert_eq!(saved["syntax_highlighting"].as_bool(), Some(true));
     assert_eq!(saved["line_wrapping"].as_bool(), Some(false));
-    assert_eq!(saved["colorscheme"].as_str(), Some("tokyonight"));
+    assert!(saved.get("colorscheme").is_none());
+    assert_eq!(saved["theme"].as_str(), Some("tokyonight"));
     assert_eq!(
         diff.get("line_background").and_then(toml::Value::as_str),
         Some("none")
@@ -1458,7 +1459,7 @@ max_visible = 3
         line_wrapping: true,
         horizontal_scroll_locked: true,
         decorations: DecorationPreference::Minimal,
-        color_scheme: ColorSchemeChoice::Tokyonight,
+        color_scheme: BuiltinTheme::Tokyonight,
         notification_mode: NotificationMode::Debug,
         toast_corner: ToastCorner::BottomLeft,
         toast_timeout_ms: 5_000,
@@ -1517,7 +1518,7 @@ fn options_menu_colorscheme_persistence_creates_config() {
     persist_options_menu_draft_to_path(
         &path,
         OptionsDraft {
-            color_scheme: ColorSchemeChoice::GruvboxDark,
+            color_scheme: BuiltinTheme::GruvboxDark,
             ..default_options_draft()
         },
         OptionsMenuItem::ColorScheme,
@@ -1526,7 +1527,7 @@ fn options_menu_colorscheme_persistence_creates_config() {
 
     let saved = fs::read_to_string(&path).expect("settings file should be readable");
     let saved: toml::Value = toml::from_str(&saved).expect("settings should stay valid toml");
-    assert_eq!(saved["colorscheme"].as_str(), Some("gruvbox-dark"));
+    assert_eq!(saved["theme"].as_str(), Some("gruvbox-dark"));
 
     let _ = fs::remove_dir_all(dir);
 }
@@ -1812,7 +1813,7 @@ fn options_menu_clamps_selection_after_toggle_leaves_filter() {
 fn options_menu_colorscheme_input_selects_draft_and_applies_on_enter() {
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
-    app.config.color_scheme = ColorSchemeChoice::System;
+    app.config.color_scheme = BuiltinTheme::System;
     app.config.theme = DiffTheme::system();
 
     app.open_options_menu();
@@ -1826,18 +1827,22 @@ fn options_menu_colorscheme_input_selects_draft_and_applies_on_enter() {
         app.handle_key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE))
             .expect("typing should filter colorschemes");
     }
-    assert_eq!(app.config.color_scheme, ColorSchemeChoice::Tokyonight);
+    assert_eq!(app.config.color_scheme, BuiltinTheme::Tokyonight);
     assert_eq!(
         app.config.theme.background,
         DiffTheme::tokyonight().background
     );
     assert_eq!(
         app.overlays.options_menu_draft.color_scheme,
-        ColorSchemeChoice::System
+        BuiltinTheme::System
     );
     assert_eq!(
         app.filtered_color_schemes(),
-        vec![ColorSchemeChoice::Tokyonight]
+        vec![
+            BuiltinTheme::Tokyonight,
+            BuiltinTheme::TokyobonesDark,
+            BuiltinTheme::TokyobonesLight,
+        ]
     );
 
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
@@ -1846,9 +1851,9 @@ fn options_menu_colorscheme_input_selects_draft_and_applies_on_enter() {
     assert!(app.overlays.options_menu_is_open());
     assert_eq!(
         app.overlays.options_menu_draft.color_scheme,
-        ColorSchemeChoice::Tokyonight
+        BuiltinTheme::Tokyonight
     );
-    assert_eq!(app.config.color_scheme, ColorSchemeChoice::Tokyonight);
+    assert_eq!(app.config.color_scheme, BuiltinTheme::Tokyonight);
     assert_eq!(
         app.config.theme.background,
         DiffTheme::tokyonight().background
@@ -1860,7 +1865,7 @@ fn options_menu_colorscheme_input_selects_draft_and_applies_on_enter() {
 fn colorscheme_picker_mouse_selection_persists_draft() {
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
-    app.config.color_scheme = ColorSchemeChoice::System;
+    app.config.color_scheme = BuiltinTheme::System;
     app.config.theme = DiffTheme::system();
 
     app.open_options_menu();
@@ -1894,17 +1899,17 @@ fn colorscheme_picker_mouse_selection_persists_draft() {
     .expect("mouse click should select colorscheme");
 
     assert!(!app.overlays.color_scheme_picker_is_open());
-    assert_eq!(app.config.color_scheme, ColorSchemeChoice::GruvboxDark);
+    assert_eq!(app.config.color_scheme, BuiltinTheme::GruvboxDark);
     assert_eq!(
         app.overlays.options_menu_draft.color_scheme,
-        ColorSchemeChoice::GruvboxDark
+        BuiltinTheme::GruvboxDark
     );
     let (draft, changed_item) = app
         .config
         .last_persisted_options_menu_draft
         .expect("mouse-selected colorscheme should be persisted");
     assert_eq!(changed_item, OptionsMenuItem::ColorScheme);
-    assert_eq!(draft.color_scheme, ColorSchemeChoice::GruvboxDark);
+    assert_eq!(draft.color_scheme, BuiltinTheme::GruvboxDark);
 }
 
 #[test]
@@ -2083,7 +2088,7 @@ fn options_menu_draws_centered_floating_menu() {
     assert!(rows.iter().any(|row| row.contains("Layout")));
     assert!(rows.iter().any(|row| row.contains("Live reload")));
     assert!(rows.iter().any(|row| row.contains("Syntax highlighting")));
-    assert!(rows.iter().any(|row| row.contains("Colorscheme")));
+    assert!(rows.iter().any(|row| row.contains("Theme")));
 
     let layout_row = rows
         .iter()
@@ -2112,7 +2117,7 @@ fn options_menu_scrolls_selected_setting_into_short_terminal() {
 
     let rows = buffer_rows(terminal.backend().buffer());
     assert!(app.overlays.options_menu.scroll > 0);
-    assert!(rows.iter().any(|row| row.contains("Colorscheme")));
+    assert!(rows.iter().any(|row| row.contains("Theme")));
     assert!(
         !rows
             .iter()
@@ -2254,7 +2259,7 @@ fn colorscheme_picker_draws_input_dropdown() {
         })
         .collect();
 
-    assert!(rows.iter().any(|row| row.contains("Colorscheme")));
+    assert!(rows.iter().any(|row| row.contains("Theme")));
     assert!(
         rows.iter()
             .any(|row| row.contains(&format!("> g{INPUT_CURSOR}")))
@@ -2287,7 +2292,7 @@ fn colorscheme_picker_navigation_keeps_expanded_rows_stable_in_tall_terminal() {
         width: 120,
         height: 60,
     });
-    app.overlays.options_menu_draft.color_scheme = ColorSchemeChoice::System;
+    app.overlays.options_menu_draft.color_scheme = BuiltinTheme::System;
     app.open_color_scheme_picker();
 
     app.move_color_scheme_selection(9);
@@ -2329,7 +2334,7 @@ fn colorscheme_picker_previews_hovered_theme_and_reverts_on_close() {
     })
     .expect("hover should preview colorscheme");
 
-    assert_eq!(app.config.color_scheme, ColorSchemeChoice::GruvboxDark);
+    assert_eq!(app.config.color_scheme, BuiltinTheme::GruvboxDark);
     assert_eq!(
         app.config.theme.background,
         DiffTheme::gruvbox_dark().background
@@ -2344,7 +2349,7 @@ fn colorscheme_picker_previews_hovered_theme_and_reverts_on_close() {
     .expect("outside click should close colorscheme picker");
 
     assert!(!app.overlays.color_scheme_picker_is_open());
-    assert_eq!(app.config.color_scheme, ColorSchemeChoice::System);
+    assert_eq!(app.config.color_scheme, BuiltinTheme::System);
     assert_eq!(app.config.theme, DiffTheme::system());
 }
 
@@ -2352,7 +2357,7 @@ fn colorscheme_picker_previews_hovered_theme_and_reverts_on_close() {
 fn colorscheme_picker_previews_first_hovered_theme() {
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
-    app.config.color_scheme = ColorSchemeChoice::System;
+    app.config.color_scheme = BuiltinTheme::System;
     app.config.theme = DiffTheme::system();
     app.open_options_menu();
     app.move_options_menu_selection(5);
@@ -2385,7 +2390,7 @@ fn colorscheme_picker_previews_first_hovered_theme() {
     .expect("hover should preview first colorscheme");
 
     assert_eq!(app.overlays.color_scheme_picker.selected, 0);
-    assert_eq!(app.config.color_scheme, ColorSchemeChoice::CatppuccinLatte);
+    assert_eq!(app.config.color_scheme, BuiltinTheme::CatppuccinLatte);
     assert_eq!(
         app.config.theme.background,
         DiffTheme::catppuccin_latte().background
@@ -3113,20 +3118,72 @@ fn color_overrides_layer_on_colorscheme() {
 #[test]
 fn color_scheme_picker_lists_supported_builtin_themes_only() {
     assert_eq!(
-        COLOR_SCHEME_CHOICES,
+        BUILTIN_THEMES,
         &[
-            ColorSchemeChoice::System,
-            ColorSchemeChoice::CatppuccinLatte,
-            ColorSchemeChoice::CatppuccinFrappe,
-            ColorSchemeChoice::CatppuccinMacchiato,
-            ColorSchemeChoice::CatppuccinMocha,
-            ColorSchemeChoice::GruvboxDark,
-            ColorSchemeChoice::GruvboxLight,
-            ColorSchemeChoice::GithubDark,
-            ColorSchemeChoice::GithubDarkHighContrast,
-            ColorSchemeChoice::GithubLight,
-            ColorSchemeChoice::GithubLightHighContrast,
-            ColorSchemeChoice::Tokyonight,
+            BuiltinTheme::System,
+            BuiltinTheme::CatppuccinLatte,
+            BuiltinTheme::CatppuccinFrappe,
+            BuiltinTheme::CatppuccinMacchiato,
+            BuiltinTheme::CatppuccinMocha,
+            BuiltinTheme::GruvboxDark,
+            BuiltinTheme::GruvboxLight,
+            BuiltinTheme::GithubDark,
+            BuiltinTheme::GithubDarkHighContrast,
+            BuiltinTheme::GithubLight,
+            BuiltinTheme::GithubLightHighContrast,
+            BuiltinTheme::Tokyonight,
+            BuiltinTheme::Nordic,
+            BuiltinTheme::Nord,
+            BuiltinTheme::AyuDark,
+            BuiltinTheme::AyuLight,
+            BuiltinTheme::AyuMirage,
+            BuiltinTheme::Molokai,
+            BuiltinTheme::ZenbonesDark,
+            BuiltinTheme::ZenbonesLight,
+            BuiltinTheme::Duckbones,
+            BuiltinTheme::ForestbonesDark,
+            BuiltinTheme::ForestbonesLight,
+            BuiltinTheme::Kanagawabones,
+            BuiltinTheme::NeobonesDark,
+            BuiltinTheme::NeobonesLight,
+            BuiltinTheme::Nordbones,
+            BuiltinTheme::RosebonesDark,
+            BuiltinTheme::RosebonesLight,
+            BuiltinTheme::SeoulbonesDark,
+            BuiltinTheme::SeoulbonesLight,
+            BuiltinTheme::TokyobonesDark,
+            BuiltinTheme::TokyobonesLight,
+            BuiltinTheme::Vimbones,
+            BuiltinTheme::Zenburned,
+            BuiltinTheme::ZenwrittenDark,
+            BuiltinTheme::ZenwrittenLight,
+            BuiltinTheme::KanagawaWave,
+            BuiltinTheme::KanagawaDragon,
+            BuiltinTheme::KanagawaLotus,
+            BuiltinTheme::EverforestDark,
+            BuiltinTheme::EverforestLight,
+            BuiltinTheme::TokenDark,
+            BuiltinTheme::TokenLight,
+            BuiltinTheme::GruvboxMaterialDark,
+            BuiltinTheme::GruvboxMaterialLight,
+            BuiltinTheme::Mfd,
+            BuiltinTheme::MfdDark,
+            BuiltinTheme::MfdStealth,
+            BuiltinTheme::MfdAmber,
+            BuiltinTheme::MfdMono,
+            BuiltinTheme::MfdScarlet,
+            BuiltinTheme::MfdPaper,
+            BuiltinTheme::MfdHud,
+            BuiltinTheme::MfdNvg,
+            BuiltinTheme::MfdBlackout,
+            BuiltinTheme::MfdFlir,
+            BuiltinTheme::MfdFlirBh,
+            BuiltinTheme::MfdFlirRh,
+            BuiltinTheme::MfdFlirFusion,
+            BuiltinTheme::MfdGblLight,
+            BuiltinTheme::MfdGblDark,
+            BuiltinTheme::MfdLumon,
+            BuiltinTheme::MfdNerv,
         ]
     );
 }

@@ -298,7 +298,7 @@ fn shard_test_case(language: &str, grammar: &str) -> CaseSpec {
     CaseSpec {
         language: language.to_owned(),
         scope: format!("source.{language}"),
-        grammar: format!("assets/tm-grammars/languages/{grammar}.tmLanguage.json"),
+        grammar: format!("assets/grammars/languages/{grammar}.tmLanguage.json"),
         fixture: String::new(),
         golden: String::new(),
         embedded: Vec::new(),
@@ -423,7 +423,7 @@ fn bsl_basic_and_stress_are_exact_and_budget_safe_in_the_full_grammar_set() {
 }
 
 fn full_asset_grammar_set() -> GrammarSet {
-    let directory = repo_path("assets/tm-grammars/languages");
+    let directory = repo_path("assets/grammars/languages");
     let mut entries = fs::read_dir(directory)
         .expect("grammar asset directory")
         .collect::<Result<Vec<_>, _>>()
@@ -548,14 +548,14 @@ fn jison_cases() -> [CaseSpec; 2] {
     ["basic", "stress"].map(|fixture| CaseSpec {
         language: "jison".to_owned(),
         scope: "source.jison".to_owned(),
-        grammar: "assets/tm-grammars/languages/jison.tmLanguage.json".to_owned(),
+        grammar: "assets/grammars/languages/jison.tmLanguage.json".to_owned(),
         fixture: format!("crates/mark-syntax/tests/fixtures/textmate/jison/{fixture}.jison"),
         golden: format!("crates/mark-syntax/tests/fixtures/textmate/jison/{fixture}.golden.jsonl"),
         // The oracle can resolve source.js but not source.jisonlex or the
         // absent source.js#string_escapes repository entry.
         embedded: vec![EmbeddedSpec {
             scope: "source.js".to_owned(),
-            grammar: "assets/tm-grammars/languages/javascript.tmLanguage.json".to_owned(),
+            grammar: "assets/grammars/languages/javascript.tmLanguage.json".to_owned(),
         }],
     })
 }
@@ -589,7 +589,7 @@ fn ara_cases() -> [CaseSpec; 2] {
     ["basic", "stress"].map(|fixture| CaseSpec {
         language: "ara".to_owned(),
         scope: "source.ara".to_owned(),
-        grammar: "assets/tm-grammars/languages/ara.tmLanguage.json".to_owned(),
+        grammar: "assets/grammars/languages/ara.tmLanguage.json".to_owned(),
         fixture: format!("crates/mark-syntax/tests/fixtures/textmate/ara/{fixture}.ara"),
         golden: format!("crates/mark-syntax/tests/fixtures/textmate/ara/{fixture}.golden.jsonl"),
         embedded: Vec::new(),
@@ -651,7 +651,7 @@ fn tsv_cases() -> [CaseSpec; 2] {
     ["basic", "stress"].map(|fixture| CaseSpec {
         language: "tsv".to_owned(),
         scope: "text.tsv".to_owned(),
-        grammar: "assets/tm-grammars/languages/tsv.tmLanguage.json".to_owned(),
+        grammar: "assets/grammars/languages/tsv.tmLanguage.json".to_owned(),
         fixture: format!("crates/mark-syntax/tests/fixtures/textmate/tsv/{fixture}.tsv"),
         golden: format!("crates/mark-syntax/tests/fixtures/textmate/tsv/{fixture}.golden.jsonl"),
         embedded: Vec::new(),
@@ -695,7 +695,7 @@ fn gherkin_cases() -> [CaseSpec; 2] {
     ["basic", "stress"].map(|fixture| CaseSpec {
         language: "gherkin".to_owned(),
         scope: "text.gherkin.feature".to_owned(),
-        grammar: "assets/tm-grammars/languages/gherkin.tmLanguage.json".to_owned(),
+        grammar: "assets/grammars/languages/gherkin.tmLanguage.json".to_owned(),
         fixture: format!("crates/mark-syntax/tests/fixtures/textmate/gherkin/{fixture}.feature"),
         golden: format!(
             "crates/mark-syntax/tests/fixtures/textmate/gherkin/{fixture}.golden.jsonl"
@@ -724,7 +724,7 @@ fn wikitext_cases() -> [CaseSpec; 2] {
     ["basic", "stress"].map(|fixture| CaseSpec {
         language: "wikitext".to_owned(),
         scope: "source.wikitext".to_owned(),
-        grammar: "assets/tm-grammars/languages/wikitext.tmLanguage.json".to_owned(),
+        grammar: "assets/grammars/languages/wikitext.tmLanguage.json".to_owned(),
         fixture: format!("crates/mark-syntax/tests/fixtures/textmate/wikitext/{fixture}.wiki"),
         golden: format!(
             "crates/mark-syntax/tests/fixtures/textmate/wikitext/{fixture}.golden.jsonl"
@@ -736,7 +736,7 @@ fn wikitext_cases() -> [CaseSpec; 2] {
         ]
         .map(|(scope, grammar)| EmbeddedSpec {
             scope: scope.to_owned(),
-            grammar: format!("assets/tm-grammars/languages/{grammar}.tmLanguage.json"),
+            grammar: format!("assets/grammars/languages/{grammar}.tmLanguage.json"),
         })
         .to_vec(),
     })
@@ -787,7 +787,7 @@ fn reusable_parity_cases() -> Vec<CaseSpec> {
             ["basic", "stress"].map(move |fixture| CaseSpec {
                 language: language.to_owned(),
                 scope: scope.to_owned(),
-                grammar: format!("assets/tm-grammars/languages/{grammar}.tmLanguage.json"),
+                grammar: format!("assets/grammars/languages/{grammar}.tmLanguage.json"),
                 fixture: format!(
                     "crates/mark-syntax/tests/fixtures/textmate/{language}/{fixture}.{extension}"
                 ),
@@ -798,7 +798,7 @@ fn reusable_parity_cases() -> Vec<CaseSpec> {
                     .iter()
                     .map(|grammar| EmbeddedSpec {
                         scope: String::new(),
-                        grammar: format!("assets/tm-grammars/languages/{grammar}.tmLanguage.json"),
+                        grammar: format!("assets/grammars/languages/{grammar}.tmLanguage.json"),
                     })
                     .collect(),
             })
@@ -808,10 +808,8 @@ fn reusable_parity_cases() -> Vec<CaseSpec> {
 
 #[test]
 fn tokenizer_never_panics_on_generated_utf8_inputs() {
-    let grammar = fs::read_to_string(repo_path(
-        "assets/tm-grammars/languages/json.tmLanguage.json",
-    ))
-    .expect("json grammar");
+    let grammar = fs::read_to_string(repo_path("assets/grammars/languages/json.tmLanguage.json"))
+        .expect("json grammar");
     let mut tokenizer = TextMateTokenizer::from_grammar(&grammar).unwrap();
     let mut state = TokenizerState::default();
     for input in generated_utf8_inputs() {

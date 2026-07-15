@@ -27,7 +27,7 @@ MARKDOWN_SOURCES = [
     "pi-mark/README.md",
 ]
 CASES = ROOT / "crates/mark-syntax/tests/fixtures/textmate/cases.toml"
-CATALOG = ROOT / "assets/tm-grammars/coverage.toml"
+CATALOG = ROOT / "assets/grammars/coverage.toml"
 CHECKED_MANIFEST = ROOT / "benchmarks/textmate/corpora.toml"
 # Keep new catalog members the same approximate size as the historical
 # core-repeated members. This deliberately does not resize core-repeated.

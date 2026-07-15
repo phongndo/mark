@@ -10,7 +10,7 @@ from pathlib import Path
 
 POLICY = Path("benchmarks/textmate/validation-policy.json")
 CASES = Path("crates/mark-syntax/tests/fixtures/textmate/cases.toml")
-COVERAGE = Path("assets/tm-grammars/coverage.toml")
+COVERAGE = Path("assets/grammars/coverage.toml")
 DIVERGENCES = Path("crates/mark-syntax/tests/fixtures/textmate/divergences.toml")
 EXPECTED_COUNT_KEYS = (
     "publicLanguages",

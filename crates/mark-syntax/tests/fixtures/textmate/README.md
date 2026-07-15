@@ -66,7 +66,7 @@ Notes:
 `*.golden.jsonl` and files with a `sample` name segment are ignored. The
 generator reads each vendored grammar's `scopeName`, follows its external
 `include` scopes recursively, and emits only dependencies present in
-`assets/tm-grammars/languages/`; unresolved optional includes are omitted just
+`assets/grammars/languages/`; unresolved optional includes are omitted just
 as they are by `vscode-textmate`.
 
 ```sh
@@ -155,7 +155,7 @@ Ad-hoc single dump:
 node tools/golden-dump.mjs \
   --language rust \
   --scope source.rust \
-  --grammar assets/tm-grammars/languages/rust.tmLanguage.json \
+  --grammar assets/grammars/languages/rust.tmLanguage.json \
   --file crates/mark-syntax/tests/fixtures/textmate/rust/basic.rs \
   --out crates/mark-syntax/tests/fixtures/textmate/rust/basic.golden.jsonl
 ```
