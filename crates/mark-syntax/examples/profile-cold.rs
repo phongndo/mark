@@ -113,6 +113,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .transpose()?
         .unwrap_or(10);
 
+    // Process-cold measures fresh-tokenizer compile cost; the process-wide
+    // shared pattern and grammar-context caches would hide it from every
+    // iteration after the first. Explicit env values still win.
+    if matches!(mode, Mode::ProcessCold) {
+        for name in ["MARK_TEXTMATE_PATTERN_CACHE", "MARK_TEXTMATE_GRAMMAR_CACHE"] {
+            if env::var_os(name).is_none() {
+                // SAFETY: single-threaded at this point, before any cache read.
+                unsafe { env::set_var(name, "off") };
+            }
+        }
+    }
+
     let (set, root) = if let Some(grammar) = grammar {
         if assets.is_some() || scope.is_some() {
             return Err("--grammar cannot be combined with --assets or --scope".into());

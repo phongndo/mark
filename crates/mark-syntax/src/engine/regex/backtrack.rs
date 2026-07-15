@@ -944,7 +944,7 @@ impl FallbackMatcher {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct StartByteSet {
+pub(crate) struct StartByteSet {
     bits: [u64; 4],
     len: usize,
 }
@@ -972,11 +972,11 @@ impl StartByteSet {
         }
     }
 
-    fn contains(&self, byte: u8) -> bool {
+    pub(crate) fn contains(&self, byte: u8) -> bool {
         self.bits[byte as usize >> 6] & (1u64 << (byte & 63)) != 0
     }
 
-    fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.len == 0
     }
 
@@ -986,12 +986,12 @@ impl StartByteSet {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct StartBytes {
-    bytes: StartByteSet,
-    nullable: bool,
+pub(crate) struct StartBytes {
+    pub(crate) bytes: StartByteSet,
+    pub(crate) nullable: bool,
 }
 
-fn expand_case_insensitive_start_bytes(bytes: &mut StartByteSet) {
+pub(crate) fn expand_case_insensitive_start_bytes(bytes: &mut StartByteSet) {
     for byte in b'a'..=b'z' {
         if bytes.contains(byte) || bytes.contains(byte.to_ascii_uppercase()) {
             bytes.insert(byte);
@@ -1076,7 +1076,7 @@ fn has_zero_width_line_end_branch(ast: &Ast) -> bool {
     }
 }
 
-fn concat_start_bytes(nodes: &[Ast]) -> Option<StartBytes> {
+pub(crate) fn concat_start_bytes(nodes: &[Ast]) -> Option<StartBytes> {
     let mut out = StartBytes {
         bytes: StartByteSet::empty(),
         nullable: true,
@@ -1866,7 +1866,7 @@ pub(crate) fn is_cpp_space_comment_separator(branches: &[Ast]) -> bool {
         })
 }
 
-fn strip_nonsemantic_group(ast: &Ast) -> &Ast {
+pub(crate) fn strip_nonsemantic_group(ast: &Ast) -> &Ast {
     let mut ast = ast;
     while let Ast::Group {
         child, name: None, ..
@@ -1947,7 +1947,7 @@ fn is_optional_newline_line_end_branch(ast: &Ast) -> bool {
     )
 }
 
-fn is_perl_class(ast: &Ast, wanted: PerlClassKind) -> bool {
+pub(crate) fn is_perl_class(ast: &Ast, wanted: PerlClassKind) -> bool {
     let Ast::Class(class) = strip_nonsemantic_group(ast) else {
         return false;
     };
@@ -2538,7 +2538,7 @@ pub(crate) fn class_contains(class: &CharClass, ch: char, flags: RegexFlags) -> 
     if class.negated { !matched } else { matched }
 }
 
-fn atom_contains(atom: &ClassAtom, ch: char, flags: RegexFlags) -> bool {
+pub(crate) fn atom_contains(atom: &ClassAtom, ch: char, flags: RegexFlags) -> bool {
     match atom {
         ClassAtom::Char(expected) => char_eq(*expected, ch, flags),
         ClassAtom::Range(start, end) => {
@@ -2571,7 +2571,7 @@ fn atom_contains(atom: &ClassAtom, ch: char, flags: RegexFlags) -> bool {
     }
 }
 
-fn perl_class_contains(kind: PerlClassKind, ch: char) -> bool {
+pub(crate) fn perl_class_contains(kind: PerlClassKind, ch: char) -> bool {
     match kind {
         PerlClassKind::Digit => ch.is_ascii_digit(),
         PerlClassKind::NotDigit => !ch.is_ascii_digit(),
@@ -2587,7 +2587,7 @@ fn perl_class_contains(kind: PerlClassKind, ch: char) -> bool {
     }
 }
 
-fn posix_class_contains(name: &str, ch: char) -> bool {
+pub(crate) fn posix_class_contains(name: &str, ch: char) -> bool {
     if name.eq_ignore_ascii_case("alnum") {
         ch.is_alphanumeric()
     } else if name.eq_ignore_ascii_case("alpha") {
@@ -2621,7 +2621,7 @@ fn posix_class_contains(name: &str, ch: char) -> bool {
     }
 }
 
-fn unicode_class_contains(name: &str, ch: char) -> bool {
+pub(crate) fn unicode_class_contains(name: &str, ch: char) -> bool {
     use unicode_general_category::{GeneralCategory as Gc, get_general_category};
     use unicode_script::UnicodeScript;
 

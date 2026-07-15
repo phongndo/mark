@@ -4,7 +4,7 @@
 //! Mutable DFS, assertion, and repeat state lives in [`BytecodeScratch`], so a
 //! caller can reuse its allocations across candidate attempts.
 
-use super::ast::{Ast, Backref, CharClass, LookKind, ParsedRegex, RegexFlags};
+use super::ast::{Ast, Backref, CharClass, ClassAtom, LookKind, ParsedRegex, RegexFlags};
 use super::backtrack::{
     BudgetExceeded, StepBudget, anchor_matches, char_at, class_contains,
     is_cpp_space_comment_separator, match_literal_end, unicode_case_eq,
@@ -85,27 +85,21 @@ struct CompiledClass {
 
 impl CompiledClass {
     fn new(source: CharClass) -> Self {
-        let mut compiled = Self {
+        // Build the ASCII bitmaps per atom instead of evaluating the whole
+        // class 128 × 2 times: the per-character evaluation runs Unicode case
+        // conversions for every probe and dominated one-shot grammar compile
+        // time on C-family grammars.
+        let (ascii_sensitive, ascii_insensitive) = ascii_class_masks(&source);
+        debug_assert_eq!(
+            (ascii_sensitive, ascii_insensitive),
+            ascii_masks_by_evaluation(&source),
+            "atom-mask construction must agree with class_contains for {source:?}",
+        );
+        Self {
             source,
-            ascii_sensitive: [0; 2],
-            ascii_insensitive: [0; 2],
-        };
-        for byte in 0u8..=127 {
-            if class_contains(&compiled.source, byte as char, RegexFlags::default()) {
-                compiled.ascii_sensitive[byte as usize / 64] |= 1u64 << (byte % 64);
-            }
-            if class_contains(
-                &compiled.source,
-                byte as char,
-                RegexFlags {
-                    case_insensitive: true,
-                    ..RegexFlags::default()
-                },
-            ) {
-                compiled.ascii_insensitive[byte as usize / 64] |= 1u64 << (byte % 64);
-            }
+            ascii_sensitive,
+            ascii_insensitive,
         }
-        compiled
     }
 
     fn matches_ascii(&self, byte: u8, case_insensitive: bool) -> bool {
@@ -116,6 +110,146 @@ impl CompiledClass {
         };
         bitmap[byte as usize / 64] & (1u64 << (byte % 64)) != 0
     }
+}
+
+type AsciiMask = [u64; 2];
+
+fn ascii_mask_set(mask: &mut AsciiMask, byte: u8) {
+    debug_assert!(byte < 128);
+    mask[byte as usize / 64] |= 1u64 << (byte % 64);
+}
+
+/// Exact ASCII membership bitmaps (case-sensitive, case-insensitive) for a
+/// class, mirroring `class_contains` on `0..=127`.
+fn ascii_class_masks(class: &CharClass) -> (AsciiMask, AsciiMask) {
+    let (mut sensitive, mut insensitive) = ascii_union_masks(&class.atoms);
+    for union in &class.intersections {
+        let (term_sensitive, term_insensitive) = ascii_union_masks(union);
+        sensitive[0] &= term_sensitive[0];
+        sensitive[1] &= term_sensitive[1];
+        insensitive[0] &= term_insensitive[0];
+        insensitive[1] &= term_insensitive[1];
+    }
+    if class.negated {
+        // Negation is exact within the ASCII range: membership of an ASCII
+        // character depends only on the (complete) positive masks.
+        sensitive = [!sensitive[0], !sensitive[1]];
+        insensitive = [!insensitive[0], !insensitive[1]];
+    }
+    (sensitive, insensitive)
+}
+
+fn ascii_union_masks(atoms: &[ClassAtom]) -> (AsciiMask, AsciiMask) {
+    let mut sensitive = [0u64; 2];
+    let mut insensitive = [0u64; 2];
+    for atom in atoms {
+        let (atom_sensitive, atom_insensitive) = ascii_atom_masks(atom);
+        sensitive[0] |= atom_sensitive[0];
+        sensitive[1] |= atom_sensitive[1];
+        insensitive[0] |= atom_insensitive[0];
+        insensitive[1] |= atom_insensitive[1];
+    }
+    (sensitive, insensitive)
+}
+
+fn ascii_atom_masks(atom: &ClassAtom) -> (AsciiMask, AsciiMask) {
+    match atom {
+        ClassAtom::Char(ch) if ch.is_ascii() => {
+            let byte = *ch as u8;
+            let mut sensitive = [0u64; 2];
+            ascii_mask_set(&mut sensitive, byte);
+            let mut insensitive = sensitive;
+            ascii_mask_set(&mut insensitive, byte.to_ascii_lowercase());
+            ascii_mask_set(&mut insensitive, byte.to_ascii_uppercase());
+            (sensitive, insensitive)
+        }
+        ClassAtom::Range(start, end) if start.is_ascii() && end.is_ascii() => {
+            let (low, high) = (*start as u8, *end as u8);
+            let mut sensitive = [0u64; 2];
+            let mut insensitive = [0u64; 2];
+            for byte in 0u8..=127 {
+                let ch = byte as char;
+                if low <= byte && byte <= high {
+                    ascii_mask_set(&mut sensitive, byte);
+                }
+                // Mirror the evaluator's folded-range semantics with ASCII
+                // case maps (exact for ASCII probes and bounds).
+                let folded_low = ch.to_ascii_lowercase() as u8;
+                let folded_up = ch.to_ascii_uppercase() as u8;
+                if (low.to_ascii_lowercase() <= folded_low
+                    && folded_low <= high.to_ascii_lowercase())
+                    || (low.to_ascii_uppercase() <= folded_up
+                        && folded_up <= high.to_ascii_uppercase())
+                {
+                    ascii_mask_set(&mut insensitive, byte);
+                }
+            }
+            (sensitive, insensitive)
+        }
+        // Perl, POSIX, and Unicode-property atoms ignore the case flag, so
+        // one cheap per-character pass fills both masks without any Unicode
+        // case conversion.
+        ClassAtom::Perl(kind) => {
+            let mask = ascii_predicate_mask(|ch| super::backtrack::perl_class_contains(*kind, ch));
+            (mask, mask)
+        }
+        ClassAtom::Posix { name, negated } => {
+            let mask = ascii_predicate_mask(|ch| {
+                super::backtrack::posix_class_contains(name, ch) != *negated
+            });
+            (mask, mask)
+        }
+        ClassAtom::Unicode { name, negated } => {
+            let mask = ascii_predicate_mask(|ch| {
+                super::backtrack::unicode_class_contains(name, ch) != *negated
+            });
+            (mask, mask)
+        }
+        ClassAtom::Nested(class) => ascii_class_masks(class),
+        // Non-ASCII chars and ranges can still fold into ASCII under case
+        // insensitivity (e.g. the Kelvin sign); evaluate the atom directly.
+        ClassAtom::Char(_) | ClassAtom::Range(..) => {
+            let sensitive = ascii_predicate_mask(|ch| {
+                super::backtrack::atom_contains(atom, ch, RegexFlags::default())
+            });
+            let insensitive = ascii_predicate_mask(|ch| {
+                super::backtrack::atom_contains(
+                    atom,
+                    ch,
+                    RegexFlags {
+                        case_insensitive: true,
+                        ..RegexFlags::default()
+                    },
+                )
+            });
+            (sensitive, insensitive)
+        }
+    }
+}
+
+fn ascii_predicate_mask(predicate: impl Fn(char) -> bool) -> AsciiMask {
+    let mut mask = [0u64; 2];
+    for byte in 0u8..=127 {
+        if predicate(byte as char) {
+            ascii_mask_set(&mut mask, byte);
+        }
+    }
+    mask
+}
+
+fn ascii_masks_by_evaluation(class: &CharClass) -> (AsciiMask, AsciiMask) {
+    let sensitive = ascii_predicate_mask(|ch| class_contains(class, ch, RegexFlags::default()));
+    let insensitive = ascii_predicate_mask(|ch| {
+        class_contains(
+            class,
+            ch,
+            RegexFlags {
+                case_insensitive: true,
+                ..RegexFlags::default()
+            },
+        )
+    });
+    (sensitive, insensitive)
 }
 
 #[derive(Debug, Clone)]
@@ -318,6 +452,7 @@ pub(crate) struct BytecodeScratch {
     line_ptr: usize,
     line_len: usize,
     line_is_ascii: bool,
+    line_block_comment: Option<bool>,
 }
 
 impl BytecodeScratch {
@@ -326,16 +461,31 @@ impl BytecodeScratch {
         self.line_ptr = line.as_ptr() as usize;
         self.line_len = line.len();
         self.line_is_ascii = line.is_ascii();
+        self.line_block_comment = None;
     }
 
     pub(crate) fn line_is_ascii(&mut self, line: &str) -> bool {
+        self.refresh_line_identity(line);
+        self.line_is_ascii
+    }
+
+    /// Whether the line contains a `/*` block-comment opener; cached per
+    /// line for the skip-prefix gates.
+    pub(crate) fn line_has_block_comment(&mut self, line: &str) -> bool {
+        self.refresh_line_identity(line);
+        *self
+            .line_block_comment
+            .get_or_insert_with(|| memchr::memmem::find(line.as_bytes(), b"/*").is_some())
+    }
+
+    fn refresh_line_identity(&mut self, line: &str) {
         let ptr = line.as_ptr() as usize;
         if self.line_ptr != ptr || self.line_len != line.len() {
             self.line_ptr = ptr;
             self.line_len = line.len();
             self.line_is_ascii = line.is_ascii();
+            self.line_block_comment = None;
         }
-        self.line_is_ascii
     }
 
     pub(crate) fn scanner(&mut self) -> &mut super::scanner::ScannerScratch {
