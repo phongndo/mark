@@ -266,7 +266,10 @@ impl HighlightScopeTable {
 }
 
 fn style_cache_stats_enabled() -> bool {
-    std::env::var_os("MARK_TEXTMATE_THEME_CACHE_STATS").is_some()
+    // Read once: `HighlightScopeTable::default()` runs per tokenized source,
+    // and `getenv` takes a process-global lock.
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("MARK_TEXTMATE_THEME_CACHE_STATS").is_some())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

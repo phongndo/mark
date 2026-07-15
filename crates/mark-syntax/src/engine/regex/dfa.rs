@@ -1471,6 +1471,12 @@ pub struct PatternSetMatcher {
     unrestricted_entries: Vec<usize>,
     start_byte_entries: Vec<Vec<usize>>,
     start_prefilter: Option<StartBytePrefilter>,
+    /// Per-entry word-context start-class masks (see `start_class`); an
+    /// entry is skipped at scan positions whose class bit is not set.
+    start_class_masks: Vec<u8>,
+    /// Per-entry separator skip gates (see `skip_prefix`); `None` entries
+    /// are always attempted.
+    skip_gates: Vec<Option<super::skip_prefix::SkipGate>>,
     /// Translated pattern spellings (diagnostic / inventory surface).
     patterns: Vec<String>,
     /// Present when every pattern is a pure unanchored literal.
@@ -1507,6 +1513,10 @@ impl PatternSetMatcher {
         let mut entries = Vec::with_capacity(patterns.len());
         let mut translated = Vec::with_capacity(patterns.len());
         let mut all_literals = Vec::with_capacity(patterns.len());
+        let mut start_class_masks = Vec::with_capacity(patterns.len());
+        let mut skip_gates = Vec::with_capacity(patterns.len());
+        let masks_enabled = start_class_gate_enabled();
+        let gates_enabled = skip_gate_enabled();
         let mut literals_only = true;
         let mut unrestricted_entries = Vec::new();
         let mut start_byte_entries = (0..=u8::MAX)
@@ -1514,6 +1524,16 @@ impl PatternSetMatcher {
             .collect::<Vec<_>>();
         for (index, pattern) in patterns.iter().enumerate() {
             translated.push(pattern.translated_pattern().to_owned());
+            start_class_masks.push(if masks_enabled {
+                pattern.start_class_mask()
+            } else {
+                super::start_class::START_CLASS_ALL
+            });
+            skip_gates.push(if gates_enabled {
+                pattern.skip_gate().cloned()
+            } else {
+                None
+            });
             if let Some(literal) = pattern.unanchored_literal() {
                 let literal = literal.to_owned();
                 if literals_only {
@@ -1603,6 +1623,8 @@ impl PatternSetMatcher {
             unrestricted_entries,
             start_byte_entries,
             start_prefilter,
+            start_class_masks,
+            skip_gates,
             patterns: translated,
             literal_set,
             scanner,
@@ -1697,6 +1719,8 @@ impl PatternSetMatcher {
         debug_assert_eq!(start_byte_entries.len(), usize::from(u8::MAX) + 1);
 
         let ascii_line = scratch.line_is_ascii(line);
+        let mut skip_state = super::skip_prefix::SkipGateLineState::default();
+        let mut line_has_comment: Option<bool> = None;
         let mut start = match start_prefilter {
             Some(prefilter) => prefilter.next_start(line, from)?,
             None => from,
@@ -1705,6 +1729,7 @@ impl PatternSetMatcher {
             if bound.is_some_and(|(bound_start, _)| start > bound_start) {
                 break;
             }
+            let position_class = position_class_bit(line.as_bytes(), start);
             let restricted = line.as_bytes().get(start).map_or(&[][..], |byte| {
                 start_byte_entries[*byte as usize].as_slice()
             });
@@ -1734,6 +1759,22 @@ impl PatternSetMatcher {
                     }
                     (None, None) => break,
                 };
+                if self.start_class_masks[idx] & position_class == 0 {
+                    continue;
+                }
+                if let Some(gate) = &self.skip_gates[idx] {
+                    match gate.decide(line, start, &mut skip_state) {
+                        super::skip_prefix::SkipGateDecision::Allow => {}
+                        super::skip_prefix::SkipGateDecision::Skip => continue,
+                        super::skip_prefix::SkipGateDecision::NeedsCommentCheck => {
+                            let has_comment = *line_has_comment
+                                .get_or_insert_with(|| scratch.line_has_block_comment(line));
+                            if !has_comment {
+                                continue;
+                            }
+                        }
+                    }
+                }
                 if bound.is_some_and(|(bound_start, bound_index)| {
                     start == bound_start && idx >= bound_index
                 }) {
@@ -2039,6 +2080,41 @@ fn frontier_env_usize(name: &str, default: usize) -> usize {
         .unwrap_or(default)
 }
 
+/// Word-context class bit for a scan position: `1 << (prev_word * 2 +
+/// cur_word)`, with line edges counting as non-word. Any non-ASCII neighbor
+/// returns all classes so masks are only authoritative over ASCII text.
+#[inline]
+fn position_class_bit(bytes: &[u8], position: usize) -> u8 {
+    let prev = position.checked_sub(1).and_then(|prev| bytes.get(prev));
+    let cur = bytes.get(position);
+    if prev.is_some_and(|byte| !byte.is_ascii()) || cur.is_some_and(|byte| !byte.is_ascii()) {
+        return super::start_class::START_CLASS_ALL;
+    }
+    let prev_word = prev.copied().is_some_and(is_ascii_word_byte);
+    let cur_word = cur.copied().is_some_and(is_ascii_word_byte);
+    1 << ((u8::from(prev_word) << 1) | u8::from(cur_word))
+}
+
+fn start_class_gate_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        !matches!(
+            std::env::var("MARK_TEXTMATE_START_CLASS").as_deref(),
+            Ok("off" | "0" | "false")
+        )
+    })
+}
+
+fn skip_gate_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        !matches!(
+            std::env::var("MARK_TEXTMATE_SKIP_GATE").as_deref(),
+            Ok("off" | "0" | "false")
+        )
+    })
+}
+
 fn scanner_candidate_enabled() -> bool {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ENABLED.get_or_init(|| {
@@ -2309,6 +2385,91 @@ mod tests {
         let matcher = AutomataMatcher::new("foo").unwrap();
         assert!(matcher.is_simple());
         assert_eq!(matcher.find("xxfoo", 0, ctx()).unwrap().start, 2);
+    }
+
+    #[test]
+    fn start_class_gate_is_selection_neutral() {
+        // Differential: the word-context gate must never change the selected
+        // candidate or match span, only skip provably impossible attempts.
+        let patterns: Vec<String> = [
+            r"(?<!\w)this(?!\w)",
+            r"\bwhile\b",
+            r"[A-Za-z_]\w*",
+            r"\b(\h{7}|\h{10})\b",
+            r"\b[0-9]+\b",
+            r"(?<![\w$])if\b",
+            r"[[:punct:]]+",
+            r"\s*+(?:(?<=\W)|(?=\W)|^|\n?$)#",
+            r"((?:\s*+/\*(?:[^*]++|\*+(?!/))*+\*/\s*+)+|\s++|(?<=\W)|(?=\W)|^|\n?$|\A|\Z)((?<!\w)template(?!\w))",
+            r"\s*+(?<!\w)(?:(unsigned|signed|double)(?!\w))",
+            r"\s++(#)\s*define",
+            r"\{",
+            r"^\s*#\s*define",
+            r"=",
+            r"\G\w+",
+            r"_x",
+            r"x_",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+        let texts = [
+            "this that_this this_",
+            "while awhile while_ WHILE while",
+            "a_b 7f3a91c deadbeef42 12345 x",
+            "if $if aif if",
+            "#define FOO_BAR(x) x##y",
+            "int template_arg = 0; /* c */ template <class T>",
+            "  /* x */ template",
+            "\ttemplate/* */unsigned",
+            "  \u{a0} template",
+            "   #define A 1",
+            "foo{bar}_baz{}",
+            "__x_ _x x_ =_= a=b",
+            "  # trailing",
+            "é_word wordé _é 7é",
+            "",
+            "_",
+            "= =",
+        ];
+        let compiled: Vec<_> = patterns
+            .iter()
+            .map(|pattern| Arc::new(super::super::CompiledPattern::new(pattern)))
+            .collect();
+        let gated = PatternSetMatcher::from_compiled(&compiled);
+        let mut ungated = gated.clone();
+        ungated
+            .start_class_masks
+            .iter_mut()
+            .for_each(|mask| *mask = super::super::start_class::START_CLASS_ALL);
+        ungated.skip_gates.iter_mut().for_each(|gate| *gate = None);
+        assert!(
+            gated.skip_gates.iter().any(Option::is_some),
+            "expected at least one skip-gated pattern in the differential set"
+        );
+        for text in texts {
+            for from in 0..=text.len() {
+                if !text.is_char_boundary(from) {
+                    continue;
+                }
+                for ctx in [
+                    AnchorContext::line_start(),
+                    AnchorContext::start_of_file(),
+                    AnchorContext::continuation(from),
+                ] {
+                    let got = gated.find_with_context(text, from, ctx);
+                    let expected = ungated.find_with_context(text, from, ctx);
+                    assert_eq!(
+                        got.as_ref()
+                            .map(|(idx, result)| (*idx, result.start, result.end)),
+                        expected
+                            .as_ref()
+                            .map(|(idx, result)| (*idx, result.start, result.end)),
+                        "text={text:?} from={from}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

@@ -324,6 +324,22 @@ source-wide fallback allowance (128 was too low for valid complex grammars).
 `profile-cold` configures production syntax limits so its line-cache behavior
 matches the runtime.
 
+Round 8 (2026-07-15) additions: the word-context start-class gate (per-pattern
+AST-derived masks over (prev, current) word-ness skip anchored attempts that
+provably cannot start at a scan position; shared per-position class bit, env
+switch `MARK_TEXTMATE_START_CLASS`), the skip-prefix gate for
+separator-prefixed rules (post-separator first-byte test at the position and
+at the shared whitespace-run end, `/*` paths gated by a cached per-line
+block-comment check; `MARK_TEXTMATE_SKIP_GATE`), atom-derived ASCII class
+bitmaps in the bytecode compiler (replacing 128 × 2 whole-class evaluations
+with Unicode case conversions per probe), the process-wide compiled-pattern
+cache (`MARK_TEXTMATE_PATTERN_CACHE`; grammar-static patterns only — dynamic
+begin/end substitutions stay per-tokenizer), Arc-shared `CompiledGrammar`
+storage in `GrammarSet`, and the identity-keyed shared rule-context cache
+(`MARK_TEXTMATE_GRAMMAR_CACHE`) so parallel syntax workers stop re-flattening
+grammar closures. `profile-cold --mode process-cold` disables both shared
+caches by default to keep strict fresh-tokenizer measurement semantics.
+
 **Reverted experiments — do not retry as-is** (measured deltas in the git
 history of this file):
 

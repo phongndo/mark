@@ -5,6 +5,8 @@ pub mod captures;
 pub mod dfa;
 pub mod prefilter;
 pub(crate) mod scanner;
+pub(crate) mod skip_prefix;
+pub(crate) mod start_class;
 pub mod translate;
 
 use std::{
@@ -237,6 +239,8 @@ pub struct CompiledPattern {
     matcher: RegexMatcher,
     unanchored_literal: Option<String>,
     restricted_start_bytes: Option<Vec<u8>>,
+    start_class_mask: u8,
+    skip_gate: Option<skip_prefix::SkipGate>,
     parsed: Arc<ParsedRegex>,
     live_captures: Arc<[u32]>,
     capture_program: std::sync::OnceLock<Option<Arc<bytecode::Program>>>,
@@ -264,6 +268,8 @@ impl CompiledPattern {
         let matcher = RegexMatcher::from_translation(pattern, translation);
         let unanchored_literal = matcher.unanchored_literal().map(str::to_owned);
         let restricted_start_bytes = matcher.restricted_start_bytes();
+        let start_class_mask = start_class::start_class_mask(&parsed);
+        let skip_gate = skip_prefix::SkipGate::analyze(&parsed);
         Self {
             id: CompiledPatternId(NEXT_COMPILED_PATTERN_ID.fetch_add(1, Ordering::Relaxed)),
             source: Arc::from(pattern),
@@ -271,6 +277,8 @@ impl CompiledPattern {
             matcher,
             unanchored_literal,
             restricted_start_bytes,
+            start_class_mask,
+            skip_gate,
             parsed,
             live_captures: live_captures.into(),
             capture_program: std::sync::OnceLock::new(),
@@ -299,6 +307,14 @@ impl CompiledPattern {
 
     pub(crate) fn restricted_start_bytes(&self) -> Option<&[u8]> {
         self.restricted_start_bytes.as_deref()
+    }
+
+    pub(crate) fn start_class_mask(&self) -> u8 {
+        self.start_class_mask
+    }
+
+    pub(crate) fn skip_gate(&self) -> Option<&skip_prefix::SkipGate> {
+        self.skip_gate.as_ref()
     }
 
     pub(crate) fn parsed(&self) -> &ParsedRegex {
@@ -360,6 +376,74 @@ impl Matcher for RegexMatcher {
             Self::Fallback(matcher) => matcher.find(line, from, ctx),
         }
     }
+}
+
+#[derive(PartialEq, Eq, Hash)]
+struct SharedPatternKey {
+    pattern: Box<str>,
+    /// `None` = the all-groups default of [`CompiledPattern::new`].
+    live_captures: Option<Box<[u32]>>,
+}
+
+type SharedPatternMap =
+    std::sync::Mutex<std::collections::HashMap<SharedPatternKey, Arc<CompiledPattern>>>;
+
+/// Process-wide cache of grammar-static compiled patterns.
+///
+/// A tokenizer instance already caches its own compiled patterns, but every
+/// new instance (parallel highlight workers, per-language instances, fresh
+/// documents) used to reparse and recompile the full working set of its
+/// grammar. Compiled patterns are immutable and self-contained, so identical
+/// spellings with identical live-capture requests can share one compilation
+/// process-wide. Dynamic (source-derived) patterns must not go through this
+/// cache — they are unbounded.
+fn shared_pattern_cache() -> Option<&'static SharedPatternMap> {
+    use std::sync::OnceLock;
+    static CACHE: OnceLock<Option<SharedPatternMap>> = OnceLock::new();
+    CACHE
+        .get_or_init(|| {
+            let disabled = matches!(
+                std::env::var("MARK_TEXTMATE_PATTERN_CACHE").as_deref(),
+                Ok("off" | "0" | "false")
+            );
+            (!disabled).then(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+        })
+        .as_ref()
+}
+
+/// Returns the shared compilation of a grammar-static pattern, compiling it
+/// on first use. `live_captures: None` selects the all-groups default.
+pub(crate) fn shared_compiled_pattern(
+    pattern: &str,
+    live_captures: Option<&[u32]>,
+) -> Arc<CompiledPattern> {
+    let compile = |pattern: &str| match live_captures {
+        None => Arc::new(CompiledPattern::new(pattern)),
+        Some(live) => Arc::new(CompiledPattern::new_with_live_captures(
+            pattern,
+            live.to_vec(),
+        )),
+    };
+    let Some(cache) = shared_pattern_cache() else {
+        return compile(pattern);
+    };
+    let key = SharedPatternKey {
+        pattern: pattern.into(),
+        live_captures: live_captures.map(Into::into),
+    };
+    if let Some(found) = cache.lock().unwrap().get(&key) {
+        return Arc::clone(found);
+    }
+    // Compile outside the lock: patterns are deterministic, so a racing
+    // duplicate is safe and the loser is simply dropped.
+    let compiled = compile(pattern);
+    Arc::clone(
+        cache
+            .lock()
+            .unwrap()
+            .entry(key)
+            .or_insert_with(|| Arc::clone(&compiled)),
+    )
 }
 
 #[cfg(test)]

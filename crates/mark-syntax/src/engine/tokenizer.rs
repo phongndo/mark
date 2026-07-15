@@ -830,7 +830,10 @@ impl ExactSizeIterator for FrameStackIter<'_> {}
 
 #[derive(Debug, Clone, Default)]
 pub struct GrammarSet {
-    grammars: Vec<CompiledGrammar>,
+    // Arc-shared so cloning a set (one clone per tokenizer instance) shares
+    // the immutable compiled grammars instead of deep-copying them, and so
+    // flattened rule contexts can be cached by grammar identity.
+    grammars: Vec<Arc<CompiledGrammar>>,
     scope_to_id: HashMap<String, GrammarId>,
 }
 
@@ -844,9 +847,9 @@ impl GrammarSet {
         self.scope_to_id.insert(grammar.scope_name.clone(), id);
         let index = id.0 as usize;
         if index == self.grammars.len() {
-            self.grammars.push(grammar);
+            self.grammars.push(Arc::new(grammar));
         } else if index < self.grammars.len() {
-            self.grammars[index] = grammar;
+            self.grammars[index] = Arc::new(grammar);
         } else {
             panic!("grammar ids must be dense and insertion ordered");
         }
@@ -860,7 +863,7 @@ impl GrammarSet {
     }
 
     pub fn grammar(&self, id: GrammarId) -> Option<&CompiledGrammar> {
-        self.grammars.get(id.0 as usize)
+        self.grammars.get(id.0 as usize).map(Arc::as_ref)
     }
 
     pub fn grammar_by_scope(&self, scope: &str) -> Option<&CompiledGrammar> {
@@ -872,7 +875,7 @@ impl GrammarSet {
         self.scope_to_id.get(scope).copied()
     }
 
-    pub fn grammars(&self) -> &[CompiledGrammar] {
+    pub fn grammars(&self) -> &[Arc<CompiledGrammar>] {
         &self.grammars
     }
 
@@ -1026,7 +1029,7 @@ pub struct TextMateTokenizer {
     grammars: GrammarSet,
     root: GrammarId,
     root_scope_key: String,
-    injection_selectors: Vec<CompiledInjectionSelector>,
+    injection_selectors: Arc<Vec<CompiledInjectionSelector>>,
     matcher_cache: FastMap<(GrammarId, PatternId), Arc<CompiledPattern>>,
     dynamic_matcher_cache: FastMap<DynamicMatcherKey, Arc<CompiledPattern>>,
     scope_names: ScopeInterner,
@@ -1043,7 +1046,7 @@ pub struct TextMateTokenizer {
     injection_outcome_cache: FastMap<ScopeStackId, (InjectionOutcomeId, Arc<InjectionOutcome>)>,
     inline_candidate_cache: FastMap<InlineCandidateCacheKey, Arc<CandidateSet>>,
     include_availability_cache: RefCell<HashMap<IncludeAvailabilityNode, bool>>,
-    rule_repository_contexts: HashMap<(GrammarId, RuleId), Arc<RepositoryBindings>>,
+    rule_repository_contexts: Arc<HashMap<(GrammarId, RuleId), Arc<RepositoryBindings>>>,
     /// Per-tokenizer mirror of the global frame-stack intern table's edges so
     /// repeat pushes of a known (parent stack, frame) transition skip the
     /// global mutex. Values are authoritative global ids and never invalidate.
@@ -1074,9 +1077,7 @@ impl TextMateTokenizer {
             .grammar(root)
             .map(|grammar| grammar.scope_name.clone())
             .unwrap_or_else(|| format!("grammar:{}", root.0));
-        let injection_selectors = compile_injection_selectors(&grammars, root);
-        let rule_repository_contexts =
-            compile_rule_repository_contexts(&grammars, root, &injection_selectors);
+        let (injection_selectors, rule_repository_contexts) = shared_rule_contexts(&grammars, root);
         Self {
             grammars,
             root,
@@ -1513,10 +1514,11 @@ impl TextMateTokenizer {
             .grammar(root)
             .map(|grammar| grammar.scope_name.clone())
             .unwrap_or_else(|| format!("grammar:{}", root.0));
-        self.injection_selectors = compile_injection_selectors(&self.grammars, root);
+        let (injection_selectors, rule_repository_contexts) =
+            shared_rule_contexts(&self.grammars, root);
+        self.injection_selectors = injection_selectors;
         self.include_availability_cache.borrow_mut().clear();
-        self.rule_repository_contexts =
-            compile_rule_repository_contexts(&self.grammars, root, &self.injection_selectors);
+        self.rule_repository_contexts = rule_repository_contexts;
         self.current_scope_stack_cache.clear();
         self.clear_line_cache();
         self.clear_candidate_cache();
@@ -2422,7 +2424,7 @@ impl TextMateTokenizer {
         let mut left = Vec::new();
         let mut right = Vec::new();
         let mut seen = HashSet::new();
-        for injection in &self.injection_selectors {
+        for injection in self.injection_selectors.iter() {
             if selector_tokens_match(&injection.selector_tokens, stack) {
                 if !seen.insert((
                     injection.priority,
@@ -2577,7 +2579,7 @@ impl TextMateTokenizer {
         if let Some(matcher) = self.matcher_cache.get(&key) {
             return matcher.clone();
         }
-        let matcher = Arc::new(CompiledPattern::new(pattern));
+        let matcher = super::regex::shared_compiled_pattern(pattern, None);
         self.matcher_cache.insert(key, matcher.clone());
         if let Some(counters) = self.counters_mut() {
             counters.record_regex_compile(Some(grammar_id.0), Some(pattern_id.0), pattern);
@@ -2596,10 +2598,7 @@ impl TextMateTokenizer {
         if let Some(matcher) = self.matcher_cache.get(&key) {
             return matcher.clone();
         }
-        let matcher = Arc::new(CompiledPattern::new_with_live_captures(
-            pattern,
-            live_captures,
-        ));
+        let matcher = super::regex::shared_compiled_pattern(pattern, Some(&live_captures));
         self.matcher_cache.insert(key, matcher.clone());
         if let Some(counters) = self.counters_mut() {
             counters.record_regex_compile(Some(grammar_id.0), Some(pattern_id.0), pattern);
@@ -4360,6 +4359,85 @@ fn contextualize_capture_spec(
 /// root rule is reached later through a different repository. The native
 /// loader assigns ids ahead of time, so retain the first repository context in
 /// a side table and apply it when candidates/capture rules are materialized.
+/// Identity key for flattened rule contexts: the same Arc-shared grammars
+/// and root produce the same contexts. Holding strong grammar references
+/// keeps the pointer identity valid for the life of the cache entry.
+struct SharedContextsKey {
+    grammars: Vec<Arc<CompiledGrammar>>,
+    root: GrammarId,
+}
+
+impl PartialEq for SharedContextsKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.root == other.root
+            && self.grammars.len() == other.grammars.len()
+            && self
+                .grammars
+                .iter()
+                .zip(&other.grammars)
+                .all(|(left, right)| Arc::ptr_eq(left, right))
+    }
+}
+
+impl Eq for SharedContextsKey {}
+
+impl std::hash::Hash for SharedContextsKey {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.root.0.hash(state);
+        for grammar in &self.grammars {
+            (Arc::as_ptr(grammar) as usize).hash(state);
+        }
+    }
+}
+
+type SharedInjectionSelectors = Arc<Vec<CompiledInjectionSelector>>;
+type SharedRepositoryContexts = Arc<HashMap<(GrammarId, RuleId), Arc<RepositoryBindings>>>;
+
+/// Returns the flattened injection selectors and rule repository contexts
+/// for a grammar set + root, sharing one computation process-wide. Every
+/// tokenizer instance (parallel syntax workers, re-instantiation) used to
+/// re-run the recursive include flattening over the whole grammar closure.
+fn shared_rule_contexts(
+    grammars: &GrammarSet,
+    root: GrammarId,
+) -> (SharedInjectionSelectors, SharedRepositoryContexts) {
+    use std::sync::{Mutex, OnceLock};
+    type Cache =
+        Mutex<HashMap<SharedContextsKey, (SharedInjectionSelectors, SharedRepositoryContexts)>>;
+    static CACHE: OnceLock<Option<Cache>> = OnceLock::new();
+    let compute = || {
+        let selectors = compile_injection_selectors(grammars, root);
+        let contexts = compile_rule_repository_contexts(grammars, root, &selectors);
+        (Arc::new(selectors), Arc::new(contexts))
+    };
+    let Some(cache) = CACHE
+        .get_or_init(|| {
+            let disabled = matches!(
+                std::env::var("MARK_TEXTMATE_GRAMMAR_CACHE").as_deref(),
+                Ok("off" | "0" | "false")
+            );
+            (!disabled).then(|| Mutex::new(HashMap::new()))
+        })
+        .as_ref()
+    else {
+        return compute();
+    };
+    let key = SharedContextsKey {
+        grammars: grammars.grammars().to_vec(),
+        root,
+    };
+    if let Some(found) = cache.lock().unwrap().get(&key) {
+        return found.clone();
+    }
+    let computed = compute();
+    cache
+        .lock()
+        .unwrap()
+        .entry(key)
+        .or_insert_with(|| computed.clone())
+        .clone()
+}
+
 fn compile_rule_repository_contexts(
     grammars: &GrammarSet,
     root: GrammarId,
