@@ -29,11 +29,14 @@ pub(crate) fn apply_annotation_target_hint(
     } else {
         target.hint.to_owned()
     };
-    let Some((start, field_width)) =
-        annotation_target_hint_range(layout, width, target.side, display_width(&hint))
+    let hint_width = display_width(&hint);
+    let Some((start, mut field_width)) =
+        annotation_target_hint_range(layout, width, target.side, hint_width)
     else {
         return line;
     };
+    field_width =
+        extend_overflow_line_number_field(&line, layout, width, target.side, start, field_width);
     let hint_style = if target.existing_annotation {
         Style::default()
             .fg(theme.hunk)
@@ -80,6 +83,89 @@ fn annotation_target_hint_range(
             AnnotationSide::New => (width.saturating_sub(hint_width), hint_width),
         })
     })
+}
+
+fn extend_overflow_line_number_field(
+    line: &Line<'_>,
+    layout: DiffLayoutMode,
+    width: usize,
+    side: AnnotationSide,
+    start: usize,
+    field_width: usize,
+) -> usize {
+    let (cell_start, cell_width, max_gutter_width, field_offset) = match layout {
+        DiffLayoutMode::Unified => (
+            0,
+            width,
+            UNIFIED_GUTTER_WIDTH,
+            match side {
+                AnnotationSide::Old => 0,
+                AnnotationSide::New => UNIFIED_NEW_LINE_OFFSET,
+            },
+        ),
+        DiffLayoutMode::Split => {
+            let left_width = width / 2;
+            match side {
+                AnnotationSide::Old => (0, left_width, GUTTER_WIDTH, 0),
+                AnnotationSide::New => (
+                    left_width,
+                    width.saturating_sub(left_width),
+                    GUTTER_WIDTH,
+                    0,
+                ),
+            }
+        }
+    };
+    let indicator_width = 1.min(cell_width);
+    let gutter_width = max_gutter_width.min(cell_width.saturating_sub(indicator_width));
+    let gutter_body_width = gutter_width.saturating_sub(1);
+    let gutter_body_end = cell_start
+        .saturating_add(indicator_width)
+        .saturating_add(gutter_body_width);
+    let Some((line_number_start, line_number_width)) =
+        line_number_field_range(cell_start, indicator_width, gutter_body_width, field_offset)
+    else {
+        return field_width;
+    };
+    let line_number_end = line_number_start.saturating_add(line_number_width);
+
+    // An overflowing selected line number forms a digit run through the last
+    // cell of its normal field. Determine its end from that field rather than
+    // from the hint's end: a wide old-side hint can already span the separator
+    // and end at the first digit of the normal new-side field.
+    if !line_cell_is_ascii_digit(line, line_number_end.saturating_sub(1)) {
+        return field_width;
+    }
+    let mut overflow_end = line_number_end;
+    while overflow_end < gutter_body_end && line_cell_is_ascii_digit(line, overflow_end) {
+        overflow_end += 1;
+    }
+
+    let hint_end = start.saturating_add(field_width);
+    if overflow_end > hint_end {
+        overflow_end.saturating_sub(start)
+    } else {
+        field_width
+    }
+}
+
+fn line_cell_is_ascii_digit(line: &Line<'_>, target: usize) -> bool {
+    let mut offset = target;
+    for span in &line.spans {
+        let span_width = display_width(span.content.as_ref());
+        if offset >= span_width {
+            offset -= span_width;
+            continue;
+        }
+
+        let (suffix, skipped) = skip_display_prefix(span.content.as_ref(), offset);
+        return skipped == offset
+            && suffix
+                .as_bytes()
+                .first()
+                .is_some_and(|byte| byte.is_ascii_digit());
+    }
+    false
 }
 
 fn hint_range_in_cell(
@@ -339,6 +425,137 @@ mod tests {
                     .spans
                     .iter()
                     .any(|span| span.content.as_ref() == hint.as_str())
+            );
+        }
+    }
+
+    #[test]
+    fn wide_gutter_hints_clear_overflowing_line_numbers() {
+        let hint = annotation_hint_codes(33, "as")
+            .into_iter()
+            .find(|hint| hint.width() == 6)
+            .expect("expected a six-cell generated hint");
+        let width = 40usize;
+        let mut source = "▌1000000     -code".to_owned();
+        source.push_str(&" ".repeat(width.saturating_sub(source.width())));
+
+        let rendered = apply_annotation_target_hint(
+            Line::from(source),
+            DiffLayoutMode::Unified,
+            width,
+            AnnotationTargetHint {
+                side: AnnotationSide::Old,
+                hint: &hint,
+                existing_annotation: false,
+                uppercase: false,
+            },
+            DiffTheme::default(),
+        );
+        let text = rendered
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert_eq!(text.width(), width);
+        assert!(
+            text.starts_with(&format!("▌ {hint}     -code")),
+            "overflow digit was not cleared from {text:?}",
+        );
+    }
+
+    #[test]
+    fn wide_old_hint_preserves_unified_new_line_number() {
+        let width = 40usize;
+        let mut source = "▌  123 12345 -code".to_owned();
+        source.push_str(&" ".repeat(width.saturating_sub(source.width())));
+
+        let rendered = apply_annotation_target_hint(
+            Line::from(source),
+            DiffLayoutMode::Unified,
+            width,
+            AnnotationTargetHint {
+                side: AnnotationSide::Old,
+                hint: "ssssss",
+                existing_annotation: false,
+                uppercase: false,
+            },
+            DiffTheme::default(),
+        );
+        let text = rendered
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert_eq!(text.width(), width);
+        assert!(
+            text.starts_with("▌ssssss12345 -code"),
+            "new line number was not preserved in {text:?}",
+        );
+    }
+
+    #[test]
+    fn target_hints_clear_overflowing_line_numbers() {
+        let cases = [
+            (
+                DiffLayoutMode::Unified,
+                AnnotationSide::Old,
+                "▌1000000     -code",
+                "▌      a     -code",
+            ),
+            (
+                DiffLayoutMode::Unified,
+                AnnotationSide::Old,
+                "▌100000      -code",
+                "▌     a      -code",
+            ),
+            (
+                DiffLayoutMode::Unified,
+                AnnotationSide::New,
+                "▌      100000+code",
+                "▌           a+code",
+            ),
+            (
+                DiffLayoutMode::Split,
+                AnnotationSide::Old,
+                "▌100000+code",
+                "▌     a+code",
+            ),
+            (
+                DiffLayoutMode::Split,
+                AnnotationSide::New,
+                "                    ▌100000+code",
+                "                    ▌     a+code",
+            ),
+        ];
+
+        for (layout, side, source, expected_prefix) in cases {
+            let width = 40usize;
+            let mut source = source.to_owned();
+            source.push_str(&" ".repeat(width.saturating_sub(source.width())));
+            let rendered = apply_annotation_target_hint(
+                Line::from(source),
+                layout,
+                width,
+                AnnotationTargetHint {
+                    side,
+                    hint: "a",
+                    existing_annotation: false,
+                    uppercase: false,
+                },
+                DiffTheme::default(),
+            );
+            let text = rendered
+                .spans
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>();
+
+            assert_eq!(text.width(), width);
+            assert!(
+                text.starts_with(expected_prefix),
+                "expected {text:?} to start with {expected_prefix:?}",
             );
         }
     }
