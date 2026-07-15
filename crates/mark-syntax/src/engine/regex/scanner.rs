@@ -744,8 +744,8 @@ mod tests {
         let preferred = parse("bc");
         let fallback = parse("b");
         let x = parse("x");
-        let b = [b'b'];
-        let x_byte = [b'x'];
+        let b = *b"b";
+        let x_byte = *b"x";
         let nfa = Scanner::compile_with_hints([
             (9, &preferred, Some(b.as_slice())),
             (11, &fallback, None),

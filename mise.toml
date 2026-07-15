@@ -5,7 +5,8 @@ just = "1.51.0"
 node = "24"
 pnpm = "11.7.0"
 ripgrep = "15.1.0"
-rust = "1.88.0"
+# Keep hk's Clippy aligned with CI; Rust 1.88 is validated separately as the MSRV.
+rust = "stable"
 rust-analyzer = "2026-06-29"
 taplo = "0.10.0"
 
