@@ -50,7 +50,7 @@ struct Args {
 
 impl Args {
     fn parse() -> Result<Self, String> {
-        let mut assets = PathBuf::from("assets/tm-grammars");
+        let mut assets = PathBuf::from("assets/grammars");
         let mut out = PathBuf::from("target/mark-syntax/bundle.bin");
         let mut iter = env::args().skip(1);
         while let Some(arg) = iter.next() {
@@ -64,7 +64,7 @@ impl Args {
                 "--out" => out = iter.next().map(PathBuf::from).ok_or("--out needs a path")?,
                 "--help" | "-h" => {
                     println!(
-                        "usage: grammar-compile [--assets assets/tm-grammars] [--out target/mark-syntax/bundle.bin]"
+                        "usage: grammar-compile [--assets assets/grammars] [--out target/mark-syntax/bundle.bin]"
                     );
                     std::process::exit(0);
                 }

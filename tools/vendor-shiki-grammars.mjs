@@ -3,9 +3,9 @@
  * Regenerate vendored TextMate grammars from the pinned @shikijs/langs package.
  *
  * This imports every dist/*.mjs module from the pinned package recorded in
- * assets/tm-grammars/SOURCE.toml, deduplicates embedded dependency copies by
+ * assets/grammars/SOURCE.toml, deduplicates embedded dependency copies by
  * grammar `name`, and writes compact JSON grammar assets. Non-Shiki assets that
- * are already present under assets/tm-grammars/languages are preserved; their
+ * are already present under assets/grammars/languages are preserved; their
  * existing licenses.json entries are carried forward.
  *
  * Usage:
@@ -28,7 +28,7 @@ for (const arg of args) {
 }
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const assetsRoot = path.join(root, 'assets/tm-grammars')
+const assetsRoot = path.join(root, 'assets/grammars')
 const languagesDir = path.join(assetsRoot, 'languages')
 const sourcePath = path.join(assetsRoot, 'SOURCE.toml')
 const coveragePath = path.join(assetsRoot, 'coverage.toml')
@@ -247,7 +247,7 @@ function makeTwigSourceAlias(shikiAssets) {
 }
 
 function languageAssetPath(name) {
-  return `assets/tm-grammars/languages/${name}.tmLanguage.json`
+  return `assets/grammars/languages/${name}.tmLanguage.json`
 }
 
 async function existingAssetNames(directory) {

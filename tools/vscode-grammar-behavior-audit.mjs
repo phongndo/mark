@@ -25,10 +25,10 @@ const exported = spawnSync('python3', [path.join(root, 'tools/export-vscode-gram
 if (exported.status !== 0) throw new Error(exported.stderr)
 const vscodeSpecs = new Map(Object.entries(JSON.parse(exported.stdout)))
 const markSpecs = new Map()
-for (const name of await fs.readdir(path.join(root, 'assets/tm-grammars/languages'))) {
+for (const name of await fs.readdir(path.join(root, 'assets/grammars/languages'))) {
   if (!name.endsWith('.tmLanguage.json')) continue
-  const grammar = JSON.parse(await fs.readFile(path.join(root, 'assets/tm-grammars/languages', name), 'utf8'))
-  markSpecs.set(grammar.scopeName, { path: `assets/tm-grammars/languages/${name}`, grammar })
+  const grammar = JSON.parse(await fs.readFile(path.join(root, 'assets/grammars/languages', name), 'utf8'))
+  markSpecs.set(grammar.scopeName, { path: `assets/grammars/languages/${name}`, grammar })
 }
 
 const sourceAudit = JSON.parse(await fs.readFile(path.join(root, 'benchmarks/textmate/vscode-grammar-differences.json'), 'utf8'))
@@ -53,7 +53,7 @@ const onigLib = Promise.resolve({
   createOnigScanner(patterns) { return new onig.OnigScanner(patterns) },
   createOnigString(source) { return new onig.OnigString(source) },
 })
-const theme = JSON.parse(await fs.readFile(path.join(root, 'assets/tm-themes/github-dark-high-contrast.json'), 'utf8'))
+const theme = JSON.parse(await fs.readFile(path.join(root, 'assets/themes/github-dark-high-contrast.json'), 'utf8'))
 const rawTheme = {
   settings: [
     { settings: { foreground: theme.colors['editor.foreground'], background: theme.colors['editor.background'] } },

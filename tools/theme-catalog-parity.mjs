@@ -12,9 +12,9 @@ const fixtureRoot = path.join(root, 'crates/mark-syntax/tests/fixtures/textmate'
 const output = path.join(root, 'benchmarks/textmate/theme-parity.json')
 const check = process.argv.includes('--check')
 const themeName = 'github-dark-high-contrast'
-const theme = JSON.parse(await fs.readFile(path.join(root, `assets/tm-themes/${themeName}.json`), 'utf8'))
+const theme = JSON.parse(await fs.readFile(path.join(root, `assets/themes/${themeName}.json`), 'utf8'))
 const files = await recursiveGoldens(fixtureRoot)
-const coverage = await fs.readFile(path.join(root, 'assets/tm-grammars/coverage.toml'), 'utf8')
+const coverage = await fs.readFile(path.join(root, 'assets/grammars/coverage.toml'), 'utf8')
 const publicLanguages = Number(coverage.match(/^public_language_count\s*=\s*(\d+)$/m)?.[1])
 if (!Number.isInteger(publicLanguages)) throw new Error('coverage.toml lacks public_language_count')
 const unique = new Map()

@@ -161,7 +161,7 @@ pub(crate) enum SyntaxCommand {
     Available(SyntaxAvailableArgs),
     #[command(about = "Remove stale syntax config when a backend is available")]
     Clean,
-    #[command(about = "Print syntax config and colorscheme paths")]
+    #[command(about = "Print syntax config and theme paths")]
     Path,
     #[command(about = "Validate the syntax backend and configured languages")]
     Doctor,

@@ -151,7 +151,7 @@ existing public ID instead of creating version-numbered language IDs.
 For each batch:
 
 1. Audit candidate upstream grammars and licenses before vendoring.
-2. Record sources and transformations in `assets/tm-grammars/SOURCE.toml` and
+2. Record sources and transformations in `assets/grammars/SOURCE.toml` and
    `licenses.json`.
 3. Add metadata, collision rules, and path-detection tests.
 4. Add basic/stress fixtures and generate oracle goldens.

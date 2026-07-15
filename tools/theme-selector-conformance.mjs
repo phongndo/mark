@@ -9,7 +9,7 @@ import { createRequire } from 'node:module'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const themeDir = path.join(root, 'assets/tm-themes')
+const themeDir = path.join(root, 'assets/themes')
 const themeFiles = (await fs.readdir(themeDir))
   .filter(name => name.endsWith('.json') && name !== 'licenses.json')
   .sort()
@@ -75,10 +75,11 @@ async function checkTheme(themeName, theme, stacks, rustThemeName) {
   })
   const grammar = await registry.loadGrammar(grammarSource.scopeName)
   const colorMap = registry.getColorMap()
+  const editorBackground = parseHexColor(theme.colors?.['editor.background'])
   const expected = stacks.map((_, index) => {
     const source = `T${String(index).padStart(5, '0')}`
     const result = grammar.tokenizeLine2(source, vsctm.INITIAL)
-    return decode(result.tokens[1] >>> 0, colorMap)
+    return decode(result.tokens[1] >>> 0, colorMap, editorBackground)
   })
   const input = stacks
     .map(scopes => JSON.stringify([grammarSource.scopeName, ...scopes]))
@@ -165,7 +166,7 @@ function conformanceStacks(theme) {
   return [...unique.values()]
 }
 
-function decode(metadata, colorMap) {
+function decode(metadata, colorMap, editorBackground) {
   const fontStyle = (metadata & 0x00007800) >>> 11
   const foregroundId = (metadata & 0x00ff8000) >>> 15
   const backgroundId = (metadata & 0xff000000) >>> 24
@@ -175,19 +176,49 @@ function decode(metadata, colorMap) {
   if (fontStyle & 4) modifiers.push('underline')
   if (fontStyle & 8) modifiers.push('strikethrough')
   return {
-    foreground: normalizeColor(colorMap[foregroundId]),
-    background: normalizeColor(colorMap[backgroundId]),
+    foreground: normalizeColor(colorMap[foregroundId], editorBackground),
+    background: normalizeColor(colorMap[backgroundId], editorBackground),
     modifiers,
   }
 }
 
-function normalizeColor(value) {
+function normalizeColor(value, editorBackground) {
   if (!value) return null
-  const hex = value.toLowerCase()
-  if (/^#[0-9a-f]{3,4}$/.test(hex)) {
-    return `#${[...hex.slice(1, 4)].map(channel => channel + channel).join('')}`
+  const color = parseHexColor(value)
+  if (!color) return value.toLowerCase()
+  if (color.alpha === 0xff) return formatRgb(color)
+  if (!editorBackground || editorBackground.alpha !== 0xff) {
+    throw new Error(`translucent color ${JSON.stringify(value)} requires an opaque editor.background`)
   }
-  return hex.length === 9 ? hex.slice(0, 7) : hex
+  const composite = (foreground, background) => Math.floor(
+    (foreground * color.alpha + background * (0xff - color.alpha) + 127) / 0xff,
+  )
+  return formatRgb({
+    red: composite(color.red, editorBackground.red),
+    green: composite(color.green, editorBackground.green),
+    blue: composite(color.blue, editorBackground.blue),
+  })
+}
+
+function parseHexColor(value) {
+  if (typeof value !== 'string') return null
+  const hex = value.toLowerCase().match(/^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/)?.[1]
+  if (!hex) return null
+  const channel = index => parseInt(
+    hex.length <= 4 ? hex[index] + hex[index] : hex.slice(index * 2, index * 2 + 2),
+    16,
+  )
+  return {
+    red: channel(0),
+    green: channel(1),
+    blue: channel(2),
+    alpha: hex.length === 4 || hex.length === 8 ? channel(3) : 0xff,
+  }
+}
+
+function formatRgb(color) {
+  const channel = value => value.toString(16).padStart(2, '0')
+  return `#${channel(color.red)}${channel(color.green)}${channel(color.blue)}`
 }
 
 function sameStyle(left, right) {

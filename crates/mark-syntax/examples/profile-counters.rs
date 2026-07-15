@@ -1,7 +1,7 @@
 //! Diagnostic driver: tokenizes a file once with engine counters enabled and
 //! dumps the counters (including pattern hotspots) as JSON to stdout.
 //!
-//! usage: profile-counters --assets assets/tm-grammars/languages --scope source.rust <file>
+//! usage: profile-counters --assets assets/grammars/languages --scope source.rust <file>
 //!
 //! Run this in a fresh process. Unlike `profile-cold`, this enables diagnostic
 //! counters and must not be used for timed throughput comparisons.

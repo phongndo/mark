@@ -102,7 +102,7 @@ git diff | mark pager
 and falls back to static ANSI output in captured pager hosts such as lazygit.
 Non-diff input is passed through the user's text pager.
 
-Static diff output reuses mark's renderer, colorscheme, and layout. It falls
+Static diff output reuses mark's renderer, theme, and layout. It falls
 back to plain diff text while no syntax backend is bundled. Override the static
 layout when needed:
 

@@ -63,7 +63,7 @@ pub(crate) fn syntax(command: SyntaxCommand) -> CliResult<()> {
                 mark_command::syntax_settings_path()?.display()
             ))?;
             write_stdout(format_args!(
-                "colorscheme {}\n",
+                "themes      {}\n",
                 mark_command::syntax_colorscheme_dir()?.display()
             ))?;
         }

@@ -222,6 +222,6 @@ fn take_values(args: &mut Vec<String>, flag: &str) -> Vec<String> {
 
 fn usage() {
     eprintln!(
-        "usage: cargo run -p mark-syntax --example tokenize -- [--classes] [--counters counters.json] [--assets assets/tm-grammars/languages --scope source.json | --grammar path.tmLanguage.json [--embedded path.tmLanguage.json]...] <file>"
+        "usage: cargo run -p mark-syntax --example tokenize -- [--classes] [--counters counters.json] [--assets assets/grammars/languages --scope source.json | --grammar path.tmLanguage.json [--embedded path.tmLanguage.json]...] <file>"
     );
 }

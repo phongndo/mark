@@ -46,7 +46,7 @@ for path in sorted((checkout / "extensions").rglob("*")):
         vscode.setdefault(grammar["scopeName"], (path, grammar))
 
 mark: dict[str, tuple[Path, dict]] = {}
-for path in sorted((ROOT / "assets/tm-grammars/languages").glob("*.tmLanguage.json")):
+for path in sorted((ROOT / "assets/grammars/languages").glob("*.tmLanguage.json")):
     grammar = load_grammar(path)
     if grammar is not None:
         mark[grammar["scopeName"]] = (path, grammar)

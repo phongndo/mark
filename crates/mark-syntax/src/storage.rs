@@ -83,6 +83,8 @@ pub(crate) fn parse_settings(contents: &str) -> Result<SyntaxSettings, toml::de:
 }
 
 pub(crate) fn settings_from_stored(stored: StoredSyntaxSettings) -> SyntaxSettings {
+    // `theme` is canonical for new writes, but `colorscheme` must retain read
+    // precedence: older versions could update it while leaving a stale `theme`.
     let colorscheme = stored.colorscheme.or(stored.theme);
     let legacy_empty_fill = stored.diff.empty_fill;
     let decorations = decorations_from_stored(stored.decorations, legacy_empty_fill);
@@ -99,7 +101,8 @@ pub(crate) fn settings_from_stored(stored: StoredSyntaxSettings) -> SyntaxSettin
         line_wrapping: stored.line_wrapping,
         colors: stored.colors.overlay(stored.color_overrides),
         syntax_rules: stored.syntax_rules,
-        transparent_background: stored.transparent_background,
+        transparent_background: stored.transparent_background.unwrap_or(false),
+        transparent_background_override: stored.transparent_background,
         diff: diff_from_stored(stored.diff),
         notifications: notifications_from_stored(stored.notifications),
         annotations: stored.annotations,

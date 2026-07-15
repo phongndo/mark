@@ -1,8 +1,8 @@
 mod color_scheme;
 
 use super::{
-    AppEffect, COLOR_SCHEME_CHOICES, COMMON_OPTIONS_MENU_ITEMS, DiffApp, OptionsDraft,
-    OptionsMenuItem, SyntaxStartupMode, checkbox, color_scheme_label, context_expansion_label,
+    AppEffect, BUILTIN_THEMES, COMMON_OPTIONS_MENU_ITEMS, DiffApp, OptionsDraft, OptionsMenuItem,
+    SyntaxStartupMode, checkbox, color_scheme_label, context_expansion_label,
     decoration_preference_label, layout_setting_from_override, layout_setting_label,
     next_context_expansion, next_decoration_preference, next_layout_setting,
     next_notification_mode, next_toast_corner, next_toast_max_visible, next_toast_timeout_ms,
@@ -313,7 +313,7 @@ impl DiffApp {
                     next_decoration_preference(self.overlays.options_menu_draft.decorations, delta);
             }
             OptionsMenuItem::ColorScheme => {
-                let choices = COLOR_SCHEME_CHOICES;
+                let choices = BUILTIN_THEMES;
                 let current = choices
                     .iter()
                     .position(|choice| *choice == self.overlays.options_menu_draft.color_scheme)

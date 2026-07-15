@@ -7,7 +7,7 @@ import { createRequire } from 'node:module'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const outputRoot = path.join(root, 'assets/tm-themes')
+const outputRoot = path.join(root, 'assets/themes')
 const check = process.argv.includes('--check')
 const require = createRequire(import.meta.url)
 const paths = [path.join(root, 'tools/golden-oracle')]
@@ -28,6 +28,15 @@ const shiki = {
   'gruvbox-dark': 'gruvbox-dark-medium',
   'gruvbox-light': 'gruvbox-light-medium',
   tokyonight: 'tokyo-night',
+  nord: 'nord',
+  'ayu-dark': 'ayu-dark',
+  'ayu-light': 'ayu-light',
+  'ayu-mirage': 'ayu-mirage',
+  'everforest-dark': 'everforest-dark',
+  'everforest-light': 'everforest-light',
+  'kanagawa-dragon': 'kanagawa-dragon',
+  'kanagawa-lotus': 'kanagawa-lotus',
+  'kanagawa-wave': 'kanagawa-wave',
 }
 
 for (const [id, source] of Object.entries(github)) {

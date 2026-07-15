@@ -29,24 +29,83 @@ pub enum BuiltinTextMateTheme {
     GithubLight,
     GithubLightHighContrast,
     Tokyonight,
+    Nordic,
+    Nord,
+    AyuDark,
+    AyuLight,
+    AyuMirage,
+    Molokai,
+    ZenbonesDark,
+    ZenbonesLight,
+    Duckbones,
+    ForestbonesDark,
+    ForestbonesLight,
+    Kanagawabones,
+    NeobonesDark,
+    NeobonesLight,
+    Nordbones,
+    RosebonesDark,
+    RosebonesLight,
+    SeoulbonesDark,
+    SeoulbonesLight,
+    TokyobonesDark,
+    TokyobonesLight,
+    Vimbones,
+    Zenburned,
+    ZenwrittenDark,
+    ZenwrittenLight,
+    KanagawaWave,
+    KanagawaDragon,
+    KanagawaLotus,
+    EverforestDark,
+    EverforestLight,
+    TokenDark,
+    TokenLight,
+    GruvboxMaterialDark,
+    GruvboxMaterialLight,
+    Mfd,
+    MfdDark,
+    MfdStealth,
+    MfdAmber,
+    MfdMono,
+    MfdScarlet,
+    MfdPaper,
+    MfdHud,
+    MfdNvg,
+    MfdBlackout,
+    MfdFlir,
+    MfdFlirBh,
+    MfdFlirRh,
+    MfdFlirFusion,
+    MfdGblLight,
+    MfdGblDark,
+    MfdLumon,
+    MfdNerv,
 }
 
 impl BuiltinTextMateTheme {
     pub fn from_name(name: &str) -> Option<Self> {
-        match name {
-            "catppuccin-latte" => Some(Self::CatppuccinLatte),
-            "catppuccin-frappe" => Some(Self::CatppuccinFrappe),
-            "catppuccin-macchiato" => Some(Self::CatppuccinMacchiato),
-            "catppuccin-mocha" => Some(Self::CatppuccinMocha),
-            "gruvbox-dark" => Some(Self::GruvboxDark),
-            "gruvbox-light" => Some(Self::GruvboxLight),
-            "github-dark" => Some(Self::GithubDark),
-            "github-dark-high-contrast" => Some(Self::GithubDarkHighContrast),
-            "github-light" => Some(Self::GithubLight),
-            "github-light-high-contrast" => Some(Self::GithubLightHighContrast),
-            "tokyonight" | "tokyo-night" => Some(Self::Tokyonight),
-            _ => None,
-        }
+        Self::all()
+            .iter()
+            .copied()
+            .find(|theme| theme.name() == name)
+            .or(match name {
+                "tokyo-night" => Some(Self::Tokyonight),
+                "ayu" => Some(Self::AyuDark),
+                "monokai" => Some(Self::Molokai),
+                "zenbones" => Some(Self::ZenbonesDark),
+                "forestbones" => Some(Self::ForestbonesDark),
+                "neobones" => Some(Self::NeobonesDark),
+                "rosebones" => Some(Self::RosebonesDark),
+                "seoulbones" => Some(Self::SeoulbonesDark),
+                "tokyobones" => Some(Self::TokyobonesDark),
+                "zenwritten" => Some(Self::ZenwrittenDark),
+                "kanagawa" => Some(Self::KanagawaWave),
+                "everforest" => Some(Self::EverforestDark),
+                "token" => Some(Self::TokenDark),
+                "gruvbox-material" => Some(Self::GruvboxMaterialDark),
+                _ => None,
+            })
     }
 
     pub const fn name(self) -> &'static str {
@@ -62,23 +121,63 @@ impl BuiltinTextMateTheme {
             Self::GithubLight => "github-light",
             Self::GithubLightHighContrast => "github-light-high-contrast",
             Self::Tokyonight => "tokyonight",
+            Self::Nordic => "nordic",
+            Self::Nord => "nord",
+            Self::AyuDark => "ayu-dark",
+            Self::AyuLight => "ayu-light",
+            Self::AyuMirage => "ayu-mirage",
+            Self::Molokai => "molokai",
+            Self::ZenbonesDark => "zenbones-dark",
+            Self::ZenbonesLight => "zenbones-light",
+            Self::Duckbones => "duckbones",
+            Self::ForestbonesDark => "forestbones-dark",
+            Self::ForestbonesLight => "forestbones-light",
+            Self::Kanagawabones => "kanagawabones",
+            Self::NeobonesDark => "neobones-dark",
+            Self::NeobonesLight => "neobones-light",
+            Self::Nordbones => "nordbones",
+            Self::RosebonesDark => "rosebones-dark",
+            Self::RosebonesLight => "rosebones-light",
+            Self::SeoulbonesDark => "seoulbones-dark",
+            Self::SeoulbonesLight => "seoulbones-light",
+            Self::TokyobonesDark => "tokyobones-dark",
+            Self::TokyobonesLight => "tokyobones-light",
+            Self::Vimbones => "vimbones",
+            Self::Zenburned => "zenburned",
+            Self::ZenwrittenDark => "zenwritten-dark",
+            Self::ZenwrittenLight => "zenwritten-light",
+            Self::KanagawaWave => "kanagawa-wave",
+            Self::KanagawaDragon => "kanagawa-dragon",
+            Self::KanagawaLotus => "kanagawa-lotus",
+            Self::EverforestDark => "everforest-dark",
+            Self::EverforestLight => "everforest-light",
+            Self::TokenDark => "token-dark",
+            Self::TokenLight => "token-light",
+            Self::GruvboxMaterialDark => "gruvbox-material-dark",
+            Self::GruvboxMaterialLight => "gruvbox-material-light",
+            Self::Mfd => "mfd",
+            Self::MfdDark => "mfd-dark",
+            Self::MfdStealth => "mfd-stealth",
+            Self::MfdAmber => "mfd-amber",
+            Self::MfdMono => "mfd-mono",
+            Self::MfdScarlet => "mfd-scarlet",
+            Self::MfdPaper => "mfd-paper",
+            Self::MfdHud => "mfd-hud",
+            Self::MfdNvg => "mfd-nvg",
+            Self::MfdBlackout => "mfd-blackout",
+            Self::MfdFlir => "mfd-flir",
+            Self::MfdFlirBh => "mfd-flir-bh",
+            Self::MfdFlirRh => "mfd-flir-rh",
+            Self::MfdFlirFusion => "mfd-flir-fusion",
+            Self::MfdGblLight => "mfd-gbl-light",
+            Self::MfdGblDark => "mfd-gbl-dark",
+            Self::MfdLumon => "mfd-lumon",
+            Self::MfdNerv => "mfd-nerv",
         }
     }
 
     pub fn get(self) -> &'static TextMateTheme {
-        match self {
-            Self::CatppuccinLatte => catppuccin_latte(),
-            Self::CatppuccinFrappe => catppuccin_frappe(),
-            Self::CatppuccinMacchiato => catppuccin_macchiato(),
-            Self::CatppuccinMocha => catppuccin_mocha(),
-            Self::GruvboxDark => gruvbox_dark(),
-            Self::GruvboxLight => gruvbox_light(),
-            Self::GithubDark => github_dark(),
-            Self::GithubDarkHighContrast => github_dark_high_contrast(),
-            Self::GithubLight => github_light(),
-            Self::GithubLightHighContrast => github_light_high_contrast(),
-            Self::Tokyonight => tokyonight(),
-        }
+        builtin_theme(self)
     }
 
     pub const fn all() -> &'static [Self] {
@@ -94,6 +193,58 @@ impl BuiltinTextMateTheme {
             Self::GithubLight,
             Self::GithubLightHighContrast,
             Self::Tokyonight,
+            Self::Nordic,
+            Self::Nord,
+            Self::AyuDark,
+            Self::AyuLight,
+            Self::AyuMirage,
+            Self::Molokai,
+            Self::ZenbonesDark,
+            Self::ZenbonesLight,
+            Self::Duckbones,
+            Self::ForestbonesDark,
+            Self::ForestbonesLight,
+            Self::Kanagawabones,
+            Self::NeobonesDark,
+            Self::NeobonesLight,
+            Self::Nordbones,
+            Self::RosebonesDark,
+            Self::RosebonesLight,
+            Self::SeoulbonesDark,
+            Self::SeoulbonesLight,
+            Self::TokyobonesDark,
+            Self::TokyobonesLight,
+            Self::Vimbones,
+            Self::Zenburned,
+            Self::ZenwrittenDark,
+            Self::ZenwrittenLight,
+            Self::KanagawaWave,
+            Self::KanagawaDragon,
+            Self::KanagawaLotus,
+            Self::EverforestDark,
+            Self::EverforestLight,
+            Self::TokenDark,
+            Self::TokenLight,
+            Self::GruvboxMaterialDark,
+            Self::GruvboxMaterialLight,
+            Self::Mfd,
+            Self::MfdDark,
+            Self::MfdStealth,
+            Self::MfdAmber,
+            Self::MfdMono,
+            Self::MfdScarlet,
+            Self::MfdPaper,
+            Self::MfdHud,
+            Self::MfdNvg,
+            Self::MfdBlackout,
+            Self::MfdFlir,
+            Self::MfdFlirBh,
+            Self::MfdFlirRh,
+            Self::MfdFlirFusion,
+            Self::MfdGblLight,
+            Self::MfdGblDark,
+            Self::MfdLumon,
+            Self::MfdNerv,
         ]
     }
 }
@@ -170,6 +321,7 @@ pub struct ThemeSelectorScore {
 pub struct TextMateTheme {
     name: String,
     generation: u64,
+    colors: HashMap<String, RgbColor>,
     default_style: ResolvedSyntaxStyle,
     rules: Vec<CompiledThemeRule>,
     candidates_by_head: HashMap<String, Vec<usize>>,
@@ -227,24 +379,39 @@ impl TextMateTheme {
     pub fn from_json(json: &str) -> Result<Self, String> {
         let raw: RawTheme = serde_json::from_str(json)
             .map_err(|error| format!("invalid TextMate theme JSON: {error}"))?;
+        let editor_background = raw
+            .colors
+            .get("editor.background")
+            .and_then(|value| value.as_str())
+            .map(parse_editor_background)
+            .transpose()?;
+        let colors = raw
+            .colors
+            .iter()
+            .filter_map(|(name, value)| {
+                value
+                    .as_str()
+                    .and_then(|value| parse_color(value, editor_background).ok())
+                    .map(|color| (name.clone(), color))
+            })
+            .collect();
         let default_style = ResolvedSyntaxStyle {
             foreground: parse_optional_color(
                 raw.colors
                     .get("editor.foreground")
                     .and_then(|value| value.as_str()),
+                editor_background,
             )?,
-            background: parse_optional_color(
-                raw.colors
-                    .get("editor.background")
-                    .and_then(|value| value.as_str()),
-            )?,
+            background: editor_background,
             modifiers: SyntaxModifiers::empty(),
         };
         let mut rules = Vec::new();
         let mut defaults = default_style;
         for (source_order, raw_rule) in raw.token_colors.into_iter().enumerate() {
-            let foreground = parse_optional_color(raw_rule.settings.foreground.as_deref())?;
-            let background = parse_optional_color(raw_rule.settings.background.as_deref())?;
+            let foreground =
+                parse_optional_color(raw_rule.settings.foreground.as_deref(), editor_background)?;
+            let background =
+                parse_optional_color(raw_rule.settings.background.as_deref(), editor_background)?;
             let modifiers = raw_rule
                 .settings
                 .font_style
@@ -313,6 +480,7 @@ impl TextMateTheme {
         Ok(Self {
             name: raw.name,
             generation: next_theme_generation(),
+            colors,
             default_style: defaults,
             rules,
             candidates_by_head,
@@ -324,8 +492,8 @@ impl TextMateTheme {
     pub fn from_syntax_rules(rules: &[SyntaxRuleOverride]) -> Result<Self, String> {
         let mut compiled = Vec::new();
         for (source_order, rule) in rules.iter().enumerate() {
-            let foreground = parse_optional_color(rule.foreground.as_deref())?;
-            let background = parse_optional_color(rule.background.as_deref())?;
+            let foreground = parse_optional_syntax_rule_color(rule.foreground.as_deref())?;
+            let background = parse_optional_syntax_rule_color(rule.background.as_deref())?;
             let modifiers = rule
                 .font_style
                 .as_deref()
@@ -359,6 +527,7 @@ impl TextMateTheme {
         Ok(Self {
             name: "user syntax rules".to_owned(),
             generation: next_theme_generation(),
+            colors: HashMap::new(),
             default_style: ResolvedSyntaxStyle::default(),
             rules: compiled,
             candidates_by_head,
@@ -371,6 +540,10 @@ impl TextMateTheme {
 
     pub fn default_style(&self) -> ResolvedSyntaxStyle {
         self.default_style
+    }
+
+    pub fn color(&self, name: &str) -> Option<RgbColor> {
+        self.colors.get(name).copied()
     }
 
     pub fn resolve(
@@ -685,6 +858,8 @@ fn parse_modifiers(value: &str) -> Result<SyntaxModifiers, String> {
     let mut modifiers = SyntaxModifiers::empty();
     for modifier in value.split_whitespace() {
         match modifier {
+            // VS Code themes use `normal` to explicitly clear inherited styles.
+            "normal" | "regular" => {}
             "bold" => modifiers.insert(SyntaxModifiers::BOLD),
             "italic" => modifiers.insert(SyntaxModifiers::ITALIC),
             "underline" => modifiers.insert(SyntaxModifiers::UNDERLINED),
@@ -695,36 +870,77 @@ fn parse_modifiers(value: &str) -> Result<SyntaxModifiers, String> {
     Ok(modifiers)
 }
 
-fn parse_optional_color(value: Option<&str>) -> Result<Option<RgbColor>, String> {
-    value.map(parse_color).transpose()
+fn parse_optional_color(
+    value: Option<&str>,
+    background: Option<RgbColor>,
+) -> Result<Option<RgbColor>, String> {
+    value
+        .map(|value| parse_color(value, background))
+        .transpose()
 }
 
-fn parse_color(value: &str) -> Result<RgbColor, String> {
-    let hex = value
-        .strip_prefix('#')
-        .ok_or_else(|| format!("unsupported TextMate color `{value}`"))?;
-    let expanded;
-    let rgb = match hex.len() {
-        3 | 4 => {
-            expanded = hex
-                .chars()
-                .take(3)
-                .flat_map(|character| [character, character])
-                .collect::<String>();
-            expanded.as_str()
-        }
-        6 | 8 => &hex[..6],
-        _ => return Err(format!("unsupported TextMate color `{value}`")),
-    };
-    let channel = |range| {
-        u8::from_str_radix(&rgb[range], 16)
-            .map_err(|_| format!("unsupported TextMate color `{value}`"))
+fn parse_optional_syntax_rule_color(value: Option<&str>) -> Result<Option<RgbColor>, String> {
+    // User rules have no single background to composite against: their tokens
+    // can be rendered over theme, diff, or inline-diff backgrounds. Preserve
+    // the historical behavior of accepting alpha forms and using their RGB
+    // channels rather than rejecting an existing configuration.
+    value
+        .map(|value| parse_rgba_color(value).map(|(color, _)| color))
+        .transpose()
+}
+
+fn parse_editor_background(value: &str) -> Result<RgbColor, String> {
+    let (color, alpha) = parse_rgba_color(value)?;
+    if alpha != u8::MAX {
+        return Err(format!(
+            "TextMate editor.background must be opaque, got `{value}`"
+        ));
+    }
+    Ok(color)
+}
+
+fn parse_color(value: &str, background: Option<RgbColor>) -> Result<RgbColor, String> {
+    let (color, alpha) = parse_rgba_color(value)?;
+    if alpha == u8::MAX {
+        return Ok(color);
+    }
+    let background = background.ok_or_else(|| {
+        format!("translucent TextMate color `{value}` requires an opaque editor.background")
+    })?;
+    let composite = |foreground: u8, background: u8| {
+        let alpha = u32::from(alpha);
+        ((u32::from(foreground) * alpha
+            + u32::from(background) * (u32::from(u8::MAX) - alpha)
+            + 127)
+            / u32::from(u8::MAX)) as u8
     };
     Ok(RgbColor {
-        red: channel(0..2)?,
-        green: channel(2..4)?,
-        blue: channel(4..6)?,
+        red: composite(color.red, background.red),
+        green: composite(color.green, background.green),
+        blue: composite(color.blue, background.blue),
     })
+}
+
+fn parse_rgba_color(value: &str) -> Result<(RgbColor, u8), String> {
+    let invalid = || format!("unsupported TextMate color `{value}`");
+    let hex = value.strip_prefix('#').ok_or_else(invalid)?;
+    if !hex.is_ascii() {
+        return Err(invalid());
+    }
+    let byte = |start| u8::from_str_radix(&hex[start..start + 2], 16).map_err(|_| invalid());
+    let nibble = |index| {
+        u8::from_str_radix(&hex[index..index + 1], 16)
+            .map(|value| value * 0x11)
+            .map_err(|_| invalid())
+    };
+    let (red, green, blue, alpha) = match hex.len() {
+        3 => (nibble(0)?, nibble(1)?, nibble(2)?, u8::MAX),
+        4 => (nibble(0)?, nibble(1)?, nibble(2)?, nibble(3)?),
+        6 => (byte(0)?, byte(2)?, byte(4)?, u8::MAX),
+        8 => (byte(0)?, byte(2)?, byte(4)?, byte(6)?),
+        _ => return Err(invalid()),
+    };
+    Ok((RgbColor { red, green, blue }, alpha))
 }
 
 macro_rules! vendored_theme {
@@ -734,7 +950,7 @@ macro_rules! vendored_theme {
             THEME.get_or_init(|| {
                 TextMateTheme::from_json(include_str!(concat!(
                     env!("CARGO_MANIFEST_DIR"),
-                    "/../../assets/tm-themes/",
+                    "/../../assets/themes/",
                     $file
                 )))
                 .unwrap_or_else(|error| panic!("vendored theme {} is invalid: {error}", $file))
@@ -757,6 +973,126 @@ vendored_theme!(
     "github-light-high-contrast.json"
 );
 vendored_theme!(tokyonight, "tokyonight.json");
+vendored_theme!(nordic, "nordic.json");
+vendored_theme!(nord, "nord.json");
+vendored_theme!(ayu_dark, "ayu-dark.json");
+vendored_theme!(ayu_light, "ayu-light.json");
+vendored_theme!(ayu_mirage, "ayu-mirage.json");
+vendored_theme!(molokai, "molokai.json");
+vendored_theme!(zenbones_dark, "zenbones-dark.json");
+vendored_theme!(zenbones_light, "zenbones-light.json");
+vendored_theme!(duckbones, "duckbones.json");
+vendored_theme!(forestbones_dark, "forestbones-dark.json");
+vendored_theme!(forestbones_light, "forestbones-light.json");
+vendored_theme!(kanagawabones, "kanagawabones.json");
+vendored_theme!(neobones_dark, "neobones-dark.json");
+vendored_theme!(neobones_light, "neobones-light.json");
+vendored_theme!(nordbones, "nordbones.json");
+vendored_theme!(rosebones_dark, "rosebones-dark.json");
+vendored_theme!(rosebones_light, "rosebones-light.json");
+vendored_theme!(seoulbones_dark, "seoulbones-dark.json");
+vendored_theme!(seoulbones_light, "seoulbones-light.json");
+vendored_theme!(tokyobones_dark, "tokyobones-dark.json");
+vendored_theme!(tokyobones_light, "tokyobones-light.json");
+vendored_theme!(vimbones, "vimbones.json");
+vendored_theme!(zenburned, "zenburned.json");
+vendored_theme!(zenwritten_dark, "zenwritten-dark.json");
+vendored_theme!(zenwritten_light, "zenwritten-light.json");
+vendored_theme!(kanagawa_wave, "kanagawa-wave.json");
+vendored_theme!(kanagawa_dragon, "kanagawa-dragon.json");
+vendored_theme!(kanagawa_lotus, "kanagawa-lotus.json");
+vendored_theme!(everforest_dark, "everforest-dark.json");
+vendored_theme!(everforest_light, "everforest-light.json");
+vendored_theme!(token_dark, "token-dark.json");
+vendored_theme!(token_light, "token-light.json");
+vendored_theme!(gruvbox_material_dark, "gruvbox-material-dark.json");
+vendored_theme!(gruvbox_material_light, "gruvbox-material-light.json");
+vendored_theme!(mfd, "mfd.json");
+vendored_theme!(mfd_dark, "mfd-dark.json");
+vendored_theme!(mfd_stealth, "mfd-stealth.json");
+vendored_theme!(mfd_amber, "mfd-amber.json");
+vendored_theme!(mfd_mono, "mfd-mono.json");
+vendored_theme!(mfd_scarlet, "mfd-scarlet.json");
+vendored_theme!(mfd_paper, "mfd-paper.json");
+vendored_theme!(mfd_hud, "mfd-hud.json");
+vendored_theme!(mfd_nvg, "mfd-nvg.json");
+vendored_theme!(mfd_blackout, "mfd-blackout.json");
+vendored_theme!(mfd_flir, "mfd-flir.json");
+vendored_theme!(mfd_flir_bh, "mfd-flir-bh.json");
+vendored_theme!(mfd_flir_rh, "mfd-flir-rh.json");
+vendored_theme!(mfd_flir_fusion, "mfd-flir-fusion.json");
+vendored_theme!(mfd_gbl_light, "mfd-gbl-light.json");
+vendored_theme!(mfd_gbl_dark, "mfd-gbl-dark.json");
+vendored_theme!(mfd_lumon, "mfd-lumon.json");
+vendored_theme!(mfd_nerv, "mfd-nerv.json");
+
+fn builtin_theme(theme: BuiltinTextMateTheme) -> &'static TextMateTheme {
+    match theme {
+        BuiltinTextMateTheme::CatppuccinLatte => catppuccin_latte(),
+        BuiltinTextMateTheme::CatppuccinFrappe => catppuccin_frappe(),
+        BuiltinTextMateTheme::CatppuccinMacchiato => catppuccin_macchiato(),
+        BuiltinTextMateTheme::CatppuccinMocha => catppuccin_mocha(),
+        BuiltinTextMateTheme::GruvboxDark => gruvbox_dark(),
+        BuiltinTextMateTheme::GruvboxLight => gruvbox_light(),
+        BuiltinTextMateTheme::GithubDark => github_dark(),
+        BuiltinTextMateTheme::GithubDarkHighContrast => github_dark_high_contrast(),
+        BuiltinTextMateTheme::GithubLight => github_light(),
+        BuiltinTextMateTheme::GithubLightHighContrast => github_light_high_contrast(),
+        BuiltinTextMateTheme::Tokyonight => tokyonight(),
+        BuiltinTextMateTheme::Nordic => nordic(),
+        BuiltinTextMateTheme::Nord => nord(),
+        BuiltinTextMateTheme::AyuDark => ayu_dark(),
+        BuiltinTextMateTheme::AyuLight => ayu_light(),
+        BuiltinTextMateTheme::AyuMirage => ayu_mirage(),
+        BuiltinTextMateTheme::Molokai => molokai(),
+        BuiltinTextMateTheme::ZenbonesDark => zenbones_dark(),
+        BuiltinTextMateTheme::ZenbonesLight => zenbones_light(),
+        BuiltinTextMateTheme::Duckbones => duckbones(),
+        BuiltinTextMateTheme::ForestbonesDark => forestbones_dark(),
+        BuiltinTextMateTheme::ForestbonesLight => forestbones_light(),
+        BuiltinTextMateTheme::Kanagawabones => kanagawabones(),
+        BuiltinTextMateTheme::NeobonesDark => neobones_dark(),
+        BuiltinTextMateTheme::NeobonesLight => neobones_light(),
+        BuiltinTextMateTheme::Nordbones => nordbones(),
+        BuiltinTextMateTheme::RosebonesDark => rosebones_dark(),
+        BuiltinTextMateTheme::RosebonesLight => rosebones_light(),
+        BuiltinTextMateTheme::SeoulbonesDark => seoulbones_dark(),
+        BuiltinTextMateTheme::SeoulbonesLight => seoulbones_light(),
+        BuiltinTextMateTheme::TokyobonesDark => tokyobones_dark(),
+        BuiltinTextMateTheme::TokyobonesLight => tokyobones_light(),
+        BuiltinTextMateTheme::Vimbones => vimbones(),
+        BuiltinTextMateTheme::Zenburned => zenburned(),
+        BuiltinTextMateTheme::ZenwrittenDark => zenwritten_dark(),
+        BuiltinTextMateTheme::ZenwrittenLight => zenwritten_light(),
+        BuiltinTextMateTheme::KanagawaWave => kanagawa_wave(),
+        BuiltinTextMateTheme::KanagawaDragon => kanagawa_dragon(),
+        BuiltinTextMateTheme::KanagawaLotus => kanagawa_lotus(),
+        BuiltinTextMateTheme::EverforestDark => everforest_dark(),
+        BuiltinTextMateTheme::EverforestLight => everforest_light(),
+        BuiltinTextMateTheme::TokenDark => token_dark(),
+        BuiltinTextMateTheme::TokenLight => token_light(),
+        BuiltinTextMateTheme::GruvboxMaterialDark => gruvbox_material_dark(),
+        BuiltinTextMateTheme::GruvboxMaterialLight => gruvbox_material_light(),
+        BuiltinTextMateTheme::Mfd => mfd(),
+        BuiltinTextMateTheme::MfdDark => mfd_dark(),
+        BuiltinTextMateTheme::MfdStealth => mfd_stealth(),
+        BuiltinTextMateTheme::MfdAmber => mfd_amber(),
+        BuiltinTextMateTheme::MfdMono => mfd_mono(),
+        BuiltinTextMateTheme::MfdScarlet => mfd_scarlet(),
+        BuiltinTextMateTheme::MfdPaper => mfd_paper(),
+        BuiltinTextMateTheme::MfdHud => mfd_hud(),
+        BuiltinTextMateTheme::MfdNvg => mfd_nvg(),
+        BuiltinTextMateTheme::MfdBlackout => mfd_blackout(),
+        BuiltinTextMateTheme::MfdFlir => mfd_flir(),
+        BuiltinTextMateTheme::MfdFlirBh => mfd_flir_bh(),
+        BuiltinTextMateTheme::MfdFlirRh => mfd_flir_rh(),
+        BuiltinTextMateTheme::MfdFlirFusion => mfd_flir_fusion(),
+        BuiltinTextMateTheme::MfdGblLight => mfd_gbl_light(),
+        BuiltinTextMateTheme::MfdGblDark => mfd_gbl_dark(),
+        BuiltinTextMateTheme::MfdLumon => mfd_lumon(),
+        BuiltinTextMateTheme::MfdNerv => mfd_nerv(),
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -784,14 +1120,99 @@ mod tests {
     }
 
     #[test]
+    fn translucent_theme_colors_are_composited_over_editor_background() {
+        let theme = TextMateTheme::from_json(
+            r##"{
+                "colors": {
+                    "editor.background": "#102030",
+                    "editor.foreground": "#ffffff80",
+                    "editor.lineHighlightBackground": "#fff8"
+                },
+                "tokenColors": [{
+                    "scope": "markup.raw",
+                    "settings": { "background": "#f000" }
+                }]
+            }"##,
+        )
+        .unwrap();
+
+        assert_eq!(
+            theme.default_style().foreground,
+            Some(RgbColor {
+                red: 0x88,
+                green: 0x90,
+                blue: 0x98,
+            })
+        );
+        assert_eq!(
+            theme.color("editor.lineHighlightBackground"),
+            Some(RgbColor {
+                red: 0x8f,
+                green: 0x97,
+                blue: 0x9e,
+            })
+        );
+        let (table, stack) = HighlightScopeTable::from_scope_names(&["markup.raw"]);
+        assert_eq!(
+            theme.resolve(&table, stack).background,
+            Some(RgbColor {
+                red: 0x10,
+                green: 0x20,
+                blue: 0x30,
+            })
+        );
+    }
+
+    #[test]
+    fn ayu_raw_markup_backgrounds_remain_low_contrast() {
+        for (theme, expected) in [
+            (
+                BuiltinTextMateTheme::AyuDark,
+                RgbColor {
+                    red: 0x13,
+                    green: 0x17,
+                    blue: 0x1f,
+                },
+            ),
+            (
+                BuiltinTextMateTheme::AyuLight,
+                RgbColor {
+                    red: 0xf9,
+                    green: 0xf9,
+                    blue: 0xf9,
+                },
+            ),
+            (
+                BuiltinTextMateTheme::AyuMirage,
+                RgbColor {
+                    red: 0x27,
+                    green: 0x2c,
+                    blue: 0x39,
+                },
+            ),
+        ] {
+            let (table, stack) = HighlightScopeTable::from_scope_names(&["markup.raw"]);
+            assert_eq!(
+                theme.get().resolve(&table, stack).background,
+                Some(expected)
+            );
+        }
+    }
+
+    #[test]
     fn scope_prefix_requires_a_dot_boundary() {
         assert!(scope_matches("support.function", "support"));
         assert!(!scope_matches("supportive.function", "support"));
     }
 
     #[test]
-    fn empty_font_style_is_a_reset() {
+    fn reset_font_styles_are_supported() {
         assert_eq!(parse_modifiers("").unwrap(), SyntaxModifiers::empty());
+        assert_eq!(parse_modifiers("normal").unwrap(), SyntaxModifiers::empty());
+        assert_eq!(
+            parse_modifiers("regular").unwrap(),
+            SyntaxModifiers::empty()
+        );
     }
 
     #[test]
@@ -915,6 +1336,106 @@ mod tests {
     }
 
     #[test]
+    fn adapted_themes_match_their_pinned_upstream_highlights() {
+        let resolve = |theme: BuiltinTextMateTheme, scope: &str| {
+            let (table, stack) = HighlightScopeTable::from_scope_names(&[scope]);
+            theme.get().resolve(&table, stack)
+        };
+
+        assert_eq!(
+            resolve(BuiltinTextMateTheme::Nordic, "keyword.control").foreground,
+            Some(RgbColor {
+                red: 0xd0,
+                green: 0x87,
+                blue: 0x70,
+            })
+        );
+        assert_eq!(
+            resolve(BuiltinTextMateTheme::Nordic, "constant.numeric").foreground,
+            Some(RgbColor {
+                red: 0xbe,
+                green: 0x9d,
+                blue: 0xb8,
+            })
+        );
+        let mfd_keyword = resolve(BuiltinTextMateTheme::MfdStealth, "keyword.control");
+        assert_eq!(
+            mfd_keyword.foreground,
+            Some(RgbColor {
+                red: 0x9a,
+                green: 0xbb,
+                blue: 0x9a,
+            })
+        );
+        assert!(mfd_keyword.modifiers.contains(SyntaxModifiers::BOLD));
+    }
+
+    #[test]
+    fn zenbones_matches_the_pinned_upstream_vim_highlights() {
+        let theme = BuiltinTextMateTheme::ZenbonesDark.get();
+        let resolve = |scope: &str| {
+            let (table, stack) = HighlightScopeTable::from_scope_names(&[scope]);
+            theme.resolve(&table, stack)
+        };
+
+        assert_eq!(
+            resolve("comment.line").foreground,
+            Some(RgbColor {
+                red: 0x6e,
+                green: 0x67,
+                blue: 0x63,
+            })
+        );
+        assert!(
+            resolve("comment.line")
+                .modifiers
+                .contains(SyntaxModifiers::ITALIC)
+        );
+        assert_eq!(
+            resolve("string.quoted").foreground,
+            Some(RgbColor {
+                red: 0x86,
+                green: 0x8c,
+                blue: 0x91,
+            })
+        );
+        assert!(
+            resolve("string.quoted")
+                .modifiers
+                .contains(SyntaxModifiers::ITALIC)
+        );
+        assert_eq!(
+            resolve("keyword.control").foreground,
+            Some(RgbColor {
+                red: 0xb4,
+                green: 0xbd,
+                blue: 0xc3,
+            })
+        );
+        assert!(
+            resolve("keyword.control")
+                .modifiers
+                .contains(SyntaxModifiers::BOLD)
+        );
+        assert_eq!(
+            resolve("entity.name.type").foreground,
+            Some(RgbColor {
+                red: 0xa1,
+                green: 0x93,
+                blue: 0x8c,
+            })
+        );
+        assert_eq!(
+            resolve("punctuation.definition").foreground,
+            Some(RgbColor {
+                red: 0x86,
+                green: 0x7a,
+                blue: 0x74,
+            })
+        );
+    }
+
+    #[test]
     fn official_theme_distinguishes_lossy_coarse_classes() {
         let theme = github_dark_high_contrast();
         let resolve = |scopes: &[&str]| {
@@ -989,6 +1510,35 @@ mod tests {
                 green: 0xcb,
                 blue: 0xff,
             })
+        );
+    }
+
+    #[test]
+    fn nonopaque_user_syntax_rule_colors_preserve_their_rgb_channels() {
+        let theme = TextMateTheme::from_syntax_rules(&[SyntaxRuleOverride {
+            scope: "constant.numeric".to_owned(),
+            foreground: Some("#ff000080".to_owned()),
+            background: Some("#0f08".to_owned()),
+            ..SyntaxRuleOverride::default()
+        }])
+        .unwrap();
+        let (table, stack) = HighlightScopeTable::from_scope_names(&["constant.numeric"]);
+
+        assert_eq!(
+            theme.resolve(&table, stack),
+            ResolvedSyntaxStyle {
+                foreground: Some(RgbColor {
+                    red: 0xff,
+                    green: 0,
+                    blue: 0,
+                }),
+                background: Some(RgbColor {
+                    red: 0,
+                    green: 0xff,
+                    blue: 0,
+                }),
+                modifiers: SyntaxModifiers::empty(),
+            }
         );
     }
 

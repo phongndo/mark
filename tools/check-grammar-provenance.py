@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-ASSETS = ROOT / "assets/tm-grammars/languages"
+ASSETS = ROOT / "assets/grammars/languages"
 REPORT = ROOT / "benchmarks/textmate/grammar-provenance-audit.json"
 VSCODE_COMMIT = "fc3def6774c76082adf699d366f31a557ce5573f"
 VSCODE_ASSETS = {
@@ -84,9 +84,9 @@ def apply_recorded_transformation(language: str, grammar: object) -> object:
 
 
 def build_report(verify_vscode: bool) -> dict[str, object]:
-    source_text = (ROOT / "assets/tm-grammars/SOURCE.toml").read_text()
-    license_data = json.loads((ROOT / "assets/tm-grammars/licenses.json").read_text())
-    metadata = json.loads((ROOT / "assets/tm-grammars/language-metadata.json").read_text())
+    source_text = (ROOT / "assets/grammars/SOURCE.toml").read_text()
+    license_data = json.loads((ROOT / "assets/grammars/licenses.json").read_text())
+    metadata = json.loads((ROOT / "assets/grammars/language-metadata.json").read_text())
     records = {record["language"]: record for record in license_data["assets"]}
     files = {path.name.removesuffix(".tmLanguage.json"): path for path in ASSETS.glob("*.tmLanguage.json")}
     if set(records) != set(files):
@@ -103,7 +103,7 @@ def build_report(verify_vscode: bool) -> dict[str, object]:
             if not record.get(required):
                 raise SystemExit(f"{language}: missing provenance field {required}")
         if notice := record.get("licenseTextPath"):
-            notice_path = ROOT / "assets/tm-grammars" / notice
+            notice_path = ROOT / "assets/grammars" / notice
             if not notice_path.is_file():
                 raise SystemExit(f"{language}: missing license notice {notice}")
         target = "pinned-package"

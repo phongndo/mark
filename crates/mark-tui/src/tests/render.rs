@@ -694,7 +694,8 @@ fn error_log_header_shows_copy_command_on_right() {
 fn transparent_background_applies_to_entire_error_log_pane() {
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
-    app.config.theme = DiffTheme::catppuccin_mocha().with_transparent_background(true);
+    app.config.theme =
+        DiffTheme::catppuccin_mocha().with_transparent_background_override(Some(true));
     app.set_error_log("reload failed:\nfatal: bad revision");
 
     let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(40, 4))
@@ -843,7 +844,8 @@ fn file_sidebar_opens_at_hunk_default_width() {
 fn transparent_background_applies_to_file_sidebar_base() {
     let changeset = changeset_with_files(&["a.rs", "b.rs"]);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
-    app.config.theme = DiffTheme::catppuccin_mocha().with_transparent_background(true);
+    app.config.theme =
+        DiffTheme::catppuccin_mocha().with_transparent_background_override(Some(true));
 
     let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(20, 3))
         .expect("test terminal should be created");
@@ -2759,20 +2761,8 @@ fn default_theme_alias_uses_system_theme() {
 
 #[test]
 fn packaged_builtin_themes_are_available() {
-    for name in [
-        "system",
-        "catppuccin-latte",
-        "catppuccin-frappe",
-        "catppuccin-macchiato",
-        "catppuccin-mocha",
-        "gruvbox-dark",
-        "gruvbox-light",
-        "github-dark",
-        "github-dark-high-contrast",
-        "github-light",
-        "github-light-high-contrast",
-        "tokyonight",
-    ] {
+    for choice in BUILTIN_THEMES {
+        let name = color_scheme_label(*choice);
         let theme = builtin_diff_theme(Some(name)).expect("built-in theme should load");
 
         assert_ne!(theme.statusline_accent_bg, Color::Reset);
@@ -2789,6 +2779,26 @@ fn packaged_builtin_themes_are_available() {
             );
         }
     }
+}
+
+#[test]
+fn zenbones_tui_colors_match_the_pinned_upstream_theme() {
+    let dark = builtin_diff_theme(Some("zenbones-dark")).expect("zenbones dark should load");
+    assert_eq!(dark.background, Color::Rgb(0x1c, 0x19, 0x17));
+    assert_eq!(dark.foreground, Color::Rgb(0xb4, 0xbd, 0xc3));
+    assert_eq!(dark.cursor, Color::Rgb(0xc4, 0xca, 0xcf));
+    assert_eq!(dark.cursor_line_bg, Color::Rgb(0x25, 0x21, 0x1f));
+    assert_eq!(dark.addition_fg, Color::Rgb(0x81, 0x9b, 0x69));
+    assert_eq!(dark.addition_bg, Color::Rgb(0x23, 0x2d, 0x1a));
+    assert_eq!(dark.deletion_fg, Color::Rgb(0xde, 0x6e, 0x7c));
+    assert_eq!(dark.deletion_bg, Color::Rgb(0x3e, 0x22, 0x25));
+
+    let light = builtin_diff_theme(Some("zenbones-light")).expect("zenbones light should load");
+    assert_eq!(light.background, Color::Rgb(0xf0, 0xed, 0xec));
+    assert_eq!(light.foreground, Color::Rgb(0x2c, 0x36, 0x3c));
+    assert_eq!(light.cursor_line_bg, Color::Rgb(0xe9, 0xe4, 0xe2));
+    assert_eq!(light.addition_bg, Color::Rgb(0xcb, 0xe5, 0xb8));
+    assert_eq!(light.deletion_bg, Color::Rgb(0xeb, 0xd8, 0xda));
 }
 
 #[test]
@@ -2950,7 +2960,7 @@ fn builtin_syntax_palettes_match_upstream_theme_colors() {
 
 #[test]
 fn transparent_background_only_resets_diff_base_background() {
-    let theme = DiffTheme::catppuccin_mocha().with_transparent_background(true);
+    let theme = DiffTheme::catppuccin_mocha().with_transparent_background_override(Some(true));
     let spans = content_spans_at_scroll(
         "changed",
         None,
@@ -2997,6 +3007,130 @@ fn transparent_background_only_resets_diff_base_background() {
             .all(|span| span.style.bg == Some(Color::Reset))
     );
     assert_eq!(file_separator.spans[0].style.bg, Some(Color::Reset));
+}
+
+#[test]
+fn textmate_palette_uses_fallbacks_for_unmatched_scopes() {
+    let theme = builtin_diff_theme(Some("mfd")).expect("MFD should load");
+    let background = RgbColor::new(0x7a, 0x8b, 0x69);
+    let foreground = RgbColor::new(0x1e, 0x2d, 0x1e);
+
+    // MFD has no markup.inserted/markup.deleted selectors. Its editor
+    // foreground must not be mistaken for a selector match.
+    assert_eq!(theme.addition_fg, foreground.color());
+    assert_eq!(
+        theme.deletion_fg,
+        background.blend(foreground, 0.84).color()
+    );
+    assert_ne!(theme.addition_fg, theme.deletion_fg);
+    assert_ne!(theme.addition_bg, theme.deletion_bg);
+}
+
+#[test]
+fn custom_theme_inherits_builtin_and_applies_partial_overrides() {
+    let base = builtin_diff_theme(Some("nord")).expect("nord should load");
+    let theme = parse_custom_colorscheme(
+        r##"
+extends = "nord"
+transparent_background = true
+
+[colors]
+bg = "#010203"
+statusline_accent_bg = "#112233"
+addition_fg = "bright-green"
+keyword = "#aabbcc"
+"##,
+    )
+    .expect("custom theme should parse")
+    .expect("native custom theme should be detected");
+
+    assert_eq!(theme.background, Color::Rgb(0x01, 0x02, 0x03));
+    assert_eq!(theme.foreground, base.foreground);
+    assert_eq!(theme.statusline_accent_bg, Color::Rgb(0x11, 0x22, 0x33));
+    assert_eq!(theme.addition_fg, Color::LightGreen);
+    assert_eq!(
+        theme.syntax.color(SyntaxClass::Keyword),
+        Some(Color::Rgb(0xaa, 0xbb, 0xcc))
+    );
+    assert!(theme.transparent_background);
+    assert!(theme.exact_syntax.is_some());
+
+    assert!(
+        theme
+            .with_transparent_background_override(None)
+            .transparent_background,
+        "an omitted global setting should preserve theme-local transparency"
+    );
+    assert!(
+        !theme
+            .with_transparent_background_override(Some(false))
+            .transparent_background,
+        "an explicit global setting should override theme-local transparency"
+    );
+}
+
+#[test]
+fn legacy_base16_colors_table_is_not_a_native_custom_theme() {
+    let contents = r##"
+scheme = "Legacy"
+
+[colors]
+base00 = "#000000"
+base01 = "#111111"
+base02 = "#222222"
+base03 = "#333333"
+base04 = "#444444"
+base05 = "#555555"
+base06 = "#666666"
+base07 = "#777777"
+base08 = "#888888"
+base09 = "#999999"
+base0A = "#aaaaaa"
+base0B = "#bbbbbb"
+base0C = "#cccccc"
+base0D = "#dddddd"
+base0E = "#eeeeee"
+base0F = "#ffffff"
+"##;
+
+    assert!(parse_base16_scheme(contents).is_some());
+    assert!(
+        parse_custom_colorscheme(contents)
+            .expect("legacy Base16 TOML should not fail native validation")
+            .is_none()
+    );
+}
+
+#[test]
+fn custom_theme_rejects_unknown_parent() {
+    let error = parse_custom_colorscheme("extends = \"not-a-theme\"\n[colors]\nfg = \"white\"\n")
+        .expect_err("unknown custom parent should fail");
+
+    assert!(
+        error
+            .to_string()
+            .contains("unknown built-in theme 'not-a-theme'")
+    );
+}
+
+#[test]
+fn custom_theme_reports_unknown_color_keys() {
+    let error = parse_custom_colorscheme("[colors]\nbackgroun = \"#010203\"\n")
+        .expect_err("misspelled custom color should fail");
+
+    assert!(
+        error
+            .to_string()
+            .contains("unknown custom theme color 'backgroun'")
+    );
+}
+
+#[test]
+fn malformed_custom_theme_reports_toml_error() {
+    let error = parse_custom_colorscheme("extends = \"nord\"\n[colors\nbg = \"#010203\"\n")
+        .expect_err("malformed custom theme should fail as TOML");
+
+    assert!(error.to_string().contains("invalid custom theme"));
 }
 
 #[test]

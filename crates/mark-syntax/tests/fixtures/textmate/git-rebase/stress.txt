@@ -128,7 +128,7 @@ squash 0000076 combine package smoke tests
 s 0000077 combine workflow formatting
 fixup 0000078 pin temporary action revision
 f 0000079 remove duplicate upload step
-exec test -r assets/tm-grammars/licenses.json
+exec test -r assets/grammars/licenses.json
 x git diff --check HEAD^
 
   # Leading whitespace is accepted on comments and commands by this grammar.

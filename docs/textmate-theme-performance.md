@@ -15,7 +15,7 @@ Command:
 ```sh
 cargo run -p mark-syntax --release --example profile-cold -- \
   --mode process-cold \
-  --assets assets/tm-grammars/languages \
+  --assets assets/grammars/languages \
   --scope source.rust \
   crates/mark-syntax/tests/fixtures/textmate/rust/stress.rs 20
 ```

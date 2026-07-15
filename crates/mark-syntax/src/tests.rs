@@ -678,6 +678,7 @@ fn syntax_settings_default_to_builtin_system_colorscheme() {
     assert!(settings.syntax_highlighting);
     assert!(!settings.line_wrapping);
     assert!(!settings.transparent_background);
+    assert_eq!(settings.transparent_background_override, None);
     assert_eq!(settings.diff, DiffSettings::default());
     assert_eq!(settings.annotations, AnnotationSettings::default());
     assert_eq!(settings.limits, SyntaxLimits::default());
@@ -718,15 +719,15 @@ fn syntax_settings_rejects_invalid_annotation_hint_keys() {
 }
 
 #[test]
-fn syntax_settings_supports_legacy_theme_key() {
-    let settings = parse_settings("theme = \"ansi\"\n").expect("legacy theme key should parse");
+fn syntax_settings_supports_theme_key() {
+    let settings = parse_settings("theme = \"ansi\"\n").expect("theme key should parse");
 
     assert_eq!(settings.theme.source(), SyntaxThemeSource::Ansi);
     assert_eq!(settings.theme.name(), None);
 }
 
 #[test]
-fn syntax_settings_prefers_colorscheme_over_legacy_theme() {
+fn syntax_settings_preserves_colorscheme_precedence_for_mixed_legacy_config() {
     let settings = parse_settings("colorscheme = \"system\"\ntheme = \"ansi\"\n")
         .expect("settings should parse");
 
@@ -851,6 +852,7 @@ context_expand = 42
     assert_eq!(settings.theme.source(), SyntaxThemeSource::Ansi);
     assert_eq!(settings.theme.name(), None);
     assert!(settings.transparent_background);
+    assert_eq!(settings.transparent_background_override, Some(true));
     assert_eq!(settings.limits.max_source_bytes, 64 * 1024);
     assert_eq!(settings.limits.max_line_bytes, 4 * 1024);
     assert_eq!(settings.limits.cache_entries, 128);
@@ -964,20 +966,25 @@ sign_style = "normal"
 }
 
 #[test]
-fn syntax_settings_accept_background_transparent_alias() {
+fn syntax_settings_tracks_explicit_transparent_background_values() {
     let settings =
         parse_settings("background_transparent = true").expect("settings should parse alias");
-
     assert!(settings.transparent_background);
+    assert_eq!(settings.transparent_background_override, Some(true));
+
+    let settings =
+        parse_settings("transparent_background = false").expect("explicit false should parse");
+    assert!(!settings.transparent_background);
+    assert_eq!(settings.transparent_background_override, Some(false));
 }
 
 #[test]
-fn syntax_settings_supports_base16_colorscheme_table() {
+fn syntax_settings_supports_base16_theme_table() {
     let settings = parse_settings(
         r#"
 mode = "all"
 
-[colorscheme]
+[theme]
 source = "base16"
 path = "~/themes/example.yaml"
 "#,

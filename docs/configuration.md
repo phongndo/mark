@@ -16,7 +16,7 @@ honored. Windows uses `APPDATA` when `XDG_CONFIG_HOME` is unset.
 Syntax language state is stored separately as `syntax.json` under the same
 `mark` config directory. Mark includes a Rust-native TextMate backend and a
 curated core grammar pack.
-Inspect syntax mappings, config, and colorscheme paths with:
+Inspect syntax mappings, config, and the custom-theme directory with:
 
 ```sh
 mark syntax path
@@ -26,7 +26,7 @@ mark syntax path
 
 ```toml
 mode = "builtin"
-colorscheme = "system"
+theme = "system"
 transparent_background = false
 layout = "dynamic"
 live_reload = true
@@ -135,27 +135,79 @@ The bundled native backend supports **264 public language IDs**. **264 are valid
 Use `mark --no-syntax`, `mark diff --no-syntax`, `mark show --no-syntax`, or
 `mark patch --no-syntax changes.diff` to disable syntax highlighting for one run.
 
-## Colorschemes and colors
+## Themes and colors
 
-Use a built-in colorscheme by name:
+Use a built-in theme by name:
 
 ```toml
-colorscheme = "system"
+theme = "system"
 ```
 
-Built-in colorschemes are `system`, `catppuccin-latte`,
-`catppuccin-frappe`, `catppuccin-macchiato`, `catppuccin-mocha`,
-`gruvbox-dark`, `gruvbox-light`, `github-dark`,
-`github-dark-high-contrast`, `github-light`, `github-light-high-contrast`,
-and `tokyonight`.
+Built-in themes style the entire TUI, including diff colors, menus, status lines,
+and syntax highlighting. Available themes are grouped below; names shown are the
+canonical `theme` values.
 
-Changing Colorscheme in the interactive settings menu updates the
-`colorscheme` config value.
+- Core: `system`, `catppuccin-latte`, `catppuccin-frappe`,
+  `catppuccin-macchiato`, `catppuccin-mocha`, `gruvbox-dark`, `gruvbox-light`,
+  `github-dark`, `github-dark-high-contrast`, `github-light`,
+  `github-light-high-contrast`, and `tokyonight`.
+- Nord: `nordic` and `nord`.
+- Ayu: `ayu-dark`, `ayu-light`, and `ayu-mirage`.
+- Molokai: `molokai`.
+- Kanagawa: `kanagawa-wave`, `kanagawa-dragon`, and `kanagawa-lotus`.
+- Everforest: `everforest-dark` and `everforest-light`.
+- Token: `token-dark` and `token-light`.
+- Gruvbox Material: `gruvbox-material-dark` and `gruvbox-material-light`.
+- Zenbones collection: `zenbones-dark`, `zenbones-light`, `duckbones`,
+  `forestbones-dark`, `forestbones-light`, `kanagawabones`, `neobones-dark`,
+  `neobones-light`, `nordbones`, `rosebones-dark`, `rosebones-light`,
+  `seoulbones-dark`, `seoulbones-light`, `tokyobones-dark`, `tokyobones-light`,
+  `vimbones`, `zenburned`, `zenwritten-dark`, and `zenwritten-light`.
+- MFD: `mfd`, `mfd-dark`, `mfd-stealth`, `mfd-amber`, `mfd-mono`,
+  `mfd-scarlet`, `mfd-paper`, `mfd-hud`, `mfd-nvg`, `mfd-blackout`, `mfd-flir`,
+  `mfd-flir-bh`, `mfd-flir-rh`, `mfd-flir-fusion`, `mfd-gbl-light`,
+  `mfd-gbl-dark`, `mfd-lumon`, and `mfd-nerv`.
 
-Base16 themes can be loaded from a file:
+Short family names such as `ayu`, `zenbones`, `kanagawa`, `everforest`,
+`token`, and `gruvbox-material` select the family's default dark
+variant. Changing Theme in the interactive settings menu updates the
+`theme` config value.
+
+### Custom themes
+
+A custom theme can inherit any built-in theme and override only the colors you
+want. Run `mark syntax path` to find Mark's theme directory. By default it is
+`~/.config/mark/`; create, for example, `~/.config/mark/my-theme.toml`:
 
 ```toml
-[colorscheme]
+extends = "nord"
+transparent_background = false
+
+[colors]
+bg = "#101419"
+fg = "#d8dee9"
+statusline_accent_bg = "#88c0d0"
+addition_fg = "#a3be8c"
+deletion_fg = "#bf616a"
+keyword = "#b48ead"
+```
+
+Select it by filename without the extension:
+
+```toml
+theme = "my-theme"
+```
+
+Custom files may use `extends`, `base`, or `inherits`. If omitted, the parent is
+`system`. They support every color override listed below, preserve the parent's
+exact syntax rules, and may use `.toml`, `.yaml`, or `.yml` for legacy Base16
+palettes. Native partial themes use `.toml`; Base16 files must provide `base00`
+through `base0F`.
+
+A Base16 theme can also be loaded directly from any path:
+
+```toml
+[theme]
 source = "base16"
 path = "~/themes/example.yaml"
 ```
@@ -180,7 +232,7 @@ terminal colors.
 annotation compose). Built-in schemes usually set it to the palette foreground (often the
 scheme's white or brightest text), similar to Neovim's normal-mode cursor. Override with
 `cursor` in config or `[colors]`. `cursor_line_bg` colors the mouse-hover highlight on diff
-code columns (Neovim-style cursorline). With `colorscheme = "system"`, `cursor` uses the
+code columns (Neovim-style cursorline). With `theme = "system"`, `cursor` uses the
 terminal default foreground (`reset`) and `cursor_line_bg` uses ANSI palette index 237 so
 both follow the emulator theme unless overridden in `[colors]`.
 
@@ -229,7 +281,7 @@ patch-size threshold where Mark skips formatted static rendering and prints the
 sanitized raw diff instead. The default is 128 MiB.
 The settings menu can change the decoration mode for the current session;
 `empty_fill` is config/CLI-controlled, and `no_borders` is config-only.
-Only Colorscheme changes are written back to config.
+Only Theme changes are written back to config.
 
 ## Notifications
 

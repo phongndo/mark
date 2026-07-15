@@ -60,10 +60,10 @@
     "tasks": [
       {
         "id": "compile-grammars",
-        "command": "cargo run --bin grammar-compile -- assets/tm-grammars",
+        "command": "cargo run --bin grammar-compile -- assets/grammars",
         "dependsOn": [],
         "inputs": [
-          "assets/tm-grammars/languages/*.json"
+          "assets/grammars/languages/*.json"
         ],
         "outputs": [
           "target/grammars.pack"

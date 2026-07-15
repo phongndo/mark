@@ -104,7 +104,7 @@ export function extractConstructs(pattern) {
 }
 
 export async function collectGrammarStats(options = {}) {
-  const root = options.root ?? 'assets/tm-grammars/languages'
+  const root = options.root ?? 'assets/grammars/languages'
   const exampleLimit = options.exampleLimit ?? 3
   const requestedLanguages = new Set(options.languages ?? [])
   const allFiles = (await fs.readdir(root)).filter(file => file.endsWith('.json')).sort()
@@ -396,7 +396,7 @@ async function loadConformanceCases(file) {
 }
 
 function parseArgs(argv) {
-  const options = { root: 'assets/tm-grammars/languages', exampleLimit: 3, languages: [], compact: false, conformanceDiff: false, failOnGaps: false }
+  const options = { root: 'assets/grammars/languages', exampleLimit: 3, languages: [], compact: false, conformanceDiff: false, failOnGaps: false }
   const positional = []
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index]

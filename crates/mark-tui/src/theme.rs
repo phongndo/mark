@@ -25,7 +25,7 @@ pub use benchmark::{
 };
 pub(crate) use colorscheme::{Base16Scheme, RgbColor, config_color, diff_theme_from_config};
 #[cfg(test)]
-pub(crate) use colorscheme::{builtin_diff_theme, parse_base16_scheme};
+pub(crate) use colorscheme::{builtin_diff_theme, parse_base16_scheme, parse_custom_colorscheme};
 pub(crate) use constants::*;
 pub(crate) use help::{HELP_MENU_ROWS, HelpMenuKey, HelpMenuRow};
 pub(crate) use palettes::SyntaxPalette;
@@ -463,8 +463,13 @@ impl DiffTheme {
         }
     }
 
-    pub(crate) fn with_transparent_background(mut self, transparent: bool) -> Self {
-        self.transparent_background = transparent;
+    pub(crate) fn with_transparent_background_override(
+        mut self,
+        transparent: Option<bool>,
+    ) -> Self {
+        if let Some(transparent) = transparent {
+            self.transparent_background = transparent;
+        }
         self
     }
 

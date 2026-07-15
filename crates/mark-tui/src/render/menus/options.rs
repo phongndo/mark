@@ -201,7 +201,7 @@ pub(crate) fn draw_color_scheme_picker(frame: &mut Frame<'_>, app: &DiffApp, are
                 inner.width as usize,
                 app.config.theme,
             )],
-            empty_message: " no matching colorscheme",
+            empty_message: " no matching theme",
         },
         |_, choice, width, highlighted| {
             selector_entry_line(
@@ -263,7 +263,7 @@ pub(crate) fn color_scheme_picker_block(theme: DiffTheme) -> Block<'static> {
         .style(Style::default().bg(bg))
         .padding(Padding::horizontal(1))
         .title(Line::from(Span::styled(
-            " Colorscheme ",
+            " Theme ",
             Style::default()
                 .fg(selector_title_color(theme))
                 .bg(bg)
@@ -284,7 +284,7 @@ fn color_scheme_picker_width(app: &DiffApp) -> u16 {
         .iter()
         .map(|choice| format!(" {} ", color_scheme_label(*choice)).width())
         .max()
-        .unwrap_or_else(|| " no matching colorscheme ".width());
+        .unwrap_or_else(|| " no matching theme ".width());
     let current = format!(
         " {} ",
         color_scheme_label(app.overlays.options_menu_draft.color_scheme)

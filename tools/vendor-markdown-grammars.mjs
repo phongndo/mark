@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url'
 
 const root = path.resolve(import.meta.dirname, '..')
 const source = path.resolve(root, '../tau/node_modules/.pnpm/@shikijs+langs@3.23.0/node_modules/@shikijs/langs/dist')
-const output = path.join(root, 'assets/tm-grammars/languages')
+const output = path.join(root, 'assets/grammars/languages')
 
 const assets = [
   ['abap', 'source.abap'], ['vb', 'source.asp.vb.net'],
@@ -40,7 +40,7 @@ for (const [name, scopeName] of assets) {
   const grammars = Array.isArray(exported) ? exported : [exported]
   const grammar = grammars.find(candidate => candidate.scopeName === scopeName)
   if (!grammar) throw new Error(`${moduleName} does not export ${scopeName}`)
-  const relativePath = `assets/tm-grammars/languages/${name}.tmLanguage.json`
+  const relativePath = `assets/grammars/languages/${name}.tmLanguage.json`
   await fs.writeFile(path.join(root, relativePath), `${JSON.stringify(grammar, null, 2)}\n`)
   imported.push({
     language: name,
@@ -73,7 +73,7 @@ for (const [name, scopeName, relativeSource] of vscodeAssets) {
   if (grammar.scopeName !== scopeName) {
     throw new Error(`${relativeSource} has scope ${grammar.scopeName}, expected ${scopeName}`)
   }
-  const relativePath = `assets/tm-grammars/languages/${name}.tmLanguage.json`
+  const relativePath = `assets/grammars/languages/${name}.tmLanguage.json`
   await fs.writeFile(path.join(root, relativePath), `${JSON.stringify(grammar, null, 2)}\n`)
   imported.push({
     language: name,
@@ -97,7 +97,7 @@ for (const [name, scopeName, relativeSource] of vscodeAssets) {
   const exported = (await import(pathToFileURL(path.join(source, 'twig.mjs')).href)).default
   const grammar = structuredClone(exported.find(candidate => candidate.scopeName === 'text.html.twig'))
   grammar.scopeName = 'source.twig'
-  const relativePath = 'assets/tm-grammars/languages/twig-source.tmLanguage.json'
+  const relativePath = 'assets/grammars/languages/twig-source.tmLanguage.json'
   await fs.writeFile(path.join(root, relativePath), `${JSON.stringify(grammar, null, 2)}\n`)
   imported.push({
     language: 'twig-source', grammarName: grammar.name ?? 'twig', scopeName: 'source.twig',
@@ -117,7 +117,7 @@ for (const [name, scopeName, relativeSource] of vscodeAssets) {
   await fs.writeFile(temporary, await response.text())
   const grammar = JSON.parse(execFileSync('plutil', ['-convert', 'json', '-o', '-', temporary], { encoding: 'utf8' }))
   if (grammar.scopeName !== 'source.yang') throw new Error('YANG grammar scope changed')
-  const relativePath = 'assets/tm-grammars/languages/yang.tmLanguage.json'
+  const relativePath = 'assets/grammars/languages/yang.tmLanguage.json'
   await fs.writeFile(path.join(root, relativePath), `${JSON.stringify(grammar, null, 2)}\n`)
   imported.push({
     language: 'yang', grammarName: grammar.name ?? 'yang', scopeName: 'source.yang',
@@ -127,7 +127,7 @@ for (const [name, scopeName, relativeSource] of vscodeAssets) {
   })
 }
 
-const licensesPath = path.join(root, 'assets/tm-grammars/licenses.json')
+const licensesPath = path.join(root, 'assets/grammars/licenses.json')
 const licenses = JSON.parse(await fs.readFile(licensesPath, 'utf8'))
 const importedNames = new Set(imported.map(asset => asset.language))
 licenses.assets = licenses.assets

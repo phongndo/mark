@@ -63,164 +63,162 @@ impl GrammarRegistry {
 ///
 /// Order is stable and alphabetical by language id. Asset path stems that differ
 /// from the test id (`bash`/`shellscript`) use the recovered filename under
-/// `assets/tm-grammars/languages/`.
+/// `assets/grammars/languages/`.
 pub(crate) const CORE_ASSETS: &[GrammarAsset] = &[
     GrammarAsset {
         language: "bash",
         scope_name: "source.shell",
-        source: include_str!(
-            "../../../../assets/tm-grammars/languages/shellscript.tmLanguage.json"
-        ),
+        source: include_str!("../../../../assets/grammars/languages/shellscript.tmLanguage.json"),
     },
     GrammarAsset {
         language: "c",
         scope_name: "source.c",
-        source: include_str!("../../../../assets/tm-grammars/languages/c.tmLanguage.json"),
+        source: include_str!("../../../../assets/grammars/languages/c.tmLanguage.json"),
     },
     GrammarAsset {
         language: "cpp",
         scope_name: "source.cpp",
-        source: include_str!("../../../../assets/tm-grammars/languages/cpp.tmLanguage.json"),
+        source: include_str!("../../../../assets/grammars/languages/cpp.tmLanguage.json"),
     },
     GrammarAsset {
         language: "cpp-macro",
         scope_name: "source.cpp.embedded.macro",
-        source: include_str!("../../../../assets/tm-grammars/languages/cpp-macro.tmLanguage.json"),
+        source: include_str!("../../../../assets/grammars/languages/cpp-macro.tmLanguage.json"),
     },
     GrammarAsset {
         language: "csharp",
         scope_name: "source.cs",
-        source: include_str!("../../../../assets/tm-grammars/languages/csharp.tmLanguage.json"),
+        source: include_str!("../../../../assets/grammars/languages/csharp.tmLanguage.json"),
     },
     GrammarAsset {
         language: "css",
         scope_name: "source.css",
-        source: include_str!("../../../../assets/tm-grammars/languages/css.tmLanguage.json"),
+        source: include_str!("../../../../assets/grammars/languages/css.tmLanguage.json"),
     },
     GrammarAsset {
         language: "dockerfile",
         scope_name: "source.dockerfile",
-        source: include_str!("../../../../assets/tm-grammars/languages/docker.tmLanguage.json"),
+        source: include_str!("../../../../assets/grammars/languages/docker.tmLanguage.json"),
     },
     GrammarAsset {
         language: "go",
         scope_name: "source.go",
-        source: include_str!("../../../../assets/tm-grammars/languages/go.tmLanguage.json"),
+        source: include_str!("../../../../assets/grammars/languages/go.tmLanguage.json"),
     },
     GrammarAsset {
         language: "html",
         scope_name: "text.html.basic",
-        source: include_str!("../../../../assets/tm-grammars/languages/html.tmLanguage.json"),
+        source: include_str!("../../../../assets/grammars/languages/html.tmLanguage.json"),
     },
     GrammarAsset {
         language: "java",
         scope_name: "source.java",
-        source: include_str!("../../../../assets/tm-grammars/languages/java.tmLanguage.json"),
+        source: include_str!("../../../../assets/grammars/languages/java.tmLanguage.json"),
     },
     GrammarAsset {
         language: "javascript",
         scope_name: "source.js",
-        source: include_str!("../../../../assets/tm-grammars/languages/javascript.tmLanguage.json"),
+        source: include_str!("../../../../assets/grammars/languages/javascript.tmLanguage.json"),
     },
     GrammarAsset {
         language: "json",
         scope_name: "source.json",
-        source: include_str!("../../../../assets/tm-grammars/languages/json.tmLanguage.json"),
+        source: include_str!("../../../../assets/grammars/languages/json.tmLanguage.json"),
     },
     GrammarAsset {
         language: "jsx",
         scope_name: "source.js.jsx",
-        source: include_str!("../../../../assets/tm-grammars/languages/jsx.tmLanguage.json"),
+        source: include_str!("../../../../assets/grammars/languages/jsx.tmLanguage.json"),
     },
     GrammarAsset {
         language: "kotlin",
         scope_name: "source.kotlin",
-        source: include_str!("../../../../assets/tm-grammars/languages/kotlin.tmLanguage.json"),
+        source: include_str!("../../../../assets/grammars/languages/kotlin.tmLanguage.json"),
     },
     GrammarAsset {
         language: "lua",
         scope_name: "source.lua",
-        source: include_str!("../../../../assets/tm-grammars/languages/lua.tmLanguage.json"),
+        source: include_str!("../../../../assets/grammars/languages/lua.tmLanguage.json"),
     },
     GrammarAsset {
         language: "make",
         scope_name: "source.makefile",
-        source: include_str!("../../../../assets/tm-grammars/languages/make.tmLanguage.json"),
+        source: include_str!("../../../../assets/grammars/languages/make.tmLanguage.json"),
     },
     GrammarAsset {
         language: "markdown",
         scope_name: "text.html.markdown",
-        source: include_str!("../../../../assets/tm-grammars/languages/markdown.tmLanguage.json"),
+        source: include_str!("../../../../assets/grammars/languages/markdown.tmLanguage.json"),
     },
     GrammarAsset {
         language: "nix",
         scope_name: "source.nix",
-        source: include_str!("../../../../assets/tm-grammars/languages/nix.tmLanguage.json"),
+        source: include_str!("../../../../assets/grammars/languages/nix.tmLanguage.json"),
     },
     GrammarAsset {
         language: "php",
         scope_name: "source.php",
-        source: include_str!("../../../../assets/tm-grammars/languages/php.tmLanguage.json"),
+        source: include_str!("../../../../assets/grammars/languages/php.tmLanguage.json"),
     },
     GrammarAsset {
         language: "powershell",
         scope_name: "source.powershell",
-        source: include_str!("../../../../assets/tm-grammars/languages/powershell.tmLanguage.json"),
+        source: include_str!("../../../../assets/grammars/languages/powershell.tmLanguage.json"),
     },
     GrammarAsset {
         language: "python",
         scope_name: "source.python",
-        source: include_str!("../../../../assets/tm-grammars/languages/python.tmLanguage.json"),
+        source: include_str!("../../../../assets/grammars/languages/python.tmLanguage.json"),
     },
     GrammarAsset {
         language: "ruby",
         scope_name: "source.ruby",
-        source: include_str!("../../../../assets/tm-grammars/languages/ruby.tmLanguage.json"),
+        source: include_str!("../../../../assets/grammars/languages/ruby.tmLanguage.json"),
     },
     GrammarAsset {
         language: "rust",
         scope_name: "source.rust",
-        source: include_str!("../../../../assets/tm-grammars/languages/rust.tmLanguage.json"),
+        source: include_str!("../../../../assets/grammars/languages/rust.tmLanguage.json"),
     },
     GrammarAsset {
         language: "scss",
         scope_name: "source.css.scss",
-        source: include_str!("../../../../assets/tm-grammars/languages/scss.tmLanguage.json"),
+        source: include_str!("../../../../assets/grammars/languages/scss.tmLanguage.json"),
     },
     GrammarAsset {
         language: "sql",
         scope_name: "source.sql",
-        source: include_str!("../../../../assets/tm-grammars/languages/sql.tmLanguage.json"),
+        source: include_str!("../../../../assets/grammars/languages/sql.tmLanguage.json"),
     },
     GrammarAsset {
         language: "swift",
         scope_name: "source.swift",
-        source: include_str!("../../../../assets/tm-grammars/languages/swift.tmLanguage.json"),
+        source: include_str!("../../../../assets/grammars/languages/swift.tmLanguage.json"),
     },
     GrammarAsset {
         language: "terraform",
         scope_name: "source.hcl.terraform",
-        source: include_str!("../../../../assets/tm-grammars/languages/terraform.tmLanguage.json"),
+        source: include_str!("../../../../assets/grammars/languages/terraform.tmLanguage.json"),
     },
     GrammarAsset {
         language: "toml",
         scope_name: "source.toml",
-        source: include_str!("../../../../assets/tm-grammars/languages/toml.tmLanguage.json"),
+        source: include_str!("../../../../assets/grammars/languages/toml.tmLanguage.json"),
     },
     GrammarAsset {
         language: "tsx",
         scope_name: "source.tsx",
-        source: include_str!("../../../../assets/tm-grammars/languages/tsx.tmLanguage.json"),
+        source: include_str!("../../../../assets/grammars/languages/tsx.tmLanguage.json"),
     },
     GrammarAsset {
         language: "typescript",
         scope_name: "source.ts",
-        source: include_str!("../../../../assets/tm-grammars/languages/typescript.tmLanguage.json"),
+        source: include_str!("../../../../assets/grammars/languages/typescript.tmLanguage.json"),
     },
     GrammarAsset {
         language: "yaml",
         scope_name: "source.yaml",
-        source: include_str!("../../../../assets/tm-grammars/languages/yaml.tmLanguage.json"),
+        source: include_str!("../../../../assets/grammars/languages/yaml.tmLanguage.json"),
     },
 ];
 

@@ -10,7 +10,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let assets = env::args()
         .nth(1)
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("assets/tm-grammars/languages"));
+        .unwrap_or_else(|| PathBuf::from("assets/grammars/languages"));
     let mut files = fs::read_dir(&assets)?.collect::<Result<Vec<_>, _>>()?;
     files.sort_by_key(|entry| entry.file_name());
 
