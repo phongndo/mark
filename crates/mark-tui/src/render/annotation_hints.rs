@@ -10,27 +10,31 @@ use crate::{
 const LINE_NUMBER_WIDTH: usize = 5;
 const UNIFIED_NEW_LINE_OFFSET: usize = LINE_NUMBER_WIDTH + 1;
 
+pub(crate) struct AnnotationTargetHint<'a> {
+    pub(crate) side: AnnotationSide,
+    pub(crate) hint: &'a str,
+    pub(crate) existing_annotation: bool,
+    pub(crate) uppercase: bool,
+}
+
 pub(crate) fn apply_annotation_target_hint(
     line: Line<'static>,
     layout: DiffLayoutMode,
     width: usize,
-    side: AnnotationSide,
-    hint: &str,
-    existing_annotation: bool,
-    uppercase: bool,
+    target: AnnotationTargetHint<'_>,
     theme: DiffTheme,
 ) -> Line<'static> {
-    let hint = if uppercase {
-        hint.to_ascii_uppercase()
+    let hint = if target.uppercase {
+        target.hint.to_ascii_uppercase()
     } else {
-        hint.to_owned()
+        target.hint.to_owned()
     };
     let Some((start, field_width)) =
-        annotation_target_hint_range(layout, width, side, display_width(&hint))
+        annotation_target_hint_range(layout, width, target.side, display_width(&hint))
     else {
         return line;
     };
-    let hint_style = if existing_annotation {
+    let hint_style = if target.existing_annotation {
         Style::default()
             .fg(theme.hunk)
             .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
@@ -238,7 +242,10 @@ mod tests {
     use ratatui::prelude::{Color, Line, Span, Style};
     use unicode_width::UnicodeWidthStr;
 
-    use super::{annotation_target_hint_range, apply_annotation_target_hint, overlay_line_cells};
+    use super::{
+        AnnotationTargetHint, annotation_target_hint_range, apply_annotation_target_hint,
+        overlay_line_cells,
+    };
     use crate::{
         annotation::{AnnotationSide, annotation_hint_codes},
         controls::DiffLayoutMode,
@@ -310,10 +317,12 @@ mod tests {
                 Line::from(source),
                 DiffLayoutMode::Unified,
                 40,
-                AnnotationSide::New,
-                hint,
-                false,
-                false,
+                AnnotationTargetHint {
+                    side: AnnotationSide::New,
+                    hint,
+                    existing_annotation: false,
+                    uppercase: false,
+                },
                 DiffTheme::default(),
             );
             let text = rendered

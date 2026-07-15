@@ -10,7 +10,7 @@ use crate::{
     app::DiffApp,
     model::{FileIndex, HunkIndex, UiRow},
     render::{
-        annotation_hints::apply_annotation_target_hint,
+        annotation_hints::{AnnotationTargetHint, apply_annotation_target_hint},
         annotations::{
             append_annotation_add_button, render_annotation_compose_block,
             render_annotation_saved_block,
@@ -128,10 +128,12 @@ pub(crate) fn build_diff_viewport_lines(
                 line,
                 layout,
                 width,
-                side,
-                hint,
-                existing,
-                app.config.syntax_settings.annotations.uppercase_hints,
+                AnnotationTargetHint {
+                    side,
+                    hint,
+                    existing_annotation: existing,
+                    uppercase: app.config.syntax_settings.annotations.uppercase_hints,
+                },
                 theme,
             );
         }
@@ -213,10 +215,12 @@ fn build_wrapped_viewport_lines(
                     line,
                     layout,
                     width,
-                    side,
-                    hint,
-                    existing,
-                    app.config.syntax_settings.annotations.uppercase_hints,
+                    AnnotationTargetHint {
+                        side,
+                        hint,
+                        existing_annotation: existing,
+                        uppercase: app.config.syntax_settings.annotations.uppercase_hints,
+                    },
                     theme,
                 );
             }
