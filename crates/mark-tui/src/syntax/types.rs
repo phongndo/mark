@@ -1,3 +1,5 @@
+use std::{ops::Deref, sync::Arc};
+
 use mark_syntax::HighlightedLine;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -57,35 +59,51 @@ pub(crate) struct HighlightedSide {
     pub(crate) lines: Vec<HighlightedLine>,
 }
 
+/// Cheap owned access to one cached highlighted line.
+///
+/// Rendering cannot borrow a line directly from the mutable LRU while it also
+/// borrows the rest of `DiffApp`. Keeping the result side behind one `Arc`
+/// avoids deep-cloning the line's segment vector on every rendered frame.
+#[derive(Debug, Clone)]
+pub(crate) struct HighlightedLineRef {
+    side: Arc<HighlightedSide>,
+    line: usize,
+}
+
+impl HighlightedLineRef {
+    pub(crate) fn new(side: Arc<HighlightedSide>, line: usize) -> Option<Self> {
+        (line < side.lines.len()).then_some(Self { side, line })
+    }
+}
+
+impl Deref for HighlightedLineRef {
+    type Target = HighlightedLine;
+
+    fn deref(&self) -> &Self::Target {
+        &self.side.lines[self.line]
+    }
+}
+
 impl HighlightedSide {
-    pub(crate) fn memory_bytes(&self) -> usize {
-        let lines = self
-            .lines
+    pub(crate) fn line_memory_bytes(&self) -> usize {
+        self.lines
             .iter()
             .map(|line| {
                 std::mem::size_of::<HighlightedLine>().saturating_add(
                     line.segments.len() * std::mem::size_of::<mark_syntax::SyntaxSegment>(),
                 )
             })
-            .sum::<usize>();
+            .sum()
+    }
+
+    pub(crate) fn memory_bytes(&self) -> usize {
         // A highlighting result shares one immutable table across its lines.
-        // Syntax workers currently produce one result per HighlightedSide.
-        lines.saturating_add(
+        // The weighted LRU stays conservative and charges each result; runtime
+        // diagnostics deduplicate tables shared between several results.
+        self.line_memory_bytes().saturating_add(
             self.lines
                 .first()
                 .map_or(0, |line| line.scope_table.memory_bytes()),
         )
-    }
-
-    pub(crate) fn scope_table_stats(&self) -> (usize, usize, u64, u64) {
-        self.lines.first().map_or((0, 0, 0, 0), |line| {
-            let (hits, misses) = line.scope_table.style_cache_stats();
-            (
-                line.scope_table.stack_count(),
-                line.scope_table.memory_bytes(),
-                hits,
-                misses,
-            )
-        })
     }
 }

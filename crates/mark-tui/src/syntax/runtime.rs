@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    sync::Arc,
     thread,
 };
 
@@ -20,7 +21,7 @@ pub(crate) struct SyntaxRuntime {
     pub(crate) limits: SyntaxLimits,
     pub(crate) result_rx: Receiver<SyntaxResult>,
     pub(crate) queue: SyntaxWorkerQueue,
-    pub(crate) cache: LruCache<SyntaxKey, HighlightedSide>,
+    pub(crate) cache: LruCache<SyntaxKey, Arc<HighlightedSide>>,
     pub(crate) pending: HashSet<SyntaxKey>,
     pub(crate) source_keys: HashMap<SyntaxSourceId, SyntaxKey>,
     pub(crate) position_keys: HashMap<SyntaxPosition, SyntaxKey>,
@@ -109,19 +110,35 @@ impl SyntaxRuntime {
     }
 
     pub(crate) fn estimated_memory_bytes(&self) -> usize {
-        self.cache.total_weight()
+        let mut seen_tables = HashSet::new();
+        self.cache.values().fold(0usize, |bytes, side| {
+            let mut bytes = bytes.saturating_add(side.line_memory_bytes());
+            if let Some(table) = side.lines.first().map(|line| &line.scope_table)
+                && seen_tables.insert(Arc::as_ptr(table) as usize)
+            {
+                bytes = bytes.saturating_add(table.memory_bytes());
+            }
+            bytes
+        })
     }
 
     pub(crate) fn scope_table_stats(&self) -> (usize, usize, u64, u64) {
+        let mut seen = HashSet::new();
         self.cache.values().fold(
             (0usize, 0usize, 0u64, 0u64),
             |(stacks, bytes, hits, misses), side| {
-                let current = side.scope_table_stats();
+                let Some(table) = side.lines.first().map(|line| &line.scope_table) else {
+                    return (stacks, bytes, hits, misses);
+                };
+                if !seen.insert(Arc::as_ptr(table) as usize) {
+                    return (stacks, bytes, hits, misses);
+                }
+                let (table_hits, table_misses) = table.style_cache_stats();
                 (
-                    stacks.saturating_add(current.0),
-                    bytes.saturating_add(current.1),
-                    hits.saturating_add(current.2),
-                    misses.saturating_add(current.3),
+                    stacks.saturating_add(table.stack_count()),
+                    bytes.saturating_add(table.memory_bytes()),
+                    hits.saturating_add(table_hits),
+                    misses.saturating_add(table_misses),
                 )
             },
         )

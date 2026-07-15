@@ -34,46 +34,7 @@ impl Runtime {
     }
 
     fn tokenizer(language: &str, counters_enabled: bool) -> MarkResult<TextMateTokenizer> {
-        let mut grammars = GrammarSet::new();
-        let mut root = None;
-        let bundle = crate::grammars::embedded_bundle();
-        let root_blob = bundle.grammar_blob_for_language(language).ok_or_else(|| {
-            MarkError::Usage(format!("bundled TextMate grammar `{language}` is missing"))
-        })?;
-        let root_scope = root_blob.scope_name.clone();
-        let blob_indices = grammar_blob_closure(bundle, &root_scope)?;
-        for index in blob_indices {
-            let blob = &bundle.grammar_blobs[index];
-            let bytes = blob.decoded_bytes().map_err(|error| {
-                MarkError::Usage(format!(
-                    "failed to decode bundled TextMate grammar `{}`: {error:?}",
-                    blob.language
-                ))
-            })?;
-            let source = std::str::from_utf8(&bytes).map_err(|_| {
-                MarkError::Usage(format!(
-                    "bundled TextMate grammar `{}` is not UTF-8",
-                    blob.language
-                ))
-            })?;
-            let grammar_id = grammars.load_and_add(source).map_err(|error| {
-                MarkError::Usage(format!(
-                    "failed to load bundled TextMate grammar `{}`: {error}",
-                    blob.language
-                ))
-            })?;
-            if blob.scope_name == root_scope {
-                root = Some(grammar_id);
-            }
-        }
-
-        // Community grammars occasionally retain optional repository includes
-        // supplied only by a host editor extension. The tokenizer skips those
-        // references rather than disabling the complete bundled backend.
-        let root = root.ok_or_else(|| {
-            MarkError::Usage(format!("bundled TextMate grammar `{language}` is missing"))
-        })?;
-
+        let (grammars, root) = shared_grammar_set(language)?;
         let mut tokenizer = TextMateTokenizer::new(grammars, root);
         tokenizer.configure_limits(crate::SyntaxLimits::default());
         tokenizer.set_counters_enabled(counters_enabled);
@@ -110,10 +71,91 @@ impl Runtime {
     }
 }
 
+fn shared_grammar_set(language: &str) -> MarkResult<(GrammarSet, state::GrammarId)> {
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    type LoadedGrammarSet = (GrammarSet, state::GrammarId);
+    type CacheEntry = OnceLock<Result<LoadedGrammarSet, String>>;
+    type Cache = Mutex<std::collections::HashMap<String, Arc<CacheEntry>>>;
+    static CACHE: OnceLock<Option<Cache>> = OnceLock::new();
+
+    let disabled = || {
+        matches!(
+            std::env::var("MARK_TEXTMATE_GRAMMAR_CACHE").as_deref(),
+            Ok("off" | "0" | "false")
+        )
+    };
+    let Some(cache) = CACHE
+        .get_or_init(|| (!disabled()).then(|| Mutex::new(std::collections::HashMap::new())))
+        .as_ref()
+    else {
+        return load_grammar_set(language);
+    };
+
+    // A per-language OnceLock lets unrelated grammar closures compile in
+    // parallel while ensuring syntax workers racing on the same visible file
+    // parse and compile that closure only once.
+    let entry = {
+        let mut cache = cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        Arc::clone(
+            cache
+                .entry(language.to_owned())
+                .or_insert_with(|| Arc::new(OnceLock::new())),
+        )
+    };
+    match entry.get_or_init(|| load_grammar_set(language).map_err(|error| error.to_string())) {
+        Ok((grammars, root)) => Ok((grammars.clone(), *root)),
+        Err(error) => Err(MarkError::Usage(error.clone())),
+    }
+}
+
+fn load_grammar_set(language: &str) -> MarkResult<(GrammarSet, state::GrammarId)> {
+    let mut grammars = GrammarSet::new();
+    let mut root = None;
+    let bundle = crate::grammars::embedded_bundle();
+    let root_blob = bundle.grammar_blob_for_language(language).ok_or_else(|| {
+        MarkError::Usage(format!("bundled TextMate grammar `{language}` is missing"))
+    })?;
+    let root_scope = root_blob.scope_name.clone();
+    for decoded in grammar_blob_closure(bundle, &root_scope)? {
+        let blob = &bundle.grammar_blobs[decoded.index];
+        let source = std::str::from_utf8(&decoded.bytes).map_err(|_| {
+            MarkError::Usage(format!(
+                "bundled TextMate grammar `{}` is not UTF-8",
+                blob.language
+            ))
+        })?;
+        let grammar_id = grammars.load_and_add(source).map_err(|error| {
+            MarkError::Usage(format!(
+                "failed to load bundled TextMate grammar `{}`: {error}",
+                blob.language
+            ))
+        })?;
+        if blob.scope_name == root_scope {
+            root = Some(grammar_id);
+        }
+    }
+
+    // Community grammars occasionally retain optional repository includes
+    // supplied only by a host editor extension. The tokenizer skips those
+    // references rather than disabling the complete bundled backend.
+    let root = root.ok_or_else(|| {
+        MarkError::Usage(format!("bundled TextMate grammar `{language}` is missing"))
+    })?;
+    Ok((grammars, root))
+}
+
+struct DecodedGrammarBlob {
+    index: usize,
+    bytes: Vec<u8>,
+}
+
 fn grammar_blob_closure(
     bundle: &grammars::bundle::Bundle,
     root_scope: &str,
-) -> MarkResult<Vec<usize>> {
+) -> MarkResult<Vec<DecodedGrammarBlob>> {
     let mut pending = vec![(root_scope.to_owned(), None::<String>)];
     let mut selected = BTreeSet::new();
     let mut inspected = BTreeSet::new();
@@ -144,11 +186,12 @@ fn grammar_blob_closure(
                     blob.language
                 ))
             })?;
-            entry.insert(json);
+            entry.insert((bytes, json));
         }
-        let json = decoded
+        let json = &decoded
             .get(&index)
-            .expect("decoded grammar inserted before dependency inspection");
+            .expect("decoded grammar inserted before dependency inspection")
+            .1;
         collect_external_scopes(
             json,
             &blob.scope_name,
@@ -158,7 +201,16 @@ fn grammar_blob_closure(
             &mut pending,
         );
     }
-    Ok(selected.into_iter().collect())
+    Ok(selected
+        .into_iter()
+        .map(|index| DecodedGrammarBlob {
+            index,
+            bytes: decoded
+                .remove(&index)
+                .expect("selected grammar decoded during dependency inspection")
+                .0,
+        })
+        .collect())
 }
 
 fn collect_external_scopes(

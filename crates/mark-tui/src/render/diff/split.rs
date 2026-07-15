@@ -64,7 +64,7 @@ pub(crate) fn render_split_line_with_focus(
     let right_line = right.and_then(|index| lines.get(index));
     let mut spans = split_cell_spans_at_scroll_with_focus(
         left_line,
-        left_syntax.as_ref(),
+        left_syntax.as_deref(),
         &left_inline,
         SplitCellRender {
             side: SplitSide::Old,
@@ -77,7 +77,7 @@ pub(crate) fn render_split_line_with_focus(
     );
     spans.extend(split_cell_spans_at_scroll_with_focus(
         right_line,
-        right_syntax.as_ref(),
+        right_syntax.as_deref(),
         &right_inline,
         SplitCellRender {
             side: SplitSide::New,
@@ -152,7 +152,7 @@ pub(crate) fn render_split_line_wrapped_with_focus(
         let visual_row = visual_row_start.saturating_add(wrap_index);
         let mut spans = split_cell_spans_at_scroll_with_focus_and_continuation(
             left_line,
-            left_syntax.as_ref(),
+            left_syntax.as_deref(),
             &left_inline,
             SplitCellRender {
                 side: SplitSide::Old,
@@ -166,7 +166,7 @@ pub(crate) fn render_split_line_wrapped_with_focus(
         );
         spans.extend(split_cell_spans_at_scroll_with_focus_and_continuation(
             right_line,
-            right_syntax.as_ref(),
+            right_syntax.as_deref(),
             &right_inline,
             SplitCellRender {
                 side: SplitSide::New,

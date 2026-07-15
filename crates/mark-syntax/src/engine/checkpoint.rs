@@ -40,10 +40,11 @@ impl CheckpointTable {
     }
 
     pub fn nearest_before(&self, target_line: usize) -> Option<LineCheckpoint> {
-        self.checkpoints
-            .iter()
-            .rev()
-            .find(|checkpoint| checkpoint.line_index <= target_line)
+        let end = self
+            .checkpoints
+            .partition_point(|checkpoint| checkpoint.line_index <= target_line);
+        end.checked_sub(1)
+            .and_then(|index| self.checkpoints.get(index))
             .copied()
     }
 

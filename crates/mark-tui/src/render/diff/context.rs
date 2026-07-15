@@ -150,7 +150,7 @@ pub(crate) fn render_context_line(
     match app.viewport.layout {
         DiffLayoutMode::Unified => render_unified_line_at_scroll(
             &diff_line,
-            syntax.as_ref(),
+            syntax.as_deref(),
             &[],
             row_index,
             width,
@@ -159,7 +159,7 @@ pub(crate) fn render_context_line(
         ),
         DiffLayoutMode::Split => render_split_context_line(
             &diff_line,
-            syntax.as_ref(),
+            syntax.as_deref(),
             row_index,
             width,
             theme,
@@ -194,7 +194,7 @@ pub(crate) fn render_context_line_wrapped(
     match app.viewport.layout {
         DiffLayoutMode::Unified => render_unified_line_wrapped_with_focus(
             &diff_line,
-            syntax.as_ref(),
+            syntax.as_deref(),
             &[],
             width,
             theme,
@@ -205,7 +205,7 @@ pub(crate) fn render_context_line_wrapped(
             let visual_row_start = app.wrapped_visual_scroll_for_model_row(row_index);
             render_split_context_line_wrapped(
                 &diff_line,
-                syntax.as_ref(),
+                syntax.as_deref(),
                 visual_row_start,
                 width,
                 theme,
