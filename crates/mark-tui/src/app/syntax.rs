@@ -1,10 +1,10 @@
 use super::DiffApp;
 use crate::model::{ContextSourceKey, FileIndex, UiRow};
 use crate::syntax::{
-    DiffSide, SyntaxKey, SyntaxPosition, SyntaxPriority, SyntaxRuntime, unified_syntax_side,
+    DiffSide, HighlightedLineRef, SyntaxKey, SyntaxPosition, SyntaxPriority, SyntaxRuntime,
+    unified_syntax_side,
 };
 use crate::theme::{MAX_SYNTAX_RESULTS_PER_FRAME, SyntaxBenchmarkReport};
-use mark_syntax::HighlightedLine;
 use std::collections::HashSet;
 
 impl DiffApp {
@@ -277,7 +277,7 @@ impl DiffApp {
         hunk: usize,
         line: usize,
         side: DiffSide,
-    ) -> Option<HighlightedLine> {
+    ) -> Option<HighlightedLineRef> {
         self.config.syntax.as_mut().and_then(|syntax| {
             syntax.line(
                 SyntaxPosition {
@@ -296,7 +296,7 @@ impl DiffApp {
         file: usize,
         side: DiffSide,
         line_number: usize,
-    ) -> Option<HighlightedLine> {
+    ) -> Option<HighlightedLineRef> {
         self.config.syntax.as_mut().and_then(|syntax| {
             syntax.full_file_line(self.document.generation, file, side, line_number)
         })

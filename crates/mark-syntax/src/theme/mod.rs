@@ -861,11 +861,18 @@ mod tests {
             )
             .unwrap(),
         );
+        let green = Arc::new(
+            TextMateTheme::from_json(
+                r##"{"tokenColors":[{"scope":"entity.name","settings":{"foreground":"#00ff00"}}]}"##,
+            )
+            .unwrap(),
+        );
         let (table, stack) =
             HighlightScopeTable::from_scope_names(&["source.test", "entity.name.test"]);
         let table = Arc::new(table);
 
         std::thread::scope(|threads| {
+            let start = Arc::new(std::sync::Barrier::new(6));
             for (theme, expected) in [
                 (
                     red,
@@ -883,11 +890,21 @@ mod tests {
                         blue: 0xff,
                     },
                 ),
+                (
+                    green,
+                    RgbColor {
+                        red: 0,
+                        green: 0xff,
+                        blue: 0,
+                    },
+                ),
             ] {
                 for _ in 0..2 {
                     let theme = Arc::clone(&theme);
                     let table = Arc::clone(&table);
+                    let start = Arc::clone(&start);
                     threads.spawn(move || {
+                        start.wait();
                         for _ in 0..2_000 {
                             assert_eq!(theme.resolve(&table, stack).foreground, Some(expected));
                         }

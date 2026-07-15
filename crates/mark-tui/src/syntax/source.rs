@@ -167,8 +167,8 @@ pub(crate) fn load_job_source(
                 return Err(SyntaxJobFailure::Unavailable);
             }
             let text = load_full_file_source(&source).map_err(|_| SyntaxJobFailure::Unavailable)?;
-            validate_highlight_source(&text, limits).map_err(|_| SyntaxJobFailure::Unavailable)?;
-            let source_lines = source_line_count(&text) as u64;
+            let source_lines = validate_highlight_source_with_line_count(&text, limits)
+                .map_err(|_| SyntaxJobFailure::Unavailable)? as u64;
             Ok((text, Some(source_bytes), Some(source_lines)))
         }
     }
@@ -332,7 +332,10 @@ pub(crate) fn load_full_file_source(source: &FullFileSource) -> Result<String, S
         }
     };
 
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
+    Ok(match String::from_utf8(bytes) {
+        Ok(source) => source,
+        Err(error) => String::from_utf8_lossy(error.as_bytes()).into_owned(),
+    })
 }
 
 pub(crate) fn full_file_source_size(source: &FullFileSource) -> Result<u64, SyntaxSkipReason> {
@@ -440,24 +443,21 @@ pub(crate) fn git_merge_base(
     Ok(rev)
 }
 
-pub(crate) fn validate_highlight_source(
+fn validate_highlight_source_with_line_count(
     source: &str,
     limits: SyntaxLimits,
-) -> Result<(), SyntaxSkipReason> {
+) -> Result<usize, SyntaxSkipReason> {
     if source.len() > limits.max_source_bytes {
         return Err(SyntaxSkipReason::TooLarge);
     }
-    if source
-        .lines()
-        .any(|line| line.len() > limits.max_line_bytes)
-    {
-        return Err(SyntaxSkipReason::TooLarge);
+    let mut lines = 0usize;
+    for line in source.lines() {
+        if line.len() > limits.max_line_bytes {
+            return Err(SyntaxSkipReason::TooLarge);
+        }
+        lines += 1;
     }
-    Ok(())
-}
-
-pub(crate) fn source_line_count(source: &str) -> usize {
-    source.lines().count().max(1)
+    Ok(lines.max(1))
 }
 
 pub(crate) fn split_context_source_lines(source: &str) -> Vec<String> {

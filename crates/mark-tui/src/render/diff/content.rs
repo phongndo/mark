@@ -335,7 +335,31 @@ pub(crate) fn syntax_line_matches_text(syntax: &HighlightedLine, text: &str) -> 
     if !syntax.matches_text(text) {
         return false;
     }
-    let grapheme_boundaries = (!text.is_ascii()).then(|| grapheme_boundary_indices(text));
+
+    if text.is_ascii() {
+        // Native tokenizer output is contiguous and range-checked when it is
+        // built. Avoid walking every segment a second time on the render hot
+        // path; ASCII byte offsets are necessarily UTF-8 and grapheme
+        // boundaries. Debug builds retain the complete invariant check so a
+        // producer regression fails during tests rather than reaching slice
+        // indexing below.
+        debug_assert!(segments_are_renderable(syntax, text, None));
+        return match (syntax.segments.first(), syntax.segments.last()) {
+            (Some(first), Some(last)) => first.byte_start == 0 && last.byte_end == text.len(),
+            (None, None) => text.is_empty(),
+            _ => false,
+        };
+    }
+
+    let grapheme_boundaries = grapheme_boundary_indices(text);
+    segments_are_renderable(syntax, text, Some(&grapheme_boundaries))
+}
+
+fn segments_are_renderable(
+    syntax: &HighlightedLine,
+    text: &str,
+    grapheme_boundaries: Option<&[usize]>,
+) -> bool {
     let mut cursor = 0usize;
     for segment in &syntax.segments {
         if segment.byte_start != cursor
@@ -343,8 +367,8 @@ pub(crate) fn syntax_line_matches_text(syntax: &HighlightedLine, text: &str) -> 
             || segment.byte_end > text.len()
             || !text.is_char_boundary(segment.byte_start)
             || !text.is_char_boundary(segment.byte_end)
-            || !is_grapheme_boundary(grapheme_boundaries.as_deref(), segment.byte_start)
-            || !is_grapheme_boundary(grapheme_boundaries.as_deref(), segment.byte_end)
+            || !is_grapheme_boundary(grapheme_boundaries, segment.byte_start)
+            || !is_grapheme_boundary(grapheme_boundaries, segment.byte_end)
         {
             return false;
         }

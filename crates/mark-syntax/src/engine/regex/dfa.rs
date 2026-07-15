@@ -1436,10 +1436,10 @@ fn anchor_permits_at(
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 enum PatternEntry {
-    Literal(String),
-    Matcher(Arc<super::CompiledPattern>),
+    Literal,
+    Matcher,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1453,8 +1453,106 @@ enum FrontierBuildPolicy {
 struct CandidateFrontier {
     scanner: Scanner,
     opaque_unrestricted_entries: Vec<usize>,
-    opaque_start_byte_entries: Vec<Vec<usize>>,
+    opaque_start_byte_entries: StartByteBuckets,
     opaque_start_prefilter: Option<StartBytePrefilter>,
+}
+
+/// Compact immutable byte → candidate-index adjacency table.
+///
+/// Candidate sets used to retain 256 independent `Vec` headers (6 KiB on a
+/// 64-bit target) plus one allocation for every populated byte. A tokenizer
+/// can retain thousands of candidate sets, so the empty headers alone could
+/// dominate engine memory. One offset table and one contiguous index slice
+/// preserve ordered lookup while substantially improving locality.
+#[derive(Debug, Clone)]
+struct StartByteBuckets {
+    offsets: [u32; 257],
+    entries: Box<[usize]>,
+}
+
+impl StartByteBuckets {
+    fn from_patterns(patterns: &[Arc<super::CompiledPattern>]) -> (Self, Vec<usize>) {
+        let mut counts = [0u32; 256];
+        let mut unrestricted = Vec::new();
+        for (index, pattern) in patterns.iter().enumerate() {
+            if !for_each_pattern_start_byte(pattern, |byte| {
+                counts[byte as usize] = counts[byte as usize]
+                    .checked_add(1)
+                    .expect("candidate bucket count fits in u32");
+            }) {
+                unrestricted.push(index);
+            }
+        }
+
+        let mut offsets = [0u32; 257];
+        for byte in 0..256 {
+            offsets[byte + 1] = offsets[byte]
+                .checked_add(counts[byte])
+                .expect("candidate bucket offsets fit in u32");
+        }
+        let mut cursors: [u32; 256] = offsets[..256]
+            .try_into()
+            .expect("candidate offset prefix has 256 entries");
+        let mut entries = vec![0usize; offsets[256] as usize];
+        for (index, pattern) in patterns.iter().enumerate() {
+            for_each_pattern_start_byte(pattern, |byte| {
+                let cursor = &mut cursors[byte as usize];
+                entries[*cursor as usize] = index;
+                *cursor += 1;
+            });
+        }
+        (
+            Self {
+                offsets,
+                entries: entries.into_boxed_slice(),
+            },
+            unrestricted,
+        )
+    }
+
+    fn from_vecs(buckets: Vec<Vec<usize>>) -> Self {
+        debug_assert_eq!(buckets.len(), usize::from(u8::MAX) + 1);
+        let mut offsets = [0u32; 257];
+        let total = buckets.iter().map(Vec::len).sum();
+        let mut entries = Vec::with_capacity(total);
+        for (byte, bucket) in buckets.into_iter().enumerate() {
+            offsets[byte] = u32::try_from(entries.len()).expect("candidate bucket fits in u32");
+            entries.extend(bucket);
+        }
+        offsets[256] = u32::try_from(entries.len()).expect("candidate bucket fits in u32");
+        Self {
+            offsets,
+            entries: entries.into_boxed_slice(),
+        }
+    }
+
+    #[inline]
+    fn get(&self, byte: u8) -> &[usize] {
+        let index = byte as usize;
+        let start = self.offsets[index] as usize;
+        let end = self.offsets[index + 1] as usize;
+        &self.entries[start..end]
+    }
+}
+
+fn for_each_pattern_start_byte(
+    pattern: &super::CompiledPattern,
+    mut visit: impl FnMut(u8),
+) -> bool {
+    if let Some(literal) = pattern.unanchored_literal() {
+        if let Some(byte) = literal.as_bytes().first().copied() {
+            visit(byte);
+            return true;
+        }
+        return false;
+    }
+    let Some(bytes) = pattern.restricted_start_bytes() else {
+        return false;
+    };
+    for byte in bytes {
+        visit(*byte);
+    }
+    true
 }
 
 #[derive(Debug, Clone)]
@@ -1467,9 +1565,10 @@ struct StartBytePrefilter {
 /// the lowest pattern index wins (regex-automata compatible).
 #[derive(Debug, Clone)]
 pub struct PatternSetMatcher {
+    compiled: Arc<[Arc<super::CompiledPattern>]>,
     entries: Vec<PatternEntry>,
     unrestricted_entries: Vec<usize>,
-    start_byte_entries: Vec<Vec<usize>>,
+    start_byte_entries: StartByteBuckets,
     start_prefilter: Option<StartBytePrefilter>,
     /// Per-entry word-context start-class masks (see `start_class`); an
     /// entry is skipped at scan positions whose class bit is not set.
@@ -1477,8 +1576,6 @@ pub struct PatternSetMatcher {
     /// Per-entry separator skip gates (see `skip_prefix`); `None` entries
     /// are always attempted.
     skip_gates: Vec<Option<super::skip_prefix::SkipGate>>,
-    /// Translated pattern spellings (diagnostic / inventory surface).
-    patterns: Vec<String>,
     /// Present when every pattern is a pure unanchored literal.
     literal_set: Option<LiteralSet>,
     /// Shared ordered NFA for candidate sets wholly inside the regular subset.
@@ -1503,27 +1600,26 @@ impl PatternSetMatcher {
     /// Builds the ordered set from already-compiled patterns. The tokenizer
     /// uses this path so constructing a candidate set never reparses regexes.
     pub fn from_compiled(patterns: &[Arc<super::CompiledPattern>]) -> Self {
+        Self::from_shared_compiled(Arc::from(patterns))
+    }
+
+    pub(crate) fn from_shared_compiled(patterns: Arc<[Arc<super::CompiledPattern>]>) -> Self {
         Self::from_compiled_with_frontier_policy(patterns, FrontierBuildPolicy::Auto)
     }
 
     fn from_compiled_with_frontier_policy(
-        patterns: &[Arc<super::CompiledPattern>],
+        patterns: Arc<[Arc<super::CompiledPattern>]>,
         frontier_policy: FrontierBuildPolicy,
     ) -> Self {
         let mut entries = Vec::with_capacity(patterns.len());
-        let mut translated = Vec::with_capacity(patterns.len());
         let mut all_literals = Vec::with_capacity(patterns.len());
         let mut start_class_masks = Vec::with_capacity(patterns.len());
         let mut skip_gates = Vec::with_capacity(patterns.len());
         let masks_enabled = start_class_gate_enabled();
         let gates_enabled = skip_gate_enabled();
         let mut literals_only = true;
-        let mut unrestricted_entries = Vec::new();
-        let mut start_byte_entries = (0..=u8::MAX)
-            .map(|_| Vec::<usize>::new())
-            .collect::<Vec<_>>();
-        for (index, pattern) in patterns.iter().enumerate() {
-            translated.push(pattern.translated_pattern().to_owned());
+        let (start_byte_entries, unrestricted_entries) = StartByteBuckets::from_patterns(&patterns);
+        for pattern in patterns.iter() {
             start_class_masks.push(if masks_enabled {
                 pattern.start_class_mask()
             } else {
@@ -1539,23 +1635,11 @@ impl PatternSetMatcher {
                 if literals_only {
                     all_literals.push(literal.clone());
                 }
-                if let Some(byte) = literal.as_bytes().first().copied() {
-                    start_byte_entries[byte as usize].push(index);
-                } else {
-                    unrestricted_entries.push(index);
-                }
-                entries.push(PatternEntry::Literal(literal));
+                entries.push(PatternEntry::Literal);
             } else {
                 literals_only = false;
                 all_literals.clear();
-                if let Some(bytes) = pattern.restricted_start_bytes() {
-                    for byte in bytes {
-                        start_byte_entries[*byte as usize].push(index);
-                    }
-                } else {
-                    unrestricted_entries.push(index);
-                }
-                entries.push(PatternEntry::Matcher(Arc::clone(pattern)));
+                entries.push(PatternEntry::Matcher);
             }
         }
         let literal_set = if literals_only && !entries.is_empty() {
@@ -1605,7 +1689,7 @@ impl PatternSetMatcher {
                             .into_iter()
                             .map(|failure| failure.pattern)
                             .collect::<Vec<_>>();
-                        Some(CandidateFrontier::new(partial, &opaque_entries, patterns))
+                        Some(CandidateFrontier::new(partial, &opaque_entries, &patterns))
                     } else {
                         None
                     };
@@ -1619,13 +1703,13 @@ impl PatternSetMatcher {
         };
 
         Self {
+            compiled: patterns,
             entries,
             unrestricted_entries,
             start_byte_entries,
             start_prefilter,
             start_class_masks,
             skip_gates,
-            patterns: translated,
             literal_set,
             scanner,
             frontier,
@@ -1636,7 +1720,7 @@ impl PatternSetMatcher {
 
     #[cfg(test)]
     fn from_compiled_with_forced_frontier(patterns: &[Arc<super::CompiledPattern>]) -> Self {
-        Self::from_compiled_with_frontier_policy(patterns, FrontierBuildPolicy::Force)
+        Self::from_compiled_with_frontier_policy(Arc::from(patterns), FrontierBuildPolicy::Force)
     }
 
     #[cfg(test)]
@@ -1712,12 +1796,10 @@ impl PatternSetMatcher {
         ctx: AnchorContext,
         scratch: &mut super::bytecode::BytecodeScratch,
         unrestricted_entries: &[usize],
-        start_byte_entries: &[Vec<usize>],
+        start_byte_entries: &StartByteBuckets,
         start_prefilter: Option<&StartBytePrefilter>,
         bound: Option<(usize, usize)>,
     ) -> Option<(usize, MatchResult)> {
-        debug_assert_eq!(start_byte_entries.len(), usize::from(u8::MAX) + 1);
-
         let ascii_line = scratch.line_is_ascii(line);
         let mut skip_state = super::skip_prefix::SkipGateLineState::default();
         let mut line_has_comment: Option<bool> = None;
@@ -1730,9 +1812,10 @@ impl PatternSetMatcher {
                 break;
             }
             let position_class = position_class_bit(line.as_bytes(), start);
-            let restricted = line.as_bytes().get(start).map_or(&[][..], |byte| {
-                start_byte_entries[*byte as usize].as_slice()
-            });
+            let restricted = line
+                .as_bytes()
+                .get(start)
+                .map_or(&[][..], |byte| start_byte_entries.get(*byte));
             let mut unrestricted_index = 0usize;
             let mut restricted_index = 0usize;
             while unrestricted_index < unrestricted_entries.len()
@@ -1910,9 +1993,16 @@ impl PatternSetMatcher {
         scratch: &mut super::bytecode::BytecodeScratch,
     ) -> Option<MatchResult> {
         let entry = self.entries.get(index)?;
+        let pattern = self.compiled.get(index)?;
         match entry {
-            PatternEntry::Literal(literal) => match_literal_at(line, start, literal),
-            PatternEntry::Matcher(pattern) => pattern
+            PatternEntry::Literal => match_literal_at(
+                line,
+                start,
+                pattern
+                    .unanchored_literal()
+                    .expect("literal entry retains literal pattern"),
+            ),
+            PatternEntry::Matcher => pattern
                 .matcher()
                 .find_at_without_captures_with_scratch(line, start, ctx, scratch)
                 .ok()
@@ -1920,8 +2010,10 @@ impl PatternSetMatcher {
         }
     }
 
-    pub fn patterns(&self) -> &[String] {
-        &self.patterns
+    pub fn patterns(&self) -> impl ExactSizeIterator<Item = &str> {
+        self.compiled
+            .iter()
+            .map(|pattern| pattern.translated_pattern())
     }
 
     pub fn len(&self) -> usize {
@@ -1962,6 +2054,7 @@ impl CandidateFrontier {
         }
         opaque_unrestricted_entries.sort_unstable();
         opaque_unrestricted_entries.dedup();
+        let opaque_start_byte_entries = StartByteBuckets::from_vecs(opaque_start_byte_entries);
         let opaque_start_prefilter = StartBytePrefilter::from_buckets(
             &opaque_unrestricted_entries,
             &opaque_start_byte_entries,
@@ -1978,16 +2071,15 @@ impl CandidateFrontier {
 impl StartBytePrefilter {
     fn from_buckets(
         unrestricted_entries: &[usize],
-        start_byte_entries: &[Vec<usize>],
+        start_byte_entries: &StartByteBuckets,
     ) -> Option<Self> {
         if !unrestricted_entries.is_empty() {
             return None;
         }
         let mut bytes = Vec::new();
         let mut bitmap = [0u64; 4];
-        for (byte, bucket) in start_byte_entries.iter().enumerate() {
-            if !bucket.is_empty() {
-                let byte = byte as u8;
+        for byte in 0u8..=u8::MAX {
+            if !start_byte_entries.get(byte).is_empty() {
                 bytes.push(byte);
                 bitmap[byte as usize >> 6] |= 1u64 << (byte & 63);
             }
@@ -2304,6 +2396,7 @@ mod tests {
             .collect::<Vec<_>>();
         buckets[b'x' as usize].push(0);
         buckets["é".as_bytes()[0] as usize].push(1);
+        let buckets = StartByteBuckets::from_vecs(buckets);
         let prefilter = StartBytePrefilter::from_buckets(&[], &buckets).unwrap();
         assert_eq!(prefilter.next_start("abcx", 0), Some(3));
         assert_eq!(prefilter.next_start("abc", 0), None);

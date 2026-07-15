@@ -4,7 +4,7 @@
 //! highlighting, language metadata, path detection, and bundle diagnostics
 //! all resolve through it.
 
-use std::sync::OnceLock;
+use std::{borrow::Cow, collections::HashMap, path::Path, sync::OnceLock};
 
 pub mod bundle;
 pub mod catalog;
@@ -13,6 +13,13 @@ pub(crate) mod registry;
 use bundle::{Bundle, BundleError, BundleGrammarRegistry, LicenseEntry};
 
 static EMBEDDED_BUNDLE: OnceLock<Bundle> = OnceLock::new();
+static CATALOG_INDEX: OnceLock<CatalogIndex> = OnceLock::new();
+
+struct CatalogIndex {
+    canonical: HashMap<String, &'static str>,
+    basenames: HashMap<String, &'static str>,
+    extensions: HashMap<String, &'static str>,
+}
 #[cfg(not(rust_analyzer))]
 include!(concat!(env!("OUT_DIR"), "/embedded_bundle.rs"));
 // rust-analyzer cannot infer the array length of a large include_bytes! from
@@ -52,19 +59,87 @@ pub fn available_languages() -> Vec<String> {
 }
 
 pub fn canonical_language(language: &str) -> Option<String> {
-    embedded_bundle()
-        .canonical_language(language)
-        .map(str::to_owned)
+    let token = normalized_catalog_token(language);
+    catalog_index()
+        .canonical
+        .get(token.as_ref())
+        .map(|language| (*language).to_owned())
 }
 
 pub fn has_language(language: &str) -> bool {
-    embedded_bundle().has_language(language)
+    let token = normalized_catalog_token(language);
+    catalog_index().canonical.contains_key(token.as_ref())
 }
 
 pub fn detect_language_from_path(path: &str) -> Option<String> {
-    embedded_bundle()
-        .detect_language_from_path(path)
-        .map(str::to_owned)
+    let name = Path::new(path).file_name()?.to_str()?;
+    let lower_name = name.to_ascii_lowercase();
+    let index = catalog_index();
+    if let Some(language) = index.basenames.get(lower_name.as_str()) {
+        return Some((*language).to_owned());
+    }
+
+    // Compound TextMate file types are suffixes (`blade.php`, `html.erb`,
+    // ...). Trying suffixes at each dot from left to right naturally chooses
+    // the longest match without scanning every language in the catalog.
+    for (dot, _) in lower_name.match_indices('.') {
+        let suffix = &lower_name[dot + 1..];
+        if let Some(language) = index.extensions.get(suffix) {
+            return Some((*language).to_owned());
+        }
+    }
+    None
+}
+
+fn catalog_index() -> &'static CatalogIndex {
+    CATALOG_INDEX.get_or_init(|| {
+        let bundle = embedded_bundle();
+        let mut canonical = HashMap::new();
+        let mut basenames = HashMap::new();
+        let mut extensions = HashMap::new();
+
+        // Canonical IDs take precedence over an identical alias, matching the
+        // bundle's public lookup contract.
+        for language in &bundle.languages {
+            canonical.insert(language.canonical.clone(), language.canonical.as_str());
+        }
+        for language in &bundle.languages {
+            for alias in &language.aliases {
+                canonical
+                    .entry(alias.clone())
+                    .or_insert(language.canonical.as_str());
+            }
+            for basename in &language.basenames {
+                basenames.insert(basename.to_ascii_lowercase(), language.canonical.as_str());
+                if basename.contains('.') {
+                    extensions.insert(
+                        basename.trim_start_matches('.').to_ascii_lowercase(),
+                        language.canonical.as_str(),
+                    );
+                }
+            }
+            for extension in &language.extensions {
+                extensions.insert(
+                    extension.trim_start_matches('.').to_ascii_lowercase(),
+                    language.canonical.as_str(),
+                );
+            }
+        }
+        CatalogIndex {
+            canonical,
+            basenames,
+            extensions,
+        }
+    })
+}
+
+fn normalized_catalog_token(language: &str) -> Cow<'_, str> {
+    let token = language.trim().trim_start_matches('.');
+    if token.bytes().all(|byte| !byte.is_ascii_uppercase()) {
+        Cow::Borrowed(token)
+    } else {
+        Cow::Owned(token.to_ascii_lowercase())
+    }
 }
 
 pub fn grammar_registry() -> BundleGrammarRegistry {
@@ -623,6 +698,50 @@ mod tests {
                 owners.first().copied(),
                 "basename {basename}"
             );
+        }
+    }
+
+    #[test]
+    fn indexed_catalog_lookup_matches_bundle_contract() {
+        let bundle = embedded_bundle();
+        for language in &bundle.languages {
+            assert_eq!(
+                canonical_language(&language.canonical).as_deref(),
+                bundle.canonical_language(&language.canonical)
+            );
+            for alias in &language.aliases {
+                assert_eq!(
+                    canonical_language(alias).as_deref(),
+                    bundle.canonical_language(alias),
+                    "alias {alias}"
+                );
+            }
+            for extension in &language.extensions {
+                if extension.contains('/') {
+                    continue;
+                }
+                let path = format!("fixture.{extension}");
+                assert_eq!(
+                    detect_language_from_path(&path).as_deref(),
+                    bundle.detect_language_from_path(&path),
+                    "extension {extension}"
+                );
+            }
+            for basename in &language.basenames {
+                assert_eq!(
+                    detect_language_from_path(basename).as_deref(),
+                    bundle.detect_language_from_path(basename),
+                    "basename {basename}"
+                );
+                if basename.contains('.') {
+                    let path = format!("prefix.{basename}");
+                    assert_eq!(
+                        detect_language_from_path(&path).as_deref(),
+                        bundle.detect_language_from_path(&path),
+                        "compound basename {basename}"
+                    );
+                }
+            }
         }
     }
 

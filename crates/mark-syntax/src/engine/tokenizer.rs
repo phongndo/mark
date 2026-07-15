@@ -7,7 +7,7 @@ use std::{
     hash::{BuildHasherDefault, Hash, Hasher},
     io::Write,
     ops::{Deref, Range},
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, Mutex, OnceLock, Weak},
     time::Instant,
 };
 
@@ -45,6 +45,7 @@ const MAX_CANDIDATE_BLUEPRINTS: usize = 1024;
 const MAX_INJECTION_OUTCOMES: usize = 1024;
 const MAX_SCOPE_STACK_CACHE_ENTRIES: usize = 8192;
 const MAX_FRAME_NODE_CACHE_ENTRIES: usize = 16384;
+const MAX_OUTPUT_SCOPE_TABLES: usize = 512;
 
 #[derive(Debug, Default)]
 pub struct Tokenizer;
@@ -81,15 +82,19 @@ pub(crate) struct CompactScopedToken {
     pub(crate) stack: ScopeStackId,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default, Clone)]
+struct OutputScopeTableCache {
+    tables: FastMap<Vec<ScopeStackId>, Weak<HighlightScopeTable>>,
+}
+
 struct OutputScopeTableBuilder {
-    engine_to_output: HashMap<ScopeStackId, ScopeStackRef>,
+    engine_to_output: FastMap<ScopeStackId, ScopeStackRef>,
     output_stacks: Vec<ScopeStackId>,
 }
 
 impl OutputScopeTableBuilder {
     fn new() -> Self {
-        let mut engine_to_output = HashMap::new();
+        let mut engine_to_output = hashing::fast_map();
         engine_to_output.insert(ScopeStackId::default(), ScopeStackRef::default());
         Self {
             engine_to_output,
@@ -111,28 +116,44 @@ impl OutputScopeTableBuilder {
         self,
         scope_stacks: &ScopeStackInterner,
         scope_names: &ScopeInterner,
+        cache: &mut OutputScopeTableCache,
     ) -> Arc<HighlightScopeTable> {
+        if let Some(table) = cache
+            .tables
+            .get(self.output_stacks.as_slice())
+            .and_then(Weak::upgrade)
+        {
+            return table;
+        }
+
         let mut stacks = Vec::with_capacity(self.output_stacks.len());
         let mut atoms = Vec::<Arc<str>>::new();
-        let mut atom_ids = HashMap::new();
-        for engine_stack in self.output_stacks {
+        let mut atom_ids = hashing::fast_map();
+        for engine_stack in &self.output_stacks {
             let stack_atoms = scope_stacks
-                .resolve_ids(engine_stack)
+                .resolve_ids(*engine_stack)
                 .into_iter()
                 .filter_map(|scope| {
                     if let Some(atom) = atom_ids.get(&scope) {
                         return Some(*atom);
                     }
-                    let name = scope_names.get(scope)?;
+                    let name = scope_names.get_arc(scope)?;
                     let atom = ScopeAtomId(atoms.len() as u32);
-                    atoms.push(Arc::from(name));
+                    atoms.push(name);
                     atom_ids.insert(scope, atom);
                     Some(atom)
                 })
                 .collect::<Vec<_>>();
             stacks.push(Arc::from(stack_atoms));
         }
-        Arc::new(HighlightScopeTable::from_parts(atoms, stacks))
+        let table = Arc::new(HighlightScopeTable::from_parts(atoms, stacks));
+        if cache.tables.len() >= MAX_OUTPUT_SCOPE_TABLES {
+            cache.tables.clear();
+        }
+        cache
+            .tables
+            .insert(self.output_stacks, Arc::downgrade(&table));
+        table
     }
 }
 
@@ -1036,7 +1057,8 @@ pub struct TextMateTokenizer {
     scope_templates: ScopeTemplateInterner,
     scope_stacks: ScopeStackInterner,
     current_scope_stack_cache: FastMap<CurrentScopeStackKey, CachedCurrentScopeStackIds>,
-    resolved_scope_stack_cache: FastMap<ScopeStackId, Arc<[String]>>,
+    resolved_scope_stack_cache: FastMap<ScopeStackId, Arc<[Arc<str>]>>,
+    output_scope_table_cache: OutputScopeTableCache,
     capture_scope_templates: FastMap<(GrammarId, ScopeId), ScopeTemplateId>,
     state_interner: StateInterner,
     line_cache: LineCache<LineCacheKey, CachedLine>,
@@ -1090,6 +1112,7 @@ impl TextMateTokenizer {
             scope_stacks: ScopeStackInterner::default(),
             current_scope_stack_cache: hashing::fast_map(),
             resolved_scope_stack_cache: hashing::fast_map(),
+            output_scope_table_cache: OutputScopeTableCache::default(),
             capture_scope_templates: hashing::fast_map(),
             state_interner: StateInterner::new(),
             line_cache: LineCache::new(0),
@@ -1125,6 +1148,10 @@ impl TextMateTokenizer {
         let mut state = TokenizerState::default();
         let mut lines = Vec::with_capacity(source.len().div_ceil(40).max(1));
         let mut scope_table = OutputScopeTableBuilder::new();
+        // Reuse one placeholder while the result-wide scope table is built.
+        // Constructing `Arc::default()` here for every line used to perform
+        // several immediately discarded heap allocations per source line.
+        let empty_scope_table = HighlightScopeTable::empty_shared();
         for (line_index, chunk) in LineChunks::new(source).enumerate() {
             let tokenized = self.tokenize_line_compact_at_line(chunk.parse_text, state, line_index);
             state = tokenized.state.clone();
@@ -1138,10 +1165,15 @@ impl TextMateTokenizer {
                 fingerprint,
                 &tokenized.tokens,
                 &mut scope_table,
+                &empty_scope_table,
             ));
         }
         self.fallback_call_budget_remaining = previous_budget;
-        let scope_table = scope_table.finish(&self.scope_stacks, &self.scope_names);
+        let scope_table = scope_table.finish(
+            &self.scope_stacks,
+            &self.scope_names,
+            &mut self.output_scope_table_cache,
+        );
         for line in &mut lines {
             line.scope_table = Arc::clone(&scope_table);
         }
@@ -1154,11 +1186,10 @@ impl TextMateTokenizer {
         visible: Range<usize>,
         checkpoints: &mut CheckpointTable,
     ) -> Vec<CompactTokenizedLine> {
-        let chunks = LineChunks::new(source).collect::<Vec<_>>();
-        if visible.start >= visible.end || visible.start >= chunks.len() {
+        if visible.start >= visible.end || LineChunks::new(source).nth(visible.start).is_none() {
             return Vec::new();
         }
-        let visible_end = visible.end.min(chunks.len());
+        let visible_end = visible.end;
         let checkpoint = checkpoints.nearest_before(visible.start).unwrap_or(
             super::checkpoint::LineCheckpoint {
                 line_index: 0,
@@ -1173,8 +1204,7 @@ impl TextMateTokenizer {
         self.record_checkpoint_replay_lines(visible.start.saturating_sub(resume_line));
 
         let mut visible_lines = Vec::new();
-        for (line_index, chunk) in chunks
-            .iter()
+        for (line_index, chunk) in LineChunks::new(source)
             .enumerate()
             .take(visible_end)
             .skip(resume_line)
@@ -1207,7 +1237,6 @@ impl TextMateTokenizer {
         visible: Range<usize>,
         checkpoints: &mut CheckpointTable,
     ) -> HighlightedText {
-        let chunks = LineChunks::new(source).collect::<Vec<_>>();
         let visible_start = visible.start;
         let previous_budget = self
             .fallback_call_budget_remaining
@@ -1215,25 +1244,30 @@ impl TextMateTokenizer {
         let tokenized = self.tokenize_viewport_compact(source, visible, checkpoints);
         self.fallback_call_budget_remaining = previous_budget;
         let mut scope_table = OutputScopeTableBuilder::new();
+        let empty_scope_table = HighlightScopeTable::empty_shared();
         let mut lines = tokenized
             .iter()
-            .enumerate()
-            .filter_map(|(offset, tokenized)| {
-                let chunk = chunks.get(visible_start + offset)?;
+            .zip(LineChunks::new(source).skip(visible_start))
+            .map(|(tokenized, chunk)| {
                 let fingerprint = if chunk.parse_text.ends_with('\n') {
                     tokenized.parse_fingerprint.without_trailing_byte(b'\n')
                 } else {
                     tokenized.parse_fingerprint
                 };
-                Some(self.build_highlighted_line(
+                self.build_highlighted_line(
                     chunk.text,
                     fingerprint,
                     &tokenized.tokens,
                     &mut scope_table,
-                ))
+                    &empty_scope_table,
+                )
             })
             .collect::<Vec<_>>();
-        let scope_table = scope_table.finish(&self.scope_stacks, &self.scope_names);
+        let scope_table = scope_table.finish(
+            &self.scope_stacks,
+            &self.scope_names,
+            &mut self.output_scope_table_cache,
+        );
         for line in &mut lines {
             line.scope_table = Arc::clone(&scope_table);
         }
@@ -1791,11 +1825,12 @@ impl TextMateTokenizer {
         fingerprint: LineTextFingerprint,
         scoped_tokens: &[CompactScopedToken],
         scope_table: &mut OutputScopeTableBuilder,
+        empty_scope_table: &Arc<HighlightScopeTable>,
     ) -> HighlightedLine {
         let mut line = HighlightedLine {
             fingerprint,
             segments: Vec::with_capacity(scoped_tokens.len()),
-            scope_table: Arc::default(),
+            scope_table: Arc::clone(empty_scope_table),
         };
         for token in scoped_tokens {
             let start = token.range.start.min(text.len());
@@ -2419,7 +2454,7 @@ impl TextMateTokenizer {
 
     fn injection_outcome(
         &mut self,
-        stack: &[String],
+        stack: &[Arc<str>],
     ) -> (InjectionOutcomeId, Arc<InjectionOutcome>) {
         let mut left = Vec::new();
         let mut right = Vec::new();
@@ -2556,11 +2591,12 @@ impl TextMateTokenizer {
             };
             matchers.push(matcher);
         }
+        let matchers: Arc<[Arc<CompiledPattern>]> = matchers.into();
         let pattern_set_search = (matchers.len() > 1).then(|| {
             if let Some(counters) = self.counters_mut() {
                 counters.record_pattern_set_construction();
             }
-            PatternSetMatcher::from_compiled(&matchers)
+            PatternSetMatcher::from_shared_compiled(Arc::clone(&matchers))
         });
         CandidateBlueprint {
             candidates,
@@ -3836,7 +3872,7 @@ impl TextMateTokenizer {
         self.current_scope_stack_cache.entry(key).or_insert(value);
     }
 
-    fn resolve_scope_stack_cached(&mut self, stack: ScopeStackId) -> Arc<[String]> {
+    fn resolve_scope_stack_cached(&mut self, stack: ScopeStackId) -> Arc<[Arc<str>]> {
         if let Some(scopes) = self.resolved_scope_stack_cache.get(&stack).cloned() {
             return scopes;
         }
@@ -3845,8 +3881,10 @@ impl TextMateTokenizer {
         }
         let scopes = Arc::from(
             self.scope_stacks
-                .resolve(stack, &self.scope_names)
-                .into_boxed_slice(),
+                .resolve_ids(stack)
+                .into_iter()
+                .filter_map(|scope| self.scope_names.get_arc(scope))
+                .collect::<Vec<_>>(),
         );
         self.resolved_scope_stack_cache
             .insert(stack, Arc::clone(&scopes));
@@ -4019,7 +4057,7 @@ impl Deref for CandidateSet {
 #[derive(Debug)]
 struct CandidateBlueprint {
     candidates: Vec<Candidate>,
-    matchers: Vec<Arc<CompiledPattern>>,
+    matchers: Arc<[Arc<CompiledPattern>]>,
     pattern_set_search: Option<PatternSetMatcher>,
 }
 
@@ -5178,7 +5216,7 @@ fn selector_matches(selector: &str, stack: &[String]) -> bool {
     selector_tokens_match(&tokens, stack)
 }
 
-fn selector_tokens_match(tokens: &[SelectorToken], stack: &[String]) -> bool {
+fn selector_tokens_match<T: AsRef<str>>(tokens: &[SelectorToken], stack: &[T]) -> bool {
     if tokens.is_empty() {
         return false;
     }
@@ -5248,13 +5286,13 @@ fn tokenize_selector(selector: &str) -> Vec<SelectorToken> {
     tokens
 }
 
-struct SelectorParser<'a> {
+struct SelectorParser<'a, T> {
     tokens: &'a [SelectorToken],
     index: usize,
-    stack: &'a [String],
+    stack: &'a [T],
 }
 
-impl SelectorParser<'_> {
+impl<T: AsRef<str>> SelectorParser<'_, T> {
     fn parse_expression(&mut self) -> bool {
         self.parse_or()
     }
@@ -5326,12 +5364,12 @@ impl SelectorParser<'_> {
     }
 }
 
-fn scope_path_matches(path: &str, stack: &[String]) -> bool {
+fn scope_path_matches<T: AsRef<str>>(path: &str, stack: &[T]) -> bool {
     let mut next_index = 0usize;
     for component in path.split_whitespace() {
         let Some(index) = stack[next_index..]
             .iter()
-            .position(|scope| scope_component_matches(component, scope))
+            .position(|scope| scope_component_matches(component, scope.as_ref()))
         else {
             return false;
         };
@@ -5730,6 +5768,26 @@ mod tests {
 
         let counters = viewport.counters();
         assert_eq!(counters.checkpoint_replay_lines, 1, "{counters:#?}");
+    }
+
+    #[test]
+    fn viewport_start_past_eof_does_not_replay_source() {
+        let grammar = r#"{
+            "scopeName": "source.viewport-eof",
+            "patterns": [{"match":"x", "name":"keyword.viewport-eof"}]
+        }"#;
+        let mut tokenizer = TextMateTokenizer::from_grammar(grammar).unwrap();
+        tokenizer.set_counters_enabled(true);
+        let mut checkpoints = crate::engine::checkpoint::CheckpointTable::new(2);
+        let checkpoints_before = checkpoints.clone();
+
+        let tokenized = tokenizer.tokenize_viewport_scopes("x\ny", 5..6, &mut checkpoints);
+
+        assert!(tokenized.is_empty());
+        assert_eq!(checkpoints, checkpoints_before);
+        let counters = tokenizer.counters();
+        assert_eq!(counters.lines_tokenized, 0, "{counters:#?}");
+        assert_eq!(counters.checkpoint_replay_lines, 0, "{counters:#?}");
     }
 
     #[test]
@@ -6887,6 +6945,22 @@ mod tests {
     }
 
     #[test]
+    fn identical_results_reuse_output_scope_tables() {
+        let grammar = r#"{
+            "scopeName": "source.scope-cache",
+            "patterns": [{"match": "true", "name": "constant.language.boolean"}]
+        }"#;
+        let mut tokenizer = TextMateTokenizer::from_grammar(grammar).unwrap();
+        let first = tokenizer.tokenize_source("true\nfalse\n");
+        let second = tokenizer.tokenize_source("true\nfalse\n");
+
+        assert!(Arc::ptr_eq(
+            &first.lines[0].scope_table,
+            &second.lines[0].scope_table
+        ));
+    }
+
+    #[test]
     fn output_scope_table_remaps_sparse_engine_ids_to_dense_refs() {
         let mut scope_names = ScopeInterner::default();
         let mut scope_stacks = ScopeStackInterner::default();
@@ -6902,7 +6976,8 @@ mod tests {
         assert_eq!(output, ScopeStackRef(1));
         assert_eq!(builder.intern_engine_stack(high_stack), output);
 
-        let table = builder.finish(&scope_stacks, &scope_names);
+        let mut cache = OutputScopeTableCache::default();
+        let table = builder.finish(&scope_stacks, &scope_names, &mut cache);
         assert_eq!(table.stack_count(), 2);
         assert_eq!(table.atom_count(), 1);
         assert_eq!(

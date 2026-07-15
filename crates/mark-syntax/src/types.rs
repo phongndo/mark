@@ -3,7 +3,7 @@ use std::{
     path::PathBuf,
     sync::{
         Arc, RwLock,
-        atomic::{AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering, fence},
     },
 };
 
@@ -49,6 +49,9 @@ pub struct ScopeAtomId(pub u32);
 // Rendering can resolve a base theme and a post-theme scope override for each
 // segment. Keep both generations warm instead of making them evict each other.
 const STYLE_CACHE_SLOTS: usize = 2;
+// Stable slot epochs are always even. Writers publish this sentinel while a
+// slot is being reset, then advance its previous epoch by two.
+const STYLE_CACHE_UPDATING_EPOCH: u64 = 1;
 
 /// Immutable scope data shared by every line in one highlighting result.
 ///
@@ -60,6 +63,7 @@ pub struct HighlightScopeTable {
     stacks: Vec<Arc<[ScopeAtomId]>>,
     resolved_styles: Vec<[AtomicU64; STYLE_CACHE_SLOTS]>,
     style_cache_generations: [AtomicU64; STYLE_CACHE_SLOTS],
+    style_cache_epochs: [AtomicU64; STYLE_CACHE_SLOTS],
     style_cache_next_slot: AtomicUsize,
     style_cache_lock: RwLock<()>,
     style_cache_hits: AtomicU64,
@@ -76,6 +80,7 @@ impl Clone for HighlightScopeTable {
                 .map(|_| std::array::from_fn(|_| AtomicU64::new(0)))
                 .collect(),
             style_cache_generations: std::array::from_fn(|_| AtomicU64::new(0)),
+            style_cache_epochs: std::array::from_fn(|_| AtomicU64::new(0)),
             style_cache_next_slot: AtomicUsize::new(0),
             style_cache_lock: RwLock::new(()),
             style_cache_hits: AtomicU64::new(0),
@@ -100,6 +105,7 @@ impl Default for HighlightScopeTable {
             stacks: vec![Arc::from([])],
             resolved_styles: vec![std::array::from_fn(|_| AtomicU64::new(0))],
             style_cache_generations: std::array::from_fn(|_| AtomicU64::new(0)),
+            style_cache_epochs: std::array::from_fn(|_| AtomicU64::new(0)),
             style_cache_next_slot: AtomicUsize::new(0),
             style_cache_lock: RwLock::new(()),
             style_cache_hits: AtomicU64::new(0),
@@ -110,6 +116,11 @@ impl Default for HighlightScopeTable {
 }
 
 impl HighlightScopeTable {
+    pub(crate) fn empty_shared() -> Arc<Self> {
+        static EMPTY: std::sync::OnceLock<Arc<HighlightScopeTable>> = std::sync::OnceLock::new();
+        Arc::clone(EMPTY.get_or_init(|| Arc::new(HighlightScopeTable::default())))
+    }
+
     /// Builds a small standalone table for diagnostics and theme tooling.
     pub fn from_scope_names(scopes: &[&str]) -> (Self, ScopeStackRef) {
         let atoms = scopes
@@ -127,6 +138,7 @@ impl HighlightScopeTable {
                     .map(|_| std::array::from_fn(|_| AtomicU64::new(0)))
                     .collect(),
                 style_cache_generations: std::array::from_fn(|_| AtomicU64::new(0)),
+                style_cache_epochs: std::array::from_fn(|_| AtomicU64::new(0)),
                 style_cache_next_slot: AtomicUsize::new(0),
                 style_cache_lock: RwLock::new(()),
                 style_cache_hits: AtomicU64::new(0),
@@ -193,6 +205,7 @@ impl HighlightScopeTable {
                 .map(|_| std::array::from_fn(|_| AtomicU64::new(0)))
                 .collect(),
             style_cache_generations: std::array::from_fn(|_| AtomicU64::new(0)),
+            style_cache_epochs: std::array::from_fn(|_| AtomicU64::new(0)),
             style_cache_next_slot: AtomicUsize::new(0),
             style_cache_lock: RwLock::new(()),
             style_cache_hits: AtomicU64::new(0),
@@ -203,26 +216,39 @@ impl HighlightScopeTable {
 
     pub(crate) fn cached_style(&self, theme: u64, stack: ScopeStackRef) -> (usize, Option<u64>) {
         let (slot, style) = loop {
-            {
-                // Keep the generation check and entry read under the same
-                // shared lock so another theme cannot reset the entries in
-                // between them.
-                let _read = self
-                    .style_cache_lock
-                    .read()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-                if let Some(slot) = self
-                    .style_cache_generations
-                    .iter()
-                    .position(|generation| generation.load(Ordering::Acquire) == theme)
+            // Cached rendering is overwhelmingly a read-only operation. Use
+            // a monotonically advancing slot epoch for seqlock-style
+            // validation so a warm segment does not acquire the table-wide
+            // RwLock. Unlike the theme generation, the epoch cannot return to
+            // its prior value when a slot transitions A -> C -> A.
+            let mut found = None;
+            for (slot, generation) in self.style_cache_generations.iter().enumerate() {
+                let epoch = self.style_cache_epochs[slot].load(Ordering::Acquire);
+                if epoch == STYLE_CACHE_UPDATING_EPOCH
+                    || generation.load(Ordering::Acquire) != theme
                 {
-                    let style = self
-                        .resolved_styles
-                        .get(stack.0 as usize)
-                        .and_then(|styles| styles[slot].load(Ordering::Relaxed).checked_sub(1));
-                    break (slot, style);
+                    continue;
+                }
+                let style = self
+                    .resolved_styles
+                    .get(stack.0 as usize)
+                    .and_then(|styles| styles[slot].load(Ordering::Acquire).checked_sub(1));
+                // The acquire keeps the entry load ahead of epoch validation.
+                // If it observes a late release publication, the publisher's
+                // stable epoch happens-before the validation load, preventing
+                // that entry from being paired with stale slot metadata.
+                if self.style_cache_epochs[slot].load(Ordering::Relaxed) == epoch {
+                    found = Some((slot, style));
+                    break;
                 }
             }
+            if let Some(found) = found {
+                break found;
+            }
+
+            // Only installing a new theme generation needs exclusive access.
+            // `cache_style` retains a shared lock while publishing an entry,
+            // so a reset cannot overwrite another generation's value.
             let _write = self
                 .style_cache_lock
                 .write()
@@ -234,10 +260,19 @@ impl HighlightScopeTable {
             {
                 let slot =
                     self.style_cache_next_slot.fetch_add(1, Ordering::Relaxed) % STYLE_CACHE_SLOTS;
+                // Mark the slot unstable before clearing it. The write lock
+                // serializes installers, while the stamped epoch lets
+                // lock-free readers detect every reuse, including A -> C -> A.
+                let previous_epoch = self.style_cache_epochs[slot]
+                    .swap(STYLE_CACHE_UPDATING_EPOCH, Ordering::Acquire);
+                debug_assert_ne!(previous_epoch, STYLE_CACHE_UPDATING_EPOCH);
+                fence(Ordering::Release);
                 for styles in &self.resolved_styles {
                     styles[slot].store(0, Ordering::Relaxed);
                 }
                 self.style_cache_generations[slot].store(theme, Ordering::Release);
+                self.style_cache_epochs[slot]
+                    .store(previous_epoch.wrapping_add(2), Ordering::Release);
             }
         };
         if self.style_cache_stats_enabled {
@@ -260,7 +295,11 @@ impl HighlightScopeTable {
         if self.style_cache_generations[slot].load(Ordering::Acquire) == theme
             && let Some(entries) = self.resolved_styles.get(stack.0 as usize)
         {
-            entries[slot].store(style + 1, Ordering::Relaxed);
+            // Readers validate the slot without taking the lock. Publish with
+            // release ordering so a reader that observes this entry cannot
+            // validate it against generation metadata from before this slot
+            // was installed.
+            entries[slot].store(style + 1, Ordering::Release);
         }
     }
 }
@@ -306,11 +345,17 @@ impl SyntaxSegment {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HighlightedLine {
     pub fingerprint: LineTextFingerprint,
     pub segments: Vec<SyntaxSegment>,
     pub scope_table: Arc<HighlightScopeTable>,
+}
+
+impl Default for HighlightedLine {
+    fn default() -> Self {
+        Self::new("")
+    }
 }
 
 impl HighlightedLine {
@@ -318,7 +363,7 @@ impl HighlightedLine {
         Self {
             fingerprint: LineTextFingerprint::from_text(text),
             segments: Vec::new(),
-            scope_table: Arc::default(),
+            scope_table: HighlightScopeTable::empty_shared(),
         }
     }
 
@@ -1451,5 +1496,34 @@ impl SyntaxHighlighter {
 
     pub fn take_engine_counters(&mut self) -> crate::engine::counters::EngineCounters {
         self.engine.take_counters()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn style_cache_slot_epoch_changes_across_theme_aba() {
+        let (table, stack) =
+            HighlightScopeTable::from_scope_names(&["source.test", "entity.name.test"]);
+        let install = |theme, style| {
+            let (slot, cached) = table.cached_style(theme, stack);
+            assert!(cached.is_none());
+            table.cache_style(theme, stack, slot, style);
+            slot
+        };
+
+        let theme_a = 10;
+        let a_slot = install(theme_a, 100);
+        let first_a_epoch = table.style_cache_epochs[a_slot].load(Ordering::Relaxed);
+        install(20, 200);
+        assert_eq!(install(30, 300), a_slot);
+        install(40, 400);
+        assert_eq!(install(theme_a, 100), a_slot);
+
+        let second_a_epoch = table.style_cache_epochs[a_slot].load(Ordering::Relaxed);
+        assert_ne!(first_a_epoch, second_a_epoch);
+        assert_eq!(table.cached_style(theme_a, stack).1, Some(100));
     }
 }

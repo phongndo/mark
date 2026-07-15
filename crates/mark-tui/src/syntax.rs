@@ -26,7 +26,9 @@ pub(crate) use source::{
     available_context_lines, full_file_source, load_full_file_source, split_context_source_lines,
     unified_syntax_side,
 };
-pub(crate) use types::{DiffSide, HighlightedSide, SyntaxKey, SyntaxPosition, SyntaxSkipReason};
+pub(crate) use types::{
+    DiffSide, HighlightedLineRef, HighlightedSide, SyntaxKey, SyntaxPosition, SyntaxSkipReason,
+};
 #[cfg(test)]
 pub(crate) use types::{SyntaxSourceId, SyntaxSourceKind};
 

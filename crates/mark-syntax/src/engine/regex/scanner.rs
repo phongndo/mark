@@ -69,13 +69,21 @@ enum Inst {
 pub(crate) struct Scanner {
     insts: Vec<Inst>,
     classes: Vec<CharClass>,
-    entries: Vec<ScannerEntry>,
+    entries: Vec<usize>,
+    starts: ScannerStarts,
 }
 
 #[derive(Debug, Clone)]
-struct ScannerEntry {
+struct CompilerEntry {
     pc: usize,
-    start_bytes: Option<Vec<u8>>,
+    start_bitmap: Option<[u64; 4]>,
+}
+
+#[derive(Debug, Clone)]
+struct ScannerStarts {
+    unrestricted: Box<[u32]>,
+    offsets: [u32; 257],
+    restricted: Box<[u32]>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -93,7 +101,7 @@ struct Thread {
 pub(crate) struct ScannerScratch {
     current: Vec<Thread>,
     next: Vec<Thread>,
-    work: Vec<Thread>,
+    work: Vec<usize>,
     seen: Vec<u32>,
     generation: u32,
 }
@@ -123,11 +131,7 @@ impl Scanner {
         for (pattern, parsed, start_bytes) in patterns {
             compiler.try_add(pattern, parsed, start_bytes)?;
         }
-        Ok(Self {
-            insts: compiler.insts,
-            classes: compiler.classes,
-            entries: compiler.entries,
-        })
+        Ok(compiler.finish())
     }
 
     /// Compile the regular subset of an ordered candidate set, returning the
@@ -144,14 +148,7 @@ impl Scanner {
                 failures.push(failure);
             }
         }
-        (
-            Self {
-                insts: compiler.insts,
-                classes: compiler.classes,
-                entries: compiler.entries,
-            },
-            failures,
-        )
+        (compiler.finish(), failures)
     }
 
     pub(crate) fn entry_count(&self) -> usize {
@@ -173,22 +170,7 @@ impl Scanner {
         scratch.prepare(self.insts.len());
         scratch.current.clear();
         scratch.begin_generation();
-        for entry in self
-            .entries
-            .iter()
-            .filter(|entry| entry.can_start(line, position))
-        {
-            add_thread(
-                &self.insts,
-                entry.pc,
-                position,
-                position,
-                line,
-                ctx,
-                scratch,
-                List::Current,
-            );
-        }
+        self.add_start_threads(line, position, ctx, scratch, List::Current);
 
         loop {
             if let Some(found) = first_accept(&self.insts, &scratch.current) {
@@ -277,23 +259,59 @@ impl Scanner {
             };
             position = next_position;
             // Existing threads have priority over starts injected later.
-            for entry in self
-                .entries
-                .iter()
-                .filter(|entry| entry.can_start(line, position))
-            {
-                add_thread(
-                    &self.insts,
-                    entry.pc,
-                    position,
-                    position,
-                    line,
-                    ctx,
-                    scratch,
-                    List::Next,
-                );
-            }
+            self.add_start_threads(line, position, ctx, scratch, List::Next);
             std::mem::swap(&mut scratch.current, &mut scratch.next);
+        }
+    }
+
+    fn add_start_threads(
+        &self,
+        line: &str,
+        position: usize,
+        ctx: AnchorContext,
+        scratch: &mut ScannerScratch,
+        list: List,
+    ) {
+        let restricted = line
+            .as_bytes()
+            .get(position)
+            .map_or(&[][..], |byte| self.starts.restricted(*byte));
+        let mut unrestricted_index = 0usize;
+        let mut restricted_index = 0usize;
+        while unrestricted_index < self.starts.unrestricted.len()
+            || restricted_index < restricted.len()
+        {
+            let unrestricted = self.starts.unrestricted.get(unrestricted_index).copied();
+            let restricted_entry = restricted.get(restricted_index).copied();
+            let entry = match (unrestricted, restricted_entry) {
+                (Some(left), Some(right)) if left < right => {
+                    unrestricted_index += 1;
+                    left
+                }
+                (Some(_), Some(right)) => {
+                    restricted_index += 1;
+                    right
+                }
+                (Some(left), None) => {
+                    unrestricted_index += 1;
+                    left
+                }
+                (None, Some(right)) => {
+                    restricted_index += 1;
+                    right
+                }
+                (None, None) => break,
+            } as usize;
+            add_thread(
+                &self.insts,
+                self.entries[entry],
+                position,
+                position,
+                line,
+                ctx,
+                scratch,
+                list,
+            );
         }
     }
 }
@@ -319,13 +337,57 @@ fn ast_is_supported(ast: &Ast) -> bool {
     }
 }
 
-impl ScannerEntry {
-    fn can_start(&self, line: &str, position: usize) -> bool {
-        self.start_bytes.as_ref().is_none_or(|bytes| {
-            line.as_bytes()
-                .get(position)
-                .is_some_and(|byte| bytes.contains(byte))
-        })
+impl ScannerStarts {
+    fn new(entries: &[CompilerEntry]) -> Self {
+        let mut unrestricted = Vec::new();
+        let mut counts = [0u32; 256];
+        for (index, entry) in entries.iter().enumerate() {
+            let Some(bitmap) = &entry.start_bitmap else {
+                unrestricted.push(u32::try_from(index).expect("scanner entry index fits in u32"));
+                continue;
+            };
+            for byte in 0u8..=u8::MAX {
+                if bitmap[byte as usize >> 6] & (1u64 << (byte & 63)) != 0 {
+                    counts[byte as usize] += 1;
+                }
+            }
+        }
+
+        let mut offsets = [0u32; 257];
+        for byte in 0..256 {
+            offsets[byte + 1] = offsets[byte]
+                .checked_add(counts[byte])
+                .expect("scanner start offsets fit in u32");
+        }
+        let mut cursors: [u32; 256] = offsets[..256]
+            .try_into()
+            .expect("scanner offset prefix has 256 entries");
+        let mut restricted = vec![0u32; offsets[256] as usize];
+        for (index, entry) in entries.iter().enumerate() {
+            let Some(bitmap) = &entry.start_bitmap else {
+                continue;
+            };
+            for byte in 0u8..=u8::MAX {
+                if bitmap[byte as usize >> 6] & (1u64 << (byte & 63)) == 0 {
+                    continue;
+                }
+                let cursor = &mut cursors[byte as usize];
+                restricted[*cursor as usize] =
+                    u32::try_from(index).expect("scanner entry index fits in u32");
+                *cursor += 1;
+            }
+        }
+        Self {
+            unrestricted: unrestricted.into_boxed_slice(),
+            offsets,
+            restricted: restricted.into_boxed_slice(),
+        }
+    }
+
+    #[inline]
+    fn restricted(&self, byte: u8) -> &[u32] {
+        let index = byte as usize;
+        &self.restricted[self.offsets[index] as usize..self.offsets[index + 1] as usize]
     }
 }
 
@@ -356,6 +418,7 @@ enum List {
 }
 
 #[allow(clippy::too_many_arguments)]
+#[inline(always)]
 fn add_thread(
     insts: &[Inst],
     pc: usize,
@@ -366,41 +429,68 @@ fn add_thread(
     scratch: &mut ScannerScratch,
     list: List,
 ) {
-    scratch.work.clear();
-    scratch.work.push(Thread {
+    if scratch.seen[pc] == scratch.generation {
+        return;
+    }
+    let initial = Thread {
         pc,
         start,
         end: position,
-    });
-    while let Some(thread) = scratch.work.pop() {
-        if scratch.seen[thread.pc] == scratch.generation {
+    };
+    if !matches!(insts[pc], Inst::Split { .. } | Inst::Anchor { .. }) {
+        // Most transitions lead directly to a consuming instruction. Avoid
+        // clearing, pushing, and popping the epsilon-work stack for that
+        // overwhelmingly common one-state closure.
+        scratch.seen[pc] = scratch.generation;
+        match list {
+            List::Current => scratch.current.push(initial),
+            List::Next => scratch.next.push(initial),
+        }
+        return;
+    }
+
+    add_epsilon_threads(insts, initial, position, line, ctx, scratch, list);
+}
+
+#[allow(clippy::too_many_arguments)]
+#[inline(never)]
+fn add_epsilon_threads(
+    insts: &[Inst],
+    initial: Thread,
+    position: usize,
+    line: &str,
+    ctx: AnchorContext,
+    scratch: &mut ScannerScratch,
+    list: List,
+) {
+    debug_assert!(scratch.work.is_empty());
+    scratch.work.push(initial.pc);
+    while let Some(pc) = scratch.work.pop() {
+        if scratch.seen[pc] == scratch.generation {
             continue;
         }
-        scratch.seen[thread.pc] = scratch.generation;
-        match insts[thread.pc] {
+        scratch.seen[pc] = scratch.generation;
+        match insts[pc] {
             Inst::Split {
                 preferred,
                 alternate,
             } => {
                 // LIFO: push the lower-priority edge first.
-                scratch.work.push(Thread {
-                    pc: alternate,
-                    ..thread
-                });
-                scratch.work.push(Thread {
-                    pc: preferred,
-                    ..thread
-                });
+                scratch.work.push(alternate);
+                scratch.work.push(preferred);
             }
             Inst::Anchor { kind, next } => {
                 if anchor_matches(kind, line, position, ctx) {
-                    scratch.work.push(Thread { pc: next, ..thread });
+                    scratch.work.push(next);
                 }
             }
-            _ => match list {
-                List::Current => scratch.current.push(thread),
-                List::Next => scratch.next.push(thread),
-            },
+            _ => {
+                let thread = Thread { pc, ..initial };
+                match list {
+                    List::Current => scratch.current.push(thread),
+                    List::Next => scratch.next.push(thread),
+                }
+            }
         }
     }
 }
@@ -429,10 +519,21 @@ impl ScannerScratch {
 struct Compiler {
     insts: Vec<Inst>,
     classes: Vec<CharClass>,
-    entries: Vec<ScannerEntry>,
+    entries: Vec<CompilerEntry>,
 }
 
 impl Compiler {
+    fn finish(self) -> Scanner {
+        let starts = ScannerStarts::new(&self.entries);
+        let entries = self.entries.into_iter().map(|entry| entry.pc).collect();
+        Scanner {
+            insts: self.insts,
+            classes: self.classes,
+            entries,
+            starts,
+        }
+    }
+
     fn try_add(
         &mut self,
         pattern: usize,
@@ -447,9 +548,15 @@ impl Compiler {
             }
             let accept = self.push(Inst::Accept { pattern })?;
             let entry = self.node(&parsed.ast, parsed.flags, accept)?;
-            self.entries.push(ScannerEntry {
+            self.entries.push(CompilerEntry {
                 pc: entry,
-                start_bytes: start_bytes.map(<[u8]>::to_vec),
+                start_bitmap: start_bytes.map(|bytes| {
+                    let mut bitmap = [0u64; 4];
+                    for byte in bytes {
+                        bitmap[*byte as usize >> 6] |= 1u64 << (*byte & 63);
+                    }
+                    bitmap
+                }),
             });
             Ok(())
         })();
@@ -629,6 +736,37 @@ mod tests {
                 start: 1,
                 end: 3
             })
+        );
+    }
+
+    #[test]
+    fn start_byte_buckets_preserve_mixed_entry_priority() {
+        let preferred = parse("bc");
+        let fallback = parse("b");
+        let x = parse("x");
+        let b = [b'b'];
+        let x_byte = [b'x'];
+        let nfa = Scanner::compile_with_hints([
+            (9, &preferred, Some(b.as_slice())),
+            (11, &fallback, None),
+            (17, &x, Some(x_byte.as_slice())),
+        ])
+        .unwrap();
+        let mut scratch = ScannerScratch::default();
+
+        assert_eq!(
+            nfa.find("abc", 0, AnchorContext::line_start(), &mut scratch),
+            Some(ScanMatch {
+                pattern: 9,
+                start: 1,
+                end: 3,
+            })
+        );
+        assert_eq!(
+            nfa.find("a x", 0, AnchorContext::line_start(), &mut scratch)
+                .unwrap()
+                .pattern,
+            17
         );
     }
 

@@ -8,8 +8,11 @@ use super::state::{ScopeId, ScopeStackId};
 
 #[derive(Debug, Clone, Default)]
 pub struct ScopeInterner {
-    names: Vec<String>,
-    ids: HashMap<String, ScopeId>,
+    // The id map and every exported scope table share the same allocation.
+    // Scope names used to be copied into both `names` and `ids`, then copied
+    // again for every highlighting result produced by a tokenizer.
+    names: Vec<Arc<str>>,
+    ids: HashMap<Arc<str>, ScopeId>,
     classes: Vec<Option<SyntaxClass>>,
 }
 
@@ -19,14 +22,20 @@ impl ScopeInterner {
             return *id;
         }
         let id = ScopeId(self.names.len() as u32);
-        self.names.push(name.to_owned());
-        self.ids.insert(name.to_owned(), id);
-        self.classes.push(classify_scope_name(name));
+        let name: Arc<str> = Arc::from(name);
+        self.names.push(Arc::clone(&name));
+        self.ids.insert(name, id);
+        self.classes
+            .push(classify_scope_name(&self.names[id.0 as usize]));
         id
     }
 
     pub fn get(&self, id: ScopeId) -> Option<&str> {
-        self.names.get(id.0 as usize).map(String::as_str)
+        self.names.get(id.0 as usize).map(AsRef::as_ref)
+    }
+
+    pub(crate) fn get_arc(&self, id: ScopeId) -> Option<Arc<str>> {
+        self.names.get(id.0 as usize).map(Arc::clone)
     }
 
     pub fn class(&self, id: ScopeId) -> Option<SyntaxClass> {

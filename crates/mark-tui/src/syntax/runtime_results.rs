@@ -1,7 +1,7 @@
-use mark_syntax::HighlightedLine;
+use std::sync::Arc;
 
 use super::{
-    SyntaxPriority,
+    HighlightedLineRef, SyntaxPriority,
     runtime::SyntaxRuntime,
     source::SyntaxJobFailure,
     types::{
@@ -41,7 +41,7 @@ impl SyntaxRuntime {
                 Ok(success) => {
                     let memory_bytes = success.side.memory_bytes();
                     self.cache
-                        .insert_with_weight(result.key, success.side, memory_bytes);
+                        .insert_with_weight(result.key, Arc::new(success.side), memory_bytes);
                     self.stats.jobs_completed = self.stats.jobs_completed.saturating_add(1);
                     if let Some(source_bytes) = success.source_bytes {
                         self.stats.source_bytes_queued =
@@ -53,10 +53,13 @@ impl SyntaxRuntime {
                     }
                     self.stats.cache_entries_peak =
                         self.stats.cache_entries_peak.max(self.cache.len());
+                    // Weighted peak tracking stays O(1) on the interactive
+                    // drain path. The final benchmark snapshot separately
+                    // deduplicates shared scope tables.
                     self.stats.estimated_memory_peak_bytes = self
                         .stats
                         .estimated_memory_peak_bytes
-                        .max(self.estimated_memory_bytes() as u64);
+                        .max(self.cache.total_weight() as u64);
                     drain.changed = true;
                     drain.changed_keys.push(result.key);
                 }
@@ -109,17 +112,15 @@ impl SyntaxRuntime {
         &mut self,
         position: SyntaxPosition,
         line: usize,
-    ) -> Option<HighlightedLine> {
+    ) -> Option<HighlightedLineRef> {
         let highlighted = self.position_keys.get(&position).copied().and_then(|key| {
             let source_line = self
                 .line_maps
                 .get(&position)
                 .and_then(|line_map| line_map.get(line))
                 .and_then(|source_line| *source_line)?;
-            self.cache
-                .get(&key)
-                .and_then(|side| side.lines.get(source_line))
-                .cloned()
+            let side = Arc::clone(self.cache.get(&key)?);
+            HighlightedLineRef::new(side, source_line)
         });
         if highlighted.is_some() {
             self.stats.cache_hits = self.stats.cache_hits.saturating_add(1);
@@ -135,7 +136,7 @@ impl SyntaxRuntime {
         file: usize,
         side: DiffSide,
         line_number: usize,
-    ) -> Option<HighlightedLine> {
+    ) -> Option<HighlightedLineRef> {
         let source_line = line_number.checked_sub(1)?;
         let source_id = SyntaxSourceId {
             generation,
@@ -145,9 +146,8 @@ impl SyntaxRuntime {
         };
         let key = self.source_keys.get(&source_id).copied();
         let highlighted = key
-            .and_then(|key| self.cache.get(&key))
-            .and_then(|side| side.lines.get(source_line))
-            .cloned();
+            .and_then(|key| self.cache.get(&key).map(Arc::clone))
+            .and_then(|side| HighlightedLineRef::new(side, source_line));
         if highlighted.is_some() {
             self.stats.cache_hits = self.stats.cache_hits.saturating_add(1);
         } else {

@@ -329,7 +329,7 @@ pub(crate) fn render_row_wrapped_with_focus(
             let diff_line = &app.document.changeset.files[file].hunks()[hunk].lines[line];
             render_unified_line_wrapped_with_focus(
                 diff_line,
-                syntax.as_ref(),
+                syntax.as_deref(),
                 &inline,
                 width,
                 theme,
@@ -445,7 +445,7 @@ pub(crate) fn render_row_with_focus(
             let diff_line = &app.document.changeset.files[file].hunks()[hunk].lines[line];
             render_unified_line_at_scroll_with_focus(
                 diff_line,
-                syntax.as_ref(),
+                syntax.as_deref(),
                 &inline,
                 width,
                 theme,
