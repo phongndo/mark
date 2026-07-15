@@ -156,6 +156,8 @@ n / p          next / previous grep match
 r              reload
 m              diff type selector
 o              settings menu
+a              annotate a visible line
+A              batch annotate visible lines
 n              annotation search menu
 b              file browser
 s              toggle split/unified layout
@@ -167,6 +169,20 @@ Ctrl-Shift-C   copy the error log pane to the terminal clipboard
 Tab            next diff type
 Shift-Tab      previous diff type
 ```
+
+Press `a` to label every annotatable line in the viewport, then type a displayed
+hint to open an inline annotation draft. Lines in the focused hunk receive the
+easier hints first. Hints temporarily replace the target-side line number while
+preserving the `+`/`-` sign. In split layout, replacement and context hints
+appear on the right/current side; deletion-only hints appear on the left/old
+side. After each typed character, matching labels show only their remaining
+suffix and nonmatching lines restore their line numbers. Existing annotations
+use an underlined annotation accent. Backspace removes a partial hint; Esc
+cancels targeting. Arrow and page keys cancel targeting and continue navigation.
+
+Press `A` for sticky review mode. After selecting and saving an annotation, the
+hints reappear so another visible line can be selected. Press Esc while writing
+or targeting to leave the batch workflow.
 
 Selector panes keep focus in the filter input: type to filter, Enter selects or
 toggles, Esc closes, and arrows, Tab / Shift-Tab, or Ctrl-N / Ctrl-P move the

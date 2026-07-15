@@ -41,6 +41,7 @@ impl DiffApp {
             return;
         }
 
+        self.close_annotation_target_mode();
         let centered_grep_match_row = self.selected_grep_match_row().filter(|row| {
             let previous_centered_scroll = row
                 .saturating_sub(viewport_center_offset(previous_rows))
@@ -67,6 +68,7 @@ impl DiffApp {
             return;
         }
 
+        self.close_annotation_target_mode();
         let wrapped_position = self
             .viewport
             .line_wrapping
@@ -124,6 +126,7 @@ impl DiffApp {
             return;
         }
 
+        self.close_annotation_target_mode();
         self.viewport.layout = layout;
         let search_result = self.document.search_index.search_with_grep_match_limit(
             &self.document.changeset,

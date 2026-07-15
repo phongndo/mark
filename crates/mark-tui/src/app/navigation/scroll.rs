@@ -9,6 +9,7 @@ use crate::render::annotations::{annotation_compose_block_height, annotation_sav
 
 impl DiffApp {
     pub(crate) fn scroll_by(&mut self, delta: isize) {
+        self.close_annotation_target_mode();
         let next = if delta < 0 {
             self.viewport.scroll.saturating_sub(delta.unsigned_abs())
         } else {
@@ -59,6 +60,7 @@ impl DiffApp {
     }
 
     pub(crate) fn scroll_horizontally_by(&mut self, delta: isize) {
+        self.close_annotation_target_mode();
         if self.viewport.horizontal_scroll_locked {
             return;
         }

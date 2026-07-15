@@ -44,6 +44,7 @@ impl DiffApp {
             || self.refs.branch_menu_is_open()
             || self.filters.filter_input.is_some()
             || self.annotations_state.annotation_draft.is_some()
+            || self.annotations_state.annotation_target_mode.is_some()
     }
 
     pub(crate) fn diff_mouse_highlight_visual_row(&self) -> Option<usize> {

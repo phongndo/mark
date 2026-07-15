@@ -42,6 +42,7 @@ pub(crate) enum ComponentId {
     FilterBar,
     ErrorLogPanel,
     Toasts,
+    AnnotationTarget,
     AnnotationDraftBindings,
     QuitKey,
     EditorShortcut,

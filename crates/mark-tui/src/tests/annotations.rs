@@ -780,6 +780,533 @@ fn viewport_width_change_clamps_scroll_after_saved_annotation_rewraps() {
 }
 
 #[test]
+fn annotation_target_mode_labels_the_entire_viewport_and_selects_a_hint() {
+    use std::collections::HashSet;
+
+    let changeset = changeset_with_hunks_at(PathBuf::from("/repo"), &[10, 20, 30]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_width(80);
+    app.set_viewport_rows(app.document.model.len());
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE))
+        .expect("annotation target mode should open");
+
+    let mode = app
+        .annotations_state
+        .annotation_target_mode
+        .as_ref()
+        .expect("annotation target mode");
+    let visible_hunks = mode
+        .targets
+        .iter()
+        .filter_map(|target| {
+            app.document
+                .model
+                .row(target.model_row_index)
+                .and_then(UiRow::hunk_key)
+                .map(|(_, hunk)| hunk)
+        })
+        .collect::<HashSet<_>>();
+    assert_eq!(visible_hunks, HashSet::from([0, 1, 2]));
+
+    let target = mode
+        .targets
+        .iter()
+        .find(|target| target.hint == "a")
+        .cloned()
+        .expect("focused hunk should receive the easiest hint");
+    assert_eq!(
+        app.document
+            .model
+            .row(target.model_row_index)
+            .and_then(UiRow::hunk_key)
+            .map(|(_, hunk)| hunk),
+        Some(0)
+    );
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE))
+        .expect("hint should select its line");
+
+    let draft = app
+        .annotations_state
+        .annotation_draft
+        .as_ref()
+        .expect("selected line should open a draft");
+    assert_eq!(draft.key, target.key);
+    assert!(app.annotations_state.annotation_target_mode.is_none());
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE))
+        .expect("draft text should be entered");
+    app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL))
+        .expect("draft should save");
+    assert!(app.annotations_state.annotation_target_mode.is_none());
+    assert!(!app.annotations_state.sticky_annotation_draft);
+}
+
+#[test]
+fn annotation_target_mode_filters_multi_key_hints_and_supports_backspace() {
+    let lines = vec!["line"; 40];
+    let changeset = changeset_with_line_texts(&lines);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_width(80);
+    app.set_viewport_rows(app.document.model.len());
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE))
+        .expect("annotation target mode should open");
+    let target = app
+        .annotations_state
+        .annotation_target_mode
+        .as_ref()
+        .and_then(|mode| mode.targets.iter().find(|target| target.hint.len() == 2))
+        .cloned()
+        .expect("tall viewport should use a two-key hint");
+    let mut characters = target.hint.chars();
+    let first = characters.next().expect("first hint character");
+
+    app.handle_key(KeyEvent::new(KeyCode::Char(first), KeyModifiers::NONE))
+        .expect("first hint character should filter targets");
+    assert_eq!(
+        app.annotations_state
+            .annotation_target_mode
+            .as_ref()
+            .map(|mode| mode.prefix.as_str()),
+        Some(&target.hint[..1])
+    );
+
+    app.handle_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE))
+        .expect("backspace should clear the target prefix");
+    assert_eq!(
+        app.annotations_state
+            .annotation_target_mode
+            .as_ref()
+            .map(|mode| mode.prefix.as_str()),
+        Some("")
+    );
+
+    for character in target.hint.chars() {
+        app.handle_key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE))
+            .expect("hint should be accepted");
+    }
+    assert_eq!(
+        app.annotations_state
+            .annotation_draft
+            .as_ref()
+            .map(|draft| &draft.key),
+        Some(&target.key)
+    );
+}
+
+#[test]
+fn no_op_reload_preserves_in_progress_annotation_target_mode() {
+    let lines = vec!["line"; 40];
+    let changeset = changeset_with_line_texts(&lines);
+    let mut app = DiffApp::new(
+        DiffOptions::default(),
+        changeset.clone(),
+        DiffLayoutMode::Unified,
+    );
+    app.set_viewport_width(80);
+    app.set_viewport_rows(app.document.model.len());
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT))
+        .expect("sticky annotation target mode should open");
+    let first = app
+        .annotations_state
+        .annotation_target_mode
+        .as_ref()
+        .and_then(|mode| mode.targets.iter().find(|target| target.hint.len() == 2))
+        .and_then(|target| target.hint.chars().next())
+        .expect("tall viewport should use a two-key hint");
+    app.handle_key(KeyEvent::new(KeyCode::Char(first), KeyModifiers::NONE))
+        .expect("first hint character should filter targets");
+    let expected_mode = app
+        .annotations_state
+        .annotation_target_mode
+        .clone()
+        .expect("target mode should remain open after a partial hint");
+    assert!(expected_mode.sticky);
+    assert_eq!(expected_mode.prefix, first.to_string());
+
+    app.replace_loaded_diff(DiffOptions::default(), changeset);
+
+    assert_eq!(
+        app.annotations_state.annotation_target_mode.as_ref(),
+        Some(&expected_mode)
+    );
+}
+
+#[test]
+fn annotation_target_mode_shows_only_matching_hint_suffixes() {
+    let lines = vec!["line"; 40];
+    let changeset = changeset_with_line_texts(&lines);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_width(80);
+    app.set_viewport_rows(app.document.model.len());
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE))
+        .expect("annotation target mode should open");
+    assert!(line_text(&statusline_header_line(&app, 80)).contains("targets · type hint · Esc"));
+    let mode = app
+        .annotations_state
+        .annotation_target_mode
+        .as_ref()
+        .expect("annotation target mode");
+    let target = mode
+        .targets
+        .iter()
+        .find(|target| target.hint.chars().count() == 2)
+        .cloned()
+        .expect("tall viewport should use a two-key hint");
+    let first = target.hint.chars().next().expect("first hint character");
+    let nonmatching_scroll = mode
+        .targets
+        .iter()
+        .find(|candidate| !candidate.hint.starts_with(first))
+        .map(|candidate| candidate.visual_scroll)
+        .expect("a nonmatching target");
+
+    app.handle_key(KeyEvent::new(KeyCode::Char(first), KeyModifiers::NONE))
+        .expect("first hint character should filter targets");
+
+    let expected_suffix = target.hint.strip_prefix(first).expect("remaining suffix");
+    assert_eq!(
+        app.annotation_target_hint_at_visual_scroll(target.visual_scroll)
+            .map(|(hint, _, _)| hint),
+        Some(expected_suffix)
+    );
+    assert!(
+        app.annotation_target_hint_at_visual_scroll(nonmatching_scroll)
+            .is_none()
+    );
+    let header = line_text(&statusline_header_line(&app, 80));
+    assert!(header.contains(&format!("{first}… ·")));
+    assert!(header.contains("matches · Backspace · Esc"));
+}
+
+#[test]
+fn annotation_target_mode_uses_annotation_accent_for_existing_marks() {
+    use crate::annotation::AnnotationKey;
+
+    let changeset = changeset_with_line_text("hello");
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_width(40);
+    app.set_viewport_rows(5);
+    let code_row = app
+        .document
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
+        .expect("unified line");
+    app.viewport.scroll = code_row;
+    let key = AnnotationKey::from_ui_row(
+        &app.document.changeset,
+        app.document.model.row(code_row).expect("code row"),
+    )
+    .expect("annotation key");
+    app.annotations_state
+        .annotations
+        .insert(key, "existing note".to_owned());
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE))
+        .expect("annotation target mode should open");
+    let hint = app
+        .annotations_state
+        .annotation_target_mode
+        .as_ref()
+        .and_then(|mode| mode.targets.first())
+        .map(|target| target.hint.clone())
+        .expect("existing target");
+    let rendered = build_diff_viewport_lines(&mut app, 40, 5);
+    let hint_span = rendered[0]
+        .spans
+        .iter()
+        .find(|span| span.content.as_ref() == hint)
+        .expect("hint span");
+
+    assert_eq!(hint_span.style.fg, Some(app.config.theme.hunk));
+    assert!(hint_span.style.add_modifier.contains(Modifier::UNDERLINED));
+    assert_ne!(hint_span.style.bg, Some(app.config.theme.search_match_bg));
+}
+
+#[test]
+fn annotation_target_mode_uses_configured_keys_and_optional_uppercase_display() {
+    let changeset = changeset_with_line_texts(&["one", "two", "three"]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_width(40);
+    app.set_viewport_rows(app.document.model.len());
+    app.config.syntax_settings.annotations.hint_keys = "arst".to_owned();
+    app.config.syntax_settings.annotations.uppercase_hints = true;
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE))
+        .expect("annotation target mode should open");
+    let target = app
+        .annotations_state
+        .annotation_target_mode
+        .as_ref()
+        .and_then(|mode| mode.targets.iter().find(|target| target.hint == "a"))
+        .cloned()
+        .expect("configured first hint");
+    assert!(
+        app.annotations_state
+            .annotation_target_mode
+            .as_ref()
+            .expect("target mode")
+            .targets
+            .iter()
+            .all(|target| target
+                .hint
+                .chars()
+                .all(|character| "arst".contains(character)))
+    );
+
+    let viewport_rows = app.viewport.viewport_rows;
+    let rendered = build_diff_viewport_lines(&mut app, 40, viewport_rows);
+    assert!(rendered.iter().any(|line| line.spans.iter().any(|span| {
+        span.content.as_ref() == "A" && span.style.bg == Some(app.config.theme.search_match_bg)
+    })));
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT))
+        .expect("uppercase form of configured hint should be accepted");
+    assert_eq!(
+        app.annotations_state
+            .annotation_draft
+            .as_ref()
+            .map(|draft| &draft.key),
+        Some(&target.key)
+    );
+}
+
+#[test]
+fn annotation_target_navigation_keys_cancel_and_continue_navigation() {
+    let lines = vec!["line"; 100];
+    let changeset = changeset_with_line_texts(&lines);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(10);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE))
+        .expect("annotation target mode should open");
+    let scroll = app.viewport.scroll;
+    app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+        .expect("down should navigate");
+    assert_eq!(app.viewport.scroll, scroll + 1);
+    assert!(app.annotations_state.annotation_target_mode.is_none());
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE))
+        .expect("annotation target mode should reopen");
+    let scroll = app.viewport.scroll;
+    app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE))
+        .expect("page down should navigate");
+    assert_eq!(app.viewport.scroll, scroll + 20);
+    assert!(app.annotations_state.annotation_target_mode.is_none());
+}
+
+#[test]
+fn sticky_annotation_mode_reopens_targets_after_save_and_esc_exits() {
+    let changeset = changeset_with_line_texts(&["one", "two", "three"]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(app.document.model.len());
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT))
+        .expect("sticky annotation target mode should open");
+    let target = app
+        .annotations_state
+        .annotation_target_mode
+        .as_ref()
+        .filter(|mode| mode.sticky)
+        .and_then(|mode| mode.targets.first())
+        .cloned()
+        .expect("sticky target");
+    for character in target.hint.chars() {
+        app.handle_key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE))
+            .expect("hint should select a line");
+    }
+    assert!(app.annotations_state.sticky_annotation_draft);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE))
+        .expect("draft text should be entered");
+    app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL))
+        .expect("draft should save");
+
+    assert_eq!(
+        app.annotations_state
+            .annotations
+            .get(&target.key)
+            .map(String::as_str),
+        Some("n")
+    );
+    assert!(app.annotations_state.annotation_draft.is_none());
+    assert!(
+        app.annotations_state
+            .annotation_target_mode
+            .as_ref()
+            .is_some_and(|mode| mode.sticky)
+    );
+
+    app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+        .expect("Esc should exit sticky targeting");
+    assert!(app.annotations_state.annotation_target_mode.is_none());
+}
+
+#[test]
+fn annotation_target_mode_blocks_modified_navigation_but_preserves_hard_quit() {
+    let lines = vec!["line"; 100];
+    let changeset = changeset_with_line_texts(&lines);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(10);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE))
+        .expect("annotation target mode should open");
+    let scroll = app.viewport.scroll;
+    assert!(
+        !app.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL,))
+            .expect("modified navigation should be consumed")
+    );
+    assert_eq!(app.viewport.scroll, scroll);
+    assert!(app.annotations_state.annotation_target_mode.is_some());
+
+    assert!(
+        app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL,))
+            .expect("Ctrl-C should retain hard-quit behavior")
+    );
+}
+
+#[test]
+fn annotation_target_mode_labels_wrapped_logical_lines_once() {
+    let changeset = changeset_with_line_texts(&[
+        "a very long logical line that wraps several times",
+        "another logical line",
+    ]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.viewport.line_wrapping = true;
+    app.set_viewport_width(18);
+    app.set_viewport_rows(20);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE))
+        .expect("annotation target mode should open");
+
+    let mode = app
+        .annotations_state
+        .annotation_target_mode
+        .as_ref()
+        .expect("annotation target mode");
+    assert_eq!(mode.targets.len(), 2);
+    assert_ne!(mode.targets[0].visual_scroll, mode.targets[1].visual_scroll);
+}
+
+#[test]
+fn unified_hint_replaces_the_line_number_and_preserves_the_diff_sign() {
+    let mut changeset = changeset_with_line_text("hello");
+    changeset.files[0].hunks_mut()[0].lines[0] = DiffLine::addition(7, "hello");
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_width(40);
+    app.set_viewport_rows(5);
+    let code_row = app
+        .document
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
+        .expect("unified line");
+    app.viewport.scroll = code_row;
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE))
+        .expect("annotation target mode should open");
+    let target = app
+        .annotations_state
+        .annotation_target_mode
+        .as_ref()
+        .and_then(|mode| mode.targets.first())
+        .cloned()
+        .expect("addition target");
+
+    let rendered = crate::render::diff::build_diff_viewport_lines(&mut app, 40, 5);
+    let characters = line_text(&rendered[0]).chars().collect::<Vec<_>>();
+    assert_eq!(characters[11], target.hint.chars().next().expect("hint"));
+    assert_eq!(characters[13], '+');
+}
+
+#[test]
+fn split_replacement_hint_replaces_the_current_side_line_number() {
+    use crate::annotation::AnnotationSide;
+
+    let changeset = changeset_with_replacement_pair();
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Split);
+    app.set_viewport_width(60);
+    app.set_viewport_rows(8);
+    let split_row = app
+        .document
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::SplitLine { .. }))
+        .expect("split line");
+    app.viewport.scroll = split_row;
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE))
+        .expect("annotation target mode should open");
+    let target = app
+        .annotations_state
+        .annotation_target_mode
+        .as_ref()
+        .and_then(|mode| mode.targets.first())
+        .cloned()
+        .expect("replacement target");
+    assert_eq!(target.key.side, AnnotationSide::New);
+
+    let rendered = crate::render::diff::build_diff_viewport_lines(&mut app, 60, 8);
+    let characters = line_text(&rendered[0]).chars().collect::<Vec<_>>();
+    assert_eq!(characters[7], '-');
+    assert_eq!(characters[35], target.hint.chars().next().expect("hint"));
+    assert_eq!(characters[37], '+');
+    assert!(rendered[0].spans.iter().any(|span| {
+        span.content.as_ref() == target.hint
+            && span.style.bg == Some(app.config.theme.search_match_bg)
+    }));
+}
+
+#[test]
+fn split_deletion_only_hint_replaces_the_old_side_line_number() {
+    use crate::annotation::AnnotationSide;
+
+    let mut changeset = changeset_with_replacement_pair();
+    changeset.files[0].additions = 0;
+    {
+        let hunk = &mut changeset.files[0].hunks_mut()[0];
+        hunk.ranges = HunkLineRanges::new(hunk.old_start(), hunk.old_count(), hunk.new_start(), 0);
+        hunk.lines.truncate(1);
+    }
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Split);
+    app.set_viewport_width(60);
+    app.set_viewport_rows(8);
+    let split_row = app
+        .document
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::SplitLine { .. }))
+        .expect("split line");
+    app.viewport.scroll = split_row;
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE))
+        .expect("annotation target mode should open");
+    let target = app
+        .annotations_state
+        .annotation_target_mode
+        .as_ref()
+        .and_then(|mode| mode.targets.first())
+        .cloned()
+        .expect("deletion target");
+    assert_eq!(target.key.side, AnnotationSide::Old);
+
+    let rendered = crate::render::diff::build_diff_viewport_lines(&mut app, 60, 8);
+    let characters = line_text(&rendered[0]).chars().collect::<Vec<_>>();
+    assert_eq!(characters[5], target.hint.chars().next().expect("hint"));
+    assert_eq!(characters[7], '-');
+    assert_eq!(characters[37], ' ');
+}
+
+#[test]
 fn old_side_annotation_renders_and_edits_on_deletion_only_split_row() {
     use crate::annotation::{AnnotationKey, AnnotationSide};
 

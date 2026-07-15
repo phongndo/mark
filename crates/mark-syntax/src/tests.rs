@@ -679,7 +679,42 @@ fn syntax_settings_default_to_builtin_system_colorscheme() {
     assert!(!settings.line_wrapping);
     assert!(!settings.transparent_background);
     assert_eq!(settings.diff, DiffSettings::default());
+    assert_eq!(settings.annotations, AnnotationSettings::default());
     assert_eq!(settings.limits, SyntaxLimits::default());
+}
+
+#[test]
+fn syntax_settings_supports_annotation_hint_preferences() {
+    let settings = parse_settings(
+        r#"
+[annotations]
+hint_keys = "arstneio"
+uppercase_hints = true
+"#,
+    )
+    .expect("annotation settings should parse");
+
+    assert_eq!(settings.annotations.hint_keys, "arstneio");
+    assert!(settings.annotations.uppercase_hints);
+}
+
+#[test]
+fn syntax_settings_rejects_invalid_annotation_hint_keys() {
+    for (hint_keys, expected) in [
+        ("", "at least two"),
+        ("a", "at least two"),
+        ("aab", "unique"),
+        ("aAb", "unique"),
+        ("a界", "single-width"),
+        ("a\n", "printable"),
+    ] {
+        let error = parse_settings(&format!("[annotations]\nhint_keys = {hint_keys:?}\n"))
+            .expect_err("invalid annotation hint keys should fail");
+        assert!(
+            error.to_string().contains(expected),
+            "unexpected error for {hint_keys:?}: {error}"
+        );
+    }
 }
 
 #[test]

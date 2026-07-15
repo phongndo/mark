@@ -69,6 +69,7 @@ impl DiffApp {
         if let Some(draft) = self.annotations_state.annotation_draft.as_ref() {
             if compose_block_top_viewport_row(self, draft.model_row_index) == Some(viewport_row) {
                 self.annotations_state.annotation_draft = None;
+                self.annotations_state.sticky_annotation_draft = false;
                 self.set_scroll_with_grep_sync(
                     self.viewport.scroll,
                     false,
@@ -147,7 +148,7 @@ impl DiffApp {
         AnnotationKey::from_ui_row(&self.document.changeset, row)
     }
 
-    pub(super) fn open_annotation_draft_for_key(
+    pub(in crate::app) fn open_annotation_draft_for_key(
         &mut self,
         key: AnnotationKey,
         model_row_index: usize,
@@ -155,6 +156,11 @@ impl DiffApp {
         if self.filters.filter_input.is_some() {
             return false;
         }
+        self.annotations_state.sticky_annotation_draft = self
+            .annotations_state
+            .annotation_target_mode
+            .take()
+            .is_some_and(|mode| mode.sticky);
         let existing = self
             .annotations_state
             .annotations

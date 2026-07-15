@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeSet, HashSet},
     path::PathBuf,
     sync::{
         Arc, RwLock,
@@ -13,7 +13,10 @@ use crate::{
     normalize_language_name,
 };
 use mark_core::{MarkError, MarkResult};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
+use unicode_width::UnicodeWidthChar;
+
+pub const DEFAULT_ANNOTATION_HINT_KEYS: &str = "asdfghjklqwertyuiopzxcvbnm";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SyntaxClass {
@@ -508,7 +511,61 @@ pub(crate) struct StoredSyntaxSettings {
     #[serde(default)]
     pub(crate) notifications: StoredNotificationSettings,
     #[serde(default)]
+    pub(crate) annotations: AnnotationSettings,
+    #[serde(default)]
     pub(crate) limits: StoredSyntaxLimits,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct AnnotationSettings {
+    #[serde(
+        default = "default_annotation_hint_keys",
+        deserialize_with = "deserialize_annotation_hint_keys"
+    )]
+    pub hint_keys: String,
+    #[serde(default)]
+    pub uppercase_hints: bool,
+}
+
+impl Default for AnnotationSettings {
+    fn default() -> Self {
+        Self {
+            hint_keys: default_annotation_hint_keys(),
+            uppercase_hints: false,
+        }
+    }
+}
+
+fn default_annotation_hint_keys() -> String {
+    DEFAULT_ANNOTATION_HINT_KEYS.to_owned()
+}
+
+fn deserialize_annotation_hint_keys<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let hint_keys = String::deserialize(deserializer)?;
+    let mut seen = HashSet::new();
+    let mut count = 0usize;
+    for character in hint_keys.chars() {
+        count += 1;
+        if character.is_control() || UnicodeWidthChar::width(character) != Some(1) {
+            return Err(D::Error::custom(
+                "annotations.hint_keys must contain only printable single-width characters",
+            ));
+        }
+        if !seen.insert(character.to_ascii_lowercase()) {
+            return Err(D::Error::custom(
+                "annotations.hint_keys characters must be unique (ignoring ASCII case)",
+            ));
+        }
+    }
+    if count < 2 {
+        return Err(D::Error::custom(
+            "annotations.hint_keys must contain at least two characters",
+        ));
+    }
+    Ok(hint_keys)
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
@@ -640,6 +697,7 @@ pub struct SyntaxSettings {
     pub transparent_background: bool,
     pub diff: DiffSettings,
     pub notifications: NotificationSettings,
+    pub annotations: AnnotationSettings,
     pub limits: SyntaxLimits,
 }
 
@@ -658,6 +716,7 @@ impl Default for SyntaxSettings {
             transparent_background: false,
             diff: DiffSettings::default(),
             notifications: NotificationSettings::default(),
+            annotations: AnnotationSettings::default(),
             limits: SyntaxLimits::default(),
         }
     }

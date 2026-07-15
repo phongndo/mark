@@ -1,3 +1,4 @@
+mod annotation_target;
 mod error_log;
 mod filter_bar;
 mod header;

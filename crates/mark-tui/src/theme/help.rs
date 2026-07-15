@@ -111,6 +111,18 @@ pub(crate) const HELP_MENU_ROWS: &[HelpMenuRow] = &[
     ),
     HelpMenuRow::Section("Annotations"),
     HelpMenuRow::Binding(
+        HelpMenuKey::Global(GlobalAction::AnnotateLine),
+        "annotate visible line",
+    ),
+    HelpMenuRow::Binding(
+        HelpMenuKey::Global(GlobalAction::AnnotateBatch),
+        "batch annotate visible lines",
+    ),
+    HelpMenuRow::Binding(
+        HelpMenuKey::Static("hint / Esc"),
+        "select / cancel line target",
+    ),
+    HelpMenuRow::Binding(
         HelpMenuKey::Global(GlobalAction::AnnotationMenu),
         "search annotations",
     ),

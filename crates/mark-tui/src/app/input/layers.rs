@@ -31,6 +31,7 @@ enum KeyComponent {
     EditorShortcut,
     Quit,
     AnnotationDraftBindings,
+    AnnotationTarget,
 }
 
 impl<C: KeyEventContext> EventComponent<KeyEvent, C> for KeyComponent {
@@ -48,6 +49,7 @@ impl<C: KeyEventContext> EventComponent<KeyEvent, C> for KeyComponent {
             Self::EditorShortcut => ComponentId::EditorShortcut,
             Self::Quit => ComponentId::QuitKey,
             Self::AnnotationDraftBindings => ComponentId::AnnotationDraftBindings,
+            Self::AnnotationTarget => ComponentId::AnnotationTarget,
         }
     }
 
@@ -66,6 +68,7 @@ impl<C: KeyEventContext> EventComponent<KeyEvent, C> for KeyComponent {
             Self::EditorShortcut => handle_editor_shortcut_key_layer(key, ctx),
             Self::Quit => handle_quit_key_layer(key, ctx),
             Self::AnnotationDraftBindings => handle_annotation_save_or_cancel_key_layer(key, ctx),
+            Self::AnnotationTarget => handle_annotation_target_key_layer(key, ctx),
         }
     }
 }
@@ -83,6 +86,7 @@ const MOUSE_SCROLL_RESET_KEY_COMPONENT: KeyComponent = KeyComponent::MouseScroll
 const EDITOR_SHORTCUT_KEY_COMPONENT: KeyComponent = KeyComponent::EditorShortcut;
 const QUIT_KEY_COMPONENT: KeyComponent = KeyComponent::Quit;
 const ANNOTATION_DRAFT_BINDINGS_KEY_COMPONENT: KeyComponent = KeyComponent::AnnotationDraftBindings;
+const ANNOTATION_TARGET_KEY_COMPONENT: KeyComponent = KeyComponent::AnnotationTarget;
 
 const KEY_LAYERS: &[KeyLayer] = &[
     NAVIGATION_KEY_COMPONENT,
@@ -98,6 +102,7 @@ const KEY_LAYERS: &[KeyLayer] = &[
     EDITOR_SHORTCUT_KEY_COMPONENT,
     QUIT_KEY_COMPONENT,
     ANNOTATION_DRAFT_BINDINGS_KEY_COMPONENT,
+    ANNOTATION_TARGET_KEY_COMPONENT,
 ];
 
 fn key_route_result(should_quit: bool) -> ComponentEventResult {
@@ -122,6 +127,17 @@ pub(super) fn route_key_through_layers(
 ) -> MarkResult<ComponentEventResult> {
     let mut ctx = KeyEventCtx::new(app);
     route_event_through_layers(KEY_LAYERS, key, &mut ctx)
+}
+
+fn handle_annotation_target_key_layer(
+    key: KeyEvent,
+    ctx: &mut dyn KeyEventContext,
+) -> MarkResult<ComponentEventResult> {
+    Ok(if ctx.handle_annotation_target_key_if_open(key) {
+        ComponentEventResult::Consumed
+    } else {
+        ComponentEventResult::Ignored
+    })
 }
 
 fn handle_annotation_save_or_cancel_key_layer(

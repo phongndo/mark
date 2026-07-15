@@ -6,6 +6,7 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthStr;
 
+use super::annotation_target::annotation_target_header_line;
 use crate::{
     app::DiffApp,
     controls::BranchMenu,
@@ -28,6 +29,9 @@ pub(crate) fn draw_header(frame: &mut Frame<'_>, app: &DiffApp, area: Rect) {
 pub(crate) fn statusline_header_line(app: &DiffApp, width: usize) -> Line<'static> {
     if width == 0 {
         return Line::default();
+    }
+    if let Some(mode) = app.annotations_state.annotation_target_mode.as_ref() {
+        return annotation_target_header_line(app, mode, width);
     }
 
     let right_max_width = statusline_right_max_width(width);

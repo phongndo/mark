@@ -201,6 +201,7 @@ impl DiffApp {
             .unwrap_or_default();
         self.close_annotation_menu();
         self.jump_to_annotation(&item.key);
+        self.annotations_state.sticky_annotation_draft = false;
         self.annotations_state.annotation_draft = Some(AnnotationDraft {
             key: item.key,
             model_row_index: item.model_row,
@@ -340,6 +341,7 @@ impl DiffApp {
         };
         let Some(model_row_index) = self.annotation_model_row(&key) else {
             self.annotations_state.annotation_draft = None;
+            self.annotations_state.sticky_annotation_draft = false;
             self.runtime.dirty = true;
             return;
         };
@@ -361,6 +363,7 @@ impl DiffApp {
             .matches_single(GlobalAction::CancelMark, key)
         {
             self.annotations_state.annotation_draft = None;
+            self.annotations_state.sticky_annotation_draft = false;
             self.set_scroll_with_grep_sync(
                 self.viewport.scroll,
                 false,
@@ -437,6 +440,10 @@ impl DiffApp {
             false,
             HunkFocusScrollBehavior::Preserve,
         );
+        let sticky = std::mem::take(&mut self.annotations_state.sticky_annotation_draft);
+        if sticky {
+            self.open_sticky_annotation_target_mode();
+        }
         self.runtime.dirty = true;
     }
 

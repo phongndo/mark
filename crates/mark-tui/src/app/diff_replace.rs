@@ -30,6 +30,7 @@ impl DiffApp {
     }
 
     pub(crate) fn replace_path_changeset(&mut self, path: &Path, path_changeset: Changeset) {
+        self.close_annotation_target_mode();
         self.invalidate_diff_cache();
         let selected_path = self
             .document
@@ -85,6 +86,7 @@ impl DiffApp {
         cached: DiffCacheEntry,
         branch_metadata: BranchMetadataPolicy,
     ) {
+        self.close_annotation_target_mode();
         let DiffCacheEntry {
             changeset,
             search_index,
@@ -241,6 +243,7 @@ impl DiffApp {
             self.runtime.dirty = true;
             return;
         }
+        self.close_annotation_target_mode();
 
         let selected_path = self
             .document

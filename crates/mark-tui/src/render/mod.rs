@@ -1,3 +1,4 @@
+pub(crate) mod annotation_hints;
 pub(crate) mod annotations;
 pub(crate) mod compositor;
 pub(crate) mod diff;
@@ -115,7 +116,8 @@ impl RenderContext for AppRenderCtx<'_> {
             ComponentId::BranchMenu => draw_branch_menu(frame, self.app, area),
             ComponentId::CommitMenu => draw_commit_menu(frame, self.app, area),
             ComponentId::HelpMenu => draw_help_menu(frame, self.app, area),
-            ComponentId::AnnotationDraftBindings
+            ComponentId::AnnotationTarget
+            | ComponentId::AnnotationDraftBindings
             | ComponentId::QuitKey
             | ComponentId::EditorShortcut
             | ComponentId::MouseScrollReset

@@ -43,6 +43,8 @@ pub(crate) const NORMAL_GLOBAL_ACTIONS: &[GlobalAction] = &[
     GlobalAction::CommitPicker,
     GlobalAction::OptionsMenu,
     GlobalAction::AnnotationMenu,
+    GlobalAction::AnnotateLine,
+    GlobalAction::AnnotateBatch,
     GlobalAction::FileBrowser,
     GlobalAction::PreviousFile,
     GlobalAction::NextFile,

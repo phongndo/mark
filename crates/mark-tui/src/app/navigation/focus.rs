@@ -17,6 +17,7 @@ impl DiffApp {
         visible_files: &[FileIndex],
         hunk_focus_behavior: HunkFocusModelBehavior,
     ) {
+        self.close_annotation_target_mode();
         let previous_manual_hunk_focus = self.viewport.manual_hunk_focus;
         self.document.model = UiModel::new_filtered(
             &self.document.changeset,

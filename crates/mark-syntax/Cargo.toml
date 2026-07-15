@@ -17,6 +17,7 @@ toml.workspace = true
 unicode-segmentation.workspace = true
 unicode-general-category.workspace = true
 unicode-script.workspace = true
+unicode-width.workspace = true
 
 [features]
 # Benchmark-only allocator trial: swaps the global allocator in the profiling

@@ -12,6 +12,7 @@ use crate::keymap::{GlobalAction, KeyPress};
 pub(super) trait KeyEventContext:
     FilterInputContext + MenuKeyContext + NavigationContext
 {
+    fn handle_annotation_target_key_if_open(&mut self, key: KeyEvent) -> bool;
     fn handle_annotation_save_or_cancel_key(&mut self, key: KeyEvent) -> bool;
     fn reset_mouse_scroll(&mut self);
     fn editor_shortcut_requested(&self, key: KeyEvent) -> bool;
@@ -34,6 +35,10 @@ impl<'a> KeyEventCtx<'a> {
 }
 
 impl KeyEventContext for KeyEventCtx<'_> {
+    fn handle_annotation_target_key_if_open(&mut self, key: KeyEvent) -> bool {
+        self.app.handle_annotation_target_key(key)
+    }
+
     fn handle_annotation_save_or_cancel_key(&mut self, key: KeyEvent) -> bool {
         self.app.handle_annotation_save_or_cancel_key(key)
     }

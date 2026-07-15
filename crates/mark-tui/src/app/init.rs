@@ -399,6 +399,8 @@ impl DiffApp {
             annotations_state: AnnotationState {
                 annotations: AnnotationStore::default(),
                 annotation_draft: None,
+                annotation_target_mode: None,
+                sticky_annotation_draft: false,
             },
             overlays: OverlayState {
                 active_overlay: ActiveOverlay::None,

@@ -102,6 +102,7 @@ pub(crate) fn settings_from_stored(stored: StoredSyntaxSettings) -> SyntaxSettin
         transparent_background: stored.transparent_background,
         diff: diff_from_stored(stored.diff),
         notifications: notifications_from_stored(stored.notifications),
+        annotations: stored.annotations,
         limits: limits_from_stored(stored.limits),
     }
 }

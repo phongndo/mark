@@ -4,7 +4,7 @@ use super::{
     OptionsDraft, PendingDiffLoad, PendingDiffPrefetch, PendingFilterApply, PendingReviewLoad,
     SyntaxStartupMode, WrappedVisualLayout,
 };
-use crate::annotation::{AnnotationDraft, AnnotationStore};
+use crate::annotation::{AnnotationDraft, AnnotationStore, AnnotationTargetMode};
 use crate::controls::{BranchMenu, DiffFilterKind, DiffLayoutMode, GitCommit};
 use crate::keymap::{KeyPress, Keymap};
 use crate::live_diff::live_diff_supported;
@@ -120,6 +120,8 @@ impl FileSidebarState {
 pub(crate) struct AnnotationState {
     pub(crate) annotations: AnnotationStore,
     pub(crate) annotation_draft: Option<AnnotationDraft>,
+    pub(crate) annotation_target_mode: Option<AnnotationTargetMode>,
+    pub(crate) sticky_annotation_draft: bool,
 }
 
 #[derive(Debug)]

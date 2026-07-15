@@ -7,6 +7,7 @@ use crate::render::viewport_plan::model_row_for_viewport_row;
 
 impl DiffApp {
     pub(crate) fn handle_click(&mut self, column: u16, row: u16) {
+        self.close_annotation_target_mode();
         let clicked_selector = row == 0 && column < diff_selector_width(&self.document.options);
         let clicked_branch_selector = (row == 0)
             .then(|| self.branch_selector_at(column))

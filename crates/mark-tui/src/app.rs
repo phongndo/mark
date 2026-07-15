@@ -1,5 +1,6 @@
 mod action;
 mod annotation_editor;
+mod annotation_targets;
 mod annotations;
 mod choices;
 mod clipboard;

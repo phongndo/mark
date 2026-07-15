@@ -140,6 +140,27 @@ fn keymap_loads_legacy_syntax_toml_keymaps() {
 }
 
 #[test]
+fn new_annotation_default_does_not_conflict_with_existing_custom_binding() {
+    let keymap = Keymap::parse(
+        r#"
+            [keymap.global]
+            reload = ["a", "A"]
+            "#,
+    )
+    .expect("existing custom bindings should take precedence over new defaults");
+
+    assert_eq!(keymap.global_action_label(GlobalAction::Reload), "a, A");
+    assert_eq!(
+        keymap.global_action_label(GlobalAction::AnnotateLine),
+        "unbound"
+    );
+    assert_eq!(
+        keymap.global_action_label(GlobalAction::AnnotateBatch),
+        "unbound"
+    );
+}
+
+#[test]
 fn new_view_defaults_do_not_conflict_with_existing_custom_bindings() {
     let keymap = Keymap::parse(
         r#"
@@ -260,6 +281,14 @@ fn default_mark_bindings_are_configurable_actions() {
     let keymap = Keymap::default();
 
     assert!(keymap.matches_single(
+        GlobalAction::AnnotateLine,
+        KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)
+    ));
+    assert!(keymap.matches_single(
+        GlobalAction::AnnotateBatch,
+        KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT)
+    ));
+    assert!(keymap.matches_single(
         GlobalAction::SaveMark,
         KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL)
     ));
@@ -318,6 +347,14 @@ fn default_review_actions_use_mnemonic_keys() {
     assert!(!keymap.matches_single(
         GlobalAction::AnnotationMenu,
         KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)
+    ));
+    assert!(keymap.matches_single(
+        GlobalAction::AnnotateLine,
+        KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)
+    ));
+    assert!(keymap.matches_single(
+        GlobalAction::AnnotateBatch,
+        KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT)
     ));
     assert!(keymap.matches_single(
         GlobalAction::Layout,

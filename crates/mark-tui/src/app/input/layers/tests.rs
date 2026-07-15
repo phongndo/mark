@@ -7,6 +7,7 @@ use crate::app::controllers::{
 
 #[derive(Default)]
 struct FakeKeyCtx {
+    annotation_target: bool,
     annotation_save_or_cancel: bool,
     reset_mouse_scroll_calls: usize,
     editor_shortcut: bool,
@@ -29,6 +30,10 @@ struct FakeKeyCtx {
 }
 
 impl KeyEventContext for FakeKeyCtx {
+    fn handle_annotation_target_key_if_open(&mut self, _key: KeyEvent) -> bool {
+        self.annotation_target
+    }
+
     fn handle_annotation_save_or_cancel_key(&mut self, _key: KeyEvent) -> bool {
         self.annotation_save_or_cancel
     }
@@ -149,6 +154,23 @@ impl NavigationContext for FakeKeyCtx {
 
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
+}
+
+#[test]
+fn annotation_target_mode_preempts_lower_key_layers() {
+    let mut ctx = FakeKeyCtx {
+        annotation_target: true,
+        annotation_save_or_cancel: true,
+        editor_shortcut: true,
+        navigation: true,
+        ..Default::default()
+    };
+
+    let result = route_event_through_layers(KEY_LAYERS, key(KeyCode::Char('a')), &mut ctx)
+        .expect("route key");
+
+    assert_eq!(result, ComponentEventResult::Consumed);
+    assert_eq!(ctx.reset_mouse_scroll_calls, 0);
 }
 
 #[test]

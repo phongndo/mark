@@ -50,6 +50,10 @@ gutter_background = "delta"
 inline_background = "strong"
 sign_style = "bold"
 
+[annotations]
+hint_keys = "asdfghjklqwertyuiopzxcvbnm"
+uppercase_hints = false
+
 [limits]
 max_source_kib = 1024
 max_line_kib = 8
@@ -72,6 +76,8 @@ base_branch = "m b"
 commit_picker = "m c"
 options_menu = "o"
 annotation_menu = "n"
+annotate_line = "a"
+annotate_batch = "A"
 file_browser = "b"
 previous_file = "shift-tab"
 next_file = "tab"
@@ -260,9 +266,24 @@ sign_style = "bold"          # normal, bold
 
 `word_background` and `word_diff_background` are accepted aliases for
 `inline_background`. Legacy `[diff] empty_fill` and `empty_diff_fill` are
-accepted as aliases for `[decorations] empty_fill`. Collapsed unchanged context expands fully when clicked.
-Legacy `context_lines`, `context_expand`, and `expand_context` settings are
-accepted for compatibility but no longer limit interactive context expansion.
+accepted as aliases for `[decorations] empty_fill`. Collapsed unchanged context
+expands fully when clicked. Legacy `context_lines`, `context_expand`, and
+`expand_context` settings are accepted for compatibility but no longer limit
+interactive context expansion.
+
+## Annotation targeting
+
+Annotation targeting uses a QWERTY-oriented sequence by default:
+
+```toml
+[annotations]
+hint_keys = "asdfghjklqwertyuiopzxcvbnm"
+uppercase_hints = false
+```
+
+Set `hint_keys` to a preferred keyboard layout. Provide at least two characters,
+each unique, printable, and one terminal cell wide. Set `uppercase_hints = true`
+to display ASCII letters in uppercase while continuing to accept either case.
 
 ## Highlight limits
 
@@ -308,8 +329,9 @@ MARK_CPU_THREADS=4   # capped at 8; set 0 or 1 to force sequential work
 Global bindings can be one-key or two-key bindings. A one-key global binding
 cannot also be used as a two-key prefix. Menu bindings are single-key and apply
 to searchable menus. Printable menu bindings override text input, so prefer
-non-printing keys to keep type-to-filter behavior. `edit_hunk`, `save_mark`, and
-`cancel_mark` must be single-key bindings.
+non-printing keys to keep type-to-filter behavior. `annotate_line`,
+`annotate_batch`, `edit_hunk`, `save_mark`, and `cancel_mark` must be single-key
+bindings.
 
 Bindings can be a string or a list of strings:
 
@@ -322,6 +344,8 @@ review_target = "m r"
 head_branch = "m h"
 base_branch = "m b"
 commit_picker = "m c"
+annotate_line = "a"
+annotate_batch = "A"
 copy_marks = "y"
 save_mark = "ctrl-s"
 cancel_mark = "esc"

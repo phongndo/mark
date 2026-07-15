@@ -247,3 +247,164 @@ pub(crate) struct AnnotationDraft {
 }
 
 pub(crate) type AnnotationStore = HashMap<AnnotationKey, String>;
+
+pub(crate) const ANNOTATION_HINT_ALPHABET: &str = mark_syntax::DEFAULT_ANNOTATION_HINT_KEYS;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AnnotationTarget {
+    pub(crate) key: AnnotationKey,
+    pub(crate) model_row_index: usize,
+    pub(crate) visual_scroll: usize,
+    pub(crate) viewport_row: usize,
+    pub(crate) hint: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AnnotationTargetMode {
+    pub(crate) targets: Vec<AnnotationTarget>,
+    pub(crate) prefix: String,
+    pub(crate) sticky: bool,
+}
+
+impl AnnotationTargetMode {
+    pub(crate) fn target_at_visual_scroll(
+        &self,
+        visual_scroll: usize,
+    ) -> Option<&AnnotationTarget> {
+        self.targets.iter().find(|target| {
+            target.visual_scroll == visual_scroll && target.hint.starts_with(&self.prefix)
+        })
+    }
+
+    pub(crate) fn matching_target_count(&self) -> usize {
+        self.targets
+            .iter()
+            .filter(|target| target.hint.starts_with(&self.prefix))
+            .count()
+    }
+}
+
+pub(crate) fn annotation_hint_codes(count: usize, hint_keys: &str) -> Vec<String> {
+    if count == 0 {
+        return Vec::new();
+    }
+
+    let mut alphabet = hint_keys.chars().collect::<Vec<_>>();
+    if alphabet.len() < 2 {
+        alphabet = ANNOTATION_HINT_ALPHABET.chars().collect();
+    }
+    let radix = alphabet.len();
+    let mut depth = 1usize;
+    let mut capacity = radix;
+    while capacity < count {
+        depth = depth.saturating_add(1);
+        capacity = capacity.saturating_mul(radix);
+    }
+
+    if depth == 1 {
+        return (0..count)
+            .map(|index| fixed_width_hint(index, 1, &alphabet))
+            .collect();
+    }
+
+    let shorter_capacity = capacity / radix;
+    // Use as many short leaves as possible while leaving enough unused
+    // prefixes to fan out into the remaining targets. This keeps every hint
+    // prefix-free, so a complete short hint can be selected immediately.
+    let short_count = capacity
+        .saturating_sub(count)
+        .saturating_div(radix.saturating_sub(1))
+        .min(shorter_capacity);
+    let mut hints = Vec::with_capacity(count);
+    for index in 0..short_count {
+        hints.push(fixed_width_hint(index, depth - 1, &alphabet));
+    }
+
+    let mut remaining = count.saturating_sub(short_count);
+    for prefix_index in short_count..shorter_capacity {
+        if remaining == 0 {
+            break;
+        }
+        let prefix = fixed_width_hint(prefix_index, depth - 1, &alphabet);
+        for character in &alphabet {
+            if remaining == 0 {
+                break;
+            }
+            let mut hint = String::with_capacity(depth);
+            hint.push_str(&prefix);
+            hint.push(*character);
+            hints.push(hint);
+            remaining -= 1;
+        }
+    }
+
+    hints
+}
+
+fn fixed_width_hint(mut index: usize, width: usize, alphabet: &[char]) -> String {
+    let radix = alphabet.len();
+    let mut hint = vec![alphabet[0]; width];
+    for position in (0..width).rev() {
+        hint[position] = alphabet[index % radix];
+        index /= radix;
+    }
+    hint.into_iter().collect()
+}
+
+#[cfg(test)]
+mod annotation_hint_tests {
+    use std::collections::HashSet;
+
+    use super::{ANNOTATION_HINT_ALPHABET, annotation_hint_codes};
+
+    fn assert_prefix_free(hints: &[String]) {
+        let unique = hints.iter().collect::<HashSet<_>>();
+        assert_eq!(unique.len(), hints.len());
+        for (index, hint) in hints.iter().enumerate() {
+            assert!(
+                hints
+                    .iter()
+                    .enumerate()
+                    .all(|(other_index, other)| index == other_index || !other.starts_with(hint)),
+                "{hint:?} is a prefix of another annotation hint"
+            );
+        }
+    }
+
+    #[test]
+    fn annotation_hints_use_easy_single_keys_when_they_fit() {
+        let hints = annotation_hint_codes(26, ANNOTATION_HINT_ALPHABET);
+
+        assert_eq!(hints.first().map(String::as_str), Some("a"));
+        assert_eq!(hints.get(1).map(String::as_str), Some("s"));
+        assert!(hints.iter().all(|hint| hint.len() == 1));
+        assert_prefix_free(&hints);
+    }
+
+    #[test]
+    fn annotation_hints_mix_short_and_long_prefix_free_codes() {
+        let hints = annotation_hint_codes(27, ANNOTATION_HINT_ALPHABET);
+
+        assert_eq!(hints.iter().filter(|hint| hint.len() == 1).count(), 25);
+        assert_eq!(hints.iter().filter(|hint| hint.len() == 2).count(), 2);
+        assert_prefix_free(&hints);
+    }
+
+    #[test]
+    fn annotation_hints_scale_beyond_two_keys_without_collisions() {
+        let hints = annotation_hint_codes(677, ANNOTATION_HINT_ALPHABET);
+
+        assert_eq!(hints.len(), 677);
+        assert_eq!(hints.iter().filter(|hint| hint.len() == 2).count(), 675);
+        assert_eq!(hints.iter().filter(|hint| hint.len() == 3).count(), 2);
+        assert_prefix_free(&hints);
+    }
+
+    #[test]
+    fn annotation_hints_use_the_configured_unicode_alphabet() {
+        let hints = annotation_hint_codes(4, "αβγδ");
+
+        assert_eq!(hints, ["α", "β", "γ", "δ"]);
+        assert_prefix_free(&hints);
+    }
+}

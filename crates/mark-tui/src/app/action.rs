@@ -18,6 +18,8 @@ pub(crate) enum AppAction {
     ToggleCommitMenu,
     OpenOptionsMenu,
     OpenAnnotationMenu,
+    StartAnnotation,
+    StartAnnotationBatch,
     ToggleFileSidebar,
     PreviousFile,
     NextFile,
@@ -54,6 +56,8 @@ impl AppAction {
             GlobalAction::CommitPicker => Self::ToggleCommitMenu,
             GlobalAction::OptionsMenu => Self::OpenOptionsMenu,
             GlobalAction::AnnotationMenu => Self::OpenAnnotationMenu,
+            GlobalAction::AnnotateLine => Self::StartAnnotation,
+            GlobalAction::AnnotateBatch => Self::StartAnnotationBatch,
             GlobalAction::FileBrowser => Self::ToggleFileSidebar,
             GlobalAction::PreviousFile => Self::PreviousFile,
             GlobalAction::NextFile => Self::NextFile,
@@ -131,6 +135,14 @@ impl DiffApp {
             }
             AppAction::OpenAnnotationMenu => {
                 self.open_annotation_menu();
+                Ok(ActionOutcome::consumed())
+            }
+            AppAction::StartAnnotation => {
+                self.open_annotation_target_mode();
+                Ok(ActionOutcome::consumed())
+            }
+            AppAction::StartAnnotationBatch => {
+                self.open_sticky_annotation_target_mode();
                 Ok(ActionOutcome::consumed())
             }
             AppAction::ToggleFileSidebar => {
