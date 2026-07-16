@@ -11,12 +11,16 @@ pub mod scopes;
 pub mod state;
 pub mod tokenizer;
 
-use std::collections::{BTreeMap, BTreeSet};
+#[cfg(test)]
+mod closure_parity_tests;
+
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use mark_core::{MarkError, MarkResult};
 
 use crate::{HighlightedText, grammars};
 use counters::EngineCounters;
+use grammar::{CompiledGrammar, RuleBody, RuleRef};
 use tokenizer::{GrammarSet, TextMateTokenizer};
 
 #[derive(Debug)]
@@ -119,21 +123,10 @@ fn load_grammar_set(language: &str) -> MarkResult<(GrammarSet, state::GrammarId)
         MarkError::Usage(format!("bundled TextMate grammar `{language}` is missing"))
     })?;
     let root_scope = root_blob.scope_name.clone();
-    for decoded in grammar_blob_closure(bundle, &root_scope)? {
-        let blob = &bundle.grammar_blobs[decoded.index];
-        let source = std::str::from_utf8(&decoded.bytes).map_err(|_| {
-            MarkError::Usage(format!(
-                "bundled TextMate grammar `{}` is not UTF-8",
-                blob.language
-            ))
-        })?;
-        let grammar_id = grammars.load_and_add(source).map_err(|error| {
-            MarkError::Usage(format!(
-                "failed to load bundled TextMate grammar `{}`: {error}",
-                blob.language
-            ))
-        })?;
-        if blob.scope_name == root_scope {
+    for grammar in compiled_grammar_closure(bundle, &root_scope)? {
+        let is_root = grammar.scope_name == root_scope;
+        let grammar_id = grammars.add(grammar);
+        if is_root {
             root = Some(grammar_id);
         }
     }
@@ -147,220 +140,210 @@ fn load_grammar_set(language: &str) -> MarkResult<(GrammarSet, state::GrammarId)
     Ok((grammars, root))
 }
 
-struct DecodedGrammarBlob {
-    index: usize,
-    bytes: Vec<u8>,
-}
-
-fn grammar_blob_closure(
+/// Decode, parse, and compile exactly the external-include closure of one root.
+///
+/// `CompiledGrammar` retains the complete include graph, so dependency
+/// discovery can walk it directly. The previous path first parsed every JSON
+/// blob into `serde_json::Value` for discovery and then parsed the same bytes
+/// again for compilation. Embedded-heavy grammars paid that duplicate work on
+/// their first visible highlight.
+fn compiled_grammar_closure(
     bundle: &grammars::bundle::Bundle,
     root_scope: &str,
-) -> MarkResult<Vec<DecodedGrammarBlob>> {
+) -> MarkResult<Vec<CompiledGrammar>> {
+    let scope_indexes = bundle
+        .grammar_blobs
+        .iter()
+        .enumerate()
+        .map(|(index, blob)| (blob.scope_name.as_str(), index))
+        .collect::<HashMap<_, _>>();
     let mut pending = vec![(root_scope.to_owned(), None::<String>)];
-    let mut selected = BTreeSet::new();
-    let mut inspected = BTreeSet::new();
-    let mut decoded = std::collections::BTreeMap::new();
+    let mut selected = vec![false; bundle.grammar_blobs.len()];
+    let mut inspected = HashSet::new();
+    let mut compiled = vec![None::<CompiledGrammar>; bundle.grammar_blobs.len()];
+
     while let Some((scope, repository)) = pending.pop() {
-        let Some((index, blob)) = bundle
-            .grammar_blobs
-            .iter()
-            .enumerate()
-            .find(|(_, blob)| blob.scope_name == scope)
-        else {
+        let Some(&index) = scope_indexes.get(scope.as_str()) else {
             continue;
         };
-        selected.insert(index);
+        selected[index] = true;
         if !inspected.insert((index, repository.clone())) {
             continue;
         }
-        if let std::collections::btree_map::Entry::Vacant(entry) = decoded.entry(index) {
+        if compiled[index].is_none() {
+            let blob = &bundle.grammar_blobs[index];
             let bytes = blob.decoded_bytes().map_err(|error| {
                 MarkError::Usage(format!(
                     "failed to decode bundled TextMate grammar `{}`: {error:?}",
                     blob.language
                 ))
             })?;
-            let json = serde_json::from_slice::<serde_json::Value>(&bytes).map_err(|error| {
+            let source = std::str::from_utf8(&bytes).map_err(|_| {
                 MarkError::Usage(format!(
-                    "failed to inspect bundled TextMate grammar `{}`: {error}",
+                    "bundled TextMate grammar `{}` is not UTF-8",
                     blob.language
                 ))
             })?;
-            entry.insert((bytes, json));
+            compiled[index] = Some(
+                grammar::load_dev_grammar_from_str(state::GrammarId(0), source).map_err(
+                    |error| {
+                        MarkError::Usage(format!(
+                            "failed to load bundled TextMate grammar `{}`: {error}",
+                            blob.language
+                        ))
+                    },
+                )?,
+            );
         }
-        let json = &decoded
-            .get(&index)
-            .expect("decoded grammar inserted before dependency inspection")
-            .1;
-        collect_external_scopes(
-            json,
-            &blob.scope_name,
-            root_scope,
-            repository.as_deref(),
-            bundle,
-            &mut pending,
-        );
+        let grammar = compiled[index]
+            .as_ref()
+            .expect("selected grammar compiled before dependency inspection");
+        collect_compiled_dependencies(grammar, root_scope, repository.as_deref(), &mut pending);
     }
-    Ok(selected
-        .into_iter()
-        .map(|index| DecodedGrammarBlob {
-            index,
-            bytes: decoded
-                .remove(&index)
-                .expect("selected grammar decoded during dependency inspection")
-                .0,
-        })
-        .collect())
+
+    let mut closure = Vec::new();
+    for (index, is_selected) in selected.into_iter().enumerate() {
+        if !is_selected {
+            continue;
+        }
+        let mut grammar = compiled[index]
+            .take()
+            .expect("selected grammar compiled during dependency discovery");
+        grammar.id = state::GrammarId(
+            u16::try_from(closure.len()).expect("grammar closure fits in GrammarId"),
+        );
+        closure.push(grammar);
+    }
+    Ok(closure)
 }
 
-fn collect_external_scopes(
-    grammar: &serde_json::Value,
-    grammar_scope: &str,
+fn collect_compiled_dependencies(
+    grammar: &CompiledGrammar,
     root_scope: &str,
     repository_rule: Option<&str>,
-    bundle: &grammars::bundle::Bundle,
     pending: &mut Vec<(String, Option<String>)>,
 ) {
-    let Some(object) = grammar.as_object() else {
-        return;
-    };
-    let repository = object
-        .get("repository")
-        .and_then(serde_json::Value::as_object);
-    // Repository rules form a shared graph, not a tree. Keep completed names
-    // visited as well as active ones: removing them after recursion makes the
-    // Markdown dependency walk exponential (many fenced-language rules share
-    // the same CommonMark repositories).
-    let mut visited_local = BTreeSet::new();
+    let mut visited_rules = BTreeSet::new();
+    let mut visited_repositories = BTreeSet::new();
     if let Some(name) = repository_rule {
-        if let Some(rule) = repository.and_then(|repository| repository.get(name)) {
-            collect_rule_dependencies(
-                rule,
-                grammar_scope,
+        collect_compiled_rule_ref(
+            grammar,
+            &RuleRef::Repository(name.to_owned()),
+            root_scope,
+            pending,
+            &mut visited_rules,
+            &mut visited_repositories,
+        );
+        return;
+    }
+
+    collect_compiled_rule_refs(
+        grammar,
+        &grammar.top_level,
+        root_scope,
+        pending,
+        &mut visited_rules,
+        &mut visited_repositories,
+    );
+    // Inline injections belong only to the root. Dependencies can themselves
+    // define injections, but loading those grammars as includes must not
+    // activate or expand the unrelated injection rules.
+    if grammar.scope_name == root_scope {
+        for injection in &grammar.injections {
+            collect_compiled_rule_refs(
+                grammar,
+                &injection.patterns,
                 root_scope,
-                repository,
-                bundle,
                 pending,
-                &mut visited_local,
+                &mut visited_rules,
+                &mut visited_repositories,
             );
         }
-    } else {
-        if let Some(patterns) = object.get("patterns") {
-            collect_pattern_dependencies(
+    }
+}
+
+fn collect_compiled_rule_refs(
+    grammar: &CompiledGrammar,
+    refs: &[RuleRef],
+    root_scope: &str,
+    pending: &mut Vec<(String, Option<String>)>,
+    visited_rules: &mut BTreeSet<state::RuleId>,
+    visited_repositories: &mut BTreeSet<String>,
+) {
+    for rule_ref in refs {
+        collect_compiled_rule_ref(
+            grammar,
+            rule_ref,
+            root_scope,
+            pending,
+            visited_rules,
+            visited_repositories,
+        );
+    }
+}
+
+fn collect_compiled_rule_ref(
+    grammar: &CompiledGrammar,
+    rule_ref: &RuleRef,
+    root_scope: &str,
+    pending: &mut Vec<(String, Option<String>)>,
+    visited_rules: &mut BTreeSet<state::RuleId>,
+    visited_repositories: &mut BTreeSet<String>,
+) {
+    match rule_ref {
+        RuleRef::Rule(rule_id) => {
+            if !visited_rules.insert(*rule_id) {
+                return;
+            }
+            let Some(rule) = grammar.rule(*rule_id) else {
+                return;
+            };
+            let patterns = match &rule.body {
+                RuleBody::BeginEnd { patterns, .. }
+                | RuleBody::BeginWhile { patterns, .. }
+                | RuleBody::IncludeOnly { patterns } => patterns,
+                // Match captures are retokenization rules. vscode-textmate's
+                // dependency processor does not follow capture-only includes.
+                RuleBody::Match { .. } => return,
+            };
+            collect_compiled_rule_refs(
+                grammar,
                 patterns,
-                grammar_scope,
                 root_scope,
-                repository,
-                bundle,
                 pending,
-                &mut visited_local,
+                visited_rules,
+                visited_repositories,
             );
         }
-        // Inline injections are owned by the root grammar. Dependencies may
-        // themselves contain `injections`, but loading them as includes must
-        // not activate (or load the closure of) those unrelated rules.
-        if grammar_scope == root_scope
-            && let Some(injections) = object
-                .get("injections")
-                .and_then(serde_json::Value::as_object)
-        {
-            for rule in injections.values() {
-                collect_rule_dependencies(
-                    rule,
-                    grammar_scope,
+        RuleRef::Repository(name) => {
+            // vscode-textmate's dependency processor walks the grammar's
+            // top-level repository, but does not expand repositories declared
+            // inside an include-only rule. The compiler gives those lexical
+            // overlays a collision-free internal name; following them here
+            // would load large unrelated closures (notably every fenced
+            // language reachable from Wikitext) and change the established
+            // bundled-closure contract.
+            if name.starts_with("$mark.local.") || !visited_repositories.insert(name.clone()) {
+                return;
+            }
+            if let Some(rule_ref) = grammar.repository.get(name) {
+                collect_compiled_rule_ref(
+                    grammar,
+                    rule_ref,
                     root_scope,
-                    repository,
-                    bundle,
                     pending,
-                    &mut visited_local,
+                    visited_rules,
+                    visited_repositories,
                 );
             }
         }
-    }
-}
-
-fn collect_pattern_dependencies(
-    patterns: &serde_json::Value,
-    grammar_scope: &str,
-    root_scope: &str,
-    repository: Option<&serde_json::Map<String, serde_json::Value>>,
-    bundle: &grammars::bundle::Bundle,
-    pending: &mut Vec<(String, Option<String>)>,
-    visited_local: &mut BTreeSet<String>,
-) {
-    let Some(patterns) = patterns.as_array() else {
-        return;
-    };
-    for rule in patterns {
-        collect_rule_dependencies(
-            rule,
-            grammar_scope,
-            root_scope,
-            repository,
-            bundle,
-            pending,
-            visited_local,
-        );
-    }
-}
-
-fn collect_rule_dependencies(
-    rule: &serde_json::Value,
-    grammar_scope: &str,
-    root_scope: &str,
-    repository: Option<&serde_json::Map<String, serde_json::Value>>,
-    bundle: &grammars::bundle::Bundle,
-    pending: &mut Vec<(String, Option<String>)>,
-    visited_local: &mut BTreeSet<String>,
-) {
-    let Some(rule) = rule.as_object() else {
-        return;
-    };
-    if let Some(include) = rule.get("include").and_then(serde_json::Value::as_str) {
-        if let Some(name) = include.strip_prefix('#') {
-            if visited_local.insert(name.to_owned())
-                && let Some(local) = repository.and_then(|repository| repository.get(name))
-            {
-                collect_rule_dependencies(
-                    local,
-                    grammar_scope,
-                    root_scope,
-                    repository,
-                    bundle,
-                    pending,
-                    visited_local,
-                );
-            }
-        } else if include == "$self" {
-            pending.push((grammar_scope.to_owned(), None));
-        } else if include == "$base" {
-            pending.push((root_scope.to_owned(), None));
-        } else {
-            let (scope, repository) = include
-                .split_once('#')
-                .map_or((include, None), |(scope, repository)| {
-                    (scope, Some(repository.to_owned()))
-                });
-            if bundle.grammar_blob_for_scope(scope).is_some() {
-                pending.push((scope.to_owned(), repository));
+        RuleRef::SelfRef => pending.push((grammar.scope_name.clone(), None)),
+        RuleRef::BaseRef => pending.push((root_scope.to_owned(), None)),
+        RuleRef::External { scope, repository } => {
+            if let Some(scope) = grammar.scope(*scope) {
+                pending.push((scope.to_owned(), repository.clone()));
             }
         }
-        return;
-    }
-
-    // vscode-textmate's dependency processor follows ordinary rule patterns,
-    // but not capture retokenization patterns. A capture-only external include
-    // is therefore unresolved unless that grammar is reachable elsewhere.
-    if let Some(patterns) = rule.get("patterns") {
-        collect_pattern_dependencies(
-            patterns,
-            grammar_scope,
-            root_scope,
-            repository,
-            bundle,
-            pending,
-            visited_local,
-        );
     }
 }
 
