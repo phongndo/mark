@@ -35,7 +35,7 @@ now. Reinstall with the command above if you used one of those paths before.
 Installer environment variables use the `MARK_` prefix:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/phongndo/mark/main/scripts/install.sh | MARK_VERSION=0.10.1 sh
+curl -fsSL https://raw.githubusercontent.com/phongndo/mark/main/scripts/install.sh | MARK_VERSION=0.10.2 sh
 curl -fsSL https://raw.githubusercontent.com/phongndo/mark/main/scripts/install.sh | MARK_INSTALL_DIR=/usr/local/bin sh
 ```
 
@@ -43,7 +43,7 @@ Update a curl-installed binary in place:
 
 ```sh
 mark update
-mark update --target-version 0.10.1
+mark update --target-version 0.10.2
 ```
 
 Nightly builds are published from `main` as a prerelease channel. Switch the
