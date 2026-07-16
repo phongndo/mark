@@ -1884,7 +1884,7 @@ fn colorscheme_picker_mouse_selection_persists_draft() {
         .iter()
         .enumerate()
         .find_map(|(row, text)| {
-            text.find("gruvbox-dark")
+            text.find("catppuccin-mocha")
                 .map(|column| (row as u16, column as u16))
         })
         .expect("target colorscheme row should render");
@@ -1899,17 +1899,17 @@ fn colorscheme_picker_mouse_selection_persists_draft() {
     .expect("mouse click should select colorscheme");
 
     assert!(!app.overlays.color_scheme_picker_is_open());
-    assert_eq!(app.config.color_scheme, BuiltinTheme::GruvboxDark);
+    assert_eq!(app.config.color_scheme, BuiltinTheme::CatppuccinMocha);
     assert_eq!(
         app.overlays.options_menu_draft.color_scheme,
-        BuiltinTheme::GruvboxDark
+        BuiltinTheme::CatppuccinMocha
     );
     let (draft, changed_item) = app
         .config
         .last_persisted_options_menu_draft
         .expect("mouse-selected colorscheme should be persisted");
     assert_eq!(changed_item, OptionsMenuItem::ColorScheme);
-    assert_eq!(draft.color_scheme, BuiltinTheme::GruvboxDark);
+    assert_eq!(draft.color_scheme, BuiltinTheme::CatppuccinMocha);
 }
 
 #[test]
@@ -2322,9 +2322,10 @@ fn colorscheme_picker_previews_hovered_theme_and_reverts_on_close() {
             let text: String = (0..buffer.area.width)
                 .map(|x| buffer.cell((x, y)).expect("cell should exist").symbol())
                 .collect();
-            text.find("gruvbox-dark").map(|column| (y, column as u16))
+            text.find("catppuccin-mocha")
+                .map(|column| (y, column as u16))
         })
-        .expect("gruvbox row should render");
+        .expect("target theme row should render");
 
     app.handle_mouse(MouseEvent {
         kind: MouseEventKind::Moved,
@@ -2334,10 +2335,10 @@ fn colorscheme_picker_previews_hovered_theme_and_reverts_on_close() {
     })
     .expect("hover should preview colorscheme");
 
-    assert_eq!(app.config.color_scheme, BuiltinTheme::GruvboxDark);
+    assert_eq!(app.config.color_scheme, BuiltinTheme::CatppuccinMocha);
     assert_eq!(
         app.config.theme.background,
-        DiffTheme::gruvbox_dark().background
+        DiffTheme::catppuccin_mocha().background
     );
 
     app.handle_mouse(MouseEvent {
@@ -2375,7 +2376,7 @@ fn colorscheme_picker_previews_first_hovered_theme() {
         .iter()
         .enumerate()
         .find_map(|(row, text)| {
-            text.find("catppuccin-latte")
+            text.find("ayu-dark")
                 .map(|column| (row as u16, column as u16))
         })
         .expect("first colorscheme row should render");
@@ -2390,10 +2391,12 @@ fn colorscheme_picker_previews_first_hovered_theme() {
     .expect("hover should preview first colorscheme");
 
     assert_eq!(app.overlays.color_scheme_picker.selected, 0);
-    assert_eq!(app.config.color_scheme, BuiltinTheme::CatppuccinLatte);
+    assert_eq!(app.config.color_scheme, BuiltinTheme::AyuDark);
     assert_eq!(
         app.config.theme.background,
-        DiffTheme::catppuccin_latte().background
+        builtin_diff_theme(Some("ayu-dark"))
+            .expect("ayu-dark theme should load")
+            .background
     );
 }
 
@@ -3116,76 +3119,82 @@ fn color_overrides_layer_on_colorscheme() {
 }
 
 #[test]
-fn color_scheme_picker_lists_supported_builtin_themes_only() {
+fn color_scheme_picker_lists_supported_builtin_themes_alphabetically() {
     assert_eq!(
         BUILTIN_THEMES,
         &[
-            BuiltinTheme::System,
-            BuiltinTheme::CatppuccinLatte,
+            BuiltinTheme::AyuDark,
+            BuiltinTheme::AyuLight,
+            BuiltinTheme::AyuMirage,
             BuiltinTheme::CatppuccinFrappe,
+            BuiltinTheme::CatppuccinLatte,
             BuiltinTheme::CatppuccinMacchiato,
             BuiltinTheme::CatppuccinMocha,
-            BuiltinTheme::GruvboxDark,
-            BuiltinTheme::GruvboxLight,
+            BuiltinTheme::Duckbones,
+            BuiltinTheme::EverforestDark,
+            BuiltinTheme::EverforestLight,
+            BuiltinTheme::ForestbonesDark,
+            BuiltinTheme::ForestbonesLight,
             BuiltinTheme::GithubDark,
             BuiltinTheme::GithubDarkHighContrast,
             BuiltinTheme::GithubLight,
             BuiltinTheme::GithubLightHighContrast,
-            BuiltinTheme::Tokyonight,
-            BuiltinTheme::Nordic,
-            BuiltinTheme::Nord,
-            BuiltinTheme::AyuDark,
-            BuiltinTheme::AyuLight,
-            BuiltinTheme::AyuMirage,
-            BuiltinTheme::Molokai,
-            BuiltinTheme::ZenbonesDark,
-            BuiltinTheme::ZenbonesLight,
-            BuiltinTheme::Duckbones,
-            BuiltinTheme::ForestbonesDark,
-            BuiltinTheme::ForestbonesLight,
+            BuiltinTheme::GruvboxDark,
+            BuiltinTheme::GruvboxLight,
+            BuiltinTheme::GruvboxMaterialDark,
+            BuiltinTheme::GruvboxMaterialLight,
+            BuiltinTheme::KanagawaDragon,
+            BuiltinTheme::KanagawaLotus,
+            BuiltinTheme::KanagawaWave,
             BuiltinTheme::Kanagawabones,
+            BuiltinTheme::Mfd,
+            BuiltinTheme::MfdAmber,
+            BuiltinTheme::MfdBlackout,
+            BuiltinTheme::MfdDark,
+            BuiltinTheme::MfdFlir,
+            BuiltinTheme::MfdFlirBh,
+            BuiltinTheme::MfdFlirFusion,
+            BuiltinTheme::MfdFlirRh,
+            BuiltinTheme::MfdGblDark,
+            BuiltinTheme::MfdGblLight,
+            BuiltinTheme::MfdHud,
+            BuiltinTheme::MfdLumon,
+            BuiltinTheme::MfdMono,
+            BuiltinTheme::MfdNerv,
+            BuiltinTheme::MfdNvg,
+            BuiltinTheme::MfdPaper,
+            BuiltinTheme::MfdScarlet,
+            BuiltinTheme::MfdStealth,
+            BuiltinTheme::Molokai,
             BuiltinTheme::NeobonesDark,
             BuiltinTheme::NeobonesLight,
+            BuiltinTheme::Nord,
             BuiltinTheme::Nordbones,
+            BuiltinTheme::Nordic,
             BuiltinTheme::RosebonesDark,
             BuiltinTheme::RosebonesLight,
             BuiltinTheme::SeoulbonesDark,
             BuiltinTheme::SeoulbonesLight,
+            BuiltinTheme::System,
+            BuiltinTheme::TokenDark,
+            BuiltinTheme::TokenLight,
             BuiltinTheme::TokyobonesDark,
             BuiltinTheme::TokyobonesLight,
+            BuiltinTheme::Tokyonight,
             BuiltinTheme::Vimbones,
+            BuiltinTheme::ZenbonesDark,
+            BuiltinTheme::ZenbonesLight,
             BuiltinTheme::Zenburned,
             BuiltinTheme::ZenwrittenDark,
             BuiltinTheme::ZenwrittenLight,
-            BuiltinTheme::KanagawaWave,
-            BuiltinTheme::KanagawaDragon,
-            BuiltinTheme::KanagawaLotus,
-            BuiltinTheme::EverforestDark,
-            BuiltinTheme::EverforestLight,
-            BuiltinTheme::TokenDark,
-            BuiltinTheme::TokenLight,
-            BuiltinTheme::GruvboxMaterialDark,
-            BuiltinTheme::GruvboxMaterialLight,
-            BuiltinTheme::Mfd,
-            BuiltinTheme::MfdDark,
-            BuiltinTheme::MfdStealth,
-            BuiltinTheme::MfdAmber,
-            BuiltinTheme::MfdMono,
-            BuiltinTheme::MfdScarlet,
-            BuiltinTheme::MfdPaper,
-            BuiltinTheme::MfdHud,
-            BuiltinTheme::MfdNvg,
-            BuiltinTheme::MfdBlackout,
-            BuiltinTheme::MfdFlir,
-            BuiltinTheme::MfdFlirBh,
-            BuiltinTheme::MfdFlirRh,
-            BuiltinTheme::MfdFlirFusion,
-            BuiltinTheme::MfdGblLight,
-            BuiltinTheme::MfdGblDark,
-            BuiltinTheme::MfdLumon,
-            BuiltinTheme::MfdNerv,
         ]
     );
+
+    let labels = BUILTIN_THEMES
+        .iter()
+        .map(|choice| color_scheme_label(*choice))
+        .collect::<Vec<_>>();
+    assert!(labels.is_sorted());
 }
 
 #[test]
