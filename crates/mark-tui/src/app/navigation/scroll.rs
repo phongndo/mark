@@ -1,8 +1,9 @@
 use std::time::Instant;
 
 use super::super::{
-    DiffApp, HunkFocusScrollBehavior, MouseScrollDirection, diff_content_width,
-    hunk_focus_row_range, max_scroll_for_annotated_viewport, viewport_center_offset,
+    AnnotationHeightCacheEntry, DiffApp, HunkFocusScrollBehavior, MouseScrollDirection,
+    diff_content_width, hunk_focus_row_range, max_scroll_for_annotated_viewport,
+    max_scroll_for_viewport, viewport_center_offset,
 };
 use crate::model::FileIndex;
 use crate::render::annotations::{annotation_compose_block_height, annotation_saved_block_height};
@@ -224,6 +225,13 @@ impl DiffApp {
     }
 
     pub(in crate::app) fn max_scroll_with_annotations(&self, row_count: usize) -> usize {
+        if self.annotations_state.annotations.is_empty()
+            && self.annotations_state.annotation_draft.is_none()
+        {
+            return max_scroll_for_viewport(row_count, self.viewport.viewport_rows);
+        }
+
+        self.cache_annotation_model_rows();
         let mut blocks = Vec::new();
         let draft_key = self
             .annotations_state
@@ -236,7 +244,7 @@ impl DiffApp {
                     continue;
                 }
                 let anchor = self.annotation_anchor_visual_scroll(model_row);
-                let height = annotation_saved_block_height(text, self.viewport.viewport_width);
+                let height = self.annotation_saved_block_height(key, text);
                 blocks.push((anchor, height));
             }
         }
@@ -246,6 +254,38 @@ impl DiffApp {
             blocks.push((anchor, height));
         }
         max_scroll_for_annotated_viewport(row_count, self.viewport.viewport_rows, blocks)
+    }
+
+    fn annotation_saved_block_height(
+        &self,
+        key: &crate::annotation::AnnotationKey,
+        text: &str,
+    ) -> usize {
+        let text_ptr = text.as_ptr() as usize;
+        let text_len = text.len();
+        let width = self.viewport.viewport_width;
+        if let Some(entry) = self.annotations_state.annotation_heights.borrow().get(key)
+            && entry.text_ptr == text_ptr
+            && entry.text_len == text_len
+            && entry.width == width
+        {
+            return entry.height;
+        }
+
+        let height = annotation_saved_block_height(text, width);
+        self.annotations_state
+            .annotation_heights
+            .borrow_mut()
+            .insert(
+                key.clone(),
+                AnnotationHeightCacheEntry {
+                    text_ptr,
+                    text_len,
+                    width,
+                    height,
+                },
+            );
+        height
     }
 
     pub(crate) fn max_horizontal_scroll(&self) -> usize {

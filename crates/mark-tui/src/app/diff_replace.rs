@@ -201,6 +201,7 @@ impl DiffApp {
                 DiffLayoutMode::Split => split_model,
                 DiffLayoutMode::Unified => unified_model,
             };
+            self.annotations_state.annotation_rows.borrow_mut().clear();
             self.invalidate_wrapped_visual_layout();
             self.reanchor_annotation_draft();
             self.viewport.manual_hunk_focus = None;

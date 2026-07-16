@@ -11,6 +11,7 @@ use crate::text_input::{TextInputKeyResult, handle_text_input_key};
 use crossterm::event::{KeyCode, KeyEvent};
 use mark_core::MarkResult;
 use mark_diff::FileStatus;
+use std::collections::HashSet;
 use std::fs;
 use std::time::Instant;
 
@@ -219,6 +220,14 @@ impl DiffApp {
             return;
         };
         self.annotations_state.annotations.remove(&item.key);
+        self.annotations_state
+            .annotation_rows
+            .borrow_mut()
+            .remove(&item.key);
+        self.annotations_state
+            .annotation_heights
+            .borrow_mut()
+            .remove(&item.key);
         let len = self.filtered_annotation_menu_items().len();
         self.overlays.annotation_menu.clamp(len);
         if len == 0 {
@@ -242,18 +251,63 @@ impl DiffApp {
         );
     }
 
-    pub(super) fn annotation_model_row(&self, key: &AnnotationKey) -> Option<usize> {
-        self.document
+    pub(crate) fn cache_annotation_model_rows(&self) {
+        let mut missing = {
+            let cached = self.annotations_state.annotation_rows.borrow();
+            self.annotations_state
+                .annotations
+                .keys()
+                .filter(|key| !cached.contains_key(*key))
+                .cloned()
+                .collect::<HashSet<_>>()
+        };
+        if missing.is_empty() {
+            return;
+        }
+        if missing.len() == 1 {
+            let key = missing.into_iter().next().expect("one missing annotation");
+            let _ = self.annotation_model_row(&key);
+            return;
+        }
+
+        let mut found = Vec::with_capacity(missing.len());
+        for (index, row) in self.document.model.iter_rows().enumerate() {
+            let Some(key) = AnnotationKey::from_ui_row(&self.document.changeset, row) else {
+                continue;
+            };
+            if missing.remove(&key) {
+                found.push((key, Some(index)));
+                if missing.is_empty() {
+                    break;
+                }
+            }
+        }
+        found.extend(missing.into_iter().map(|key| (key, None)));
+        self.annotations_state
+            .annotation_rows
+            .borrow_mut()
+            .extend(found);
+    }
+
+    pub(crate) fn annotation_model_row(&self, key: &AnnotationKey) -> Option<usize> {
+        if let Some(model_row) = self.annotations_state.annotation_rows.borrow().get(key) {
+            return *model_row;
+        }
+
+        let model_row = self
+            .document
             .model
-            .rows
-            .iter()
+            .iter_rows()
             .enumerate()
             .find_map(|(index, row)| {
-                AnnotationKey::candidates_from_ui_row(&self.document.changeset, *row)
-                    .into_iter()
-                    .any(|row_key| row_key == *key)
+                (AnnotationKey::from_ui_row(&self.document.changeset, row).as_ref() == Some(key))
                     .then_some(index)
-            })
+            });
+        self.annotations_state
+            .annotation_rows
+            .borrow_mut()
+            .insert(key.clone(), model_row);
+        model_row
     }
 
     pub(crate) fn move_annotation(&mut self, delta: isize) {
@@ -428,8 +482,20 @@ impl DiffApp {
     }
 
     pub(super) fn commit_annotation_draft(&mut self, draft: AnnotationDraft) {
+        self.annotations_state
+            .annotation_heights
+            .borrow_mut()
+            .remove(&draft.key);
+        self.annotations_state
+            .annotation_rows
+            .borrow_mut()
+            .insert(draft.key.clone(), Some(draft.model_row_index));
         if draft.input.trim().is_empty() {
             self.annotations_state.annotations.remove(&draft.key);
+            self.annotations_state
+                .annotation_rows
+                .borrow_mut()
+                .remove(&draft.key);
         } else {
             self.annotations_state
                 .annotations

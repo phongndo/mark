@@ -1469,6 +1469,121 @@ fn meta_rows_do_not_render_annotation_add_button() {
 }
 
 #[test]
+fn annotation_height_cache_tracks_text_and_viewport_width() {
+    use crate::annotation::AnnotationKey;
+
+    let changeset = changeset_with_line_text("hello");
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_width(8);
+    let code_row = app
+        .document
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
+        .expect("unified line");
+    let key = AnnotationKey::from_ui_row(
+        &app.document.changeset,
+        app.document.model.row(code_row).expect("row"),
+    )
+    .expect("key");
+    app.annotations_state
+        .annotations
+        .insert(key.clone(), "one two three four".to_owned());
+
+    let _ = app.max_scroll();
+    let first = *app
+        .annotations_state
+        .annotation_heights
+        .borrow()
+        .get(&key)
+        .expect("cached annotation height");
+    assert_eq!(first.width, 8);
+
+    app.annotations_state
+        .annotations
+        .insert(key.clone(), "abcdefghijklmnopqr".to_owned());
+    let replacement_ptr = app.annotations_state.annotations[&key].as_ptr() as usize;
+    let _ = app.max_scroll();
+    let replacement = *app
+        .annotations_state
+        .annotation_heights
+        .borrow()
+        .get(&key)
+        .expect("replacement annotation height");
+    assert_eq!(replacement.text_ptr, replacement_ptr);
+    assert_ne!(replacement.text_ptr, first.text_ptr);
+
+    app.set_viewport_width(20);
+    let resized = *app
+        .annotations_state
+        .annotation_heights
+        .borrow()
+        .get(&key)
+        .expect("resized annotation height");
+    assert_eq!(resized.width, 20);
+}
+
+#[test]
+fn annotation_row_cache_is_invalidated_with_the_view_model() {
+    use crate::annotation::AnnotationKey;
+
+    let changeset = changeset_with_line_text("hello");
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    let code_row = app
+        .document
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
+        .expect("unified line");
+    let key = AnnotationKey::from_ui_row(
+        &app.document.changeset,
+        app.document.model.row(code_row).expect("row"),
+    )
+    .expect("key");
+
+    app.annotations_state
+        .annotation_rows
+        .borrow_mut()
+        .insert(key.clone(), Some(usize::MAX));
+    app.set_layout(DiffLayoutMode::Split);
+
+    assert_ne!(app.annotation_model_row(&key), Some(usize::MAX));
+    assert!(app.annotation_model_row(&key).is_some());
+}
+
+#[test]
+fn annotation_row_cache_batches_multiple_missing_keys() {
+    use crate::annotation::AnnotationKey;
+
+    let changeset = changeset_with_hunks_at(PathBuf::from("/repo"), &[10, 20, 30]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    let expected = app
+        .document
+        .model
+        .iter_rows()
+        .enumerate()
+        .filter_map(|(row, model_row)| {
+            AnnotationKey::from_ui_row(&app.document.changeset, model_row).map(|key| (key, row))
+        })
+        .take(3)
+        .collect::<Vec<_>>();
+    assert_eq!(expected.len(), 3);
+    for (key, _) in &expected {
+        app.annotations_state
+            .annotations
+            .insert(key.clone(), "note".to_owned());
+    }
+
+    app.cache_annotation_model_rows();
+
+    for (key, row) in expected {
+        assert_eq!(app.annotation_model_row(&key), Some(row));
+    }
+}
+
+#[test]
 fn annotations_are_keyed_by_path_and_line_across_model_changes() {
     use crate::annotation::AnnotationKey;
 

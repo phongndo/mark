@@ -402,6 +402,8 @@ impl DiffApp {
             },
             annotations_state: AnnotationState {
                 annotations: AnnotationStore::default(),
+                annotation_rows: RefCell::new(HashMap::new()),
+                annotation_heights: RefCell::new(HashMap::new()),
                 annotation_draft: None,
                 annotation_target_mode: None,
                 sticky_annotation_draft: false,
