@@ -25,6 +25,7 @@ impl DiffApp {
             &self.document.context_expansions,
             visible_files,
         );
+        self.annotations_state.annotation_rows.borrow_mut().clear();
         self.invalidate_wrapped_visual_layout();
         self.viewport.manual_hunk_focus = match hunk_focus_behavior {
             HunkFocusModelBehavior::PreserveIfValid => {

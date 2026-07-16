@@ -206,31 +206,43 @@ fn annotation_body_line(text: &str, width: usize, theme: DiffTheme, fg: Color) -
 }
 
 fn annotation_display_lines(text: &str, width: usize) -> Vec<String> {
-    let body_width = annotation_body_width(width);
-    wrap_annotation_text(text, body_width)
+    let mut lines = Vec::new();
+    visit_annotation_display_lines(text, annotation_body_width(width), |line| {
+        lines.push(line.to_owned());
+    });
+    lines
 }
 
-fn wrap_annotation_text(text: &str, width: usize) -> Vec<String> {
+fn annotation_display_line_count(text: &str, width: usize) -> usize {
+    visit_annotation_display_lines(text, annotation_body_width(width), |_| {})
+}
+
+fn visit_annotation_display_lines(text: &str, width: usize, mut visit: impl FnMut(&str)) -> usize {
     if width == 0 {
-        return vec![String::new()];
+        visit("");
+        return 1;
     }
 
-    let mut lines = Vec::new();
+    let mut line_count = 0usize;
     for paragraph in text.split('\n') {
         // Wrap terminal-safe text so expanded tabs/control escapes can be
         // split across visual line boundaries without re-rendering bytes.
         let display_paragraph = terminal_text(paragraph);
-        wrap_annotation_paragraph(&display_paragraph, width, &mut lines);
+        visit_annotation_paragraph(&display_paragraph, width, &mut |line| {
+            line_count = line_count.saturating_add(1);
+            visit(line);
+        });
     }
-    if lines.is_empty() {
-        lines.push(String::new());
+    if line_count == 0 {
+        visit("");
+        return 1;
     }
-    lines
+    line_count
 }
 
-fn wrap_annotation_paragraph(paragraph: &str, width: usize, lines: &mut Vec<String>) {
+fn visit_annotation_paragraph(paragraph: &str, width: usize, visit: &mut impl FnMut(&str)) {
     if paragraph.is_empty() {
-        lines.push(String::new());
+        visit("");
         return;
     }
 
@@ -238,7 +250,7 @@ fn wrap_annotation_paragraph(paragraph: &str, width: usize, lines: &mut Vec<Stri
     while !rest.is_empty() {
         let (fit_len, _, complete) = fit_byte_prefix_with_width(rest, width);
         if complete {
-            lines.push(rest.to_owned());
+            visit(rest);
             break;
         }
 
@@ -248,12 +260,12 @@ fn wrap_annotation_paragraph(paragraph: &str, width: usize, lines: &mut Vec<Stri
                 break;
             };
             let character_len = character.len_utf8();
-            lines.push(rest[..character_len].to_owned());
+            visit(&rest[..character_len]);
             rest = &rest[character_len..];
             continue;
         }
 
-        lines.push(rest[..break_len].to_owned());
+        visit(&rest[..break_len]);
         rest = &rest[break_len..];
     }
 }
@@ -292,9 +304,7 @@ pub(crate) fn render_annotation_saved_block(
 }
 
 pub(crate) fn annotation_saved_block_height(text: &str, width: usize) -> usize {
-    annotation_display_lines(text, width)
-        .len()
-        .saturating_add(2)
+    annotation_display_line_count(text, width).saturating_add(2)
 }
 
 pub(crate) fn render_annotation_compose_block(
@@ -318,9 +328,7 @@ pub(crate) fn render_annotation_compose_block(
 
 pub(crate) fn annotation_compose_block_height(draft: &AnnotationDraft, width: usize) -> usize {
     let display = text_with_cursor(&draft.input, draft.cursor);
-    annotation_display_lines(&display, width)
-        .len()
-        .saturating_add(2)
+    annotation_display_line_count(&display, width).saturating_add(2)
 }
 
 fn text_with_cursor(input: &str, cursor: usize) -> String {
@@ -366,4 +374,28 @@ pub(crate) fn annotation_edit_hit_at_column(column: u16, width: usize) -> bool {
     }
     let start = width.saturating_sub(ANNOTATION_EDIT_BUTTON_WIDTH as u16);
     column >= start
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{annotation_display_line_count, annotation_display_lines};
+
+    #[test]
+    fn count_only_annotation_wrapping_matches_rendered_lines() {
+        for text in [
+            "",
+            "one two three four",
+            "first\n\nthird",
+            "wide 👩‍💻 text",
+            "tab\there and control \u{1b}[31m",
+        ] {
+            for width in [0, 1, 4, 8, 40] {
+                assert_eq!(
+                    annotation_display_line_count(text, width),
+                    annotation_display_lines(text, width).len(),
+                    "text={text:?}, width={width}",
+                );
+            }
+        }
+    }
 }

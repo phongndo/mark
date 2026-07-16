@@ -99,7 +99,7 @@ pub(crate) fn build_diff_viewport_lines(
     let theme = app.config.theme;
     let layout = app.viewport.layout;
     let draft = app.annotations_state.annotation_draft.clone();
-    let annotations = app.annotations_state.annotations.clone();
+    let has_annotation_blocks = draft.is_some() || !app.annotations_state.annotations.is_empty();
     let focused_hunk = app.focused_hunk_for_viewport(visible_rows);
     let mut lines = Vec::with_capacity(visible_rows);
 
@@ -139,7 +139,9 @@ pub(crate) fn build_diff_viewport_lines(
         }
         lines.push(line);
 
-        for key in AnnotationKey::candidates_from_ui_row(&app.document.changeset, row) {
+        if has_annotation_blocks
+            && let Some(key) = AnnotationKey::from_ui_row(&app.document.changeset, row)
+        {
             if let Some(draft) = draft
                 .as_ref()
                 .filter(|d| d.model_row_index == visual_row && d.key == key)
@@ -150,7 +152,7 @@ pub(crate) fn build_diff_viewport_lines(
                     render_annotation_compose_block(draft, width, theme, label.as_deref()),
                     visible_rows,
                 );
-            } else if let Some(text) = annotations.get(&key)
+            } else if let Some(text) = app.annotations_state.annotations.get(&key)
                 && draft.as_ref().is_none_or(|d| d.key != key)
             {
                 let label = app.annotation_label(&key);
@@ -176,7 +178,7 @@ fn build_wrapped_viewport_lines(
     let theme = app.config.theme;
     let layout = app.viewport.layout;
     let draft = app.annotations_state.annotation_draft.clone();
-    let annotations = app.annotations_state.annotations.clone();
+    let has_annotation_blocks = draft.is_some() || !app.annotations_state.annotations.is_empty();
     let focused_hunk = app.focused_hunk_for_viewport(visible_rows);
     let mut lines = Vec::with_capacity(visible_rows);
     let Some((mut row_index, mut row_offset)) = app.model_row_at_scroll(app.viewport.scroll) else {
@@ -229,28 +231,29 @@ fn build_wrapped_viewport_lines(
             if lines.len() >= visible_rows {
                 break;
             }
-            if is_last_wrap {
-                for key in AnnotationKey::candidates_from_ui_row(&app.document.changeset, row) {
-                    if let Some(draft) = draft
-                        .as_ref()
-                        .filter(|d| d.model_row_index == row_index && d.key == key)
-                    {
-                        let label = app.annotation_label(&draft.key);
-                        push_annotation_block(
-                            &mut lines,
-                            render_annotation_compose_block(draft, width, theme, label.as_deref()),
-                            visible_rows,
-                        );
-                    } else if let Some(text) = annotations.get(&key)
-                        && draft.as_ref().is_none_or(|d| d.key != key)
-                    {
-                        let label = app.annotation_label(&key);
-                        push_annotation_block(
-                            &mut lines,
-                            render_annotation_saved_block(text, width, theme, label.as_deref()),
-                            visible_rows,
-                        );
-                    }
+            if is_last_wrap
+                && has_annotation_blocks
+                && let Some(key) = AnnotationKey::from_ui_row(&app.document.changeset, row)
+            {
+                if let Some(draft) = draft
+                    .as_ref()
+                    .filter(|d| d.model_row_index == row_index && d.key == key)
+                {
+                    let label = app.annotation_label(&draft.key);
+                    push_annotation_block(
+                        &mut lines,
+                        render_annotation_compose_block(draft, width, theme, label.as_deref()),
+                        visible_rows,
+                    );
+                } else if let Some(text) = app.annotations_state.annotations.get(&key)
+                    && draft.as_ref().is_none_or(|d| d.key != key)
+                {
+                    let label = app.annotation_label(&key);
+                    push_annotation_block(
+                        &mut lines,
+                        render_annotation_saved_block(text, width, theme, label.as_deref()),
+                        visible_rows,
+                    );
                 }
             }
         }

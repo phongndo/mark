@@ -11,7 +11,10 @@ use crossterm::{
 };
 use mark_core::{MarkError, MarkResult};
 use mark_diff::{Changeset, DiffOptions};
-use ratatui::{Terminal, backend::CrosstermBackend};
+use ratatui::{
+    Terminal,
+    backend::{CrosstermBackend, TestBackend},
+};
 
 use crate::{
     app::{
@@ -20,7 +23,7 @@ use crate::{
     },
     controls::{DiffLayoutMode, default_layout_for_width, filtered_file_indices},
     model::UiModel,
-    render::diff::render_row,
+    render::draw,
     runtime,
     syntax::SyntaxRuntime,
     terminal_input::disable_mouse_capture_and_discard_reports,
@@ -212,10 +215,10 @@ pub fn benchmark_diff_view(
     let (hunk_navigation_steps, hunk_navigation_total_micros, hunk_navigation_max_micros) =
         benchmark_hunk_navigation(&app.document.model);
 
-    app.set_viewport_rows(options.viewport_rows);
+    let mut terminal = benchmark_terminal(options.width, options.viewport_rows);
 
     let initial_render_start = Instant::now();
-    render_viewport_for_benchmark(&mut app, options.width);
+    render_viewport_for_benchmark(&mut terminal, &mut app);
     let initial_render_micros = initial_render_start.elapsed().as_micros();
 
     let positions = benchmark_scroll_positions(
@@ -225,7 +228,7 @@ pub fn benchmark_diff_view(
         options.max_scroll_steps,
     );
     let (cold_scroll_total_micros, cold_scroll_max_micros) =
-        benchmark_scroll_pass(&mut app, &positions, options.width);
+        benchmark_scroll_pass(&mut terminal, &mut app, &positions);
 
     let syntax_settle_micros =
         settle_syntax_for_benchmark(&mut app).map(|duration| duration.as_micros());
@@ -238,14 +241,14 @@ pub fn benchmark_diff_view(
         .map(SyntaxRuntime::scope_table_stats)
         .unwrap_or_default();
     let (warm_scroll_total_micros, warm_scroll_max_micros) =
-        benchmark_scroll_pass(&mut app, &positions, options.width);
+        benchmark_scroll_pass(&mut terminal, &mut app, &positions);
     let random_positions = benchmark_random_scroll_positions(
         app.document.model.len(),
         options.viewport_rows,
         options.max_scroll_steps,
     );
     let (random_scroll_total_micros, random_scroll_max_micros) =
-        benchmark_scroll_pass(&mut app, &random_positions, options.width);
+        benchmark_scroll_pass(&mut terminal, &mut app, &random_positions);
     let after_warm_stats = app.syntax_stats();
     let syntax_cache_estimated_memory_bytes = app
         .config
@@ -335,20 +338,25 @@ pub(crate) fn sanitize_benchmark_options(
     options
 }
 
-pub(crate) fn render_viewport_for_benchmark(app: &mut DiffApp, width: usize) {
-    app.prepare_syntax_for_viewport(app.viewport.viewport_rows);
-    for offset in 0..app.viewport.viewport_rows {
-        let Some(row) = app.document.model.row(app.viewport.scroll + offset) else {
-            continue;
-        };
-        let _ = render_row(app, app.viewport.scroll + offset, row, width);
-    }
+fn benchmark_terminal(width: usize, viewport_rows: usize) -> Terminal<TestBackend> {
+    let width = width.min(u16::MAX as usize) as u16;
+    let height = viewport_rows.saturating_add(1).min(u16::MAX as usize) as u16;
+    Terminal::new(TestBackend::new(width, height)).expect("benchmark terminal")
+}
+
+pub(crate) fn render_viewport_for_benchmark(
+    terminal: &mut Terminal<TestBackend>,
+    app: &mut DiffApp,
+) {
+    terminal
+        .draw(|frame| draw(frame, app))
+        .expect("benchmark render");
 }
 
 pub(crate) fn benchmark_scroll_pass(
+    terminal: &mut Terminal<TestBackend>,
     app: &mut DiffApp,
     positions: &[usize],
-    width: usize,
 ) -> (u128, u128) {
     let mut total = 0u128;
     let mut max = 0u128;
@@ -356,7 +364,7 @@ pub(crate) fn benchmark_scroll_pass(
         let start = Instant::now();
         app.drain_syntax();
         app.set_scroll(*position);
-        render_viewport_for_benchmark(app, width);
+        render_viewport_for_benchmark(terminal, app);
         let elapsed = start.elapsed().as_micros();
         total = total.saturating_add(elapsed);
         max = max.max(elapsed);

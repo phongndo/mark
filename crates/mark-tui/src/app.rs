@@ -85,9 +85,10 @@ pub(crate) use options::{
 pub(crate) use runner::{drain_live_reloads, handle_event};
 pub(crate) use runner::{is_quit_key, run_loop, sync_live_diff};
 pub(crate) use state::{
-    ActiveOverlay, ActiveReferenceMenu, AnnotationState, AppConfigState, DocumentState,
-    FileSidebarState, FilterState, InputState, JobState, LiveReloadStatus, LiveUpdatesState,
-    NotificationState, OverlayState, ReferenceState, RuntimeState, ViewportState,
+    ActiveOverlay, ActiveReferenceMenu, AnnotationHeightCacheEntry, AnnotationState,
+    AppConfigState, DocumentState, FileSidebarState, FilterState, InputState, JobState,
+    LiveReloadStatus, LiveUpdatesState, NotificationState, OverlayState, ReferenceState,
+    RuntimeState, ViewportState,
 };
 pub(crate) use viewport::{
     annotation_scroll_for_block, find_rendered_diff_row_outward, hunk_focus_row_range,

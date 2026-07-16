@@ -54,6 +54,19 @@ fn plan_unwrapped_viewport_rows(
     let annotations = &app.annotations_state.annotations;
     let mut plans = Vec::with_capacity(visible_rows);
 
+    if draft.is_none() && annotations.is_empty() {
+        let end = scroll
+            .saturating_add(visible_rows)
+            .min(app.document.model.len());
+        plans.extend((scroll..end).map(|model_row| ViewportSlot {
+            kind: ViewportSlotKind::DiffVisual {
+                visual_scroll: model_row,
+                model_row,
+            },
+        }));
+        return plans;
+    }
+
     for offset in 0..visible_rows {
         if plans.len() >= visible_rows {
             break;
@@ -69,7 +82,7 @@ fn plan_unwrapped_viewport_rows(
             },
         });
 
-        for key in AnnotationKey::candidates_from_ui_row(&app.document.changeset, row) {
+        if let Some(key) = AnnotationKey::from_ui_row(&app.document.changeset, row) {
             if let Some(draft) = draft.filter(|d| d.model_row_index == visual_row && d.key == key) {
                 push_compose_plan_slots(
                     &mut plans,
@@ -137,30 +150,29 @@ fn plan_wrapped_viewport_rows(
         if plans.len() >= visible_rows {
             break;
         }
-        if wraps_left == 0 {
-            for key in AnnotationKey::candidates_from_ui_row(&app.document.changeset, row) {
-                if let Some(draft) =
-                    draft.filter(|d| d.model_row_index == row_index && d.key == key)
-                {
-                    push_compose_plan_slots(
-                        &mut plans,
-                        row_index,
-                        draft,
-                        app.viewport.viewport_width,
-                        visible_rows,
-                    );
-                } else if let Some(text) = annotations.get(&key)
-                    && draft.is_none_or(|d| d.key != key)
-                {
-                    push_saved_plan_slots(
-                        &mut plans,
-                        row_index,
-                        key,
-                        text,
-                        app.viewport.viewport_width,
-                        visible_rows,
-                    );
-                }
+        if wraps_left == 0
+            && (draft.is_some() || !annotations.is_empty())
+            && let Some(key) = AnnotationKey::from_ui_row(&app.document.changeset, row)
+        {
+            if let Some(draft) = draft.filter(|d| d.model_row_index == row_index && d.key == key) {
+                push_compose_plan_slots(
+                    &mut plans,
+                    row_index,
+                    draft,
+                    app.viewport.viewport_width,
+                    visible_rows,
+                );
+            } else if let Some(text) = annotations.get(&key)
+                && draft.is_none_or(|d| d.key != key)
+            {
+                push_saved_plan_slots(
+                    &mut plans,
+                    row_index,
+                    key,
+                    text,
+                    app.viewport.viewport_width,
+                    visible_rows,
+                );
             }
         }
         row_index = row_index.saturating_add(1);

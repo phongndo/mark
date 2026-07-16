@@ -89,6 +89,14 @@ impl DiffApp {
             return false;
         };
         if self.annotations_state.annotations.remove(&key).is_some() {
+            self.annotations_state
+                .annotation_rows
+                .borrow_mut()
+                .remove(&key);
+            self.annotations_state
+                .annotation_heights
+                .borrow_mut()
+                .remove(&key);
             self.set_scroll_with_grep_sync(
                 self.viewport.scroll,
                 false,

@@ -4,7 +4,7 @@ use super::{
     OptionsDraft, PendingDiffLoad, PendingDiffPrefetch, PendingFilterApply, PendingReviewLoad,
     SyntaxStartupMode, WrappedVisualLayout,
 };
-use crate::annotation::{AnnotationDraft, AnnotationStore, AnnotationTargetMode};
+use crate::annotation::{AnnotationDraft, AnnotationKey, AnnotationStore, AnnotationTargetMode};
 use crate::controls::{BranchMenu, DiffFilterKind, DiffLayoutMode, GitCommit};
 use crate::keymap::{KeyPress, Keymap};
 use crate::live_diff::live_diff_supported;
@@ -119,9 +119,22 @@ impl FileSidebarState {
 #[derive(Debug)]
 pub(crate) struct AnnotationState {
     pub(crate) annotations: AnnotationStore,
+    pub(crate) annotation_rows: RefCell<HashMap<AnnotationKey, Option<usize>>>,
+    pub(crate) annotation_heights: RefCell<HashMap<AnnotationKey, AnnotationHeightCacheEntry>>,
     pub(crate) annotation_draft: Option<AnnotationDraft>,
     pub(crate) annotation_target_mode: Option<AnnotationTargetMode>,
     pub(crate) sticky_annotation_draft: bool,
+}
+
+/// Cached against the immutable `String` buffer stored in `AnnotationStore`.
+/// Annotation text is replaced by insertion rather than mutated in place, so
+/// pointer/length changes invalidate edits without hashing the body per frame.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct AnnotationHeightCacheEntry {
+    pub(crate) text_ptr: usize,
+    pub(crate) text_len: usize,
+    pub(crate) width: usize,
+    pub(crate) height: usize,
 }
 
 #[derive(Debug)]

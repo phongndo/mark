@@ -87,7 +87,7 @@ impl DiffApp {
     fn exportable_annotation_keys(&self, model: &UiModel) -> HashSet<AnnotationKey> {
         model
             .iter_rows()
-            .flat_map(|row| AnnotationKey::candidates_from_ui_row(&self.document.changeset, row))
+            .filter_map(|row| AnnotationKey::from_ui_row(&self.document.changeset, row))
             .collect()
     }
 
