@@ -25,9 +25,9 @@ path = "target/textmate-performance/corpora/representative-markdown.md"
 builder = "tools/build-textmate-corpora.py"
 language = "markdown"
 scope = "text.html.markdown"
-bytes = 39996
-tokenizer_lines = 1226
-sha256 = "4a247450d396134237243c58e635446947a84fe4a832f7aa51f41a5b877686e4"
+bytes = 40393
+tokenizer_lines = 1232
+sha256 = "bda6e00d5471f3f816c085a65789bd104c9e363ff69baf9a0a7bc9934c4645d4"
 
 [[corpus]]
 id = "core-repeated"
