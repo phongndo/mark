@@ -19,10 +19,11 @@ impl DiffApp {
     ) {
         self.close_annotation_target_mode();
         let previous_manual_hunk_focus = self.viewport.manual_hunk_focus;
-        self.document.model = UiModel::new_filtered(
+        self.document.model = UiModel::new_filtered_with_trailing_context(
             &self.document.changeset,
             self.viewport.layout,
             &self.document.context_expansions,
+            &self.document.trailing_context_lines,
             visible_files,
         );
         self.annotations_state.annotation_rows.borrow_mut().clear();

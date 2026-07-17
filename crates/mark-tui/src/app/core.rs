@@ -5,13 +5,14 @@ use super::{
 use crate::controls::{DiffChoice, DiffLayoutMode, is_review_options};
 use crate::editor::EditorTarget;
 use crate::keymap::GlobalAction;
-use crate::model::UiModel;
+use crate::model::{ContextKey, FileIndex, HunkIndex, UiModel};
 use crate::search::{DiffSearchIndex, DiffSearchResult};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use mark_core::MarkResult;
 use mark_diff::{Changeset, DiffOptions, DiffSource, DiffStats};
 use mark_syntax::DiffContextExpansion;
 use ratatui::layout::Rect;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -23,6 +24,7 @@ pub(crate) const EDITOR_RELOAD_POLL: Duration = Duration::from_millis(8);
 pub(crate) const FILTER_DEBOUNCE: Duration = Duration::from_millis(120);
 pub(crate) const DIFF_PREFETCH_POLL: Duration = Duration::from_millis(8);
 pub(crate) const FILTER_WORKER_POLL: Duration = Duration::from_millis(8);
+pub(crate) const TRAILING_CONTEXT_WORKER_POLL: Duration = Duration::from_millis(8);
 pub(crate) const MAX_LIVE_GREP_MATCHES: usize = 10_000;
 pub(crate) const MAX_DIFF_CACHE_ENTRIES: usize = 4;
 pub(crate) const MAX_COLOR_SCHEME_MENU_ROWS: usize = 9;
@@ -88,6 +90,13 @@ pub(crate) enum EditorReloadBehavior {
 pub(crate) struct FocusedEditorLaunch {
     pub(crate) target: EditorTarget,
     pub(crate) editor: String,
+    pub(crate) view_anchor: EditorViewAnchor,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct EditorViewAnchor {
+    pub(crate) line: usize,
+    pub(crate) viewport_row: usize,
 }
 
 pub(crate) struct AsyncJob<T> {
@@ -110,8 +119,38 @@ impl<T> std::fmt::Debug for AsyncJob<T> {
     }
 }
 
+pub(crate) struct TrailingContextWorker {
+    pub(crate) generation: u64,
+    pub(crate) job: AsyncJob<
+        Vec<(
+            crate::model::ContextKey,
+            usize,
+            Option<crate::syntax::DiffSide>,
+        )>,
+    >,
+}
+
+impl std::fmt::Debug for TrailingContextWorker {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("TrailingContextWorker")
+            .field("generation", &self.generation)
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct EditorReloadNavigation {
+    pub(crate) scroll: usize,
+    pub(crate) selected_file: FileIndex,
+    pub(crate) manual_hunk_focus: Option<(FileIndex, HunkIndex)>,
+    pub(crate) layout: DiffLayoutMode,
+    pub(crate) line_wrapping: bool,
+}
+
 pub(crate) struct EditorReloadWorker {
     pub(crate) generation: u64,
+    pub(crate) navigation: EditorReloadNavigation,
     pub(crate) job: AsyncJob<EditorScopedReload>,
 }
 
@@ -124,6 +163,7 @@ impl std::fmt::Debug for EditorReloadWorker {
 pub(crate) struct EditorScopedReload {
     pub(crate) path: PathBuf,
     pub(crate) changeset: MarkResult<Changeset>,
+    pub(crate) view_anchor: Option<EditorViewAnchor>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -177,6 +217,7 @@ pub(crate) struct MarkExport {
 pub(crate) struct EditorReloadRequest {
     pub(crate) path: PathBuf,
     pub(crate) pathspecs: Vec<PathBuf>,
+    pub(crate) view_anchor: Option<EditorViewAnchor>,
 }
 
 pub(crate) fn is_plain_char_key(key: KeyEvent, character: char) -> bool {
@@ -272,6 +313,8 @@ pub(crate) struct DiffCacheEntry {
     pub(crate) search_index: Arc<DiffSearchIndex>,
     pub(crate) total_stats: DiffStats,
     pub(crate) max_line_width: usize,
+    pub(crate) trailing_context_lines: HashMap<ContextKey, usize>,
+    pub(crate) trailing_context_sides: HashMap<ContextKey, crate::syntax::DiffSide>,
     pub(crate) unified_model: UiModel,
     pub(crate) split_model: UiModel,
 }

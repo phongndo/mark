@@ -2,7 +2,7 @@ use super::{
     AppEffect, BuiltinTheme, DIFF_PREFETCH_POLL, DiffCacheEntry, EDITOR_RELOAD_POLL,
     EditorReloadRequest, EditorReloadWorker, FILTER_WORKER_POLL, FilterWorker, MouseScroll,
     OptionsDraft, PendingDiffLoad, PendingDiffPrefetch, PendingFilterApply, PendingReviewLoad,
-    SyntaxStartupMode, WrappedVisualLayout,
+    SyntaxStartupMode, TRAILING_CONTEXT_WORKER_POLL, TrailingContextWorker, WrappedVisualLayout,
 };
 use crate::annotation::{AnnotationDraft, AnnotationKey, AnnotationStore, AnnotationTargetMode};
 use crate::controls::{BranchMenu, DiffFilterKind, DiffLayoutMode, GitCommit};
@@ -41,6 +41,8 @@ pub(crate) struct DocumentState {
     pub(crate) model: UiModel,
     pub(crate) max_line_width: usize,
     pub(crate) context_expansions: HashMap<ContextKey, usize>,
+    pub(crate) trailing_context_lines: HashMap<ContextKey, usize>,
+    pub(crate) trailing_context_sides: HashMap<ContextKey, crate::syntax::DiffSide>,
     pub(crate) context_cache: HashMap<ContextSourceKey, ContextSourceEntry>,
     pub(crate) inline_cache: LruCache<InlineHunkKey, InlineHunkEmphasisCache>,
     pub(crate) generation: u64,
@@ -544,6 +546,7 @@ pub(crate) struct JobState {
     pub(crate) pending_filter_apply: Option<PendingFilterApply>,
     pub(crate) filter_worker: Option<FilterWorker>,
     pub(crate) filter_searching: bool,
+    pub(crate) trailing_context_worker: Option<TrailingContextWorker>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -639,6 +642,9 @@ impl JobState {
         }
         if self.filter_worker.is_some() {
             poll = poll.min(FILTER_WORKER_POLL);
+        }
+        if self.trailing_context_worker.is_some() {
+            poll = poll.min(TRAILING_CONTEXT_WORKER_POLL);
         }
         if let Some(pending) = self.pending_filter_apply {
             poll = poll.min(pending.due_at.saturating_duration_since(now));

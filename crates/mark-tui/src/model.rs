@@ -416,14 +416,30 @@ impl UiModel {
         layout: DiffLayoutMode,
         context_expansions: &HashMap<ContextKey, usize>,
     ) -> Self {
-        let visible_files: Vec<_> = (0..changeset.files.len()).map(FileIndex::new).collect();
-        Self::new_filtered(changeset, layout, context_expansions, &visible_files)
+        Self::new_with_trailing_context(changeset, layout, context_expansions, &HashMap::new())
     }
 
-    pub(crate) fn new_filtered(
+    pub(crate) fn new_with_trailing_context(
         changeset: &Changeset,
         layout: DiffLayoutMode,
         context_expansions: &HashMap<ContextKey, usize>,
+        trailing_context_lines: &HashMap<ContextKey, usize>,
+    ) -> Self {
+        let visible_files: Vec<_> = (0..changeset.files.len()).map(FileIndex::new).collect();
+        Self::new_filtered_with_trailing_context(
+            changeset,
+            layout,
+            context_expansions,
+            trailing_context_lines,
+            &visible_files,
+        )
+    }
+
+    pub(crate) fn new_filtered_with_trailing_context(
+        changeset: &Changeset,
+        layout: DiffLayoutMode,
+        context_expansions: &HashMap<ContextKey, usize>,
+        trailing_context_lines: &HashMap<ContextKey, usize>,
         visible_files: &[FileIndex],
     ) -> Self {
         let total_hunks = changeset
@@ -456,12 +472,19 @@ impl UiModel {
             .saturating_add(total_hunks.saturating_mul(2))
             .saturating_add(total_hunk_lines)
             .saturating_add(expanded_context_rows)
-            .saturating_add(expanded_context_controls);
+            .saturating_add(expanded_context_controls)
+            .saturating_add(
+                trailing_context_lines
+                    .values()
+                    .filter(|lines| **lines > 0)
+                    .count(),
+            );
         if estimated_rows > MAX_EAGER_UI_MODEL_ROWS {
             return Self::new_filtered_sparse(
                 changeset,
                 layout,
                 context_expansions,
+                trailing_context_lines,
                 visible_files,
                 total_hunks,
             );
@@ -603,10 +626,15 @@ impl UiModel {
                 file: file_index,
                 hunk: HunkIndex::new(file.hunks().len()),
             };
-            let expanded = context_expansions
+            let available = trailing_context_lines
                 .get(&trailing_context_key)
                 .copied()
                 .unwrap_or_default();
+            let expanded = context_expansions
+                .get(&trailing_context_key)
+                .copied()
+                .unwrap_or_default()
+                .min(available);
             if expanded > 0 {
                 rows.push(UiRow::ContextHide {
                     file: file_index,
@@ -620,6 +648,17 @@ impl UiModel {
                         new_line: next_new_line.saturating_add(offset),
                     });
                 }
+            }
+            let remaining = available.saturating_sub(expanded);
+            if remaining > 0 {
+                rows.push(UiRow::Collapsed {
+                    file: file_index,
+                    hunk: trailing_context_key.hunk,
+                    old_start: row_count_u32(next_old_line.saturating_add(expanded)),
+                    new_start: row_count_u32(next_new_line.saturating_add(expanded)),
+                    lines: row_count_u32(remaining),
+                    expanded: row_count_u32(expanded),
+                });
             }
         }
 
@@ -640,6 +679,7 @@ impl UiModel {
         changeset: &Changeset,
         layout: DiffLayoutMode,
         context_expansions: &HashMap<ContextKey, usize>,
+        trailing_context_lines: &HashMap<ContextKey, usize>,
         visible_files: &[FileIndex],
         total_hunks: usize,
     ) -> Self {
@@ -836,10 +876,15 @@ impl UiModel {
                 file: file_index,
                 hunk: HunkIndex::new(file.hunks().len()),
             };
-            let expanded = context_expansions
+            let available = trailing_context_lines
                 .get(&trailing_context_key)
                 .copied()
                 .unwrap_or_default();
+            let expanded = context_expansions
+                .get(&trailing_context_key)
+                .copied()
+                .unwrap_or_default()
+                .min(available);
             if expanded > 0 {
                 push_row_segment(
                     &mut row_segments,
@@ -859,6 +904,22 @@ impl UiModel {
                         file: file_index,
                         old_start: row_count_u32(next_old_line),
                         new_start: row_count_u32(next_new_line),
+                    },
+                );
+            }
+            let remaining = available.saturating_sub(expanded);
+            if remaining > 0 {
+                push_row_segment(
+                    &mut row_segments,
+                    &mut row_count,
+                    1,
+                    RowSegmentKind::Collapsed {
+                        file: file_index,
+                        hunk: trailing_context_key.hunk,
+                        old_start: row_count_u32(next_old_line.saturating_add(expanded)),
+                        new_start: row_count_u32(next_new_line.saturating_add(expanded)),
+                        lines: row_count_u32(remaining),
+                        expanded: row_count_u32(expanded),
                     },
                 );
             }
@@ -1383,9 +1444,29 @@ mod tests {
             1,
         );
         let visible = [FileIndex::new(0)];
+        let trailing = HashMap::from([(
+            ContextKey {
+                file: FileIndex::new(0),
+                hunk: HunkIndex::new(2),
+            },
+            2,
+        )]);
         for layout in [DiffLayoutMode::Unified, DiffLayoutMode::Split] {
-            let eager = UiModel::new_filtered(&changeset, layout, &expansions, &visible);
-            let sparse = UiModel::new_filtered_sparse(&changeset, layout, &expansions, &visible, 2);
+            let eager = UiModel::new_filtered_with_trailing_context(
+                &changeset,
+                layout,
+                &expansions,
+                &trailing,
+                &visible,
+            );
+            let sparse = UiModel::new_filtered_sparse(
+                &changeset,
+                layout,
+                &expansions,
+                &trailing,
+                &visible,
+                2,
+            );
             assert_eq!(sparse.len(), eager.len());
             for row in 0..eager.len() {
                 assert_eq!(sparse.row(row), eager.row(row), "row {row} in {layout:?}");

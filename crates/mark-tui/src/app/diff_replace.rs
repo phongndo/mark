@@ -53,7 +53,10 @@ impl DiffApp {
         );
         self.document.total_stats = self.document.changeset.stats();
         self.document.context_expansions.clear();
+        self.document.trailing_context_lines.clear();
+        self.document.trailing_context_sides.clear();
         self.document.context_cache.clear();
+        self.jobs.trailing_context_worker = None;
         self.document.generation = self.document.generation.wrapping_add(1);
         self.document.inline_cache.clear();
         self.document.search_index = Arc::new(DiffSearchIndex::new(&self.document.changeset));
@@ -92,6 +95,8 @@ impl DiffApp {
             search_index,
             total_stats,
             max_line_width,
+            trailing_context_lines,
+            trailing_context_sides,
             unified_model,
             split_model,
             ..
@@ -170,7 +175,10 @@ impl DiffApp {
         self.document.changeset = changeset;
         self.document.search_index = search_index;
         self.document.context_expansions.clear();
+        self.document.trailing_context_lines = trailing_context_lines;
+        self.document.trailing_context_sides = trailing_context_sides;
         self.document.context_cache.clear();
+        self.jobs.trailing_context_worker = None;
         self.document.generation = self.document.generation.wrapping_add(1);
         self.document.inline_cache.clear();
         self.jobs.pending_filter_apply = None;
@@ -293,7 +301,10 @@ impl DiffApp {
         self.document.changeset = changeset;
         self.document.search_index = Arc::new(DiffSearchIndex::new(&self.document.changeset));
         self.document.context_expansions.clear();
+        self.document.trailing_context_lines.clear();
+        self.document.trailing_context_sides.clear();
         self.document.context_cache.clear();
+        self.jobs.trailing_context_worker = None;
         self.document.generation = self.document.generation.wrapping_add(1);
         self.document.inline_cache.clear();
         self.jobs.pending_filter_apply = None;

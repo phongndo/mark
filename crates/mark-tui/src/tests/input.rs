@@ -544,7 +544,7 @@ fn editable_hunk_without_configured_editor_sets_notice() {
     assert!(!app.prepare_focused_hunk_editor_for_test(None));
     assert_eq!(
         app.notifications.toasts.latest_text(),
-        Some("set $VISUAL, $GIT_EDITOR, or $EDITOR to edit focused hunk")
+        Some("set $GIT_EDITOR, $VISUAL, or $EDITOR to edit focused hunk")
     );
     assert!(app.notifications.error_log.is_none());
     assert!(app.runtime.dirty);

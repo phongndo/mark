@@ -18,7 +18,11 @@ pub(crate) fn editor_reload_request_for_file(
     push_unique_pathspec(&mut pathspecs, file.old_path());
     push_unique_pathspec(&mut pathspecs, file.new_path());
 
-    Some(EditorReloadRequest { path, pathspecs })
+    Some(EditorReloadRequest {
+        path,
+        pathspecs,
+        view_anchor: None,
+    })
 }
 
 fn push_unique_pathspec(pathspecs: &mut Vec<PathBuf>, path: Option<&str>) {
