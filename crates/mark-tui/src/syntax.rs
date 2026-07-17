@@ -23,8 +23,8 @@ pub(crate) use source::{
     build_hunk_source,
 };
 pub(crate) use source::{
-    available_context_lines, full_file_source, load_full_file_source, split_context_source_lines,
-    unified_syntax_side,
+    available_context_lines, full_file_source, full_file_source_size, load_full_file_source,
+    split_context_source_lines, unified_syntax_side,
 };
 pub(crate) use types::{
     DiffSide, HighlightedLineRef, HighlightedSide, SyntaxKey, SyntaxPosition, SyntaxSkipReason,

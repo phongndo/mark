@@ -161,7 +161,7 @@ A              batch annotate visible lines
 n              annotation search menu
 b              file browser
 s              toggle split/unified layout
-Ctrl-G         open the focused hunk in `$VISUAL`, `$GIT_EDITOR`, or `$EDITOR`
+Ctrl-G         open the focused hunk in `$GIT_EDITOR`, `$VISUAL`, or `$EDITOR`
 y              copy marks to the terminal clipboard
 Ctrl-U         clear filters
 { / }          previous / next annotation
@@ -169,6 +169,12 @@ Ctrl-Shift-C   copy the error log pane to the terminal clipboard
 Tab            next diff type
 Shift-Tab      previous diff type
 ```
+
+Editor commands are shell-word parsed and open on the line focused in the diff.
+Mark knows the location syntax used by Vim/Neovim, Helix, Kakoune, Emacs,
+nano/pico, micro/vis, VS Code/Codium/Cursor, Sublime Text, and Zed. For another
+editor or a wrapper script, put `{file}`, `{line}`, and optionally `{column}` in
+the command, for example `EDITOR='my-editor --location {file}:{line}:{column}'`.
 
 Press `a` to label every annotatable line in the viewport, then type a displayed
 hint to open an inline annotation draft. Lines in the focused hunk receive the

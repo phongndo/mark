@@ -18,6 +18,8 @@ pub(crate) fn diff_cache_entry(options: DiffOptions, changeset: Changeset) -> Di
         search_index,
         total_stats,
         max_line_width,
+        trailing_context_lines: HashMap::new(),
+        trailing_context_sides: HashMap::new(),
         unified_model,
         split_model,
     }
@@ -55,17 +57,29 @@ impl DiffApp {
             && !self.filter_busy()
             && self.document.context_expansions.is_empty();
         let context_expansions = HashMap::new();
+        let trailing_context_lines = self.document.trailing_context_lines.clone();
+        let trailing_context_sides = self.document.trailing_context_sides.clone();
         let unified_model =
             if can_reuse_current_model && self.viewport.layout == DiffLayoutMode::Unified {
                 self.document.model.clone()
             } else {
-                UiModel::new(&changeset, DiffLayoutMode::Unified, &context_expansions)
+                UiModel::new_with_trailing_context(
+                    &changeset,
+                    DiffLayoutMode::Unified,
+                    &context_expansions,
+                    &trailing_context_lines,
+                )
             };
         let split_model =
             if can_reuse_current_model && self.viewport.layout == DiffLayoutMode::Split {
                 self.document.model.clone()
             } else {
-                UiModel::new(&changeset, DiffLayoutMode::Split, &context_expansions)
+                UiModel::new_with_trailing_context(
+                    &changeset,
+                    DiffLayoutMode::Split,
+                    &context_expansions,
+                    &trailing_context_lines,
+                )
             };
         self.jobs.diff_cache.insert(
             0,
@@ -75,6 +89,8 @@ impl DiffApp {
                 search_index,
                 total_stats,
                 max_line_width,
+                trailing_context_lines,
+                trailing_context_sides,
                 unified_model,
                 split_model,
             },

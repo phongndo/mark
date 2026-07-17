@@ -274,6 +274,8 @@ impl DiffApp {
             load_user_settings,
         } = loaded_syntax_settings;
         let context_expansions = HashMap::new();
+        let trailing_context_lines = HashMap::new();
+        let trailing_context_sides = HashMap::new();
         let context_cache = HashMap::new();
         let layout_override = layout_override_from_settings(&settings, honor_settings_layout);
         if let Some(setting_layout) = layout_override {
@@ -373,6 +375,8 @@ impl DiffApp {
                 model,
                 max_line_width,
                 context_expansions,
+                trailing_context_lines,
+                trailing_context_sides,
                 context_cache,
                 inline_cache: LruCache::new(MAX_INLINE_DIFF_CACHE_ENTRIES),
                 generation: 0,
@@ -485,6 +489,7 @@ impl DiffApp {
                 pending_filter_apply: None,
                 filter_worker: None,
                 filter_searching: false,
+                trailing_context_worker: None,
             },
             notifications: NotificationState {
                 error_log: startup_error_log,

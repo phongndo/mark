@@ -519,7 +519,7 @@ impl DiffApp {
         };
         let Some(editor) = configured_editor() else {
             self.annotations_state.annotation_draft = Some(draft);
-            self.set_warning_notice("set $VISUAL, $GIT_EDITOR, or $EDITOR to edit annotation");
+            self.set_warning_notice("set $GIT_EDITOR, $VISUAL, or $EDITOR to edit annotation");
             return;
         };
         let scratch = match create_annotation_scratch_file(&draft.input) {

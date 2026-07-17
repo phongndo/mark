@@ -124,8 +124,8 @@ impl DiffApp {
     }
 
     fn trailing_context_contains_annotation_key(&self, key: &AnnotationKey) -> bool {
-        // Collapsed trailing context has no UiRow::Collapsed sentinel; derive
-        // the hidden range from the final hunk and the available source lines.
+        // The trailing control is discovered lazily for visible files. Keep a
+        // source-derived fallback so marks export correctly before discovery.
         self.document
             .changeset
             .files

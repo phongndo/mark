@@ -22,7 +22,7 @@ pub(crate) struct EditorTarget {
 }
 
 pub(crate) fn configured_editor() -> Option<String> {
-    ["VISUAL", "GIT_EDITOR", "EDITOR"]
+    ["GIT_EDITOR", "VISUAL", "EDITOR"]
         .into_iter()
         .filter_map(env::var_os)
         .map(|editor| editor.to_string_lossy().trim().to_owned())
@@ -72,17 +72,143 @@ pub(crate) fn editor_status(editor: &str, target: &EditorTarget) -> io::Result<E
 
 pub(crate) fn editor_args(parts: &[String], target: &EditorTarget) -> Vec<String> {
     let mut args = parts.get(1..).unwrap_or_default().to_vec();
-    if editor_uses_goto_arg(parts.first().map(String::as_str).unwrap_or_default()) {
-        if !args.iter().any(|arg| arg == "--wait" || arg == "-w") {
+    let path = target.path.display().to_string();
+    let line = target.line.max(1);
+
+    // Placeholders make unusual editors and wrapper scripts configurable without
+    // Mark having to guess their command-line syntax. A file placeholder means
+    // the command supplied the complete target; line-only templates still get
+    // the file appended below.
+    let has_file_placeholder = args.iter().any(|arg| arg.contains("{file}"));
+    let has_placeholder = has_file_placeholder
+        || args
+            .iter()
+            .any(|arg| arg.contains("{line}") || arg.contains("{column}"));
+    let program = parts.first().map(String::as_str).unwrap_or_default();
+    let kind = editor_kind(program);
+    if has_placeholder {
+        let line = line.to_string();
+        for arg in &mut args {
+            *arg = expand_editor_placeholders(arg, &path, &line);
+        }
+        if !has_file_placeholder {
+            args.push(path);
+        }
+        if matches!(kind, EditorKind::VsCode | EditorKind::WaitPathLine) && !has_wait_arg(&args) {
             args.push("--wait".to_owned());
         }
-        args.push("--goto".to_owned());
-        args.push(format!("{}:{}", target.path.display(), target.line.max(1)));
-    } else {
-        args.push(format!("+{}", target.line.max(1)));
-        args.push(target.path.display().to_string());
+        return args;
+    }
+
+    match kind {
+        EditorKind::VsCode => {
+            if !has_wait_arg(&args) {
+                args.push("--wait".to_owned());
+            }
+            if !args.iter().any(|arg| arg == "--goto" || arg == "-g") {
+                args.push("--goto".to_owned());
+            }
+            args.push(format!("{path}:{line}:1"));
+        }
+        EditorKind::WaitPathLine => {
+            if !has_wait_arg(&args) {
+                args.push("--wait".to_owned());
+            }
+            args.push(format!("{path}:{line}:1"));
+        }
+        EditorKind::PathLine => args.push(format!("{path}:{line}:1")),
+        EditorKind::Vim => {
+            args.push(format!("+{line}"));
+            // Vim otherwise tends to place command-line targets against a
+            // viewport edge. Centering makes entering the editor match Mark's
+            // focused-row model and avoids the nearly-empty lower viewport.
+            args.push("+normal! zz".to_owned());
+            args.push(path);
+        }
+        EditorKind::Nano => {
+            args.push(format!("+{line},1"));
+            args.push(path);
+        }
+        EditorKind::PlusLineColumn => {
+            args.push(format!("+{line}:1"));
+            args.push(path);
+        }
+        EditorKind::PlusLine => {
+            args.push(format!("+{line}"));
+            args.push(path);
+        }
     }
     args
+}
+
+fn expand_editor_placeholders(template: &str, path: &str, line: &str) -> String {
+    let mut expanded = String::with_capacity(template.len());
+    let mut remainder = template;
+    while let Some(index) = remainder.find('{') {
+        expanded.push_str(&remainder[..index]);
+        remainder = &remainder[index..];
+        if let Some(rest) = remainder.strip_prefix("{file}") {
+            expanded.push_str(path);
+            remainder = rest;
+        } else if let Some(rest) = remainder.strip_prefix("{line}") {
+            expanded.push_str(line);
+            remainder = rest;
+        } else if let Some(rest) = remainder.strip_prefix("{column}") {
+            expanded.push('1');
+            remainder = rest;
+        } else {
+            expanded.push('{');
+            remainder = &remainder[1..];
+        }
+    }
+    expanded.push_str(remainder);
+    expanded
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EditorKind {
+    VsCode,
+    WaitPathLine,
+    PathLine,
+    Vim,
+    Nano,
+    PlusLineColumn,
+    PlusLine,
+}
+
+fn editor_kind(program: &str) -> EditorKind {
+    let name = editor_program_name(program);
+    match name.as_str() {
+        "code" | "code-insiders" | "codium" | "cursor" => EditorKind::VsCode,
+        "subl" | "sublime_text" | "zed" => EditorKind::WaitPathLine,
+        "helix" | "hx" | "amp" => EditorKind::PathLine,
+        "vim" | "nvim" | "gvim" | "mvim" => EditorKind::Vim,
+        "nano" | "pico" => EditorKind::Nano,
+        "emacs" | "emacsclient" | "kak" | "kakoune" => EditorKind::PlusLineColumn,
+        // +line file is shared by the vi family and is the most broadly
+        // supported fallback for terminal editors (including micro and vis).
+        _ => EditorKind::PlusLine,
+    }
+}
+
+fn editor_program_name(program: &str) -> String {
+    let name = Path::new(program)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(program)
+        .to_ascii_lowercase();
+    name.trim_end_matches(".exe")
+        .trim_end_matches(".cmd")
+        .trim_end_matches(".bat")
+        .to_owned()
+}
+
+fn has_wait_arg(args: &[String]) -> bool {
+    args.iter().any(|arg| {
+        arg == "--wait"
+            || arg == "-w"
+            || (arg.starts_with('-') && !arg.starts_with("--") && arg[1..].contains('w'))
+    })
 }
 
 pub(crate) fn split_editor_command(editor: &str) -> Option<Vec<String>> {
@@ -90,16 +216,9 @@ pub(crate) fn split_editor_command(editor: &str) -> Option<Vec<String>> {
     (!parts.is_empty()).then_some(parts)
 }
 
+#[cfg(test)]
 pub(crate) fn editor_uses_goto_arg(program: &str) -> bool {
-    let name = Path::new(program)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(program)
-        .to_ascii_lowercase();
-    matches!(
-        name.as_str(),
-        "code" | "code-insiders" | "codium" | "cursor"
-    )
+    editor_kind(program) == EditorKind::VsCode
 }
 
 struct SuspendedTerminal {

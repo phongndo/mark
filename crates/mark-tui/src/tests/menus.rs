@@ -45,7 +45,7 @@ fn editor_command_helpers_choose_line_arguments() {
         vec![
             "--wait".to_owned(),
             "--goto".to_owned(),
-            "/repo/file.rs:12".to_owned(),
+            "/repo/file.rs:12:1".to_owned(),
         ]
     );
     assert_eq!(
@@ -53,7 +53,7 @@ fn editor_command_helpers_choose_line_arguments() {
         vec![
             "--wait".to_owned(),
             "--goto".to_owned(),
-            "/repo/file.rs:12".to_owned(),
+            "/repo/file.rs:12:1".to_owned(),
         ]
     );
     assert_eq!(
@@ -61,8 +61,69 @@ fn editor_command_helpers_choose_line_arguments() {
         vec![
             "-f".to_owned(),
             "+12".to_owned(),
+            "+normal! zz".to_owned(),
             "/repo/file.rs".to_owned(),
         ]
+    );
+    assert_eq!(
+        editor_args(&["hx".to_owned()], &target),
+        vec!["/repo/file.rs:12:1".to_owned()]
+    );
+    assert_eq!(
+        editor_args(&["nano".to_owned()], &target),
+        vec!["+12,1".to_owned(), "/repo/file.rs".to_owned()]
+    );
+    assert_eq!(
+        editor_args(&["kak".to_owned()], &target),
+        vec!["+12:1".to_owned(), "/repo/file.rs".to_owned()]
+    );
+    assert_eq!(
+        editor_args(
+            &[
+                "custom-editor".to_owned(),
+                "--at={file}:{line}:{column}".to_owned(),
+            ],
+            &target,
+        ),
+        vec!["--at=/repo/file.rs:12:1".to_owned()]
+    );
+    assert_eq!(
+        editor_args(
+            &[
+                "code".to_owned(),
+                "--goto".to_owned(),
+                "{file}:{line}".to_owned()
+            ],
+            &target,
+        ),
+        vec![
+            "--goto".to_owned(),
+            "/repo/file.rs:12".to_owned(),
+            "--wait".to_owned(),
+        ]
+    );
+    assert_eq!(
+        editor_args(
+            &[
+                "subl".to_owned(),
+                "--wait".to_owned(),
+                "{file}:{line}".to_owned(),
+            ],
+            &target,
+        ),
+        vec!["--wait".to_owned(), "/repo/file.rs:12".to_owned(),]
+    );
+
+    let placeholder_path_target = EditorTarget {
+        path: PathBuf::from("/repo/file{line}{column}{file}.rs"),
+        line: 12,
+    };
+    assert_eq!(
+        editor_args(
+            &["custom-editor".to_owned(), "{file}:{line}".to_owned()],
+            &placeholder_path_target,
+        ),
+        vec!["/repo/file{line}{column}{file}.rs:12".to_owned()]
     );
 }
 

@@ -47,18 +47,19 @@ pub(crate) use clipboard::{json_string, write_osc52_clipboard};
 pub(crate) use core::{
     AnnotationScratchFile, AsyncJob, BranchMetadataPolicy, DIFF_PREFETCH_POLL, DiffApp,
     DiffCacheEntry, DiffLoadCachePolicy, EDITOR_RELOAD_POLL, ERROR_LOG_DEFAULT_HEIGHT,
-    ERROR_LOG_MAX_HEIGHT, ERROR_LOG_MIN_HEIGHT, EditorReloadBehavior, EditorReloadRequest,
-    EditorReloadWorker, EditorScopedReload, FILTER_DEBOUNCE, FILTER_WORKER_POLL, FilterWorker,
-    FocusedEditorLaunch, HunkFocusModelBehavior, HunkFocusScrollBehavior, HunkFocusSearch,
-    MAX_COLOR_SCHEME_MENU_ROWS, MAX_DIFF_CACHE_ENTRIES, MAX_LIVE_GREP_MATCHES,
-    MOUSE_HUNK_FOCUS_SCROLL_TICKS, MarkExport, NORMAL_GLOBAL_ACTIONS, POST_EDITOR_QUIT_KEY_IGNORE,
-    PendingDiffLoad, PendingDiffPrefetch, PendingFilterApply, PendingReviewLoad,
-    PostFilterNavigation, RenderedDiffRow, SyntaxStartupMode, WrappedVisualLayout,
+    ERROR_LOG_MAX_HEIGHT, ERROR_LOG_MIN_HEIGHT, EditorReloadBehavior, EditorReloadNavigation,
+    EditorReloadRequest, EditorReloadWorker, EditorScopedReload, EditorViewAnchor, FILTER_DEBOUNCE,
+    FILTER_WORKER_POLL, FilterWorker, FocusedEditorLaunch, HunkFocusModelBehavior,
+    HunkFocusScrollBehavior, HunkFocusSearch, MAX_COLOR_SCHEME_MENU_ROWS, MAX_DIFF_CACHE_ENTRIES,
+    MAX_LIVE_GREP_MATCHES, MOUSE_HUNK_FOCUS_SCROLL_TICKS, MarkExport, NORMAL_GLOBAL_ACTIONS,
+    POST_EDITOR_QUIT_KEY_IGNORE, PendingDiffLoad, PendingDiffPrefetch, PendingFilterApply,
+    PendingReviewLoad, PostFilterNavigation, RenderedDiffRow, SyntaxStartupMode,
+    TRAILING_CONTEXT_WORKER_POLL, TrailingContextWorker, WrappedVisualLayout,
     cacheable_diff_options, diff_choice_for_options, is_plain_char_key, next_context_expansion,
     previous_context_expansion, rect_contains, show_rev_from_options,
 };
 pub(crate) use diff_files::{
-    diff_content_width, editor_reload_request_for_file, repo_relative_path,
+    diff_content_width, diff_file_matches_path, editor_reload_request_for_file, repo_relative_path,
     splice_diff_files_for_path, split_cell_content_width, unified_content_width,
     wrapped_line_count, wrapped_line_start_columns,
 };

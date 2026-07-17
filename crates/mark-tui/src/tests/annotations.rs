@@ -328,6 +328,7 @@ fn queue_editor_scoped_reload_marks_dirty_for_terminal_repaint() {
     app.queue_editor_scoped_reload(EditorReloadRequest {
         path: PathBuf::from("src/file.rs"),
         pathspecs: vec![PathBuf::from("src/file.rs")],
+        view_anchor: None,
     });
 
     assert!(app.runtime.dirty);
@@ -627,6 +628,194 @@ fn copy_marks_includes_marks_on_collapsed_context_lines() {
         app.marks_clipboard_json().as_deref(),
         Some(expected.as_str())
     );
+}
+
+fn finish_trailing_context_discovery(app: &mut DiffApp) {
+    for _ in 0..1_000 {
+        app.drain_trailing_context_worker();
+        if app.jobs.trailing_context_worker.is_none() {
+            return;
+        }
+        thread::sleep(Duration::from_millis(1));
+    }
+    panic!("trailing context worker did not finish");
+}
+
+#[test]
+fn revision_backed_trailing_context_discovery_runs_on_a_worker() {
+    let repo = temp_test_dir("trailing-context-control");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    git(&repo, &["init", "-q"]);
+    git(&repo, &["config", "user.email", "mark@example.com"]);
+    git(&repo, &["config", "user.name", "Mark Test"]);
+    let text = (1..=80)
+        .map(|line| format!("line {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(repo.join("file.rs"), text).expect("context file should be written");
+    git(&repo, &["add", "file.rs"]);
+    git(&repo, &["commit", "-qm", "initial"]);
+    let changeset = changeset_with_hunk_at(repo, 50);
+    let options = DiffOptions {
+        source: DiffSource::Range {
+            left: "HEAD".into(),
+            right: "HEAD".into(),
+        },
+        ..DiffOptions::default()
+    };
+    let mut app = DiffApp::new(options, changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(app.document.model.len());
+
+    assert!(app.discover_trailing_context_for_viewport());
+    assert!(app.jobs.trailing_context_worker.is_some());
+    assert!(app.document.trailing_context_lines.is_empty());
+    finish_trailing_context_discovery(&mut app);
+    assert!(matches!(
+        app.document.model.rows.last(),
+        Some(UiRow::Collapsed {
+            hunk,
+            new_start: 51,
+            lines: 30,
+            ..
+        }) if hunk.get() == 1
+    ));
+    let control_row = app.document.model.len() - 1;
+    assert!(app.handle_context_at_row(control_row));
+    assert!(matches!(
+        app.document.model.rows.last(),
+        Some(UiRow::ContextLine { new_line: 80, .. })
+    ));
+}
+
+#[test]
+fn trailing_context_discovery_skips_oversized_sources_without_caching_them() {
+    let repo = temp_test_dir("oversized-trailing-context");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    let changeset = changeset_with_hunk_at(repo.clone(), 50);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    let discovery_byte_limit = app
+        .config
+        .syntax_limits
+        .max_source_bytes
+        .min(mark_syntax::DEFAULT_MAX_HIGHLIGHT_SOURCE_BYTES);
+    let oversized = vec![b'x'; discovery_byte_limit + 1];
+    fs::write(repo.join("file.rs"), oversized).expect("context file should be written");
+    app.set_viewport_rows(app.document.model.len());
+
+    assert!(app.discover_trailing_context_for_viewport());
+    finish_trailing_context_discovery(&mut app);
+    assert!(app.document.context_cache.is_empty());
+    assert_eq!(
+        app.document.trailing_context_lines.get(&ContextKey {
+            file: FileIndex::new(0),
+            hunk: HunkIndex::new(1),
+        }),
+        Some(&0)
+    );
+}
+
+#[test]
+fn cached_diff_restores_trailing_context_metadata_with_its_model() {
+    let repo = temp_test_dir("cached-oversized-trailing-context");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    let changeset = changeset_with_hunk_at(repo.clone(), 50);
+    let options = DiffOptions::default();
+    let mut app = DiffApp::new(options.clone(), changeset.clone(), DiffLayoutMode::Unified);
+    let discovery_byte_limit = app
+        .config
+        .syntax_limits
+        .max_source_bytes
+        .min(mark_syntax::DEFAULT_MAX_HIGHLIGHT_SOURCE_BYTES);
+    let mut oversized = (1..=80)
+        .map(|line| format!("line {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    oversized.push_str(&"x".repeat(discovery_byte_limit + 1));
+    fs::write(repo.join("file.rs"), oversized).expect("context file should be written");
+
+    assert!(app.expand_trailing_context_for_key(0, 1));
+    assert!(app.hide_context(0, 1));
+    assert!(matches!(
+        app.document.model.rows.last(),
+        Some(UiRow::Collapsed { hunk, .. }) if hunk.get() == 1
+    ));
+
+    let other_options = DiffOptions {
+        source: DiffSource::Base("main".into()),
+        ..DiffOptions::default()
+    };
+    app.cache_loaded_diff(other_options.clone(), changeset);
+    app.start_diff_load(other_options, "switch failed");
+    assert!(app.jobs.pending_diff_load.is_none());
+    app.start_diff_load(options, "switch back failed");
+    assert!(app.jobs.pending_diff_load.is_none());
+
+    let key = ContextKey {
+        file: FileIndex::new(0),
+        hunk: HunkIndex::new(1),
+    };
+    assert_eq!(app.document.trailing_context_lines.get(&key), Some(&30));
+    assert!(!app.discover_trailing_context_for_viewport());
+    let control_row = app.document.model.len() - 1;
+    assert!(app.handle_context_at_row(control_row));
+    assert!(matches!(
+        app.document.model.rows.last(),
+        Some(UiRow::ContextLine { new_line: 80, .. })
+    ));
+}
+
+#[test]
+fn trailing_context_discovery_tries_old_side_after_oversized_new_side() {
+    let repo = temp_test_dir("old-side-trailing-context");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    git(&repo, &["init", "-q"]);
+    git(&repo, &["config", "user.email", "mark@example.com"]);
+    git(&repo, &["config", "user.name", "Mark Test"]);
+    let old_text = (1..=80)
+        .map(|line| format!("line {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(repo.join("file.rs"), old_text).expect("old source should be written");
+    git(&repo, &["add", "file.rs"]);
+    git(&repo, &["commit", "-qm", "initial"]);
+
+    let changeset = changeset_with_hunk_at(repo.clone(), 50);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    let discovery_byte_limit = app
+        .config
+        .syntax_limits
+        .max_source_bytes
+        .min(mark_syntax::DEFAULT_MAX_HIGHLIGHT_SOURCE_BYTES);
+    fs::write(repo.join("file.rs"), vec![b'x'; discovery_byte_limit + 1])
+        .expect("oversized new source should be written");
+    app.set_viewport_rows(app.document.model.len());
+
+    assert!(app.discover_trailing_context_for_viewport());
+    finish_trailing_context_discovery(&mut app);
+    assert!(matches!(
+        app.document.model.rows.last(),
+        Some(UiRow::Collapsed {
+            hunk,
+            new_start: 51,
+            lines: 30,
+            ..
+        }) if hunk.get() == 1
+    ));
+    let key = ContextKey {
+        file: FileIndex::new(0),
+        hunk: HunkIndex::new(1),
+    };
+    assert_eq!(
+        app.document.trailing_context_sides.get(&key),
+        Some(&DiffSide::Old)
+    );
+    let control_row = app.document.model.len() - 1;
+    assert!(app.handle_context_at_row(control_row));
+    assert!(matches!(
+        app.document.model.rows.last(),
+        Some(UiRow::ContextLine { new_line: 80, .. })
+    ));
+    assert_eq!(app.context_source_side(0), Some(DiffSide::Old));
 }
 
 #[test]

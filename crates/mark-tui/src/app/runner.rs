@@ -34,6 +34,7 @@ pub(crate) async fn run_loop(
         app.drain_diff_prefetch();
         app.start_due_filter_apply();
         app.drain_filter_worker();
+        app.drain_trailing_context_worker();
         app.drain_syntax();
         if app.runtime.dirty {
             if app.runtime.terminal_clear_requested {
@@ -42,6 +43,9 @@ pub(crate) async fn run_loop(
             }
             terminal.draw(|frame| draw(frame, app))?;
             app.runtime.dirty = false;
+            if app.discover_trailing_context_for_viewport() {
+                continue;
+            }
             app.start_diff_prefetches();
         }
         app.start_pending_editor_reload();

@@ -179,6 +179,171 @@ fn focused_hunk_editor_target_uses_new_path_and_visible_line() {
 }
 
 #[test]
+fn editor_reload_restores_the_focused_line_at_its_viewport_row() {
+    let repo = PathBuf::from("/repo");
+    let changeset = changeset_with_context_lines_at(repo.clone(), 1, 100);
+    let replacement = changeset_with_context_lines_at(repo, 1, 100);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(11);
+    app.set_scroll(40);
+
+    assert_eq!(app.focused_hunk_editor_target().unwrap().line, 44);
+    app.replace_path_changeset(Path::new("file.rs"), replacement);
+    app.set_scroll(0);
+    app.restore_editor_view_for_test(Path::new("file.rs"), 44, 5);
+
+    assert_eq!(app.viewport.scroll, 40);
+    assert_eq!(app.focused_hunk_editor_target().unwrap().line, 44);
+}
+
+#[test]
+fn editor_reload_restores_anchor_through_annotation_rows() {
+    use crate::annotation::AnnotationKey;
+    use crate::render::viewport_plan::{ViewportSlotKind, plan_diff_viewport_rows};
+
+    let repo = PathBuf::from("/repo");
+    let changeset = changeset_with_context_lines_at(repo.clone(), 1, 100);
+    let replacement = changeset_with_context_lines_at(repo, 1, 100);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_width(80);
+    app.set_viewport_rows(11);
+
+    let annotated_row = (0..app.document.model.len())
+        .find(|row| app.editor_line_at_hunk_row(*row, 0, 0) == Some(43))
+        .expect("line above the editor anchor should be rendered");
+    let key = AnnotationKey::from_ui_row(
+        &app.document.changeset,
+        app.document
+            .model
+            .row(annotated_row)
+            .expect("annotated row"),
+    )
+    .expect("annotation key");
+    app.annotations_state
+        .annotations
+        .insert(key, "note".to_owned());
+
+    app.replace_path_changeset(Path::new("file.rs"), replacement);
+    app.set_scroll(0);
+    app.restore_editor_view_for_test(Path::new("file.rs"), 44, 5);
+
+    let anchor_viewport_row = plan_diff_viewport_rows(&app, app.viewport.viewport_rows)
+        .into_iter()
+        .enumerate()
+        .find_map(|(viewport_row, slot)| match slot.kind {
+            ViewportSlotKind::DiffVisual { model_row, .. }
+                if app.editor_line_at_hunk_row(model_row, 0, 0) == Some(44) =>
+            {
+                Some(viewport_row)
+            }
+            _ => None,
+        })
+        .expect("editor anchor should be visible");
+    assert_eq!(anchor_viewport_row, 5);
+}
+
+#[test]
+fn editor_reload_finds_anchor_between_long_deletion_runs() {
+    let mut changeset = changeset_with_context_lines(3);
+    let hunk = &mut changeset.files[0].hunks_mut()[0];
+    let mut lines = vec![DiffLine::addition(1, "first")];
+    lines.extend((1..=300).map(|line| DiffLine::deletion(line, "before")));
+    lines.push(DiffLine::addition(2, "target"));
+    lines.extend((301..=600).map(|line| DiffLine::deletion(line, "after")));
+    lines.push(DiffLine::addition(3, "last"));
+    hunk.ranges = HunkLineRanges::new(1, 600, 1, 3);
+    hunk.lines = lines;
+
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(11);
+    app.restore_editor_view_for_test(Path::new("file.rs"), 2, 5);
+
+    assert_eq!(app.focused_hunk_editor_target().unwrap().line, 2);
+}
+
+#[test]
+fn editor_reload_does_not_restore_after_navigation_during_reload() {
+    let repo = PathBuf::from("/repo");
+    let changeset = changeset_with_context_lines_at(repo.clone(), 1, 100);
+    let replacement = changeset_with_context_lines_at(repo, 1, 100);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(11);
+    app.set_scroll(40);
+
+    let navigation = EditorReloadNavigation {
+        scroll: app.viewport.scroll,
+        selected_file: app.sidebar.selected_file,
+        manual_hunk_focus: app.viewport.manual_hunk_focus,
+        layout: app.viewport.layout,
+        line_wrapping: app.viewport.line_wrapping,
+    };
+    let (tx, rx) = oneshot::channel();
+    assert!(
+        tx.send(EditorScopedReload {
+            path: PathBuf::from("file.rs"),
+            changeset: Ok(replacement),
+            view_anchor: Some(EditorViewAnchor {
+                line: 44,
+                viewport_row: 5,
+            }),
+        })
+        .is_ok()
+    );
+    app.jobs.editor_reload = Some(EditorReloadWorker {
+        generation: app.document.generation,
+        navigation,
+        job: AsyncJob::new(rx),
+    });
+
+    app.set_scroll(0);
+    assert!(app.drain_editor_reload());
+
+    assert_eq!(app.viewport.scroll, 0);
+    assert_ne!(app.focused_hunk_editor_target().unwrap().line, 44);
+}
+
+#[test]
+fn editor_reload_does_not_restore_after_layout_change_during_reload() {
+    let repo = PathBuf::from("/repo");
+    let changeset = changeset_with_context_lines_at(repo.clone(), 1, 100);
+    let replacement = changeset_with_context_lines_at(repo, 1, 100);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(11);
+
+    let navigation = EditorReloadNavigation {
+        scroll: app.viewport.scroll,
+        selected_file: app.sidebar.selected_file,
+        manual_hunk_focus: app.viewport.manual_hunk_focus,
+        layout: app.viewport.layout,
+        line_wrapping: app.viewport.line_wrapping,
+    };
+    let (tx, rx) = oneshot::channel();
+    assert!(
+        tx.send(EditorScopedReload {
+            path: PathBuf::from("file.rs"),
+            changeset: Ok(replacement),
+            view_anchor: Some(EditorViewAnchor {
+                line: 44,
+                viewport_row: 5,
+            }),
+        })
+        .is_ok()
+    );
+    app.jobs.editor_reload = Some(EditorReloadWorker {
+        generation: app.document.generation,
+        navigation,
+        job: AsyncJob::new(rx),
+    });
+
+    app.toggle_layout();
+    assert_eq!(app.viewport.scroll, navigation.scroll);
+    assert!(app.drain_editor_reload());
+
+    assert_eq!(app.viewport.layout, DiffLayoutMode::Split);
+    assert_eq!(app.viewport.scroll, 0);
+}
+
+#[test]
 fn focused_hunk_editor_target_uses_manual_focus_when_diff_fits_viewport() {
     let repo = PathBuf::from("/repo");
     let changeset = changeset_with_hunks_at(repo.clone(), &[10, 20, 30]);
