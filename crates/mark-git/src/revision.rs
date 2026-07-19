@@ -85,6 +85,13 @@ pub fn existing_object_revision(repo: &Path, rev: &str, kind: &str) -> MarkResul
     Err(MarkError::Usage(format!("unknown {label} `{rev}`")))
 }
 
+pub fn revision_is_treeish(repo: &Path, rev: &str) -> MarkResult<bool> {
+    let Some(object) = resolve_revision(repo, rev)? else {
+        return Ok(false);
+    };
+    revision_object_matches(repo, &object, "tree")
+}
+
 pub fn revision_expression_exists(repo: &Path, rev: &str) -> MarkResult<bool> {
     let output = rev_parse_verify(repo, rev)?;
     // `rev-parse --verify` exits non-zero for expressions that expand to

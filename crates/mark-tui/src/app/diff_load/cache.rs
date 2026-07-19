@@ -53,7 +53,8 @@ impl DiffApp {
         let search_index = Arc::clone(&self.document.search_index);
         let total_stats = self.document.total_stats.clone();
         let max_line_width = search_index.max_line_width();
-        let can_reuse_current_model = !self.filters.active()
+        let can_reuse_current_model = !self.full_file_mode_active()
+            && !self.filters.active()
             && !self.filter_busy()
             && self.document.context_expansions.is_empty();
         let context_expansions = HashMap::new();

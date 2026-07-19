@@ -3,7 +3,8 @@ use super::{
     DocumentState, ERROR_LOG_DEFAULT_HEIGHT, FileSidebarState, FilterState, InputState, JobState,
     LiveUpdatesState, MouseScroll, NotificationState, OptionsDraft, OverlayState, ReferenceState,
     RuntimeState, SyntaxStartupMode, ViewportState, color_scheme_from_config,
-    layout_override_from_setting, layout_setting_from_override, show_rev_from_options,
+    full_file_context_expansions, full_file_mode_available, layout_override_from_setting,
+    layout_setting_from_override, show_rev_from_options,
 };
 use crate::annotation::AnnotationStore;
 use crate::controls::{
@@ -11,11 +12,17 @@ use crate::controls::{
     current_head_label, default_branch_base,
 };
 use crate::keymap::Keymap;
-use crate::model::{FileIndex, HunkIndex, UiModel, UiRow};
-use crate::render::snapshot::HitMap;
+use crate::model::{
+    ContextKey, ContextSourceEntry, ContextSourceKey, FileIndex, HunkIndex, UiModel, UiRow,
+    line_after_hunk,
+};
+use crate::render::{snapshot::HitMap, text::display_width};
 use crate::search::DiffSearchIndex;
 use crate::selector::SelectorState;
-use crate::syntax::{LruCache, SyntaxRuntime};
+use crate::syntax::{
+    DiffSide, LruCache, SyntaxRuntime, available_context_lines, full_file_source,
+    load_full_file_source, split_context_source_lines,
+};
 use crate::theme::{
     DecorationPreference, DiffTheme, MAX_INLINE_DIFF_CACHE_ENTRIES, decoration_preference_from_env,
     diff_theme_from_config, resolve_decoration_style,
@@ -93,6 +100,46 @@ pub(crate) fn layout_override_from_settings(
         .then_some(settings.layout)
         .flatten()
         .and_then(layout_override_from_setting)
+}
+
+fn populate_static_full_file_context(
+    options: &DiffOptions,
+    changeset: &Changeset,
+    trailing_context_lines: &mut HashMap<ContextKey, usize>,
+    trailing_context_sides: &mut HashMap<ContextKey, DiffSide>,
+    context_cache: &mut HashMap<ContextSourceKey, ContextSourceEntry>,
+) {
+    for (file, file_diff) in changeset.files.iter().enumerate() {
+        let Some(last_hunk) = file_diff.hunks().last() else {
+            continue;
+        };
+        let file = FileIndex::new(file);
+        let trailing_key = ContextKey {
+            file,
+            hunk: HunkIndex::new(file_diff.hunks().len()),
+        };
+
+        for side in [DiffSide::New, DiffSide::Old] {
+            let source_key = ContextSourceKey { file, side };
+            let Some(source) = full_file_source(&changeset.repo, options, file_diff, side) else {
+                continue;
+            };
+            let Ok(source) = load_full_file_source(&source) else {
+                context_cache.insert(source_key, ContextSourceEntry::Unavailable);
+                continue;
+            };
+            let lines = Arc::new(split_context_source_lines(&source));
+            let source_start = match side {
+                DiffSide::Old => line_after_hunk(last_hunk.old_start(), last_hunk.old_count()),
+                DiffSide::New => line_after_hunk(last_hunk.new_start(), last_hunk.new_count()),
+            };
+            let available = available_context_lines(source_start, usize::MAX, lines.len());
+            trailing_context_lines.insert(trailing_key, available);
+            trailing_context_sides.insert(trailing_key, side);
+            context_cache.insert(source_key, ContextSourceEntry::Lines(lines));
+            break;
+        }
+    }
 }
 
 fn load_user_settings_for_syntax_mode(syntax_mode: &SyntaxStartupMode) -> bool {
@@ -191,6 +238,32 @@ impl DiffApp {
     }
 
     #[cfg(test)]
+    pub(crate) fn new_with_explicit_layout_and_settings(
+        options: DiffOptions,
+        changeset: Changeset,
+        layout: DiffLayoutMode,
+        syntax_mode: SyntaxStartupMode,
+        settings: SyntaxSettings,
+    ) -> Self {
+        Self::with_explicit_layout(
+            Self::new_with_loaded_syntax_settings(
+                options,
+                changeset,
+                layout,
+                syntax_mode,
+                false,
+                true,
+                LoadedSyntaxSettings {
+                    settings,
+                    startup_error_log: None,
+                    load_user_settings: false,
+                },
+            ),
+            layout,
+        )
+    }
+
+    #[cfg(test)]
     pub(crate) fn new_static_with_explicit_layout_and_settings(
         options: DiffOptions,
         changeset: Changeset,
@@ -273,15 +346,38 @@ impl DiffApp {
             mut startup_error_log,
             load_user_settings,
         } = loaded_syntax_settings;
-        let context_expansions = HashMap::new();
-        let trailing_context_lines = HashMap::new();
-        let trailing_context_sides = HashMap::new();
-        let context_cache = HashMap::new();
+        let full_file_mode = settings.full_file && full_file_mode_available(&changeset, &options);
+        let preload_wrapped_full_file_context = full_file_mode && settings.line_wrapping;
+        let mut trailing_context_lines = HashMap::new();
+        let mut trailing_context_sides = HashMap::new();
+        let mut context_cache = HashMap::new();
+        // Static rendering has no event loop to discover trailing context, so
+        // resolve and cache it before constructing the one-pass model.
+        if full_file_mode && !build_search_index {
+            populate_static_full_file_context(
+                &options,
+                &changeset,
+                &mut trailing_context_lines,
+                &mut trailing_context_sides,
+                &mut context_cache,
+            );
+        }
+        let context_expansions = if full_file_mode {
+            full_file_context_expansions(&changeset, &options, &trailing_context_lines)
+        } else {
+            HashMap::new()
+        };
         let layout_override = layout_override_from_settings(&settings, honor_settings_layout);
         if let Some(setting_layout) = layout_override {
             layout = setting_layout;
         }
-        let model = UiModel::new(&changeset, layout, &context_expansions);
+        let model = UiModel::new_with_trailing_context_and_controls(
+            &changeset,
+            layout,
+            &context_expansions,
+            &trailing_context_lines,
+            !full_file_mode,
+        );
         let search_index = Arc::new(if build_search_index {
             DiffSearchIndex::new(&changeset)
         } else {
@@ -363,8 +459,18 @@ impl DiffApp {
                 SyntaxRuntime::start_with_languages(languages.clone(), syntax_limits)
             }
         };
-        let max_line_width = search_index.max_line_width();
-        Self {
+        let max_line_width = context_cache
+            .values()
+            .filter_map(|entry| match entry {
+                ContextSourceEntry::Lines(lines) => {
+                    lines.iter().map(|line| display_width(line)).max()
+                }
+                ContextSourceEntry::Unavailable => None,
+            })
+            .max()
+            .unwrap_or_default()
+            .max(search_index.max_line_width());
+        let mut app = Self {
             document: DocumentState {
                 options,
                 base_changeset: changeset.clone(),
@@ -387,6 +493,7 @@ impl DiffApp {
                 scroll: 0,
                 horizontal_scroll: 0,
                 horizontal_scroll_locked: false,
+                full_file: settings.full_file,
                 line_wrapping: settings.line_wrapping,
                 viewport_rows: 1,
                 viewport_width: 1,
@@ -425,6 +532,7 @@ impl DiffApp {
                 annotation_menu: SelectorState::default(),
                 options_menu_draft: OptionsDraft {
                     layout: layout_setting_from_override(layout_override),
+                    full_file: settings.full_file,
                     live_updates_enabled: settings.live_reload,
                     context_expansion,
                     syntax_enabled: syntax.is_some(),
@@ -523,6 +631,11 @@ impl DiffApp {
                 hit_map: HitMap::default(),
                 pending_effects: Vec::new(),
             },
+        };
+        if preload_wrapped_full_file_context {
+            let visible_files = app.document.model.visible_files().to_vec();
+            app.prepare_full_file_context_layout(&visible_files);
         }
+        app
     }
 }

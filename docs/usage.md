@@ -147,9 +147,10 @@ g              top
 G              bottom
 ]              next hunk
 [              previous hunk
-( / )          previous / next file
+Shift-Tab/Tab  previous / next file
 , / .          expand context up / down
 c              collapse expanded context
+e              toggle full file / hunks
 f              file filter
 /              grep filter
 n / p          next / previous grep match
@@ -161,13 +162,11 @@ A              batch annotate visible lines
 n              annotation search menu
 b              file browser
 s              toggle split/unified layout
-Ctrl-G         open the focused hunk in `$GIT_EDITOR`, `$VISUAL`, or `$EDITOR`
+Ctrl-G         open the viewport line (full file) or focused hunk in the editor
 y              copy marks to the terminal clipboard
 Ctrl-U         clear filters
 { / }          previous / next annotation
 Ctrl-Shift-C   copy the error log pane to the terminal clipboard
-Tab            next diff type
-Shift-Tab      previous diff type
 ```
 
 Editor commands are shell-word parsed and open on the line focused in the diff.

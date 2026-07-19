@@ -1,6 +1,6 @@
 use super::{DiffApp, MarkExport, json_string};
 use crate::annotation::{AnnotationKey, AnnotationSide, paired_old_line_for_addition};
-use crate::model::{UiModel, UiRow};
+use crate::model::{UiModel, UiRow, line_after_hunk};
 use crate::syntax::{DiffSide, available_context_lines};
 use std::collections::HashSet;
 
@@ -140,8 +140,8 @@ impl DiffApp {
                 let Some(last_hunk) = file.hunks().last() else {
                     return false;
                 };
-                let old_start = last_hunk.old_start().saturating_add(last_hunk.old_count());
-                let new_start = last_hunk.new_start().saturating_add(last_hunk.new_count());
+                let old_start = line_after_hunk(last_hunk.old_start(), last_hunk.old_count());
+                let new_start = line_after_hunk(last_hunk.new_start(), last_hunk.new_count());
                 if key.line < new_start {
                     return false;
                 }

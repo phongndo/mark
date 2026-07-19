@@ -28,6 +28,7 @@ pub(crate) enum GlobalAction {
     ExpandContextUp,
     ExpandContextDown,
     CollapseContextAll,
+    FullFile,
     Quit,
     Layout,
     LineWrapping,
@@ -176,6 +177,7 @@ const GLOBAL_ACTION_SPECS: &[GlobalActionSpec] = &[
         "collapse_context_all",
         ["c"]
     ),
+    global_action_spec!(GlobalAction::FullFile, "full_file", ["e"]),
     global_action_spec!(GlobalAction::Quit, "quit", ["q"]),
     global_action_spec!(GlobalAction::Layout, "layout", ["s"]),
     global_action_spec!(GlobalAction::LineWrapping, "line_wrapping", ["w"]),

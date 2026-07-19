@@ -682,7 +682,7 @@ pub(crate) fn grep_match_rows(model: &UiModel, grep_matches: &[SearchLineRef]) -
     for line_ref in grep_matches.iter().copied() {
         let row = match line_ref {
             SearchLineRef::FileBody { file } => model.file_body_notice_row(file),
-            SearchLineRef::HunkHeader { file, hunk } => model.typed_hunk_start_row(file, hunk),
+            SearchLineRef::HunkHeader { file, hunk } => model.hunk_header_row(file, hunk),
             SearchLineRef::DiffLine { file, hunk, line } => model.diff_line_row(file, hunk, line),
         };
         if let Some(row) = row

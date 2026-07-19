@@ -12,8 +12,9 @@ use crate::{
         DiffLayoutMode, branch_base_from_options, branch_head_from_options, comparison_branches,
         comparison_commits, current_head_label, default_branch_base,
     },
-    model::FileIndex,
+    model::{ContextKey, FileIndex, HunkIndex, UiModel},
     search::DiffSearchIndex,
+    syntax::invalidate_range_operand_revision_cache,
 };
 
 impl DiffApp {
@@ -187,6 +188,11 @@ impl DiffApp {
         if let Some(syntax) = self.config.syntax.as_mut() {
             syntax.clear(self.document.generation);
         }
+        let full_file_mode = self.full_file_mode_active();
+        if full_file_mode {
+            self.retry_unresolved_trailing_context();
+            self.sync_full_file_context_expansions();
+        }
 
         if self.filters.active() {
             let search_result = self.document.search_index.search_with_grep_match_limit(
@@ -205,10 +211,24 @@ impl DiffApp {
         } else {
             self.document.stats = self.document.total_stats.clone();
             self.document.max_line_width = max_line_width;
-            self.document.model = match self.viewport.layout {
-                DiffLayoutMode::Split => split_model,
-                DiffLayoutMode::Unified => unified_model,
+            self.document.model = if full_file_mode {
+                UiModel::new_with_trailing_context_and_controls(
+                    &self.document.changeset,
+                    self.viewport.layout,
+                    &self.document.context_expansions,
+                    &self.document.trailing_context_lines,
+                    false,
+                )
+            } else {
+                match self.viewport.layout {
+                    DiffLayoutMode::Split => split_model,
+                    DiffLayoutMode::Unified => unified_model,
+                }
             };
+            if full_file_mode {
+                let visible_files = self.document.model.visible_files().to_vec();
+                self.prepare_full_file_context_layout(&visible_files);
+            }
             self.annotations_state.annotation_rows.borrow_mut().clear();
             self.invalidate_wrapped_visual_layout();
             self.reanchor_annotation_draft();
@@ -246,14 +266,44 @@ impl DiffApp {
     }
 
     pub(crate) fn replace_loaded_diff(&mut self, options: DiffOptions, changeset: Changeset) {
+        // Range operands such as `:/message` can resolve to a different commit
+        // after refs move even when their spelling is unchanged.
+        invalidate_range_operand_revision_cache(&changeset.repo, &options);
         let options_changed = self.document.options != options;
-        if !options_changed && self.document.base_changeset == changeset {
+        if !options_changed
+            && self.document.base_changeset == changeset
+            && !self.full_file_mode_active()
+        {
             self.jobs.live_updates.reset_reload();
             self.runtime.dirty = true;
             return;
         }
         self.close_annotation_target_mode();
 
+        // Keep only the current full-file anchor hot across a reload, and
+        // recompute its source line count below. DiffFile equality says nothing
+        // about unchanged source lines after the final hunk.
+        let refresh_trailing_context_file = (!options_changed
+            && self.document.changeset.repo == changeset.repo
+            && self.full_file_mode_active())
+        .then(|| {
+            let old_file_index = self.sidebar.selected_file.get();
+            let old_file = self.document.changeset.files.get(old_file_index)?;
+            let old_key = ContextKey {
+                file: FileIndex::new(old_file_index),
+                hunk: HunkIndex::new(old_file.hunks().len()),
+            };
+            if !self.document.trailing_context_lines.contains_key(&old_key)
+                || !self.document.trailing_context_sides.contains_key(&old_key)
+            {
+                return None;
+            }
+            changeset
+                .files
+                .iter()
+                .position(|new_file| new_file.display_path() == old_file.display_path())
+        })
+        .flatten();
         let selected_path = self
             .document
             .changeset
@@ -312,6 +362,11 @@ impl DiffApp {
         self.jobs.filter_searching = false;
         if let Some(syntax) = self.config.syntax.as_mut() {
             syntax.clear(self.document.generation);
+        }
+        if self.full_file_mode_active()
+            && let Some(file) = refresh_trailing_context_file
+        {
+            self.refresh_trailing_context_for_file(file);
         }
         let search_result = self.document.search_index.search_with_grep_match_limit(
             &self.document.changeset,

@@ -199,6 +199,17 @@ pub(crate) fn context_expands_up(hunk: HunkIndex) -> bool {
     hunk.get() == 0
 }
 
+/// Git encodes a zero-count hunk range at the line before the change. Convert
+/// that position to the first line at or after the change so context remains
+/// ordered around pure insertions and deletions.
+pub(crate) fn normalized_hunk_start(start: usize, count: usize) -> usize {
+    start.saturating_add(usize::from(count == 0))
+}
+
+pub(crate) fn line_after_hunk(start: usize, count: usize) -> usize {
+    normalized_hunk_start(start, count).saturating_add(count)
+}
+
 pub(crate) fn row_count_u32(value: usize) -> u32 {
     u32::try_from(value).unwrap_or(u32::MAX)
 }
@@ -425,22 +436,40 @@ impl UiModel {
         context_expansions: &HashMap<ContextKey, usize>,
         trailing_context_lines: &HashMap<ContextKey, usize>,
     ) -> Self {
+        Self::new_with_trailing_context_and_controls(
+            changeset,
+            layout,
+            context_expansions,
+            trailing_context_lines,
+            true,
+        )
+    }
+
+    pub(crate) fn new_with_trailing_context_and_controls(
+        changeset: &Changeset,
+        layout: DiffLayoutMode,
+        context_expansions: &HashMap<ContextKey, usize>,
+        trailing_context_lines: &HashMap<ContextKey, usize>,
+        show_context_controls: bool,
+    ) -> Self {
         let visible_files: Vec<_> = (0..changeset.files.len()).map(FileIndex::new).collect();
-        Self::new_filtered_with_trailing_context(
+        Self::new_filtered_with_trailing_context_and_controls(
             changeset,
             layout,
             context_expansions,
             trailing_context_lines,
             &visible_files,
+            show_context_controls,
         )
     }
 
-    pub(crate) fn new_filtered_with_trailing_context(
+    pub(crate) fn new_filtered_with_trailing_context_and_controls(
         changeset: &Changeset,
         layout: DiffLayoutMode,
         context_expansions: &HashMap<ContextKey, usize>,
         trailing_context_lines: &HashMap<ContextKey, usize>,
         visible_files: &[FileIndex],
+        show_context_controls: bool,
     ) -> Self {
         let total_hunks = changeset
             .files
@@ -459,11 +488,18 @@ impl UiModel {
             .filter(|file| file.is_binary() || file.has_no_textual_changes())
             .count();
         let file_separator_rows = changeset.files.len().saturating_sub(1);
-        let expanded_context_rows = context_expansions.values().copied().sum::<usize>();
-        let expanded_context_controls = context_expansions
+        let expanded_context_rows = context_expansions
             .values()
-            .filter(|expanded| **expanded > 0)
-            .count();
+            .copied()
+            .fold(0usize, usize::saturating_add);
+        let expanded_context_controls = if show_context_controls {
+            context_expansions
+                .values()
+                .filter(|expanded| **expanded > 0)
+                .count()
+        } else {
+            0
+        };
         let estimated_rows = changeset
             .files
             .len()
@@ -487,6 +523,7 @@ impl UiModel {
                 trailing_context_lines,
                 visible_files,
                 total_hunks,
+                show_context_controls,
             );
         }
 
@@ -517,10 +554,11 @@ impl UiModel {
             let mut next_new_line = 1;
             for (hunk_index, hunk) in file.hunks().iter().enumerate() {
                 let hunk_index = HunkIndex::new(hunk_index);
-                let collapsed_lines = hunk
-                    .old_start()
+                let hunk_old_start = normalized_hunk_start(hunk.old_start(), hunk.old_count());
+                let hunk_new_start = normalized_hunk_start(hunk.new_start(), hunk.new_count());
+                let collapsed_lines = hunk_old_start
                     .saturating_sub(next_old_line)
-                    .min(hunk.new_start().saturating_sub(next_new_line));
+                    .min(hunk_new_start.saturating_sub(next_new_line));
                 if collapsed_lines > 0 {
                     let key = ContextKey {
                         file: file_index,
@@ -555,19 +593,23 @@ impl UiModel {
                                     new_line: new_start + offset,
                                 });
                             }
-                            rows.push(UiRow::ContextHide {
-                                file: file_index,
-                                hunk: hunk_index,
-                                lines: expanded,
-                            });
+                            if show_context_controls {
+                                rows.push(UiRow::ContextHide {
+                                    file: file_index,
+                                    hunk: hunk_index,
+                                    lines: expanded,
+                                });
+                            }
                         }
                     } else {
                         if expanded > 0 {
-                            rows.push(UiRow::ContextHide {
-                                file: file_index,
-                                hunk: hunk_index,
-                                lines: expanded,
-                            });
+                            if show_context_controls {
+                                rows.push(UiRow::ContextHide {
+                                    file: file_index,
+                                    hunk: hunk_index,
+                                    lines: expanded,
+                                });
+                            }
                             for offset in 0..expanded {
                                 rows.push(UiRow::ContextLine {
                                     file: file_index,
@@ -594,10 +636,13 @@ impl UiModel {
                 let hunk_start_row = ModelRow::new(hunk_start_row);
                 hunk_start_rows.push(hunk_start_row);
                 hunk_row_starts.push(((file_index, hunk_index), hunk_start_row));
-                rows.push(UiRow::HunkHeader {
-                    file: file_index,
-                    hunk: hunk_index,
-                });
+                // Full-file mode omits patch-only chrome, including @@ headers.
+                if show_context_controls {
+                    rows.push(UiRow::HunkHeader {
+                        file: file_index,
+                        hunk: hunk_index,
+                    });
+                }
 
                 match layout {
                     DiffLayoutMode::Unified => {
@@ -618,8 +663,8 @@ impl UiModel {
                 }
                 hunk_row_ends.push(ModelRow::new(rows.len()));
 
-                next_old_line = hunk.old_start().saturating_add(hunk.old_count());
-                next_new_line = hunk.new_start().saturating_add(hunk.new_count());
+                next_old_line = line_after_hunk(hunk.old_start(), hunk.old_count());
+                next_new_line = line_after_hunk(hunk.new_start(), hunk.new_count());
             }
 
             let trailing_context_key = ContextKey {
@@ -636,11 +681,13 @@ impl UiModel {
                 .unwrap_or_default()
                 .min(available);
             if expanded > 0 {
-                rows.push(UiRow::ContextHide {
-                    file: file_index,
-                    hunk: trailing_context_key.hunk,
-                    lines: expanded,
-                });
+                if show_context_controls {
+                    rows.push(UiRow::ContextHide {
+                        file: file_index,
+                        hunk: trailing_context_key.hunk,
+                        lines: expanded,
+                    });
+                }
                 for offset in 0..expanded {
                     rows.push(UiRow::ContextLine {
                         file: file_index,
@@ -682,6 +729,7 @@ impl UiModel {
         trailing_context_lines: &HashMap<ContextKey, usize>,
         visible_files: &[FileIndex],
         total_hunks: usize,
+        show_context_controls: bool,
     ) -> Self {
         let mut row_count = 0usize;
         let mut row_segments = Vec::with_capacity(
@@ -731,10 +779,11 @@ impl UiModel {
             let mut next_new_line = 1;
             for (hunk_index, hunk) in file.hunks().iter().enumerate() {
                 let hunk_index = HunkIndex::new(hunk_index);
-                let collapsed_lines = hunk
-                    .old_start()
+                let hunk_old_start = normalized_hunk_start(hunk.old_start(), hunk.old_count());
+                let hunk_new_start = normalized_hunk_start(hunk.new_start(), hunk.new_count());
+                let collapsed_lines = hunk_old_start
                     .saturating_sub(next_old_line)
-                    .min(hunk.new_start().saturating_sub(next_new_line));
+                    .min(hunk_new_start.saturating_sub(next_new_line));
                 if collapsed_lines > 0 {
                     let key = ContextKey {
                         file: file_index,
@@ -777,29 +826,33 @@ impl UiModel {
                                     new_start: row_count_u32(new_start),
                                 },
                             );
-                            push_row_segment(
-                                &mut row_segments,
-                                &mut row_count,
-                                1,
-                                RowSegmentKind::ContextHide {
-                                    file: file_index,
-                                    hunk: hunk_index,
-                                    lines: row_count_u32(expanded),
-                                },
-                            );
+                            if show_context_controls {
+                                push_row_segment(
+                                    &mut row_segments,
+                                    &mut row_count,
+                                    1,
+                                    RowSegmentKind::ContextHide {
+                                        file: file_index,
+                                        hunk: hunk_index,
+                                        lines: row_count_u32(expanded),
+                                    },
+                                );
+                            }
                         }
                     } else {
                         if expanded > 0 {
-                            push_row_segment(
-                                &mut row_segments,
-                                &mut row_count,
-                                1,
-                                RowSegmentKind::ContextHide {
-                                    file: file_index,
-                                    hunk: hunk_index,
-                                    lines: row_count_u32(expanded),
-                                },
-                            );
+                            if show_context_controls {
+                                push_row_segment(
+                                    &mut row_segments,
+                                    &mut row_count,
+                                    1,
+                                    RowSegmentKind::ContextHide {
+                                        file: file_index,
+                                        hunk: hunk_index,
+                                        lines: row_count_u32(expanded),
+                                    },
+                                );
+                            }
                             push_row_segment(
                                 &mut row_segments,
                                 &mut row_count,
@@ -837,15 +890,17 @@ impl UiModel {
                 let hunk_start_row = ModelRow::new(row_count);
                 hunk_start_rows.push(hunk_start_row);
                 hunk_row_starts.push(((file_index, hunk_index), hunk_start_row));
-                push_row_segment(
-                    &mut row_segments,
-                    &mut row_count,
-                    1,
-                    RowSegmentKind::HunkHeader {
-                        file: file_index,
-                        hunk: hunk_index,
-                    },
-                );
+                if show_context_controls {
+                    push_row_segment(
+                        &mut row_segments,
+                        &mut row_count,
+                        1,
+                        RowSegmentKind::HunkHeader {
+                            file: file_index,
+                            hunk: hunk_index,
+                        },
+                    );
+                }
 
                 match layout {
                     DiffLayoutMode::Unified => push_row_segment(
@@ -868,8 +923,8 @@ impl UiModel {
                 }
                 hunk_row_ends.push(ModelRow::new(row_count));
 
-                next_old_line = hunk.old_start().saturating_add(hunk.old_count());
-                next_new_line = hunk.new_start().saturating_add(hunk.new_count());
+                next_old_line = line_after_hunk(hunk.old_start(), hunk.old_count());
+                next_new_line = line_after_hunk(hunk.new_start(), hunk.new_count());
             }
 
             let trailing_context_key = ContextKey {
@@ -886,16 +941,18 @@ impl UiModel {
                 .unwrap_or_default()
                 .min(available);
             if expanded > 0 {
-                push_row_segment(
-                    &mut row_segments,
-                    &mut row_count,
-                    1,
-                    RowSegmentKind::ContextHide {
-                        file: file_index,
-                        hunk: trailing_context_key.hunk,
-                        lines: row_count_u32(expanded),
-                    },
-                );
+                if show_context_controls {
+                    push_row_segment(
+                        &mut row_segments,
+                        &mut row_count,
+                        1,
+                        RowSegmentKind::ContextHide {
+                            file: file_index,
+                            hunk: trailing_context_key.hunk,
+                            lines: row_count_u32(expanded),
+                        },
+                    );
+                }
                 push_row_segment(
                     &mut row_segments,
                     &mut row_count,
@@ -1088,10 +1145,58 @@ impl UiModel {
             .map(|(_, row)| *row)
     }
 
+    pub(crate) fn hunk_header_row(&self, file: FileIndex, hunk: HunkIndex) -> Option<ModelRow> {
+        let row = self.typed_hunk_start_row(file, hunk)?;
+        matches!(
+            self.row(row.get()),
+            Some(UiRow::HunkHeader {
+                file: row_file,
+                hunk: row_hunk,
+            }) if row_file == file && row_hunk == hunk
+        )
+        .then_some(row)
+    }
+
     pub(crate) fn file_body_notice_row(&self, file: FileIndex) -> Option<ModelRow> {
         let row = self.file_start_row(file.get())?.saturating_add(1);
         matches!(self.row(row), Some(UiRow::FileBodyNotice(row_file)) if row_file == file)
             .then_some(ModelRow::new(row))
+    }
+
+    pub(crate) fn context_line_row(&self, file: FileIndex, new_line: usize) -> Option<ModelRow> {
+        if !self.rows.is_empty() {
+            return self
+                .rows
+                .iter()
+                .position(|row| {
+                    matches!(
+                        row,
+                        UiRow::ContextLine {
+                            file: row_file,
+                            new_line: row_new_line,
+                            ..
+                        } if *row_file == file && *row_new_line == new_line
+                    )
+                })
+                .map(ModelRow::new);
+        }
+
+        self.row_segments.iter().find_map(|segment| {
+            let RowSegmentKind::ContextLines {
+                file: row_file,
+                new_start,
+                ..
+            } = segment.kind
+            else {
+                return None;
+            };
+            if row_file != file {
+                return None;
+            }
+            let offset = new_line.checked_sub(new_start as usize)?;
+            (offset < segment.len as usize)
+                .then_some(ModelRow::new(segment.start.get().saturating_add(offset)))
+        })
     }
 
     pub(crate) fn diff_line_row(
@@ -1451,50 +1556,55 @@ mod tests {
             },
             2,
         )]);
-        for layout in [DiffLayoutMode::Unified, DiffLayoutMode::Split] {
-            let eager = UiModel::new_filtered_with_trailing_context(
-                &changeset,
-                layout,
-                &expansions,
-                &trailing,
-                &visible,
-            );
-            let sparse = UiModel::new_filtered_sparse(
-                &changeset,
-                layout,
-                &expansions,
-                &trailing,
-                &visible,
-                2,
-            );
-            assert_eq!(sparse.len(), eager.len());
-            for row in 0..eager.len() {
-                assert_eq!(sparse.row(row), eager.row(row), "row {row} in {layout:?}");
-            }
-            assert_eq!(sparse.hunk_row_range(0, 0), eager.hunk_row_range(0, 0));
-            assert_eq!(sparse.hunk_row_range(0, 1), eager.hunk_row_range(0, 1));
-            for row in 0..eager.len() {
-                if let Some(
-                    UiRow::UnifiedLine { file, hunk, line } | UiRow::MetaLine { file, hunk, line },
-                ) = eager.row(row)
-                {
-                    assert_eq!(
-                        sparse.diff_line_row(file, hunk, line),
-                        Some(ModelRow::new(row))
-                    );
+        for show_context_controls in [true, false] {
+            for layout in [DiffLayoutMode::Unified, DiffLayoutMode::Split] {
+                let eager = UiModel::new_filtered_with_trailing_context_and_controls(
+                    &changeset,
+                    layout,
+                    &expansions,
+                    &trailing,
+                    &visible,
+                    show_context_controls,
+                );
+                let sparse = UiModel::new_filtered_sparse(
+                    &changeset,
+                    layout,
+                    &expansions,
+                    &trailing,
+                    &visible,
+                    2,
+                    show_context_controls,
+                );
+                assert_eq!(sparse.len(), eager.len());
+                for row in 0..eager.len() {
+                    assert_eq!(sparse.row(row), eager.row(row), "row {row} in {layout:?}");
                 }
-                if let Some(UiRow::SplitLine {
-                    file,
-                    hunk,
-                    left,
-                    right,
-                }) = eager.row(row)
-                {
-                    for line in [left.get(), right.get()].into_iter().flatten() {
+                assert_eq!(sparse.hunk_row_range(0, 0), eager.hunk_row_range(0, 0));
+                assert_eq!(sparse.hunk_row_range(0, 1), eager.hunk_row_range(0, 1));
+                for row in 0..eager.len() {
+                    if let Some(
+                        UiRow::UnifiedLine { file, hunk, line }
+                        | UiRow::MetaLine { file, hunk, line },
+                    ) = eager.row(row)
+                    {
                         assert_eq!(
                             sparse.diff_line_row(file, hunk, line),
                             Some(ModelRow::new(row))
                         );
+                    }
+                    if let Some(UiRow::SplitLine {
+                        file,
+                        hunk,
+                        left,
+                        right,
+                    }) = eager.row(row)
+                    {
+                        for line in [left.get(), right.get()].into_iter().flatten() {
+                            assert_eq!(
+                                sparse.diff_line_row(file, hunk, line),
+                                Some(ModelRow::new(row))
+                            );
+                        }
                     }
                 }
             }

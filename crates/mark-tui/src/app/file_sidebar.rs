@@ -103,7 +103,9 @@ impl DiffApp {
         if let Some(row) = self.document.model.file_start_row(next) {
             let mut scroll = self.scroll_for_model_row(row);
             let first_hunk_row = self.document.model.hunk_start_row(next, 0);
-            if let Some(hunk_row) = first_hunk_row {
+            if !self.full_file_mode_active()
+                && let Some(hunk_row) = first_hunk_row
+            {
                 scroll = self.scroll_with_model_row_rendered(scroll, hunk_row);
             }
             self.clear_manual_hunk_focus();

@@ -19,12 +19,18 @@ impl DiffApp {
     ) {
         self.close_annotation_target_mode();
         let previous_manual_hunk_focus = self.viewport.manual_hunk_focus;
-        self.document.model = UiModel::new_filtered_with_trailing_context(
+        let full_file_mode = self.full_file_mode_active();
+        if full_file_mode {
+            self.sync_full_file_context_expansions();
+            self.prepare_full_file_context_layout(visible_files);
+        }
+        self.document.model = UiModel::new_filtered_with_trailing_context_and_controls(
             &self.document.changeset,
             self.viewport.layout,
             &self.document.context_expansions,
             &self.document.trailing_context_lines,
             visible_files,
+            !full_file_mode,
         );
         self.annotations_state.annotation_rows.borrow_mut().clear();
         self.invalidate_wrapped_visual_layout();
@@ -93,8 +99,12 @@ impl DiffApp {
             .into_iter()
             .enumerate()
             .filter_map(|(viewport_row, slot)| match slot.kind {
-                ViewportSlotKind::DiffVisual { model_row, .. } => Some(RenderedDiffRow {
+                ViewportSlotKind::DiffVisual {
+                    visual_scroll,
+                    model_row,
+                } => Some(RenderedDiffRow {
                     viewport_row,
+                    visual_scroll,
                     model_row,
                 }),
                 ViewportSlotKind::AnnotationCompose { .. }

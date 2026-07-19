@@ -21,6 +21,7 @@ fn keymap_parses_configured_global_and_menu_bindings() {
             copy_error_log = "ctrl+shift+c"
             prev_diff_type = "shift-left"
             expand_context_up = []
+            full_file = "v"
 
             [keymap.menu]
             down = ["s", "down"]
@@ -80,6 +81,10 @@ fn keymap_parses_configured_global_and_menu_bindings() {
     assert!(keymap.matches_single(
         GlobalAction::PreviousDiffType,
         KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT)
+    ));
+    assert!(keymap.matches_single(
+        GlobalAction::FullFile,
+        KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE)
     ));
 }
 
@@ -167,6 +172,7 @@ fn new_view_defaults_do_not_conflict_with_existing_custom_bindings() {
             [keymap.global]
             reload = "w"
             quit = "x"
+            file_filter = "e"
             "#,
     )
     .expect("existing custom bindings should take precedence over new defaults");
@@ -177,6 +183,10 @@ fn new_view_defaults_do_not_conflict_with_existing_custom_bindings() {
     );
     assert_eq!(
         keymap.global_action_label(GlobalAction::HorizontalScrollLock),
+        "unbound"
+    );
+    assert_eq!(
+        keymap.global_action_label(GlobalAction::FullFile),
         "unbound"
     );
 }
@@ -423,6 +433,10 @@ fn default_review_actions_use_mnemonic_keys() {
     assert!(keymap.matches_single(
         GlobalAction::CollapseContextAll,
         KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE)
+    ));
+    assert!(keymap.matches_single(
+        GlobalAction::FullFile,
+        KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE)
     ));
     assert_eq!(
         keymap.global_action_label(GlobalAction::ReviewTarget),

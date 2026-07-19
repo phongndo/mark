@@ -855,6 +855,559 @@ fn context_keyboard_shortcuts_expand_and_collapse_by_default() {
 }
 
 #[test]
+fn e_toggles_full_file_and_hunk_view() {
+    let repo = temp_test_dir("full-file-key");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    let text = (1..=80)
+        .map(|line| format!("line {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(repo.join("file.rs"), text).expect("context file should be written");
+    let changeset = changeset_with_hunk_at(repo, 50);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE))
+        .expect("e should enable full-file view");
+
+    assert!(app.viewport.full_file);
+    assert!(app.overlays.options_menu_draft.full_file);
+    assert_eq!(
+        app.document.context_expansions.get(&ContextKey {
+            file: FILE_0,
+            hunk: HUNK_0,
+        }),
+        Some(&49)
+    );
+    assert_eq!(
+        app.document.model.row(1),
+        Some(UiRow::ContextLine {
+            file: FILE_0,
+            old_line: 1,
+            new_line: 1,
+        })
+    );
+    assert!((0..app.document.model.len()).all(|row| !matches!(
+        app.document.model.row(row),
+        Some(UiRow::Collapsed { .. } | UiRow::ContextHide { .. } | UiRow::HunkHeader { .. })
+    )));
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE))
+        .expect("e should return to hunk view");
+
+    assert!(!app.viewport.full_file);
+    assert!(!app.overlays.options_menu_draft.full_file);
+    assert!(app.document.context_expansions.is_empty());
+    assert!(matches!(
+        app.document.model.row(1),
+        Some(UiRow::Collapsed { lines: 49, .. })
+    ));
+}
+
+#[test]
+fn full_file_toggle_preserves_the_focused_hunk_and_viewport_in_both_modes() {
+    let repo = temp_test_dir("full-file-focused-hunk-transition");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    fs::write(
+        repo.join("file.rs"),
+        (1..=20)
+            .map(|line| format!("line {line}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .expect("context file should be written");
+    let changeset = changeset_with_hunks_at(repo.clone(), &[1, 3, 5, 7, 9, 11]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(7);
+    app.toggle_full_file();
+    app.set_scroll(3);
+    app.viewport.manual_hunk_focus = None;
+
+    let focused_hunk = app
+        .focused_hunk_for_viewport(app.viewport.viewport_rows)
+        .expect("a hunk should be focused in full-file mode");
+    assert_ne!(focused_hunk, (FILE_0, HUNK_0));
+    let focused_row = app
+        .document
+        .model
+        .diff_line_row(focused_hunk.0, focused_hunk.1, LINE_0)
+        .expect("focused hunk line should be visible")
+        .get();
+    let focused_viewport_row = focused_row.saturating_sub(app.viewport.scroll);
+
+    app.toggle_full_file();
+
+    let restored_row = app
+        .document
+        .model
+        .diff_line_row(focused_hunk.0, focused_hunk.1, LINE_0)
+        .expect("focused hunk line should remain visible")
+        .get();
+    assert_eq!(
+        app.focused_hunk_for_viewport(app.viewport.viewport_rows),
+        Some(focused_hunk)
+    );
+    assert_eq!(app.viewport.manual_hunk_focus, Some(focused_hunk));
+    assert_eq!(
+        restored_row.saturating_sub(app.viewport.scroll),
+        focused_viewport_row
+    );
+
+    app.toggle_full_file();
+
+    let expanded_row = app
+        .document
+        .model
+        .diff_line_row(focused_hunk.0, focused_hunk.1, LINE_0)
+        .expect("focused hunk line should remain visible in full-file mode")
+        .get();
+    assert_eq!(
+        app.focused_hunk_for_viewport(app.viewport.viewport_rows),
+        Some(focused_hunk)
+    );
+    assert_eq!(app.viewport.manual_hunk_focus, Some(focused_hunk));
+    assert_eq!(
+        expanded_row.saturating_sub(app.viewport.scroll),
+        focused_viewport_row
+    );
+
+    fs::remove_dir_all(repo).expect("repo directory should be removed");
+}
+
+#[test]
+fn unsupported_diff_source_keeps_hunk_view_when_full_file_is_enabled() {
+    let repo = temp_test_dir("unsupported-full-file-source");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    let changeset = changeset_with_hunk_at(repo, 20);
+    let mut app = DiffApp::new(
+        DiffOptions::default(),
+        changeset.clone(),
+        DiffLayoutMode::Unified,
+    );
+
+    app.toggle_full_file();
+    assert!(
+        (0..app.document.model.len())
+            .all(|row| !matches!(app.document.model.row(row), Some(UiRow::HunkHeader { .. })))
+    );
+
+    app.replace_loaded_diff(
+        DiffOptions {
+            source: DiffSource::Show("HEAD".into()),
+            ..DiffOptions::default()
+        },
+        changeset,
+    );
+
+    assert!(app.viewport.full_file);
+    assert!(app.document.context_expansions.is_empty());
+    assert!(
+        (0..app.document.model.len())
+            .any(|row| matches!(app.document.model.row(row), Some(UiRow::Collapsed { .. })))
+    );
+    assert!(
+        (0..app.document.model.len())
+            .any(|row| matches!(app.document.model.row(row), Some(UiRow::HunkHeader { .. })))
+    );
+}
+
+#[test]
+fn full_file_toggle_preserves_the_viewport_anchor() {
+    let repo = temp_test_dir("full-file-viewport-anchor");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    let text = (1..=100)
+        .map(|line| format!("line {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(repo.join("file.rs"), text).expect("context file should be written");
+    let changeset = changeset_with_hunk_line_counts(repo, &[(50, 20)]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(6);
+
+    let anchor_line = DiffLineIndex::new(10);
+    let anchor_row = app
+        .document
+        .model
+        .diff_line_row(FILE_0, HUNK_0, anchor_line)
+        .expect("anchor line should exist")
+        .get();
+    app.set_scroll(anchor_row.saturating_sub(2));
+    let viewport_row = anchor_row.saturating_sub(app.viewport.scroll);
+
+    app.toggle_full_file();
+
+    let full_file_anchor_row = app
+        .document
+        .model
+        .diff_line_row(FILE_0, HUNK_0, anchor_line)
+        .expect("anchor line should remain in full-file view")
+        .get();
+    assert_eq!(
+        full_file_anchor_row.saturating_sub(app.viewport.scroll),
+        viewport_row
+    );
+
+    app.toggle_full_file();
+
+    let hunk_anchor_row = app
+        .document
+        .model
+        .diff_line_row(FILE_0, HUNK_0, anchor_line)
+        .expect("anchor line should remain in hunk view")
+        .get();
+    assert_eq!(
+        hunk_anchor_row.saturating_sub(app.viewport.scroll),
+        viewport_row
+    );
+}
+
+#[test]
+fn wrapped_full_file_toggle_uses_loaded_context_heights_for_the_viewport_anchor() {
+    let repo = temp_test_dir("wrapped-full-file-context-height-anchor");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    let text = (1..=100)
+        .map(|line| {
+            if line < 50 {
+                format!("{} {line}", "context".repeat(8))
+            } else {
+                format!("line {line}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(repo.join("file.rs"), text).expect("context file should be written");
+    let changeset = changeset_with_hunk_at(repo, 50);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.viewport.line_wrapping = true;
+    app.set_viewport_width(18);
+    app.set_viewport_rows(3);
+
+    let anchor_row = app
+        .document
+        .model
+        .diff_line_row(FILE_0, HUNK_0, LINE_0)
+        .expect("anchor line should exist")
+        .get();
+    let anchor_scroll = app.wrapped_visual_scroll_for_model_row(anchor_row);
+    app.set_scroll(anchor_scroll.saturating_sub(1));
+    let viewport_row = anchor_scroll.saturating_sub(app.viewport.scroll);
+
+    app.toggle_full_file();
+    // This used to load the source after restoration and invalidate a layout
+    // that had assigned every uncached context line a height of one.
+    app.context_line_text(0, 1, 1);
+
+    let restored_row = app
+        .document
+        .model
+        .diff_line_row(FILE_0, HUNK_0, LINE_0)
+        .expect("anchor line should remain in full-file view")
+        .get();
+    assert_eq!(
+        app.model_row_at_scroll(app.viewport.scroll.saturating_add(viewport_row)),
+        Some((restored_row, 0))
+    );
+}
+
+#[test]
+fn full_file_toggle_preserves_a_wrapped_row_offset() {
+    let repo = temp_test_dir("full-file-wrapped-row-offset");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    let text = (1..=100)
+        .map(|line| format!("line {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(repo.join("file.rs"), text).expect("context file should be written");
+    let mut changeset = changeset_with_hunk_at(repo, 50);
+    *changeset.files[0].hunks_mut()[0].lines[0].text_mut() =
+        "a diff line long enough to wrap several times".to_owned();
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.viewport.line_wrapping = true;
+    app.set_viewport_width(18);
+    app.set_viewport_rows(4);
+
+    let anchor_row = app
+        .document
+        .model
+        .diff_line_row(FILE_0, HUNK_0, LINE_0)
+        .expect("anchor line should exist")
+        .get();
+    let row_offset = 2;
+    app.set_scroll(
+        app.wrapped_visual_scroll_for_model_row(anchor_row)
+            .saturating_add(row_offset),
+    );
+    assert_eq!(
+        app.model_row_at_scroll(app.viewport.scroll),
+        Some((anchor_row, row_offset))
+    );
+
+    app.toggle_full_file();
+
+    let full_file_anchor_row = app
+        .document
+        .model
+        .diff_line_row(FILE_0, HUNK_0, LINE_0)
+        .expect("anchor line should remain in full-file view")
+        .get();
+    assert_eq!(
+        app.model_row_at_scroll(app.viewport.scroll),
+        Some((full_file_anchor_row, row_offset))
+    );
+
+    app.toggle_full_file();
+
+    let hunk_anchor_row = app
+        .document
+        .model
+        .diff_line_row(FILE_0, HUNK_0, LINE_0)
+        .expect("anchor line should remain in hunk view")
+        .get();
+    assert_eq!(
+        app.model_row_at_scroll(app.viewport.scroll),
+        Some((hunk_anchor_row, row_offset))
+    );
+}
+
+#[test]
+fn sparse_wrapped_full_file_layout_accounts_for_continuation_rows() {
+    const SOURCE_LINES: usize = 200_010;
+
+    let repo = temp_test_dir("sparse-wrapped-full-file-layout");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    fs::write(
+        repo.join("file.rs"),
+        format!("{}\n", "x".repeat(40)).repeat(SOURCE_LINES),
+    )
+    .expect("context file should be written");
+    let changeset = changeset_with_hunk_at(repo.clone(), SOURCE_LINES);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.viewport.line_wrapping = true;
+    app.set_viewport_width(18);
+    app.set_viewport_rows(5);
+    app.toggle_full_file();
+
+    assert!(app.document.model.rows.is_empty());
+    let visual_rows = app.max_scroll().saturating_add(app.viewport.viewport_rows);
+    assert!(visual_rows > app.document.model.len());
+    assert!(
+        app.viewport
+            .wrapped_visual_layout
+            .borrow()
+            .as_ref()
+            .is_some_and(|layout| layout.row_start_stride > 1)
+    );
+    let target_row = app
+        .document
+        .model
+        .context_line_row(FILE_0, 200_000)
+        .expect("far context row should be visible")
+        .get();
+    let target_scroll = app.wrapped_visual_scroll_for_model_row(target_row);
+    assert!(app.wrapped_visual_height_for_model_row(target_row) > 1);
+    assert_eq!(
+        app.model_row_at_scroll(target_scroll.saturating_add(1)),
+        Some((target_row, 1))
+    );
+
+    fs::remove_dir_all(repo).expect("repo directory should be removed");
+}
+
+#[test]
+fn full_file_toggle_resyncs_grep_selection_after_restoring_the_viewport_anchor() {
+    let repo = temp_test_dir("full-file-grep-anchor");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    let text = (1..=120)
+        .map(|line| {
+            if matches!(line, 20 | 60 | 100) {
+                format!("needle {line}")
+            } else {
+                format!("line {line}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(repo.join("file.rs"), text).expect("context file should be written");
+    let mut changeset = changeset_with_hunks_at(repo, &[20, 60, 100]);
+    for (hunk, line) in changeset.files[0].hunks_mut().iter_mut().zip([20, 60, 100]) {
+        *hunk.lines[0].text_mut() = format!("needle {line}");
+    }
+
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(5);
+    app.filters.grep_filter = "needle".to_owned();
+    app.apply_filters(PostFilterNavigation::Preserve);
+    let second_match = app
+        .document
+        .model
+        .diff_line_row(FILE_0, HUNK_1, LINE_0)
+        .expect("second grep match should be rendered");
+    app.set_scroll(second_match.get());
+    assert_eq!(app.current_grep_match_row(), Some(second_match.get()));
+
+    app.toggle_full_file();
+
+    let restored_second_match = app
+        .document
+        .model
+        .diff_line_row(FILE_0, HUNK_1, LINE_0)
+        .expect("second grep match should remain rendered");
+    assert_eq!(
+        app.current_grep_match_row(),
+        Some(restored_second_match.get())
+    );
+
+    app.move_grep_match(1);
+    let third_match = app
+        .document
+        .model
+        .diff_line_row(FILE_0, HUNK_2, LINE_0)
+        .expect("third grep match should remain rendered");
+    assert_eq!(app.current_grep_match_row(), Some(third_match.get()));
+}
+
+#[test]
+fn full_file_grep_does_not_navigate_to_a_hidden_hunk_header_match() {
+    let repo = temp_test_dir("full-file-hidden-header-grep");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    fs::write(
+        repo.join("file.rs"),
+        (1..=30)
+            .map(|line| format!("line {line}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .expect("context file should be written");
+    let mut changeset = changeset_with_hunk_at(repo.clone(), 20);
+    changeset.files[0].hunks_mut()[0].header = "@@ -20 +20 @@ hidden_header_needle".to_owned();
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.toggle_full_file();
+
+    app.filters.grep_filter = "hidden_header_needle".to_owned();
+    app.apply_filters(PostFilterNavigation::JumpToGrep);
+
+    assert!(app.full_file_mode_active());
+    assert!(app.filters.grep_matches.is_empty());
+    assert_eq!(app.current_grep_match_row(), None);
+
+    fs::remove_dir_all(repo).expect("repo directory should be removed");
+}
+
+#[test]
+fn full_file_toggle_preserves_an_expanded_context_anchor() {
+    let repo = temp_test_dir("full-file-expanded-context-anchor");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    let text = (1..=100)
+        .map(|line| format!("line {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(repo.join("file.rs"), text).expect("context file should be written");
+    let changeset = changeset_with_hunk_at(repo, 50);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(6);
+    assert!(app.expand_context_for_key(0, 0));
+
+    let anchor_row = app
+        .document
+        .model
+        .context_line_row(FILE_0, 20)
+        .expect("expanded context anchor should exist")
+        .get();
+    app.set_scroll(anchor_row);
+    assert!(
+        (anchor_row..anchor_row + app.viewport.viewport_rows)
+            .all(|row| matches!(app.document.model.row(row), Some(UiRow::ContextLine { .. })))
+    );
+
+    app.toggle_full_file();
+
+    let restored_row = app
+        .document
+        .model
+        .context_line_row(FILE_0, 20)
+        .expect("context anchor should remain in full-file mode")
+        .get();
+    assert_eq!(app.viewport.scroll, restored_row);
+}
+
+#[test]
+fn full_file_filter_rebuild_retains_cached_context_width() {
+    let repo = temp_test_dir("full-file-filter-context-width");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    let wide_line = "x".repeat(200);
+    let text = std::iter::once(wide_line)
+        .chain((2..=80).map(|line| format!("line {line}")))
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(repo.join("file.rs"), text).expect("context file should be written");
+    let changeset = changeset_with_hunk_at(repo, 50);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_width(40);
+    app.toggle_full_file();
+    app.context_line_text(0, 1, 1);
+    app.set_horizontal_scroll(80);
+    assert_eq!(app.viewport.horizontal_scroll, 80);
+
+    app.filters.file_filter = "file.rs".to_owned();
+    app.apply_filters(PostFilterNavigation::Preserve);
+
+    assert!(app.document.max_line_width >= 200);
+    assert_eq!(app.viewport.horizontal_scroll, 80);
+}
+
+#[test]
+fn leaving_full_file_mode_resets_context_width_and_horizontal_scroll() {
+    let repo = temp_test_dir("full-file-horizontal-scroll-reset");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    let source = std::iter::once("x".repeat(200))
+        .chain((2..=80).map(|line| format!("line {line}")))
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(repo.join("file.rs"), source).expect("source file should be written");
+    let changeset = changeset_with_hunk_at(repo.clone(), 50);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_width(40);
+    app.toggle_full_file();
+    assert_eq!(app.context_line_text(0, 1, 1), "x".repeat(200));
+    app.set_horizontal_scroll(80);
+    assert_eq!(app.viewport.horizontal_scroll, 80);
+
+    app.toggle_full_file();
+
+    assert!(!app.full_file_mode_active());
+    assert!(app.document.max_line_width < 200);
+    assert_eq!(app.viewport.horizontal_scroll, 0);
+
+    fs::remove_dir_all(repo).expect("repo directory should be removed");
+}
+
+#[test]
+fn full_file_toggle_ignores_cached_context_width_for_hidden_files() {
+    let repo = temp_test_dir("full-file-hidden-context-width");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    fs::write(repo.join("wide.rs"), "x".repeat(200)).expect("wide source should be written");
+    fs::write(repo.join("narrow.rs"), "narrow\n").expect("narrow source should be written");
+    let mut changeset = changeset_with_files(&["wide.rs", "narrow.rs"]);
+    changeset.repo = repo.clone().into();
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_width(40);
+
+    assert_eq!(app.context_line_text(0, 1, 1), "x".repeat(200));
+    app.filters.file_filter = "narrow.rs".to_owned();
+    app.apply_filters(PostFilterNavigation::Preserve);
+    assert_eq!(visible_paths(&app), vec!["narrow.rs"]);
+    assert!(app.document.max_line_width < 200);
+
+    app.toggle_full_file();
+
+    assert!(app.full_file_mode_active());
+    assert_eq!(visible_paths(&app), vec!["narrow.rs"]);
+    assert!(app.document.max_line_width < 200);
+    assert_eq!(app.viewport.horizontal_scroll, 0);
+
+    fs::remove_dir_all(repo).expect("repo directory should be removed");
+}
+
+#[test]
 fn context_keyboard_expand_down_reveals_context_after_final_hunk() {
     let repo = temp_test_dir("context-keyboard-trailing");
     fs::create_dir_all(&repo).expect("repo directory should be created");
@@ -1235,7 +1788,7 @@ fn default_edit_hunk_key_is_ctrl_g() {
     app.set_scroll(1);
 
     app.handle_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE))
-        .expect("unmapped e should be handled");
+        .expect("full-file toggle should be handled");
     assert_eq!(app.viewport.scroll, 1);
     assert!(app.notifications.error_log.is_none());
 
@@ -1786,6 +2339,52 @@ fn tab_keys_move_between_files() {
 
     assert_eq!(app.sidebar.selected_file, FILE_0);
     assert!(app.jobs.pending_diff_load.is_none());
+}
+
+#[test]
+fn tab_keys_jump_to_file_starts_in_full_file_mode() {
+    let repo = temp_test_dir("full-file-tab-navigation");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    let text = (1..=80)
+        .map(|line| format!("line {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    for path in ["a.rs", "b.rs"] {
+        fs::write(repo.join(path), &text).expect("source file should be written");
+    }
+
+    let mut changeset = changeset_with_files(&["a.rs", "b.rs"]);
+    changeset.repo = repo.into();
+    for file in &mut changeset.files {
+        let hunk = &mut file.hunks_mut()[0];
+        hunk.header = "@@ -50 +50 @@".to_owned();
+        hunk.ranges = HunkLineRanges::new(50, 1, 50, 1);
+        hunk.lines = vec![DiffLine::context(50, 50, "line 50")];
+    }
+
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(5);
+    app.toggle_full_file();
+
+    app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+        .expect("tab should jump to the next file");
+    let second_file_start = app
+        .document
+        .model
+        .file_start_row(1)
+        .expect("second file should be visible");
+    assert_eq!(app.sidebar.selected_file, FILE_1);
+    assert_eq!(app.viewport.scroll, second_file_start);
+
+    app.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT))
+        .expect("shift-tab should jump to the previous file");
+    let first_file_start = app
+        .document
+        .model
+        .file_start_row(0)
+        .expect("first file should be visible");
+    assert_eq!(app.sidebar.selected_file, FILE_0);
+    assert_eq!(app.viewport.scroll, first_file_start);
 }
 
 #[test]

@@ -28,6 +28,7 @@ pub(crate) enum AppAction {
     ExpandContextUp,
     ExpandContextDown,
     CollapseContextAll,
+    ToggleFullFile,
     ToggleLayout,
     ToggleLineWrapping,
     ToggleHorizontalScrollLock,
@@ -66,6 +67,7 @@ impl AppAction {
             GlobalAction::ExpandContextUp => Self::ExpandContextUp,
             GlobalAction::ExpandContextDown => Self::ExpandContextDown,
             GlobalAction::CollapseContextAll => Self::CollapseContextAll,
+            GlobalAction::FullFile => Self::ToggleFullFile,
             GlobalAction::Layout => Self::ToggleLayout,
             GlobalAction::LineWrapping => Self::ToggleLineWrapping,
             GlobalAction::HorizontalScrollLock => Self::ToggleHorizontalScrollLock,
@@ -175,6 +177,10 @@ impl DiffApp {
             }
             AppAction::CollapseContextAll => {
                 self.collapse_all_context();
+                Ok(ActionOutcome::consumed())
+            }
+            AppAction::ToggleFullFile => {
+                self.toggle_full_file();
                 Ok(ActionOutcome::consumed())
             }
             AppAction::ToggleLayout => {

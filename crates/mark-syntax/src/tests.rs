@@ -676,6 +676,7 @@ fn syntax_settings_default_to_builtin_system_colorscheme() {
     assert_eq!(settings.layout, None);
     assert!(settings.live_reload);
     assert!(settings.syntax_highlighting);
+    assert!(!settings.full_file);
     assert!(!settings.line_wrapping);
     assert!(!settings.transparent_background);
     assert_eq!(settings.transparent_background_override, None);
@@ -742,6 +743,7 @@ fn syntax_settings_supports_persistent_ui_settings() {
 layout = "unified"
 live_reload = false
 syntax_highlighting = false
+full_file = true
 line_wrapping = true
 
 [decorations]
@@ -761,6 +763,7 @@ max_visible = 5
     assert_eq!(settings.layout, Some(LayoutSetting::Unified));
     assert!(!settings.live_reload);
     assert!(!settings.syntax_highlighting);
+    assert!(settings.full_file);
     assert!(settings.line_wrapping);
     assert_eq!(settings.decorations.mode, DecorationSetting::Minimal);
     assert!(!settings.decorations.empty_fill);
@@ -772,6 +775,14 @@ max_visible = 5
 
     let settings = parse_settings("layout = \"dynamic\"\n").expect("settings should parse");
     assert_eq!(settings.layout, Some(LayoutSetting::Dynamic));
+
+    let settings =
+        parse_settings("[diff]\nfull_file = true\n").expect("nested setting should parse");
+    assert!(settings.full_file);
+
+    let settings = parse_settings("full_file = false\n[diff]\nfull_file = true\n")
+        .expect("top-level setting should take precedence");
+    assert!(!settings.full_file);
 }
 
 #[test]

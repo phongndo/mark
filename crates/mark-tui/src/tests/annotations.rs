@@ -688,6 +688,36 @@ fn revision_backed_trailing_context_discovery_runs_on_a_worker() {
 }
 
 #[test]
+fn full_file_mode_expands_discovered_trailing_context() {
+    let repo = temp_test_dir("full-file-trailing-context");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    let text = (1..=80)
+        .map(|line| format!("line {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(repo.join("file.rs"), text).expect("context file should be written");
+    let changeset = changeset_with_hunk_at(repo, 50);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.toggle_full_file();
+    app.set_viewport_rows(app.document.model.len());
+
+    assert!(app.discover_trailing_context_for_viewport());
+    finish_trailing_context_discovery(&mut app);
+
+    assert!(app.viewport.full_file);
+    assert!(matches!(
+        app.document.model.rows.last(),
+        Some(UiRow::ContextLine { new_line: 80, .. })
+    ));
+    assert!(app.document.model.rows.iter().all(|row| {
+        !matches!(
+            row,
+            UiRow::Collapsed { .. } | UiRow::ContextHide { .. } | UiRow::HunkHeader { .. }
+        )
+    }));
+}
+
+#[test]
 fn trailing_context_discovery_skips_oversized_sources_without_caching_them() {
     let repo = temp_test_dir("oversized-trailing-context");
     fs::create_dir_all(&repo).expect("repo directory should be created");
@@ -712,6 +742,46 @@ fn trailing_context_discovery_skips_oversized_sources_without_caching_them() {
         }),
         Some(&0)
     );
+}
+
+#[test]
+fn cached_full_file_diff_retries_capped_trailing_context_discovery() {
+    let repo = temp_test_dir("cached-capped-trailing-context");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    let changeset = changeset_with_hunk_at(repo.clone(), 50);
+    let options = DiffOptions::default();
+    let mut app = DiffApp::new(options.clone(), changeset.clone(), DiffLayoutMode::Unified);
+    let discovery_byte_limit = app
+        .config
+        .syntax_limits
+        .max_source_bytes
+        .min(mark_syntax::DEFAULT_MAX_HIGHLIGHT_SOURCE_BYTES);
+    let mut oversized = (1..=80)
+        .map(|line| format!("line {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    oversized.push_str(&"x".repeat(discovery_byte_limit + 1));
+    fs::write(repo.join("file.rs"), oversized).expect("context file should be written");
+    app.toggle_full_file();
+
+    let key = ContextKey {
+        file: FILE_0,
+        hunk: HUNK_1,
+    };
+    let mut cached = diff_cache_entry(options.clone(), changeset);
+    cached.trailing_context_lines.insert(key, 0);
+    app.replace_cached_diff(options, cached, BranchMetadataPolicy::Preserve);
+
+    assert!(!app.document.trailing_context_lines.contains_key(&key));
+    app.set_viewport_rows(app.document.model.len());
+    assert!(app.discover_trailing_context_for_viewport());
+    finish_trailing_context_discovery(&mut app);
+    assert!(matches!(
+        app.document.model.rows.last(),
+        Some(UiRow::ContextLine { new_line: 80, .. })
+    ));
+
+    fs::remove_dir_all(repo).expect("repo directory should be removed");
 }
 
 #[test]

@@ -179,6 +179,347 @@ fn focused_hunk_editor_target_uses_new_path_and_visible_line() {
 }
 
 #[test]
+fn full_file_editor_target_follows_the_viewport_and_clamps_at_file_end() {
+    let repo = temp_test_dir("full-file-editor-target");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    let text = (1..=100)
+        .map(|line| format!("line {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(repo.join("file.rs"), text).expect("source file should be written");
+    let changeset = changeset_with_hunk_at(repo.clone(), 50);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.toggle_full_file();
+    assert!(app.expand_trailing_context_for_key(0, 1));
+    app.set_viewport_rows(9);
+
+    app.set_scroll(20);
+    assert_eq!(
+        app.focused_hunk_editor_target(),
+        Some(EditorTarget {
+            path: repo.join("file.rs"),
+            line: 24,
+        })
+    );
+
+    app.set_scroll(usize::MAX);
+    assert_eq!(
+        app.focused_hunk_editor_target(),
+        Some(EditorTarget {
+            path: repo.join("file.rs"),
+            line: 100,
+        })
+    );
+
+    app.set_scroll(0);
+    app.restore_editor_view_for_test(Path::new("file.rs"), 24, 4);
+    assert_eq!(app.viewport.scroll, 20);
+    assert_eq!(app.focused_hunk_editor_target().unwrap().line, 24);
+}
+
+#[test]
+fn full_file_editor_reload_preserves_wrapped_row_offset() {
+    let repo = temp_test_dir("full-file-editor-wrapped-anchor");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    let text = (1..=100)
+        .map(|line| format!("line {line} {}", "wrapped content ".repeat(8)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(repo.join("file.rs"), text).expect("source file should be written");
+    let changeset = changeset_with_hunk_at(repo.clone(), 50);
+    let replacement = changeset_with_hunk_at(repo.clone(), 50);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.toggle_full_file();
+    assert!(app.expand_trailing_context_for_key(0, 1));
+    app.set_viewport_width(30);
+    app.set_viewport_rows(9);
+    app.toggle_line_wrapping();
+
+    let anchor_row = app
+        .document
+        .model
+        .context_line_row(FILE_0, 90)
+        .expect("anchor line should be visible")
+        .get();
+    let row_start = app.wrapped_visual_scroll_for_model_row(anchor_row);
+    assert!(app.wrapped_visual_height_for_model_row(anchor_row) > 2);
+    let viewport_row = 4;
+    let row_visual_offset = 2;
+    app.set_scroll(
+        row_start
+            .saturating_add(row_visual_offset)
+            .saturating_sub(viewport_row),
+    );
+
+    let anchor = app
+        .focused_hunk_editor_view_anchor_for_test()
+        .expect("full-file editor anchor should exist");
+    assert_eq!(anchor.line, 90);
+    assert_eq!(anchor.row_visual_offset, row_visual_offset);
+    assert_eq!(anchor.viewport_row, viewport_row);
+
+    app.replace_path_changeset(Path::new("file.rs"), replacement);
+    app.set_scroll(0);
+    app.restore_editor_view_anchor_for_test(Path::new("file.rs"), anchor);
+
+    let restored_row = app
+        .document
+        .model
+        .context_line_row(FILE_0, 90)
+        .expect("anchor context should be restored")
+        .get();
+    let restored_start = app.wrapped_visual_scroll_for_model_row(restored_row);
+    assert_eq!(
+        app.viewport.scroll,
+        restored_start
+            .saturating_add(row_visual_offset)
+            .saturating_sub(viewport_row)
+    );
+
+    fs::remove_dir_all(repo).expect("repo directory should be removed");
+}
+
+#[test]
+fn full_file_editor_target_falls_back_for_a_deletion_only_viewport() {
+    let repo = temp_test_dir("full-file-deletion-editor-target");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    let text = (1..=30)
+        .map(|line| format!("line {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(repo.join("file.rs"), text).expect("source file should be written");
+
+    let mut changeset = changeset_with_context_lines_at(repo.clone(), 10, 1);
+    let hunk = &mut changeset.files[0].hunks_mut()[0];
+    hunk.ranges = HunkLineRanges::new(10, 20, 10, 0);
+    hunk.lines = (10..30)
+        .map(|line| DiffLine::deletion(line, format!("removed {line}")))
+        .collect();
+
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.toggle_full_file();
+    app.set_viewport_rows(5);
+    let first_deletion_row = app
+        .document
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
+        .expect("deletion row should be rendered");
+    app.set_scroll(first_deletion_row + 5);
+
+    assert_eq!(
+        app.focused_hunk_editor_target(),
+        Some(EditorTarget {
+            path: repo.join("file.rs"),
+            line: 10,
+        })
+    );
+}
+
+#[test]
+fn full_file_editor_target_does_not_cross_a_deleted_file_boundary() {
+    let repo = temp_test_dir("full-file-deleted-editor-boundary");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    fs::write(
+        repo.join("editable.rs"),
+        (1..=10)
+            .map(|line| format!("line {line}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .expect("editable source file should be written");
+
+    let mut changeset = changeset_with_files(&["deleted.rs", "editable.rs"]);
+    changeset.repo = repo.clone().into();
+    set_test_file_deleted(&mut changeset.files[0]);
+    changeset.files[0].additions = 0;
+    changeset.files[0].deletions = 6;
+    changeset.files[0].hunks_mut()[0].ranges = HunkLineRanges::new(1, 6, 1, 0);
+    changeset.files[0].hunks_mut()[0].lines = (1..=6)
+        .map(|line| DiffLine::deletion(line, format!("deleted {line}")))
+        .collect();
+    changeset.files[1].hunks_mut()[0].ranges = HunkLineRanges::new(1, 10, 1, 10);
+    changeset.files[1].hunks_mut()[0].lines = (1..=10)
+        .map(|line| DiffLine::context(line, line, format!("line {line}")))
+        .collect();
+
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.toggle_full_file();
+    app.set_viewport_rows(7);
+    app.set_scroll(3);
+
+    assert!(app.full_file_mode_active());
+    assert_eq!(app.focused_hunk_editor_target(), None);
+
+    fs::remove_dir_all(repo).expect("repo directory should be removed");
+}
+
+#[test]
+fn live_reload_preserves_a_trailing_full_file_anchor_for_an_unchanged_file() {
+    let repo = temp_test_dir("full-file-live-reload-trailing-anchor");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    for path in ["focused.rs", "changed.rs"] {
+        fs::write(
+            repo.join(path),
+            (1..=100)
+                .map(|line| format!("line {line}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+        .expect("source file should be written");
+    }
+
+    let mut changeset = changeset_with_files(&["focused.rs", "changed.rs"]);
+    changeset.repo = repo.clone().into();
+    for (index, file) in changeset.files.iter_mut().enumerate() {
+        file.hunks_mut()[0].header = "@@ -50 +50 @@".to_owned();
+        file.hunks_mut()[0].ranges = HunkLineRanges::new(50, 1, 50, 1);
+        file.hunks_mut()[0].lines = vec![DiffLine::context(50, 50, format!("diff line {index}"))];
+    }
+    let mut replacement = changeset.clone();
+    *replacement.files[1].hunks_mut()[0].lines[0].text_mut() = "updated diff line".to_owned();
+
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.toggle_full_file();
+    assert!(app.expand_trailing_context_for_key(0, 1));
+    app.set_viewport_rows(9);
+    let anchor_row = app
+        .document
+        .model
+        .context_line_row(FILE_0, 90)
+        .expect("trailing anchor should be visible")
+        .get();
+    app.set_scroll(anchor_row.saturating_sub(4));
+
+    app.replace_loaded_diff(DiffOptions::default(), replacement);
+
+    let restored_row = app
+        .document
+        .model
+        .context_line_row(FILE_0, 90)
+        .expect("trailing anchor should survive the reload")
+        .get();
+    assert_eq!(restored_row.saturating_sub(app.viewport.scroll), 4);
+
+    fs::remove_dir_all(repo).expect("repo directory should be removed");
+}
+
+#[test]
+fn live_reload_preserves_a_trailing_full_file_anchor_when_the_selected_patch_changes() {
+    let repo = temp_test_dir("full-file-live-reload-changed-patch-anchor");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    fs::write(
+        repo.join("file.rs"),
+        (1..=100)
+            .map(|line| format!("line {line}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .expect("source file should be written");
+
+    let changeset = changeset_with_hunk_at(repo.clone(), 50);
+    let mut replacement = changeset.clone();
+    *replacement.files[0].hunks_mut()[0].lines[0].text_mut() = "updated diff line".to_owned();
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.toggle_full_file();
+    assert!(app.expand_trailing_context_for_key(0, 1));
+    app.set_viewport_rows(9);
+    let anchor_row = app
+        .document
+        .model
+        .context_line_row(FILE_0, 90)
+        .expect("trailing anchor should be visible")
+        .get();
+    app.set_scroll(anchor_row.saturating_sub(4));
+
+    app.replace_loaded_diff(DiffOptions::default(), replacement);
+
+    let restored_row = app
+        .document
+        .model
+        .context_line_row(FILE_0, 90)
+        .expect("trailing anchor should survive the changed patch")
+        .get();
+    assert_eq!(restored_row.saturating_sub(app.viewport.scroll), 4);
+
+    fs::remove_dir_all(repo).expect("repo directory should be removed");
+}
+
+#[test]
+fn full_file_reload_revalidates_trailing_context_for_an_unchanged_patch() {
+    let repo = temp_test_dir("full-file-reload-trailing-revalidation");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    fs::write(
+        repo.join("file.rs"),
+        (1..=100)
+            .map(|line| format!("line {line}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .expect("source file should be written");
+    let changeset = changeset_with_hunk_at(repo.clone(), 50);
+    let mut app = DiffApp::new(
+        DiffOptions::default(),
+        changeset.clone(),
+        DiffLayoutMode::Unified,
+    );
+    app.toggle_full_file();
+    assert!(app.expand_trailing_context_for_key(0, 1));
+    let key = ContextKey {
+        file: FILE_0,
+        hunk: HUNK_1,
+    };
+    assert_eq!(app.document.trailing_context_lines.get(&key), Some(&50));
+
+    fs::write(
+        repo.join("file.rs"),
+        (1..=60)
+            .map(|line| format!("line {line}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .expect("source file should be replaced");
+    app.replace_loaded_diff(DiffOptions::default(), changeset);
+
+    assert_eq!(app.document.trailing_context_lines.get(&key), Some(&10));
+    assert!(app.document.model.context_line_row(FILE_0, 60).is_some());
+    assert!(app.document.model.context_line_row(FILE_0, 61).is_none());
+
+    fs::remove_dir_all(repo).expect("repo directory should be removed");
+}
+
+#[test]
+fn editor_reload_restores_trailing_full_file_context_before_the_anchor() {
+    let repo = temp_test_dir("full-file-editor-trailing-restore");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    let text = (1..=100)
+        .map(|line| format!("line {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(repo.join("file.rs"), text).expect("source file should be written");
+    let changeset = changeset_with_hunk_at(repo.clone(), 50);
+    let replacement = changeset_with_hunk_at(repo, 50);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.toggle_full_file();
+    assert!(app.expand_trailing_context_for_key(0, 1));
+    app.set_viewport_rows(9);
+
+    app.replace_path_changeset(Path::new("file.rs"), replacement);
+    assert!(app.document.model.context_line_row(FILE_0, 90).is_none());
+    app.restore_editor_view_for_test(Path::new("file.rs"), 90, 4);
+
+    let anchor_row = app
+        .document
+        .model
+        .context_line_row(FILE_0, 90)
+        .expect("trailing editor anchor should be restored")
+        .get();
+    assert_eq!(anchor_row.saturating_sub(app.viewport.scroll), 4);
+    assert_eq!(app.focused_hunk_editor_target().unwrap().line, 90);
+}
+
+#[test]
 fn editor_reload_restores_the_focused_line_at_its_viewport_row() {
     let repo = PathBuf::from("/repo");
     let changeset = changeset_with_context_lines_at(repo.clone(), 1, 100);
@@ -275,6 +616,7 @@ fn editor_reload_does_not_restore_after_navigation_during_reload() {
         selected_file: app.sidebar.selected_file,
         manual_hunk_focus: app.viewport.manual_hunk_focus,
         layout: app.viewport.layout,
+        full_file_mode: app.full_file_mode_active(),
         line_wrapping: app.viewport.line_wrapping,
     };
     let (tx, rx) = oneshot::channel();
@@ -284,6 +626,7 @@ fn editor_reload_does_not_restore_after_navigation_during_reload() {
             changeset: Ok(replacement),
             view_anchor: Some(EditorViewAnchor {
                 line: 44,
+                row_visual_offset: 0,
                 viewport_row: 5,
             }),
         })
@@ -315,6 +658,7 @@ fn editor_reload_does_not_restore_after_layout_change_during_reload() {
         selected_file: app.sidebar.selected_file,
         manual_hunk_focus: app.viewport.manual_hunk_focus,
         layout: app.viewport.layout,
+        full_file_mode: app.full_file_mode_active(),
         line_wrapping: app.viewport.line_wrapping,
     };
     let (tx, rx) = oneshot::channel();
@@ -324,6 +668,7 @@ fn editor_reload_does_not_restore_after_layout_change_during_reload() {
             changeset: Ok(replacement),
             view_anchor: Some(EditorViewAnchor {
                 line: 44,
+                row_visual_offset: 0,
                 viewport_row: 5,
             }),
         })
@@ -341,6 +686,60 @@ fn editor_reload_does_not_restore_after_layout_change_during_reload() {
 
     assert_eq!(app.viewport.layout, DiffLayoutMode::Split);
     assert_eq!(app.viewport.scroll, 0);
+}
+
+#[test]
+fn editor_reload_does_not_restore_after_full_file_mode_change() {
+    let repo = temp_test_dir("editor-reload-full-file-navigation");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    fs::write(
+        repo.join("file.rs"),
+        (1..=100)
+            .map(|line| format!("line {line}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .expect("source file should be written");
+    let changeset = changeset_with_context_lines_at(repo.clone(), 1, 100);
+    let replacement = changeset_with_context_lines_at(repo, 1, 100);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(11);
+
+    let navigation = EditorReloadNavigation {
+        scroll: app.viewport.scroll,
+        selected_file: app.sidebar.selected_file,
+        manual_hunk_focus: app.viewport.manual_hunk_focus,
+        layout: app.viewport.layout,
+        full_file_mode: app.full_file_mode_active(),
+        line_wrapping: app.viewport.line_wrapping,
+    };
+    let (tx, rx) = oneshot::channel();
+    assert!(
+        tx.send(EditorScopedReload {
+            path: PathBuf::from("file.rs"),
+            changeset: Ok(replacement),
+            view_anchor: Some(EditorViewAnchor {
+                line: 44,
+                row_visual_offset: 0,
+                viewport_row: 5,
+            }),
+        })
+        .is_ok()
+    );
+    app.jobs.editor_reload = Some(EditorReloadWorker {
+        generation: app.document.generation,
+        navigation,
+        job: AsyncJob::new(rx),
+    });
+
+    app.toggle_full_file();
+    assert!(app.full_file_mode_active());
+    assert_eq!(app.viewport.scroll, navigation.scroll);
+    assert!(app.drain_editor_reload());
+
+    assert!(app.full_file_mode_active());
+    assert_eq!(app.viewport.scroll, 0);
+    assert_ne!(app.focused_hunk_editor_target().unwrap().line, 44);
 }
 
 #[test]

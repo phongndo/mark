@@ -109,6 +109,13 @@ impl DiffApp {
             return;
         }
 
+        if enabled && self.full_file_mode_active() {
+            let visible_files = self.document.model.visible_files().to_vec();
+            let layout_files = self
+                .full_file_context_files_for_viewport(&visible_files, self.viewport.viewport_rows);
+            self.load_full_file_context_for_files(&layout_files);
+        }
+
         let next_scroll = if enabled {
             self.wrapped_visual_scroll_for_model_row(self.viewport.scroll)
         } else {
@@ -153,9 +160,70 @@ impl DiffApp {
         self.set_scroll_with_grep_sync(scroll, false, HunkFocusScrollBehavior::ClearOnScroll);
     }
 
+    pub(in crate::app) fn scroll_for_model_row_offset_at_viewport_row(
+        &self,
+        model_row: usize,
+        row_visual_offset: usize,
+        viewport_row: usize,
+    ) -> usize {
+        let row_height = if self.viewport.line_wrapping {
+            self.wrapped_visual_height_for_model_row(model_row)
+        } else {
+            1
+        };
+        let row_visual_offset = row_visual_offset.min(row_height.saturating_sub(1));
+        let target_visual_scroll = self
+            .scroll_for_model_row(model_row)
+            .saturating_add(row_visual_offset);
+        let max_scroll = self.max_scroll();
+        let latest_scroll = target_visual_scroll.min(max_scroll);
+        let viewport_row = viewport_row.min(self.viewport.viewport_rows.saturating_sub(1));
+        let preferred_scroll = latest_scroll.saturating_sub(viewport_row);
+        let mut best = None;
+
+        // Annotation blocks consume viewport slots without advancing the scroll
+        // coordinate. Ask the viewport planner where the exact visual row lands
+        // at each nearby scroll instead of treating model and viewport rows as
+        // interchangeable.
+        for scroll in preferred_scroll..=latest_scroll {
+            for rendered_row in self
+                .rendered_diff_rows_for_viewport_at_scroll(scroll, self.viewport.viewport_rows)
+                .into_iter()
+                .filter(|rendered_row| {
+                    rendered_row.model_row == model_row
+                        && rendered_row.visual_scroll == target_visual_scroll
+                })
+            {
+                let distance = rendered_row.viewport_row.abs_diff(viewport_row);
+                if best.is_none_or(|(known_distance, known_scroll)| {
+                    (distance, scroll) < (known_distance, known_scroll)
+                }) {
+                    best = Some((distance, scroll));
+                }
+                if distance == 0 {
+                    return scroll;
+                }
+            }
+        }
+
+        best.map(|(_, scroll)| scroll)
+            .unwrap_or_else(|| self.scroll_with_model_row_rendered(preferred_scroll, model_row))
+    }
+
     pub(crate) fn set_scroll_focused_on_hunk(&mut self, file: usize, hunk: usize) {
-        let Some((range, hunk_start_row)) = hunk_focus_row_range(&self.document.model, file, hunk)
-        else {
+        if self.full_file_mode_active() && self.viewport.line_wrapping {
+            self.load_full_file_context_for_files(&[FileIndex::new(file)]);
+        }
+
+        let focus_range = if self.full_file_mode_active() {
+            self.document.model.hunk_row_range(file, hunk).map(|range| {
+                let hunk_start = range.start;
+                (range, hunk_start)
+            })
+        } else {
+            hunk_focus_row_range(&self.document.model, file, hunk)
+        };
+        let Some((range, hunk_start_row)) = focus_range else {
             return;
         };
 

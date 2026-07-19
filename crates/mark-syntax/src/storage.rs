@@ -87,6 +87,7 @@ pub(crate) fn settings_from_stored(stored: StoredSyntaxSettings) -> SyntaxSettin
     // precedence: older versions could update it while leaving a stale `theme`.
     let colorscheme = stored.colorscheme.or(stored.theme);
     let legacy_empty_fill = stored.diff.empty_fill;
+    let full_file = stored.full_file.or(stored.diff.full_file).unwrap_or(false);
     let decorations = decorations_from_stored(stored.decorations, legacy_empty_fill);
 
     SyntaxSettings {
@@ -98,6 +99,7 @@ pub(crate) fn settings_from_stored(stored: StoredSyntaxSettings) -> SyntaxSettin
         layout: stored.layout,
         live_reload: stored.live_reload.unwrap_or(true),
         syntax_highlighting: stored.syntax_highlighting.unwrap_or(true),
+        full_file,
         line_wrapping: stored.line_wrapping,
         colors: stored.colors.overlay(stored.color_overrides),
         syntax_rules: stored.syntax_rules,
