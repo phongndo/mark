@@ -596,8 +596,12 @@ fn trailing_context_starts_after_a_zero_count_new_range() {
         if app.jobs.trailing_context_worker.is_none() {
             break;
         }
-        thread::yield_now();
+        thread::sleep(Duration::from_millis(1));
     }
+    assert!(
+        app.jobs.trailing_context_worker.is_none(),
+        "trailing context worker did not finish"
+    );
 
     let key = ContextKey {
         file: FILE_0,
