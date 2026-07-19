@@ -44,8 +44,12 @@ pub(crate) const HELP_MENU_ROWS: &[HelpMenuRow] = &[
         "collapse context",
     ),
     HelpMenuRow::Binding(
+        HelpMenuKey::Global(GlobalAction::FullFile),
+        "toggle full file / hunks",
+    ),
+    HelpMenuRow::Binding(
         HelpMenuKey::Global(GlobalAction::EditHunk),
-        "edit focused hunk",
+        "edit viewport line / focused hunk",
     ),
     HelpMenuRow::Binding(
         HelpMenuKey::GlobalPair(GlobalAction::NextDiffType, GlobalAction::PreviousDiffType),

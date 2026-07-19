@@ -46,6 +46,21 @@ pub(crate) fn file_changed_since(path: &Path, before: Option<FileFingerprint>) -
     }
 }
 
+fn full_file_row_file(row: UiRow) -> Option<FileIndex> {
+    match row {
+        UiRow::FileSeparator => None,
+        UiRow::FileHeader(file)
+        | UiRow::FileBodyNotice(file)
+        | UiRow::Collapsed { file, .. }
+        | UiRow::ContextLine { file, .. }
+        | UiRow::ContextHide { file, .. }
+        | UiRow::HunkHeader { file, .. }
+        | UiRow::UnifiedLine { file, .. }
+        | UiRow::SplitLine { file, .. }
+        | UiRow::MetaLine { file, .. } => Some(file),
+    }
+}
+
 fn update_closest_editor_row(
     closest: &mut Option<(usize, usize, usize)>,
     row: usize,
@@ -110,6 +125,23 @@ impl DiffApp {
             return None;
         }
 
+        if self.full_file_mode_active() {
+            let (file, line, row_visual_offset, viewport_row) = self.full_file_editor_position()?;
+            let file_diff = self.document.changeset.files.get(file.get())?;
+            let path = file_diff.new_path()?;
+            return Some((
+                EditorTarget {
+                    path: repo_file_path(&self.document.changeset.repo, path),
+                    line,
+                },
+                EditorViewAnchor {
+                    line,
+                    row_visual_offset,
+                    viewport_row,
+                },
+            ));
+        }
+
         let (file, hunk) = self.focused_hunk_for_viewport(self.viewport.viewport_rows)?;
         let file_diff = self.document.changeset.files.get(file.get())?;
         let hunk_diff = file_diff.hunks().get(hunk.get())?;
@@ -129,7 +161,11 @@ impl DiffApp {
                 path: repo_file_path(&self.document.changeset.repo, path),
                 line,
             },
-            EditorViewAnchor { line, viewport_row },
+            EditorViewAnchor {
+                line,
+                row_visual_offset: 0,
+                viewport_row,
+            },
         ))
     }
 
@@ -141,8 +177,84 @@ impl DiffApp {
             return None;
         }
 
-        let (file, _) = self.focused_hunk_for_viewport(self.viewport.viewport_rows)?;
+        let file = if self.full_file_mode_active() {
+            self.full_file_editor_position()?.0
+        } else {
+            self.focused_hunk_for_viewport(self.viewport.viewport_rows)?
+                .0
+        };
         editor_reload_request_for_file(self.document.changeset.files.get(file.get())?)
+    }
+
+    fn full_file_editor_position(&self) -> Option<(FileIndex, usize, usize, usize)> {
+        let rendered_rows = self.rendered_diff_rows_for_viewport(self.viewport.viewport_rows);
+        let focus_row = self.rendered_viewport_focus_row(self.viewport.viewport_rows);
+        let file = find_rendered_diff_row_outward(&rendered_rows, focus_row, |rendered_row| {
+            self.document
+                .model
+                .row(rendered_row.model_row)
+                .and_then(full_file_row_file)
+        })?;
+
+        // Choose the focused file before checking whether it can be edited. In
+        // particular, a deleted file must not make editor lookup spill into an
+        // adjacent editable file.
+        self.document.changeset.files.get(file.get())?.new_path()?;
+        find_rendered_diff_row_outward(&rendered_rows, focus_row, |rendered_row| {
+            let row = self.document.model.row(rendered_row.model_row)?;
+            if full_file_row_file(row) != Some(file) {
+                return None;
+            }
+            self.editor_line_at_full_file_row(rendered_row.model_row)
+                .map(|(_, line)| {
+                    let row_visual_offset = rendered_row
+                        .visual_scroll
+                        .saturating_sub(self.scroll_for_model_row(rendered_row.model_row));
+                    (file, line, row_visual_offset, rendered_row.viewport_row)
+                })
+        })
+    }
+
+    fn editor_line_at_full_file_row(&self, row_index: usize) -> Option<(FileIndex, usize)> {
+        let row = self.document.model.row(row_index)?;
+        let (file, line) = match row {
+            UiRow::FileSeparator => return None,
+            UiRow::FileHeader(file) | UiRow::FileBodyNotice(file) => (file, 1),
+            UiRow::Collapsed {
+                file, new_start, ..
+            } => (file, (new_start as usize).max(1)),
+            UiRow::ContextLine { file, new_line, .. } => (file, new_line.max(1)),
+            UiRow::ContextHide { file, hunk, .. } | UiRow::HunkHeader { file, hunk } => {
+                let line = self
+                    .document
+                    .changeset
+                    .files
+                    .get(file.get())?
+                    .hunks()
+                    .get(hunk.get())?
+                    .new_start()
+                    .max(1);
+                (file, line)
+            }
+            UiRow::UnifiedLine { file, hunk, .. }
+            | UiRow::MetaLine { file, hunk, .. }
+            | UiRow::SplitLine { file, hunk, .. } => {
+                let line = self
+                    .editor_line_at_hunk_row(row_index, file.get(), hunk.get())
+                    .or_else(|| {
+                        self.document
+                            .changeset
+                            .files
+                            .get(file.get())?
+                            .hunks()
+                            .get(hunk.get())
+                            .map(|hunk| hunk.new_start().max(1))
+                    })?;
+                (file, line)
+            }
+        };
+        self.document.changeset.files.get(file.get())?.new_path()?;
+        Some((file, line))
     }
 
     fn focused_hunk_editor_position(&self, file: usize, hunk: usize) -> Option<(usize, usize)> {
@@ -194,13 +306,35 @@ impl DiffApp {
     }
 
     #[cfg(test)]
+    pub(crate) fn focused_hunk_editor_view_anchor_for_test(&self) -> Option<EditorViewAnchor> {
+        self.focused_hunk_editor_target_and_anchor()
+            .map(|(_, anchor)| anchor)
+    }
+
+    #[cfg(test)]
     pub(crate) fn restore_editor_view_for_test(
         &mut self,
         path: &Path,
         line: usize,
         viewport_row: usize,
     ) {
-        self.restore_editor_view(path, EditorViewAnchor { line, viewport_row });
+        self.restore_editor_view(
+            path,
+            EditorViewAnchor {
+                line,
+                row_visual_offset: 0,
+                viewport_row,
+            },
+        );
+    }
+
+    #[cfg(test)]
+    pub(crate) fn restore_editor_view_anchor_for_test(
+        &mut self,
+        path: &Path,
+        anchor: EditorViewAnchor,
+    ) {
+        self.restore_editor_view(path, anchor);
     }
 
     fn restore_editor_view(&mut self, path: &Path, anchor: EditorViewAnchor) {
@@ -214,51 +348,32 @@ impl DiffApp {
             return;
         };
 
+        self.restore_full_file_trailing_context_for_line(file, anchor.line);
         let Some(row) = self.closest_editor_view_row(file, anchor.line) else {
             return;
         };
 
         self.viewport.manual_hunk_focus =
             self.document.model.row(row).and_then(UiRow::typed_hunk_key);
-        let scroll = self.scroll_for_model_row_at_viewport_row(row, anchor.viewport_row);
+        let scroll = self.scroll_for_model_row_offset_at_viewport_row(
+            row,
+            anchor.row_visual_offset,
+            anchor.viewport_row,
+        );
         self.set_scroll_with_grep_sync(scroll, false, HunkFocusScrollBehavior::Preserve);
         self.runtime.dirty = true;
     }
 
-    fn scroll_for_model_row_at_viewport_row(&self, model_row: usize, viewport_row: usize) -> usize {
-        let max_scroll = self.max_scroll();
-        let target_scroll = self.scroll_for_model_row(model_row).min(max_scroll);
-        let viewport_row = viewport_row.min(self.viewport.viewport_rows.saturating_sub(1));
-        let preferred_scroll = target_scroll.saturating_sub(viewport_row);
-        let mut best = None;
-
-        // Annotation blocks consume viewport slots without advancing the scroll
-        // coordinate. Ask the viewport planner where the target actually lands
-        // at each nearby scroll instead of treating model and viewport rows as
-        // interchangeable.
-        for scroll in preferred_scroll..=target_scroll {
-            for rendered_row in self
-                .rendered_diff_rows_for_viewport_at_scroll(scroll, self.viewport.viewport_rows)
-                .into_iter()
-                .filter(|rendered_row| rendered_row.model_row == model_row)
-            {
-                let distance = rendered_row.viewport_row.abs_diff(viewport_row);
-                if best.is_none_or(|(known_distance, known_scroll)| {
-                    (distance, scroll) < (known_distance, known_scroll)
-                }) {
-                    best = Some((distance, scroll));
-                }
-                if distance == 0 {
-                    return scroll;
-                }
-            }
+    fn closest_editor_view_row(&self, file: usize, line: usize) -> Option<usize> {
+        if self.full_file_mode_active()
+            && let Some(row) = self
+                .document
+                .model
+                .context_line_row(FileIndex::new(file), line)
+        {
+            return Some(row.get());
         }
 
-        best.map(|(_, scroll)| scroll)
-            .unwrap_or_else(|| self.scroll_with_model_row_rendered(preferred_scroll, model_row))
-    }
-
-    fn closest_editor_view_row(&self, file: usize, line: usize) -> Option<usize> {
         let file_diff = self.document.changeset.files.get(file)?;
         let hunks = file_diff.hunks();
         if hunks.is_empty() {
@@ -309,6 +424,7 @@ impl DiffApp {
             selected_file: self.sidebar.selected_file,
             manual_hunk_focus: self.viewport.manual_hunk_focus,
             layout: self.viewport.layout,
+            full_file_mode: self.full_file_mode_active(),
             line_wrapping: self.viewport.line_wrapping,
         }
     }

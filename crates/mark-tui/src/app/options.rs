@@ -440,6 +440,7 @@ pub(crate) fn next_decoration_preference(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum OptionsMenuItem {
     Layout,
+    FullFile,
     LiveReload,
     #[allow(dead_code)]
     ContextExpansion,
@@ -461,6 +462,7 @@ const _: OptionsMenuItem = OptionsMenuItem::ContextExpansion;
 pub(crate) const COMMON_OPTIONS_MENU_ITEMS: &[OptionsMenuItem] = &[
     // Review-view controls: most likely to vary per session.
     OptionsMenuItem::Layout,
+    OptionsMenuItem::FullFile,
     OptionsMenuItem::LineWrapping,
     OptionsMenuItem::HorizontalScrollLock,
     OptionsMenuItem::SyntaxHighlighting,
@@ -479,6 +481,7 @@ pub(crate) const COMMON_OPTIONS_MENU_ITEMS: &[OptionsMenuItem] = &[
 pub(crate) fn option_label(item: OptionsMenuItem) -> &'static str {
     match item {
         OptionsMenuItem::Layout => "Layout",
+        OptionsMenuItem::FullFile => "Full file",
         OptionsMenuItem::LiveReload => "Live reload",
         OptionsMenuItem::ContextExpansion => "Context expand",
         OptionsMenuItem::SyntaxHighlighting => "Syntax highlighting",
@@ -528,6 +531,7 @@ pub(crate) fn toast_timeout_label(timeout_ms: u64) -> String {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct OptionsDraft {
     pub(crate) layout: LayoutSetting,
+    pub(crate) full_file: bool,
     pub(crate) live_updates_enabled: bool,
     pub(crate) context_expansion: DiffContextExpansion,
     pub(crate) syntax_enabled: bool,

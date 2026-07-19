@@ -1,10 +1,11 @@
 use std::{
-    collections::hash_map::DefaultHasher,
+    collections::{HashMap, hash_map::DefaultHasher},
     fs,
     hash::{Hash, Hasher},
     panic::{self, AssertUnwindSafe},
     path::{Component, Path, PathBuf},
     process::Command,
+    sync::{Mutex, OnceLock},
     time::Instant,
 };
 
@@ -256,6 +257,90 @@ pub(crate) fn diff_line_number(line: &DiffLine, side: DiffSide) -> Option<usize>
     }
 }
 
+fn range_operand_contains_path_selector(operand: &RevSpec) -> bool {
+    // `:/regex` searches commit messages. Its leading colon (and any colons in
+    // the regex itself) are part of the revision rather than a path selector.
+    if operand.starts_with(":/") {
+        return false;
+    }
+
+    let mut brace_depth = 0usize;
+    for character in operand.chars() {
+        match character {
+            '{' => brace_depth = brace_depth.saturating_add(1),
+            '}' => brace_depth = brace_depth.saturating_sub(1),
+            ':' if brace_depth == 0 => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
+type RangeOperandCacheKey = (PathBuf, RevSpec);
+static RANGE_OPERAND_CACHE: OnceLock<Mutex<HashMap<RangeOperandCacheKey, Option<RevSpec>>>> =
+    OnceLock::new();
+
+fn range_operand_cache() -> &'static Mutex<HashMap<RangeOperandCacheKey, Option<RevSpec>>> {
+    RANGE_OPERAND_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+pub(crate) fn invalidate_range_operand_revision_cache(repo: &Path, options: &DiffOptions) {
+    let DiffSource::Range { left, right } = &options.source else {
+        return;
+    };
+    let Some(cache) = RANGE_OPERAND_CACHE.get() else {
+        return;
+    };
+    let mut cache = cache.lock().unwrap_or_else(|error| error.into_inner());
+    cache.remove(&(repo.to_owned(), left.clone()));
+    cache.remove(&(repo.to_owned(), right.clone()));
+}
+
+fn range_operand_treeish_revision(repo: &Path, operand: &RevSpec) -> Option<RevSpec> {
+    // Reflog date selectors and braced revision-search patterns may contain colons.
+    // Reject only a top-level `REV:path` selector before asking Git whether the
+    // remaining revision resolves to a commit or tree.
+    if range_operand_contains_path_selector(operand) {
+        return None;
+    }
+
+    let cache = range_operand_cache();
+    let key = (repo.to_owned(), operand.clone());
+    let mut cache = cache.lock().unwrap_or_else(|error| error.into_inner());
+    if let Some(revision) = cache.get(&key) {
+        return revision.clone();
+    }
+
+    // A range operand is shared by every hunk and file in the changeset. Keep
+    // the object-kind lookup here so source construction stays cheap after the
+    // first lookup instead of running `git rev-parse` per hunk.
+    let revision = mark_git::revision_is_treeish(repo, operand)
+        .unwrap_or(false)
+        .then(|| operand.clone())
+        .and_then(|revision| {
+            // Appending `:path` directly to `:/regex` is ambiguous to Git.
+            // Resolve commit-search expressions first so the full-file blob
+            // selector is constructed from an object ID.
+            if !revision.starts_with(":/") {
+                return Some(revision);
+            }
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(repo)
+                .args(["rev-parse", "--verify", "--quiet", "--end-of-options"])
+                .arg(revision.as_ref())
+                .output()
+                .ok()?;
+            if !output.status.success() {
+                return None;
+            }
+            let resolved = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+            (!resolved.is_empty()).then_some(resolved.into())
+        });
+    cache.insert(key, revision.clone());
+    revision
+}
+
 pub(crate) fn full_file_source(
     repo: &Path,
     options: &DiffOptions,
@@ -271,6 +356,18 @@ pub(crate) fn full_file_source(
     if !repo.is_dir() {
         return None;
     }
+    let range_revision = if let DiffSource::Range { left, right } = &options.source {
+        let operand = match side {
+            DiffSide::Old => left,
+            DiffSide::New => right,
+        };
+        // Full-file sources append the diff path, so the operand must resolve
+        // to a tree-ish object. Blob objects and existing `REV:path` operands
+        // are valid range inputs, but cannot be extended with another path.
+        Some(range_operand_treeish_revision(repo, operand)?)
+    } else {
+        None
+    };
 
     let path: RepoRelativePath = file_path_for_side(file, side)?.into();
     let kind = match (&options.source, side) {
@@ -297,14 +394,12 @@ pub(crate) fn full_file_source(
             rev: head.clone(),
             path,
         },
-        (DiffSource::Range { left, .. }, DiffSide::Old) => FullFileSourceKind::GitRevision {
-            rev: left.clone(),
-            path,
-        },
-        (DiffSource::Range { right, .. }, DiffSide::New) => FullFileSourceKind::GitRevision {
-            rev: right.clone(),
-            path,
-        },
+        (DiffSource::Range { .. }, DiffSide::Old | DiffSide::New) => {
+            FullFileSourceKind::GitRevision {
+                rev: range_revision.expect("range sources have a validated revision"),
+                path,
+            }
+        }
     };
 
     Some(FullFileSource {

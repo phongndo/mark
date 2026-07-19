@@ -12,7 +12,7 @@ use mark_core::MarkResult;
 use mark_diff::{Changeset, DiffOptions, DiffSource, DiffStats};
 use mark_syntax::DiffContextExpansion;
 use ratatui::layout::Rect;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -55,6 +55,7 @@ pub(crate) const NORMAL_GLOBAL_ACTIONS: &[GlobalAction] = &[
     GlobalAction::ExpandContextUp,
     GlobalAction::ExpandContextDown,
     GlobalAction::CollapseContextAll,
+    GlobalAction::FullFile,
     GlobalAction::Layout,
     GlobalAction::LineWrapping,
     GlobalAction::HorizontalScrollLock,
@@ -96,6 +97,7 @@ pub(crate) struct FocusedEditorLaunch {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct EditorViewAnchor {
     pub(crate) line: usize,
+    pub(crate) row_visual_offset: usize,
     pub(crate) viewport_row: usize,
 }
 
@@ -145,6 +147,7 @@ pub(crate) struct EditorReloadNavigation {
     pub(crate) selected_file: FileIndex,
     pub(crate) manual_hunk_focus: Option<(FileIndex, HunkIndex)>,
     pub(crate) layout: DiffLayoutMode,
+    pub(crate) full_file_mode: bool,
     pub(crate) line_wrapping: bool,
 }
 
@@ -341,6 +344,7 @@ pub(crate) enum HunkFocusSearch {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RenderedDiffRow {
     pub(crate) viewport_row: usize,
+    pub(crate) visual_scroll: usize,
     pub(crate) model_row: usize,
 }
 
@@ -356,7 +360,12 @@ pub(crate) struct WrappedVisualLayout {
     pub(crate) viewport_width: usize,
     pub(crate) model_rows: usize,
     pub(crate) model_rows_ptr: usize,
+    /// Exact visual starts for eager layouts. Sparse layouts leave this empty.
     pub(crate) row_starts: Vec<usize>,
+    pub(crate) row_start_stride: usize,
+    /// Per-block visual starts relative to the block's first model row.
+    /// Unmeasured sparse blocks conservatively count each model row once.
+    pub(crate) sparse_row_starts: BTreeMap<usize, Vec<usize>>,
     pub(crate) total_rows: usize,
 }
 

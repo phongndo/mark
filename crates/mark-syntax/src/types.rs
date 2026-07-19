@@ -543,6 +543,8 @@ pub(crate) struct StoredSyntaxSettings {
     pub(crate) layout: Option<LayoutSetting>,
     pub(crate) live_reload: Option<bool>,
     pub(crate) syntax_highlighting: Option<bool>,
+    #[serde(alias = "show_full_file")]
+    pub(crate) full_file: Option<bool>,
     #[serde(default, alias = "word_wrap", alias = "wrap_lines")]
     pub(crate) line_wrapping: bool,
     #[serde(default)]
@@ -675,6 +677,8 @@ pub enum ToastCorner {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 pub(crate) struct StoredDiffSettings {
+    #[serde(alias = "show_full_file")]
+    pub(crate) full_file: Option<bool>,
     pub(crate) line_background: Option<DiffBackground>,
     pub(crate) gutter_background: Option<DiffGutterBackground>,
     pub(crate) inline_background: Option<DiffBackground>,
@@ -738,6 +742,7 @@ pub struct SyntaxSettings {
     pub layout: Option<LayoutSetting>,
     pub live_reload: bool,
     pub syntax_highlighting: bool,
+    pub full_file: bool,
     pub line_wrapping: bool,
     pub colors: ColorOverrides,
     pub syntax_rules: Vec<SyntaxRuleOverride>,
@@ -760,6 +765,7 @@ impl Default for SyntaxSettings {
             layout: None,
             live_reload: true,
             syntax_highlighting: true,
+            full_file: false,
             line_wrapping: false,
             colors: ColorOverrides::default(),
             syntax_rules: Vec::new(),

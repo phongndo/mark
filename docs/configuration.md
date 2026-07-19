@@ -31,6 +31,7 @@ transparent_background = false
 layout = "dynamic"
 live_reload = true
 syntax_highlighting = true
+full_file = false
 line_wrapping = false
 
 [decorations]
@@ -86,6 +87,7 @@ next_hunk = "]"
 expand_context_up = ","
 expand_context_down = "."
 collapse_context_all = "c"
+full_file = "e"
 quit = "q"
 layout = "s"
 line_wrapping = "w"
@@ -258,6 +260,7 @@ menu:
 layout = "dynamic"           # dynamic, unified, split
 live_reload = true
 syntax_highlighting = true
+full_file = false
 line_wrapping = false
 
 [decorations]
@@ -267,7 +270,12 @@ no_borders = false             # true removes pane borders even in fancy mode
 ```
 
 `layout = "dynamic"` uses split when the terminal is wide enough and unified
-when it is narrow.
+when it is narrow. `full_file = true` starts repository-backed reviews with all
+available unchanged lines visible; `false` starts in hunk view. Full-file view
+also omits `@@` hunk headers and context controls. The **Full file** setting or
+`full_file` keybinding toggles this for the current session. Patch,
+show, and difftool inputs remain in hunk view when source text is unavailable.
+`full_file` is also accepted inside `[diff]`; the top-level form is canonical.
 `[decorations] mode = "auto"` uses Mark's fancy UI on capable UTF-8 terminals and a
 minimal low-chrome UI on constrained terminals such as `TERM=dumb` or non-UTF-8
 locales. Set `mode = "fancy"` or `mode = "minimal"` to force a mode. Minimal
@@ -396,6 +404,7 @@ review_target = "m r"
 head_branch = "m h"
 base_branch = "m b"
 commit_picker = "m c"
+full_file = "e"
 annotate_line = "a"
 annotate_batch = "A"
 copy_marks = "y"

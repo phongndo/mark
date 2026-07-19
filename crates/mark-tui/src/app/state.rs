@@ -55,6 +55,7 @@ pub(crate) struct ViewportState {
     pub(crate) scroll: usize,
     pub(crate) horizontal_scroll: usize,
     pub(crate) horizontal_scroll_locked: bool,
+    pub(crate) full_file: bool,
     pub(crate) line_wrapping: bool,
     pub(crate) viewport_rows: usize,
     pub(crate) viewport_width: usize,

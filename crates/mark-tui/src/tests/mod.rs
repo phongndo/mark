@@ -465,6 +465,7 @@ fn visible_paths(app: &DiffApp) -> Vec<&str> {
 fn default_options_draft() -> OptionsDraft {
     OptionsDraft {
         layout: LayoutSetting::Dynamic,
+        full_file: false,
         live_updates_enabled: true,
         context_expansion: DiffContextExpansion::Lines(20),
         syntax_enabled: true,
@@ -618,4 +619,18 @@ fn git(repo: &Path, args: &[&str]) {
         "git failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+fn git_stdout(repo: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .current_dir(repo)
+        .args(args)
+        .output()
+        .expect("git should run");
+    assert!(
+        output.status.success(),
+        "git failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_owned()
 }

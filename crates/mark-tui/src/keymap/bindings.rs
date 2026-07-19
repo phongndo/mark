@@ -38,6 +38,7 @@ impl Keymap {
         let copy_marks_configured = stored_global.copy_marks.is_some();
         let line_wrapping_configured = stored_global.line_wrapping.is_some();
         let horizontal_scroll_lock_configured = stored_global.horizontal_scroll_lock.is_some();
+        let full_file_configured = stored_global.full_file.is_some();
         let diff_menu_configured = stored_global.diff_menu.is_some();
         let review_target_configured = stored_global.review_target.is_some();
         let head_branch_configured = stored_global.head_branch.is_some();
@@ -65,6 +66,9 @@ impl Keymap {
         }
         if !horizontal_scroll_lock_configured {
             keymap.clear_default_on_conflict(GlobalAction::HorizontalScrollLock);
+        }
+        if !full_file_configured {
+            keymap.clear_default_on_conflict(GlobalAction::FullFile);
         }
         if !annotate_line_configured {
             keymap.clear_default_on_conflict(GlobalAction::AnnotateLine);
@@ -275,6 +279,7 @@ struct StoredGlobalKeymap {
     expand_context_up: Option<KeySpec>,
     expand_context_down: Option<KeySpec>,
     collapse_context_all: Option<KeySpec>,
+    full_file: Option<KeySpec>,
     quit: Option<KeySpec>,
     layout: Option<KeySpec>,
     line_wrapping: Option<KeySpec>,
@@ -316,6 +321,7 @@ impl StoredGlobalKeymap {
             GlobalAction::ExpandContextUp => self.expand_context_up.take(),
             GlobalAction::ExpandContextDown => self.expand_context_down.take(),
             GlobalAction::CollapseContextAll => self.collapse_context_all.take(),
+            GlobalAction::FullFile => self.full_file.take(),
             GlobalAction::Quit => self.quit.take(),
             GlobalAction::Layout => self.layout.take(),
             GlobalAction::LineWrapping => self.line_wrapping.take(),

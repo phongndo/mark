@@ -14,7 +14,7 @@ mod revision;
 pub use revision::{
     RevisionKind, RevisionStatus, existing_commitish_revision, existing_object_revision,
     merge_base_revision, range_right_operand_is_pathspec, revision_expression_exists,
-    revision_status, show_target, worktree_base_revision,
+    revision_is_treeish, revision_status, show_target, worktree_base_revision,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]

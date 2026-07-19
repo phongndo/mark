@@ -184,6 +184,50 @@ fn hunk_navigation_includes_expanded_context_before_hunk() {
 }
 
 #[test]
+fn full_file_hunk_navigation_centers_each_change() {
+    let repo = temp_test_dir("full-file-hunk-navigation");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    fs::write(
+        repo.join("file.rs"),
+        (1..=220)
+            .map(|line| format!("line {line}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .expect("source file should be written");
+    let changeset = changeset_with_hunks_at(repo.clone(), &[20, 100, 180]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(9);
+    app.toggle_full_file();
+    assert!(app.expand_trailing_context_for_key(0, 3));
+    app.set_scroll(0);
+    app.viewport.manual_hunk_focus = None;
+
+    for hunk in [HUNK_0, HUNK_1, HUNK_2] {
+        app.next_hunk();
+
+        let range = app
+            .document
+            .model
+            .hunk_row_range(0, hunk.get())
+            .expect("target hunk should have rows");
+        let center = range
+            .start
+            .saturating_add(range.end.saturating_sub(range.start + 1) / 2);
+        assert_eq!(
+            app.viewport.scroll + viewport_center_offset(app.viewport.viewport_rows),
+            center
+        );
+        assert_eq!(app.viewport.manual_hunk_focus, Some((FILE_0, hunk)));
+    }
+
+    app.previous_hunk();
+    assert_eq!(app.viewport.manual_hunk_focus, Some((FILE_0, HUNK_1)));
+
+    fs::remove_dir_all(repo).expect("repo directory should be removed");
+}
+
+#[test]
 fn selecting_file_scrolls_file_to_top_and_focuses_its_first_hunk() {
     let changeset = changeset_with_files(&["a.rs", "b.rs", "c.rs"]);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
@@ -445,6 +489,265 @@ fn static_explicit_layout_builds_model_before_saved_layout_preference() {
             .iter()
             .all(|row| !matches!(row, UiRow::UnifiedLine { .. }))
     );
+}
+
+#[test]
+fn raw_blob_range_stays_in_hunk_view_when_full_file_is_requested() {
+    let repo = temp_test_dir("raw-blob-range-full-file");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    git(&repo, &["init", "-q"]);
+    git(&repo, &["config", "user.email", "test@example.com"]);
+    git(&repo, &["config", "user.name", "Test"]);
+    fs::write(repo.join("file.rs"), "old\n").expect("old file should be written");
+    git(&repo, &["add", "file.rs"]);
+    git(&repo, &["commit", "-qm", "old"]);
+    let old_blob = git_stdout(&repo, &["rev-parse", "HEAD:file.rs"]);
+    fs::write(repo.join("file.rs"), "new\n").expect("new file should be written");
+    git(&repo, &["commit", "-qam", "new"]);
+    let new_blob = git_stdout(&repo, &["rev-parse", "HEAD:file.rs"]);
+    let options = DiffOptions {
+        source: DiffSource::Range {
+            left: old_blob.into(),
+            right: new_blob.into(),
+        },
+        ..DiffOptions::default()
+    };
+    let changeset = changeset_with_hunk_at(repo.clone(), 1);
+    let mut app = DiffApp::new(options, changeset, DiffLayoutMode::Unified);
+
+    app.toggle_full_file();
+
+    assert!(app.viewport.full_file);
+    assert!(!app.full_file_mode_active());
+    assert!(app.document.context_expansions.is_empty());
+    assert!(
+        (0..app.document.model.len())
+            .any(|row| matches!(app.document.model.row(row), Some(UiRow::HunkHeader { .. })))
+    );
+
+    fs::remove_dir_all(repo).expect("repo directory should be removed");
+}
+
+#[test]
+fn full_file_context_normalizes_zero_count_insertion_ranges() {
+    let repo = temp_test_dir("zero-count-insertion-context");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    fs::write(repo.join("file.rs"), "one\ntwo\ninserted\nthree\nfour\n")
+        .expect("source file should be written");
+    let mut changeset = changeset_with_hunk_at(repo.clone(), 3);
+    let hunk = &mut changeset.files[0].hunks_mut()[0];
+    hunk.header = "@@ -2,0 +3 @@".to_owned();
+    hunk.ranges = HunkLineRanges::new(2, 0, 3, 1);
+    hunk.lines = vec![DiffLine::addition(3, "inserted".to_owned())];
+
+    let trailing_key = ContextKey {
+        file: FILE_0,
+        hunk: HUNK_1,
+    };
+    let trailing = HashMap::from([(trailing_key, 2)]);
+    let expansions = full_file_context_expansions(&changeset, &DiffOptions::default(), &trailing);
+    assert_eq!(
+        expansions.get(&ContextKey {
+            file: FILE_0,
+            hunk: HUNK_0,
+        }),
+        Some(&2)
+    );
+
+    let model = UiModel::new_with_trailing_context_and_controls(
+        &changeset,
+        DiffLayoutMode::Unified,
+        &expansions,
+        &trailing,
+        false,
+    );
+    let context_lines = model
+        .iter_rows()
+        .filter_map(|row| match row {
+            UiRow::ContextLine {
+                old_line, new_line, ..
+            } => Some((old_line, new_line)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(context_lines, vec![(1, 1), (2, 2), (3, 4), (4, 5)]);
+
+    fs::remove_dir_all(repo).expect("repo directory should be removed");
+}
+
+#[test]
+fn trailing_context_starts_after_a_zero_count_new_range() {
+    let repo = temp_test_dir("zero-count-deletion-trailing-context");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    fs::write(repo.join("file.rs"), "two\nthree\nfour\nfive\n")
+        .expect("source file should be written");
+    let mut changeset = changeset_with_hunk_at(repo.clone(), 1);
+    let hunk = &mut changeset.files[0].hunks_mut()[0];
+    hunk.header = "@@ -1 +0,0 @@".to_owned();
+    hunk.ranges = HunkLineRanges::new(1, 1, 0, 0);
+    hunk.lines = vec![DiffLine::deletion(1, "one".to_owned())];
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.toggle_full_file();
+    app.set_viewport_rows(app.document.model.len().max(1));
+
+    assert!(app.discover_trailing_context_for_viewport());
+    for _ in 0..1_000 {
+        app.drain_trailing_context_worker();
+        if app.jobs.trailing_context_worker.is_none() {
+            break;
+        }
+        thread::yield_now();
+    }
+
+    let key = ContextKey {
+        file: FILE_0,
+        hunk: HUNK_1,
+    };
+    assert_eq!(app.document.trailing_context_lines.get(&key), Some(&4));
+    assert!(app.document.model.context_line_row(FILE_0, 4).is_some());
+
+    fs::remove_dir_all(repo).expect("repo directory should be removed");
+}
+
+#[test]
+fn full_file_setting_starts_with_unchanged_lines_visible() {
+    let repo = temp_test_dir("configured-full-file");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    let text = (1..=30)
+        .map(|line| format!("line {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(repo.join("file.rs"), text).expect("context file should be written");
+    let app = DiffApp::new_static_with_explicit_layout_and_settings(
+        DiffOptions::default(),
+        changeset_with_hunk_at(repo, 20),
+        DiffLayoutMode::Unified,
+        SyntaxStartupMode::Disabled,
+        SyntaxSettings {
+            full_file: true,
+            ..SyntaxSettings::default()
+        },
+    );
+
+    assert!(app.viewport.full_file);
+    assert!(app.overlays.options_menu_draft.full_file);
+    assert_eq!(
+        app.document.trailing_context_lines.get(&ContextKey {
+            file: FILE_0,
+            hunk: HunkIndex::new(1),
+        }),
+        Some(&10)
+    );
+    assert!(matches!(
+        app.document.model.row(1),
+        Some(UiRow::ContextLine {
+            old_line: 1,
+            new_line: 1,
+            ..
+        })
+    ));
+    assert!(app.document.model.context_line_row(FILE_0, 30).is_some());
+    assert!((0..app.document.model.len()).all(|row| !matches!(
+        app.document.model.row(row),
+        Some(UiRow::Collapsed { .. } | UiRow::ContextHide { .. } | UiRow::HunkHeader { .. })
+    )));
+}
+
+#[test]
+fn wrapped_full_file_setting_preloads_context_for_interactive_startup() {
+    let repo = temp_test_dir("configured-wrapped-full-file");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    fs::write(
+        repo.join("file.rs"),
+        (1..=30)
+            .map(|_| "x".repeat(80))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .expect("context file should be written");
+    let mut app = DiffApp::new_with_explicit_layout_and_settings(
+        DiffOptions::default(),
+        changeset_with_hunk_at(repo, 20),
+        DiffLayoutMode::Unified,
+        SyntaxStartupMode::Disabled,
+        SyntaxSettings {
+            full_file: true,
+            line_wrapping: true,
+            ..SyntaxSettings::default()
+        },
+    );
+    app.set_viewport_width(18);
+
+    assert!(matches!(
+        app.document.context_cache.get(&ContextSourceKey {
+            file: FILE_0,
+            side: DiffSide::New,
+        }),
+        Some(ContextSourceEntry::Lines(_))
+    ));
+    let hunk_row = app
+        .document
+        .model
+        .diff_line_row(FILE_0, HUNK_0, LINE_0)
+        .expect("hunk row should be visible")
+        .get();
+    let scroll_before_render = app.wrapped_visual_scroll_for_model_row(hunk_row);
+    assert!(scroll_before_render > hunk_row);
+
+    app.context_line_text(0, 1, 1);
+
+    assert_eq!(
+        app.wrapped_visual_scroll_for_model_row(hunk_row),
+        scroll_before_render
+    );
+}
+
+#[test]
+fn wrapped_full_file_startup_loads_only_viewport_context() {
+    let repo = temp_test_dir("wrapped-full-file-viewport-context");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    let paths = ["one.rs", "two.rs", "three.rs", "four.rs"];
+    for path in paths {
+        fs::write(
+            repo.join(path),
+            (1..=80)
+                .map(|line| format!("{path} line {line} {}", "x".repeat(80)))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+        .expect("source file should be written");
+    }
+    let mut changeset = changeset_with_files(&paths);
+    changeset.repo = repo.clone().into();
+    for file in &mut changeset.files {
+        let hunk = &mut file.hunks_mut()[0];
+        hunk.header = "@@ -50 +50 @@".to_owned();
+        hunk.ranges = HunkLineRanges::new(50, 1, 50, 1);
+        hunk.lines = vec![DiffLine::context(50, 50, "changed".to_owned())];
+    }
+
+    let app = DiffApp::new_with_explicit_layout_and_settings(
+        DiffOptions::default(),
+        changeset,
+        DiffLayoutMode::Unified,
+        SyntaxStartupMode::Disabled,
+        SyntaxSettings {
+            full_file: true,
+            line_wrapping: true,
+            ..SyntaxSettings::default()
+        },
+    );
+
+    assert!(app.full_file_mode_active());
+    assert!(!app.document.context_cache.is_empty());
+    assert!(
+        app.document
+            .context_cache
+            .keys()
+            .all(|key| key.file == FILE_0)
+    );
+
+    fs::remove_dir_all(repo).expect("repo directory should be removed");
 }
 
 #[test]
@@ -839,6 +1142,129 @@ fn range_diff_has_no_diff_type_choices() {
 }
 
 #[test]
+fn cached_current_diff_does_not_reuse_a_full_file_model() {
+    let repo = temp_test_dir("full-file-diff-cache");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    let changeset = changeset_with_context_lines_at(repo.clone(), 1, 1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.refs.branch_base = Some("main".to_owned());
+    app.refs.current_head = Some("feature".to_owned());
+    let branch = DiffOptions {
+        source: DiffSource::Base("main".into()),
+        ..DiffOptions::default()
+    };
+    app.cache_loaded_diff(branch.clone(), changeset_with_context_lines_at(repo, 1, 1));
+
+    app.toggle_full_file();
+    assert!(
+        (0..app.document.model.len())
+            .all(|row| !matches!(app.document.model.row(row), Some(UiRow::HunkHeader { .. })))
+    );
+
+    app.select_diff_choice(DiffChoice::Branch);
+    assert_eq!(app.document.options, branch);
+    app.set_full_file(false);
+    app.select_diff_choice(DiffChoice::All);
+
+    assert_eq!(app.document.options, DiffOptions::default());
+    assert!(
+        (0..app.document.model.len())
+            .any(|row| matches!(app.document.model.row(row), Some(UiRow::HunkHeader { .. })))
+    );
+}
+
+#[test]
+fn cached_full_file_diff_preloads_wrapped_context_before_scroll_restore() {
+    let repo = temp_test_dir("cached-wrapped-full-file");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    fs::write(
+        repo.join("file.rs"),
+        (1..=30)
+            .map(|_| "x".repeat(80))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .expect("context file should be written");
+    let changeset = changeset_with_hunk_at(repo.clone(), 20);
+    let mut app = DiffApp::new(
+        DiffOptions::default(),
+        changeset.clone(),
+        DiffLayoutMode::Unified,
+    );
+    app.toggle_full_file();
+    app.set_line_wrapping(true);
+    app.set_viewport_width(18);
+    let options = DiffOptions::default();
+
+    app.replace_cached_diff(
+        options.clone(),
+        diff_cache_entry(options, changeset),
+        BranchMetadataPolicy::Preserve,
+    );
+
+    assert!(matches!(
+        app.document.context_cache.get(&ContextSourceKey {
+            file: FILE_0,
+            side: DiffSide::New,
+        }),
+        Some(ContextSourceEntry::Lines(_))
+    ));
+    let hunk_row = app
+        .document
+        .model
+        .diff_line_row(FILE_0, HUNK_0, LINE_0)
+        .expect("hunk row should be visible")
+        .get();
+    let scroll_before_render = app.wrapped_visual_scroll_for_model_row(hunk_row);
+    assert!(scroll_before_render > hunk_row);
+
+    app.context_line_text(0, 1, 1);
+
+    assert_eq!(
+        app.wrapped_visual_scroll_for_model_row(hunk_row),
+        scroll_before_render
+    );
+}
+
+#[test]
+fn cached_full_file_diff_recovers_context_width_before_horizontal_scroll_restore() {
+    let repo = temp_test_dir("cached-full-file-context-width");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    let wide_line = "x".repeat(200);
+    fs::write(
+        repo.join("file.rs"),
+        std::iter::once(wide_line)
+            .chain((2..=80).map(|line| format!("line {line}")))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .expect("context file should be written");
+    let changeset = changeset_with_hunk_at(repo.clone(), 50);
+    let mut app = DiffApp::new(
+        DiffOptions::default(),
+        changeset.clone(),
+        DiffLayoutMode::Unified,
+    );
+    app.toggle_full_file();
+    app.set_viewport_width(40);
+    app.context_line_text(0, 1, 1);
+    app.set_horizontal_scroll(80);
+    assert_eq!(app.viewport.horizontal_scroll, 80);
+    let options = DiffOptions::default();
+
+    app.replace_cached_diff(
+        options.clone(),
+        diff_cache_entry(options, changeset),
+        BranchMetadataPolicy::Preserve,
+    );
+
+    assert!(app.document.max_line_width >= 200);
+    assert_eq!(app.viewport.horizontal_scroll, 80);
+
+    fs::remove_dir_all(repo).expect("repo directory should be removed");
+}
+
+#[test]
 fn cached_current_diff_rebuilds_model_while_filter_apply_is_pending() {
     let mut app = DiffApp::new(
         DiffOptions::default(),
@@ -1175,7 +1601,17 @@ fn oversized_hunks_fall_back_to_plain_diff_text() {
 
 #[test]
 fn full_file_sources_cover_diff_modes_and_statuses() {
-    let repo = std::env::temp_dir();
+    let repo = temp_test_dir("full-file-source-modes");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    git(&repo, &["init", "-q"]);
+    git(&repo, &["config", "user.email", "test@example.com"]);
+    git(&repo, &["config", "user.name", "Test"]);
+    fs::write(repo.join("old.rs"), "old\n").expect("old source should be written");
+    fs::write(repo.join("new.rs"), "new\n").expect("new source should be written");
+    git(&repo, &["add", "old.rs", "new.rs"]);
+    git(&repo, &["commit", "-qm", "init"]);
+    git(&repo, &["branch", "left"]);
+    git(&repo, &["branch", "right"]);
     let file = mark_diff::DiffFile {
         change: mark_diff::FileChange::from_status(
             mark_diff::FileStatus::Renamed,
@@ -1245,6 +1681,16 @@ fn full_file_sources_cover_diff_modes_and_statuses() {
         }
     );
 
+    let object_range = DiffOptions {
+        source: DiffSource::Range {
+            left: "HEAD:old.rs".into(),
+            right: "HEAD:new.rs".into(),
+        },
+        ..DiffOptions::default()
+    };
+    assert!(full_file_source(&repo, &object_range, &file, DiffSide::Old).is_none());
+    assert!(full_file_source(&repo, &object_range, &file, DiffSide::New).is_none());
+
     let show = DiffOptions {
         source: DiffSource::Show("HEAD".into()),
         ..DiffOptions::default()
@@ -1265,6 +1711,109 @@ fn full_file_sources_cover_diff_modes_and_statuses() {
         None,
     );
     assert!(full_file_source(&repo, &DiffOptions::default(), &deleted, DiffSide::New).is_none());
+
+    let reflog_revision = "HEAD@{2030-01-01 20:43:02 -0700}";
+    let reflog_range = DiffOptions {
+        source: DiffSource::Range {
+            left: reflog_revision.into(),
+            right: reflog_revision.into(),
+        },
+        ..DiffOptions::default()
+    };
+    let old_reflog_source = full_file_source(&repo, &reflog_range, &file, DiffSide::Old)
+        .expect("timestamped reflog revision should support full-file mode");
+    let new_reflog_source = full_file_source(&repo, &reflog_range, &file, DiffSide::New)
+        .expect("timestamped reflog revision should support full-file mode");
+    assert_eq!(load_full_file_source(&old_reflog_source).unwrap(), "old\n");
+    assert_eq!(load_full_file_source(&new_reflog_source).unwrap(), "new\n");
+
+    let commit_search_range = DiffOptions {
+        source: DiffSource::Range {
+            left: ":/init".into(),
+            right: ":/init".into(),
+        },
+        ..DiffOptions::default()
+    };
+    let old_commit_search_source =
+        full_file_source(&repo, &commit_search_range, &file, DiffSide::Old)
+            .expect("commit-search revision should support full-file mode");
+    let new_commit_search_source =
+        full_file_source(&repo, &commit_search_range, &file, DiffSide::New)
+            .expect("commit-search revision should support full-file mode");
+    assert_eq!(
+        load_full_file_source(&old_commit_search_source).unwrap(),
+        "old\n"
+    );
+    assert_eq!(
+        load_full_file_source(&new_commit_search_source).unwrap(),
+        "new\n"
+    );
+
+    let tree = git_stdout(&repo, &["rev-parse", "HEAD^{tree}"]);
+    let tree_range = DiffOptions {
+        source: DiffSource::Range {
+            left: tree.clone().into(),
+            right: "HEAD".into(),
+        },
+        ..DiffOptions::default()
+    };
+    assert_eq!(
+        full_file_source(&repo, &tree_range, &file, DiffSide::Old)
+            .unwrap()
+            .kind,
+        FullFileSourceKind::GitRevision {
+            rev: tree.into(),
+            path: "old.rs".into(),
+        }
+    );
+
+    fs::remove_dir_all(repo).expect("repo directory should be removed");
+}
+
+#[test]
+fn reload_re_resolves_commit_search_range_sources() {
+    let repo = temp_test_dir("commit-search-range-reload");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    git(&repo, &["init", "-q"]);
+    git(&repo, &["config", "user.email", "test@example.com"]);
+    git(&repo, &["config", "user.name", "Test"]);
+    fs::write(repo.join("file.rs"), "old\n").expect("old source should be written");
+    git(&repo, &["add", "file.rs"]);
+    git(&repo, &["commit", "-qm", "base old"]);
+
+    let options = DiffOptions {
+        source: DiffSource::Range {
+            left: ":/base".into(),
+            right: ":/base".into(),
+        },
+        ..DiffOptions::default()
+    };
+    let changeset = changeset_with_hunk_at(repo.clone(), 1);
+    let mut app = DiffApp::new(options.clone(), changeset.clone(), DiffLayoutMode::Unified);
+    let old_source = full_file_source(
+        &repo,
+        &options,
+        &app.document.changeset.files[0],
+        DiffSide::New,
+    )
+    .expect("initial commit-search source should resolve");
+    assert_eq!(load_full_file_source(&old_source).unwrap(), "old\n");
+
+    fs::write(repo.join("file.rs"), "new\n").expect("new source should be written");
+    git(&repo, &["add", "file.rs"]);
+    git(&repo, &["commit", "-qm", "base new"]);
+    app.replace_loaded_diff(options.clone(), changeset);
+
+    let refreshed_source = full_file_source(
+        &repo,
+        &options,
+        &app.document.changeset.files[0],
+        DiffSide::New,
+    )
+    .expect("reloaded commit-search source should resolve");
+    assert_eq!(load_full_file_source(&refreshed_source).unwrap(), "new\n");
+
+    fs::remove_dir_all(repo).expect("repo directory should be removed");
 }
 
 #[test]

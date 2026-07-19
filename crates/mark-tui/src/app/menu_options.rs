@@ -21,6 +21,7 @@ impl DiffApp {
         self.close_color_scheme_picker();
         self.overlays.options_menu_draft = OptionsDraft {
             layout: layout_setting_from_override(self.viewport.layout_override),
+            full_file: self.viewport.full_file,
             live_updates_enabled: self.jobs.live_updates.enabled(),
             context_expansion: self.config.theme.diff.context_expansion,
             syntax_enabled: self.config.syntax.is_some(),
@@ -146,6 +147,13 @@ impl DiffApp {
             OptionsMenuItem::Layout => {
                 layout_setting_label(self.overlays.options_menu_draft.layout).to_owned()
             }
+            OptionsMenuItem::FullFile => {
+                if self.overlays.options_menu_draft.full_file {
+                    "on full file".to_owned()
+                } else {
+                    "off hunks".to_owned()
+                }
+            }
             OptionsMenuItem::LiveReload if !self.jobs.live_updates.allowed() => {
                 "off disabled".to_owned()
             }
@@ -196,6 +204,7 @@ impl DiffApp {
                     layout_setting_label(self.overlays.options_menu_draft.layout)
                 )
             }
+            OptionsMenuItem::FullFile => checkbox(self.overlays.options_menu_draft.full_file),
             OptionsMenuItem::LiveReload if !self.jobs.live_updates.allowed() => {
                 "[ ] disabled".to_owned()
             }
@@ -281,6 +290,10 @@ impl DiffApp {
                 self.overlays.options_menu_draft.layout =
                     next_layout_setting(self.overlays.options_menu_draft.layout, delta);
             }
+            OptionsMenuItem::FullFile => {
+                self.overlays.options_menu_draft.full_file =
+                    !self.overlays.options_menu_draft.full_file;
+            }
             OptionsMenuItem::LiveReload => {
                 if !self.jobs.live_updates.allowed() {
                     self.set_error_log("live reload disabled by --no-watch");
@@ -356,6 +369,9 @@ impl DiffApp {
 
         if draft.layout != layout_setting_from_override(self.viewport.layout_override) {
             self.set_layout_setting(draft.layout);
+        }
+        if draft.full_file != self.viewport.full_file {
+            self.set_full_file(draft.full_file);
         }
         if draft.live_updates_enabled != self.jobs.live_updates.enabled() {
             self.jobs

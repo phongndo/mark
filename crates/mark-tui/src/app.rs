@@ -44,6 +44,7 @@ pub(crate) use annotations::AnnotationMenuItem;
 #[cfg(test)]
 pub(crate) use clipboard::osc52_clipboard_sequence;
 pub(crate) use clipboard::{json_string, write_osc52_clipboard};
+pub(crate) use context::{full_file_context_expansions, full_file_mode_available};
 pub(crate) use core::{
     AnnotationScratchFile, AsyncJob, BranchMetadataPolicy, DIFF_PREFETCH_POLL, DiffApp,
     DiffCacheEntry, DiffLoadCachePolicy, EDITOR_RELOAD_POLL, ERROR_LOG_DEFAULT_HEIGHT,
