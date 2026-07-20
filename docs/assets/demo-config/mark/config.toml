@@ -1,0 +1,12 @@
+layout = "unified"
+line_wrapping = false
+live_reload = false
+syntax_highlighting = true
+theme = "catppuccin-mocha"
+transparent_background = false
+
+[diff]
+context_expand = 36
+
+[notifications]
+mode = "default"

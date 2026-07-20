@@ -1,24 +1,36 @@
 # mark
 
 [![Quality](https://github.com/phongndo/mark/actions/workflows/quality.yml/badge.svg?branch=main)](https://github.com/phongndo/mark/actions/workflows/quality.yml)
+[![Latest release](https://img.shields.io/github/v/release/phongndo/mark)](https://github.com/phongndo/mark/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-`mark` is a fast, keyboard-first terminal Git diff reviewer.
+`mark` is a fast, keyboard-first terminal Git diff reviewer. It opens local
+changes, commits, patches, pager input, difftool pairs, and GitHub pull requests
+in the same focused review UI.
 
-Use it when you want to review real diffs without leaving the terminal: local
-worktree changes, revision ranges, patch files, Git difftool pairs, pager input,
-and GitHub pull requests.
+<p align="center">
+  <img src="docs/assets/mark-demo.png" alt="Mark reviewing a focused, syntax-highlighted Rust change in the terminal" width="100%">
+</p>
 
-## Why mark
+<p align="center">
+  <sub>A focused Rust change in Mark, rendered in Catppuccin Mocha. Reproduce it with <a href="docs/assets/readme-demo.tape">this VHS tape</a>.</sub>
+</p>
 
-- Interactive terminal UI for large unified diffs.
-- Local worktree watching with explicit reload controls.
-- Split and unified diff layouts with configurable colors.
-- Fancy or minimal UI decorations with automatic terminal-aware selection.
-- Git pager and Git difftool integrations.
-- Patch-file and stdin diff review for generated changes.
-- GitHub pull request review by number or URL.
-- Optional Pi package with a `/mark` slash command.
+## What it does
+
+- **Review any changeset.** Open the worktree, revision ranges, commits, patch
+  files, stdin, difftool pairs, or a GitHub pull request by number or URL.
+- **Move without waiting.** Jump between files, hunks, matches, the top, or the
+  bottom while rendering only the visible viewport.
+- **Find the relevant change.** Filter files, grep the diff, expand context, or
+  switch from hunks to the full file without leaving the reviewer.
+- **Leave review context.** Add inline annotations one at a time or use sticky
+  batch annotation mode across the visible viewport.
+- **Work the way you want.** Toggle split and unified layouts, choose a built-in
+  or custom theme, customize keybindings, and open the focused code in your
+  editor.
+- **Fit into Git.** Use Mark directly, as `core.pager`, or as a Git difftool.
+  Local worktree sessions can watch for changes and reload in place.
 
 ## Install
 
@@ -76,6 +88,51 @@ git diff | mark pager        # use mark as a diff pager
 
 Plain `mark` is a shortcut for `mark diff`.
 
+## Built for huge diffs
+
+Mark keeps the hot path viewport-bounded instead of rebuilding the entire
+screen model for every action. That matters on ordinary reviews, and it keeps
+navigation responsive when a generated change or pull request becomes enormous.
+
+A committed Apple Silicon reference run measured the synthetic one-million-row
+diff fixture as follows:
+
+| Diff | Load | Open | Grep | Random-scroll max | RSS increase |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1,000,000 rows / 74.0 MB | 20.6 ms | 20.8 ms | 68.0 ms | 87 µs | 112 MB |
+
+These are reference-machine benchmark results, not latency promises for every
+machine or repository. The fixture, commands, memory accounting, and 10-million-
+row local run are documented in the
+[mega-diff performance report](docs/performance-reports/2026-07-11-mega-diff-memory.md).
+
+## How it compares
+
+These tools solve related but different problems. Mark and
+[Hunk](https://github.com/modem-dev/hunk) are interactive reviewers,
+[delta](https://github.com/dandavison/delta) is primarily a syntax-highlighting
+pager, and [Difftastic](https://github.com/Wilfred/difftastic) is a structural
+diff engine.
+
+| Built-in capability | Mark | Hunk | delta | Difftastic |
+| --- | :---: | :---: | :---: | :---: |
+| Interactive multi-file review UI | Yes | Yes | — | — |
+| Split / side-by-side view | Yes | Yes | Yes | Yes |
+| Runtime layout switching | Yes | Yes | — | — |
+| Inline review annotations | Yes | Yes | — | — |
+| Live worktree or file reload | Yes | Yes | — | — |
+| File filtering | Yes | Yes | — | — |
+| In-diff text search | Yes | — | — | — |
+| Direct GitHub pull request review | Yes | — | — | — |
+| Git pager workflow | Yes | Yes | Yes | — |
+| Git difftool / external-diff workflow | Yes | Yes | — | Yes |
+| Native Jujutsu and Sapling detection | — | Yes | — | — |
+| Structural, syntax-aware diff algorithm | — | — | — | Yes |
+| Syntax highlighting | Yes | Yes | Yes | Yes |
+
+The table compares documented, built-in workflows. Each tool can be composed
+with other Git and shell commands beyond what is listed here.
+
 ## Git integrations
 
 Use `mark pager` as a Git pager for `git diff` and `git show` output:
@@ -99,14 +156,6 @@ bundle the CLI.
 
 ```sh
 pi install npm:pi-mark
-```
-
-If you previously installed the old `pi-dx` package, migrate with:
-
-```sh
-pi remove npm:pi-dx
-pi install npm:pi-mark
-```
 
 The slash command moved from `/diff`, `/show`, and `/patch` to `/mark` with
 subcommands (`/mark diff`, `/mark show`, `/mark patch`). `PI_DX_BIN` is now
