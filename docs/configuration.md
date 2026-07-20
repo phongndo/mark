@@ -376,6 +376,20 @@ MARK_MAX_DIFF_HUNKS=100000
 MARK_MAX_DIFF_LINE_BYTES=1048576
 ```
 
+These limits are enforced while reading patch files, standard input, Git and
+GitHub output, and difftool output, so rejected input is not fully buffered
+first.
+
+Full-file context source reads have separate defaults of 128 MiB per file, 2
+million lines per file, and 1 MiB per line. Set smaller or larger positive
+limits when reviewing unusually large files:
+
+```sh
+MARK_MAX_FULL_FILE_BYTES=134217728
+MARK_MAX_FULL_FILE_LINES=2000000
+MARK_MAX_FULL_FILE_LINE_BYTES=1048576
+```
+
 Large multi-file patches are parsed on the lazy process-wide CPU pool. The
 default pool size is the physical-core count capped at eight. Override the
 shared parse/search pool for benchmarking or force serial work with:

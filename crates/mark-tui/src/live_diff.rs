@@ -54,7 +54,11 @@ impl LiveDiff {
                             &watcher_tx,
                         );
                     }
-                    Ok(_) | Err(_) => {}
+                    Ok(_) => {}
+                    Err(error) => {
+                        let _ = watcher_tx
+                            .blocking_send(LiveDiffCommand::WatcherFailed(error.to_string()));
+                    }
                 }
             })
             .map_err(|error| watcher_error("failed to start live diff watcher", error))?;
@@ -115,6 +119,7 @@ impl Drop for LiveDiff {
 #[derive(Debug)]
 pub(crate) enum LiveDiffCommand {
     Changed,
+    WatcherFailed(String),
     Stop,
 }
 
@@ -122,6 +127,7 @@ pub(crate) enum LiveDiffCommand {
 pub(crate) enum LiveDiffReload {
     Started,
     Loaded(MarkResult<Changeset>),
+    WatcherFailed(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -390,10 +396,26 @@ pub(crate) fn spawn_live_diff_worker(
 ) -> tokio::task::JoinHandle<()> {
     runtime::spawn(async move {
         let mut control_rx = control_rx;
-        while let Some(LiveDiffCommand::Changed) = control_rx.recv().await {
-            if !wait_for_live_diff_quiet_period(&mut control_rx).await {
-                break;
+        loop {
+            let outcome = match control_rx.recv().await {
+                Some(LiveDiffCommand::Changed) => {
+                    wait_for_live_diff_quiet_period(&mut control_rx).await
+                }
+                Some(LiveDiffCommand::WatcherFailed(error)) => {
+                    LiveDiffQuietOutcome::WatcherFailed(error)
+                }
+                Some(LiveDiffCommand::Stop) | None => LiveDiffQuietOutcome::Stop,
+            };
+            match outcome {
+                LiveDiffQuietOutcome::Reload => {}
+                LiveDiffQuietOutcome::WatcherFailed(error) => {
+                    let _ =
+                        send_live_reload(&reload_tx, LiveDiffReload::WatcherFailed(error)).await;
+                    break;
+                }
+                LiveDiffQuietOutcome::Stop => break,
             }
+
             if reload_should_wait_for_unpause(&paused, &pending_while_paused) {
                 continue;
             }
@@ -470,14 +492,23 @@ fn reload_should_wait_for_unpause(paused: &AtomicBool, pending_while_paused: &At
     false
 }
 
-pub(crate) async fn wait_for_live_diff_quiet_period(
+enum LiveDiffQuietOutcome {
+    Reload,
+    WatcherFailed(String),
+    Stop,
+}
+
+async fn wait_for_live_diff_quiet_period(
     control_rx: &mut Receiver<LiveDiffCommand>,
-) -> bool {
+) -> LiveDiffQuietOutcome {
     loop {
         match tokio::time::timeout(LIVE_RELOAD_DEBOUNCE, control_rx.recv()).await {
             Ok(Some(LiveDiffCommand::Changed)) => continue,
-            Ok(Some(LiveDiffCommand::Stop)) | Ok(None) => return false,
-            Err(_) => return true,
+            Ok(Some(LiveDiffCommand::WatcherFailed(error))) => {
+                return LiveDiffQuietOutcome::WatcherFailed(error);
+            }
+            Ok(Some(LiveDiffCommand::Stop)) | Ok(None) => return LiveDiffQuietOutcome::Stop,
+            Err(_) => return LiveDiffQuietOutcome::Reload,
         }
     }
 }
@@ -567,6 +598,35 @@ mod tests {
 
         assert!(reload_should_wait_for_unpause(&paused, &pending));
         assert!(pending.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn watcher_failure_is_forwarded_and_stops_the_worker() {
+        let runtime = crate::runtime::build_runtime().expect("runtime should start");
+        runtime.block_on(async {
+            let (control_tx, control_rx) = mpsc::channel(2);
+            let (reload_tx, mut reload_rx) = mpsc::channel(2);
+            let worker = spawn_live_diff_worker(
+                DiffOptions::default(),
+                control_rx,
+                reload_tx,
+                Arc::new(AtomicBool::new(false)),
+                Arc::new(AtomicBool::new(false)),
+            );
+
+            control_tx
+                .send(LiveDiffCommand::WatcherFailed("watch overflow".to_owned()))
+                .await
+                .expect("watch error should send");
+            assert!(matches!(
+                reload_rx.recv().await,
+                Some(LiveDiffReload::WatcherFailed(error)) if error == "watch overflow"
+            ));
+            tokio::time::timeout(std::time::Duration::from_secs(1), worker)
+                .await
+                .expect("worker should stop")
+                .expect("worker should not panic");
+        });
     }
 
     #[test]

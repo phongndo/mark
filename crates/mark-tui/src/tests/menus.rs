@@ -1403,8 +1403,9 @@ fn options_menu_persistence_writes_only_theme_and_migrates_legacy_key() {
     fs::write(
         &path,
         r#"
+# keep this user comment
 mode = "enabled"
-layout = "split"
+layout = "split" # keep this inline comment
 live_reload = true
 syntax_highlighting = true
 full_file = false
@@ -1446,6 +1447,8 @@ context_expand = 7
     .expect("colorscheme should persist");
 
     let saved = fs::read_to_string(&path).expect("settings file should be readable");
+    assert!(saved.contains("# keep this user comment"));
+    assert!(saved.contains("# keep this inline comment"));
     let saved: toml::Value = toml::from_str(&saved).expect("settings should stay valid toml");
     let diff = saved["diff"].as_table().expect("diff should stay a table");
     let notifications = saved["notifications"]

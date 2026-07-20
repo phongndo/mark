@@ -16,16 +16,18 @@ pub(crate) use lru::LruCache;
 pub(crate) use queue::{SyntaxPriority, SyntaxQueueError, SyntaxWorkerQueue};
 pub(crate) use runtime::SyntaxRuntime;
 #[cfg(test)]
-pub(crate) use source::{FullFileSource, FullFileSourceKind, HunkSource, git_blob, git_merge_base};
+pub(crate) use source::{
+    FullFileSource, FullFileSourceKind, HunkSource, git_blob, git_merge_base, load_full_file_source,
+};
 #[cfg(test)]
 pub(crate) use source::{
     SyntaxJob, SyntaxJobFailure, SyntaxJobSource, SyntaxResult, build_full_file_line_map,
     build_hunk_source,
 };
 pub(crate) use source::{
-    available_context_lines, full_file_source, full_file_source_size,
-    invalidate_range_operand_revision_cache, load_full_file_source, split_context_source_lines,
-    unified_syntax_side,
+    available_context_lines, context_source_byte_limit, count_context_source_lines_cancellable,
+    full_file_source, invalidate_range_operand_revision_cache, load_full_file_source_limited,
+    load_full_file_source_limited_cancellable, split_context_source_lines, unified_syntax_side,
 };
 pub(crate) use types::{
     DiffSide, HighlightedLineRef, HighlightedSide, SyntaxKey, SyntaxPosition, SyntaxSkipReason,

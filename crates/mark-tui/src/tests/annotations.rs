@@ -343,12 +343,13 @@ fn live_reload_started_state_marks_pending_until_loaded() {
         changeset.clone(),
         DiffLayoutMode::Unified,
     );
+    let reload_options = app.document.options.clone();
     let (reload_tx, mut reload_rx) = mpsc::channel(2);
 
     reload_tx
         .try_send(LiveDiffReload::Started)
         .expect("started reload should send");
-    drain_live_reloads(&mut app, Some(&mut reload_rx));
+    drain_live_reloads(&mut app, Some((&reload_options, &mut reload_rx)));
 
     assert_eq!(
         app.jobs.live_updates.status(),
@@ -359,10 +360,70 @@ fn live_reload_started_state_marks_pending_until_loaded() {
     reload_tx
         .try_send(LiveDiffReload::Loaded(Ok(changeset)))
         .expect("loaded reload should send");
-    drain_live_reloads(&mut app, Some(&mut reload_rx));
+    drain_live_reloads(&mut app, Some((&reload_options, &mut reload_rx)));
 
     assert_eq!(app.jobs.live_updates.status(), Some(LiveReloadStatus::Idle));
     assert!(app.runtime.dirty);
+}
+
+#[test]
+fn watcher_failure_is_visible_and_suppresses_automatic_restart() {
+    let changeset = changeset_with_files(&["src/lib.rs"]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    let reload_options = app.document.options.clone();
+    let (reload_tx, mut reload_rx) = mpsc::channel(1);
+
+    reload_tx
+        .try_send(LiveDiffReload::WatcherFailed("watch overflow".to_owned()))
+        .expect("watcher failure should send");
+    drain_live_reloads(&mut app, Some((&reload_options, &mut reload_rx)));
+
+    assert_eq!(
+        app.jobs.live_diff_failed_options.as_ref(),
+        Some(&app.document.options)
+    );
+    assert_eq!(
+        app.notifications.error_log.as_deref(),
+        Some("live reload watcher failed: watch overflow")
+    );
+}
+
+#[test]
+fn live_reloads_from_previous_diff_options_are_discarded() {
+    let previous_options = DiffOptions::default();
+    let current_options = DiffOptions {
+        source: DiffSource::Base("main".into()),
+        ..DiffOptions::default()
+    };
+    let mut app = DiffApp::new(
+        current_options.clone(),
+        changeset_with_files(&["current.rs"]),
+        DiffLayoutMode::Unified,
+    );
+    let (reload_tx, mut reload_rx) = mpsc::channel(3);
+
+    reload_tx
+        .try_send(LiveDiffReload::Started)
+        .expect("started reload should send");
+    reload_tx
+        .try_send(LiveDiffReload::Loaded(Ok(changeset_with_files(&[
+            "stale.rs",
+        ]))))
+        .expect("loaded reload should send");
+    reload_tx
+        .try_send(LiveDiffReload::WatcherFailed("stale watcher".to_owned()))
+        .expect("watcher failure should send");
+    drain_live_reloads(&mut app, Some((&previous_options, &mut reload_rx)));
+
+    assert_eq!(app.document.options, current_options);
+    assert_eq!(app.document.changeset.files[0].display_path(), "current.rs");
+    assert_eq!(app.jobs.live_updates.status(), Some(LiveReloadStatus::Idle));
+    assert!(app.jobs.live_diff_failed_options.is_none());
+    assert!(app.notifications.error_log.is_none());
+    assert!(matches!(
+        reload_rx.try_recv(),
+        Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+    ));
 }
 
 #[test]
@@ -756,11 +817,11 @@ fn cached_full_file_diff_retries_capped_trailing_context_discovery() {
         .syntax_limits
         .max_source_bytes
         .min(mark_syntax::DEFAULT_MAX_HIGHLIGHT_SOURCE_BYTES);
-    let mut oversized = (1..=80)
-        .map(|line| format!("line {line}"))
+    let filler = "x".repeat(discovery_byte_limit / 80 + 2);
+    let oversized = (1..=80)
+        .map(|line| format!("line {line} {filler}"))
         .collect::<Vec<_>>()
         .join("\n");
-    oversized.push_str(&"x".repeat(discovery_byte_limit + 1));
     fs::write(repo.join("file.rs"), oversized).expect("context file should be written");
     app.toggle_full_file();
 
@@ -796,11 +857,11 @@ fn cached_diff_restores_trailing_context_metadata_with_its_model() {
         .syntax_limits
         .max_source_bytes
         .min(mark_syntax::DEFAULT_MAX_HIGHLIGHT_SOURCE_BYTES);
-    let mut oversized = (1..=80)
-        .map(|line| format!("line {line}"))
+    let filler = "x".repeat(discovery_byte_limit / 80 + 2);
+    let oversized = (1..=80)
+        .map(|line| format!("line {line} {filler}"))
         .collect::<Vec<_>>()
         .join("\n");
-    oversized.push_str(&"x".repeat(discovery_byte_limit + 1));
     fs::write(repo.join("file.rs"), oversized).expect("context file should be written");
 
     assert!(app.expand_trailing_context_for_key(0, 1));

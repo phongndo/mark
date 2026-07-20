@@ -20,8 +20,8 @@ use crate::render::{snapshot::HitMap, text::display_width};
 use crate::search::DiffSearchIndex;
 use crate::selector::SelectorState;
 use crate::syntax::{
-    DiffSide, LruCache, SyntaxRuntime, available_context_lines, full_file_source,
-    load_full_file_source, split_context_source_lines,
+    DiffSide, LruCache, SyntaxRuntime, available_context_lines, context_source_byte_limit,
+    full_file_source, load_full_file_source_limited, split_context_source_lines,
 };
 use crate::theme::{
     DecorationPreference, DiffTheme, MAX_INLINE_DIFF_CACHE_ENTRIES, decoration_preference_from_env,
@@ -33,7 +33,7 @@ use mark_diff::{Changeset, DiffOptions};
 use mark_syntax::SyntaxSettings;
 use ratatui::layout::Rect;
 use std::cell::RefCell;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, atomic::AtomicU64};
 
 pub(crate) fn load_syntax_settings_for_diff(
@@ -108,7 +108,9 @@ fn populate_static_full_file_context(
     trailing_context_lines: &mut HashMap<ContextKey, usize>,
     trailing_context_sides: &mut HashMap<ContextKey, DiffSide>,
     context_cache: &mut HashMap<ContextSourceKey, ContextSourceEntry>,
-) {
+) -> HashSet<FileIndex> {
+    let max_source_bytes = context_source_byte_limit();
+    let mut loaded_files = HashSet::new();
     for (file, file_diff) in changeset.files.iter().enumerate() {
         let Some(last_hunk) = file_diff.hunks().last() else {
             continue;
@@ -124,11 +126,14 @@ fn populate_static_full_file_context(
             let Some(source) = full_file_source(&changeset.repo, options, file_diff, side) else {
                 continue;
             };
-            let Ok(source) = load_full_file_source(&source) else {
+            let Ok(source) = load_full_file_source_limited(&source, max_source_bytes) else {
                 context_cache.insert(source_key, ContextSourceEntry::Unavailable);
                 continue;
             };
-            let lines = Arc::new(split_context_source_lines(&source));
+            let Some(lines) = split_context_source_lines(source).map(Arc::new) else {
+                context_cache.insert(source_key, ContextSourceEntry::Unavailable);
+                continue;
+            };
             let source_start = match side {
                 DiffSide::Old => line_after_hunk(last_hunk.old_start(), last_hunk.old_count()),
                 DiffSide::New => line_after_hunk(last_hunk.new_start(), last_hunk.new_count()),
@@ -137,9 +142,11 @@ fn populate_static_full_file_context(
             trailing_context_lines.insert(trailing_key, available);
             trailing_context_sides.insert(trailing_key, side);
             context_cache.insert(source_key, ContextSourceEntry::Lines(lines));
+            loaded_files.insert(file);
             break;
         }
     }
+    loaded_files
 }
 
 fn load_user_settings_for_syntax_mode(syntax_mode: &SyntaxStartupMode) -> bool {
@@ -353,20 +360,28 @@ impl DiffApp {
         let mut context_cache = HashMap::new();
         // Static rendering has no event loop to discover trailing context, so
         // resolve and cache it before constructing the one-pass model.
-        if full_file_mode && !build_search_index {
-            populate_static_full_file_context(
+        let static_context_files = if full_file_mode && !build_search_index {
+            Some(populate_static_full_file_context(
                 &options,
                 &changeset,
                 &mut trailing_context_lines,
                 &mut trailing_context_sides,
                 &mut context_cache,
-            );
-        }
-        let context_expansions = if full_file_mode {
+            ))
+        } else {
+            None
+        };
+        let mut context_expansions = if full_file_mode {
             full_file_context_expansions(&changeset, &options, &trailing_context_lines)
         } else {
             HashMap::new()
         };
+        if let Some(static_context_files) = static_context_files {
+            // A static pager cannot replace unavailable placeholders later.
+            // Omit rejected source expansions instead of serializing one
+            // placeholder for every hidden line in the file.
+            context_expansions.retain(|key, _| static_context_files.contains(&key.file));
+        }
         let layout_override = layout_override_from_settings(&settings, honor_settings_layout);
         if let Some(setting_layout) = layout_override {
             layout = setting_layout;
@@ -462,10 +477,8 @@ impl DiffApp {
         let max_line_width = context_cache
             .values()
             .filter_map(|entry| match entry {
-                ContextSourceEntry::Lines(lines) => {
-                    lines.iter().map(|line| display_width(line)).max()
-                }
-                ContextSourceEntry::Unavailable => None,
+                ContextSourceEntry::Lines(lines) => lines.iter().map(display_width).max(),
+                ContextSourceEntry::Loading | ContextSourceEntry::Unavailable => None,
             })
             .max()
             .unwrap_or_default()
@@ -597,6 +610,7 @@ impl DiffApp {
                 pending_filter_apply: None,
                 filter_worker: None,
                 filter_searching: false,
+                context_load_worker: None,
                 trailing_context_worker: None,
             },
             notifications: NotificationState {

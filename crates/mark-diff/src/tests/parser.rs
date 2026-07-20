@@ -239,33 +239,6 @@ fn parse_patch_preserves_binary_paths_with_spaces() {
 }
 
 #[test]
-fn parse_patch_bytes_reports_explicit_limits() {
-    let patch = Arc::<[u8]>::from(
-        b"diff --git a/a.txt b/a.txt
---- a/a.txt
-+++ b/a.txt
-@@ -1,2 +1,2 @@
--old
-+new
-"
-        .as_slice(),
-    );
-
-    let error = parse_patch_bytes_limited(
-        patch,
-        DiffLimits {
-            max_diff_rows: Some(1),
-            ..DiffLimits::default()
-        },
-    )
-    .expect_err("two diff rows should exceed the limit");
-
-    assert_eq!(error.limit, "diff rows");
-    assert_eq!(error.max, 1);
-    assert_eq!(error.actual, 2);
-}
-
-#[test]
 fn parse_patch_bytes_parallel_sections_match_order_and_spans() {
     let padding = "x".repeat(600);
     let patch = format!(

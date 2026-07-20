@@ -38,8 +38,9 @@ impl DiffApp {
                     let Some(line_index) = line_number.checked_sub(1) else {
                         return Some("");
                     };
-                    return Some(lines.get(line_index).map(String::as_str).unwrap_or(""));
+                    return Some(lines.get(line_index).unwrap_or(""));
                 }
+                Some(ContextSourceEntry::Loading) => return None,
                 Some(ContextSourceEntry::Unavailable) => continue,
                 None if self.has_context_source(file, side) => return None,
                 None => {}
