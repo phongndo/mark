@@ -23,8 +23,12 @@ class CiChangesTests(unittest.TestCase):
         result = changes.classify_paths(["docs/ci.md"])
         self.assertFalse(any(result.values()))
 
-    def test_representative_markdown_change_refreshes_generated_contract(self):
-        result = changes.classify_paths(["docs/development.md", "README.md"])
+    def test_dynamic_markdown_sources_do_not_select_generated_contracts(self):
+        result = changes.classify_paths(["docs/development.md", "CONTRIBUTING.md"])
+        self.assertFalse(any(result.values()))
+
+    def test_managed_language_docs_select_generated_contracts(self):
+        result = changes.classify_paths(["README.md", "docs/configuration.md"])
         self.assertEqual(
             {lane for lane, selected in result.items() if selected},
             {"generated"},

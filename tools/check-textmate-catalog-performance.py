@@ -167,6 +167,8 @@ def main():
         if committed is None:
             print(f"{CHECKED_MANIFEST}: missing corpus {generated['id']}", file=sys.stderr)
             return 1
+        if committed.get("content_contract") == "dynamic":
+            continue
         for key in ("bytes", "tokenizer_lines", "sha256", "languages", "generated_languages"):
             if key in generated and committed.get(key) != generated[key]:
                 print(
