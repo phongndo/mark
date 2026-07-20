@@ -19,15 +19,17 @@ bytes = 13199
 tokenizer_lines = 538
 sha256 = "5f473f1f1dbc3cf0834d0339c111e5e8e7ee45582c1c09c09670ac16786123bb"
 
+# This corpus follows the project documentation so it stays representative.
+# Its generated manifest records exact metrics, but this index deliberately
+# does not lock them: ordinary documentation edits must not require a follow-up
+# benchmark metadata commit.
 [[corpus]]
 id = "representative-markdown"
 path = "target/textmate-performance/corpora/representative-markdown.md"
 builder = "tools/build-textmate-corpora.py"
 language = "markdown"
 scope = "text.html.markdown"
-bytes = 41360
-tokenizer_lines = 1254
-sha256 = "d45ed48bd10d288f98f73d8f1b93b46183d8cad4d2e7e91e41b58b7362817f61"
+content_contract = "dynamic"
 
 [[corpus]]
 id = "core-repeated"

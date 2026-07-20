@@ -13,13 +13,8 @@ LANES = ("rust", "syntax", "generated", "performance", "pi", "workflows")
 ZERO_SHA = "0" * 40
 GENERATED_DOC_SOURCES = {
     "README.md",
-    "CONTRIBUTING.md",
-    "docs/architecture.md",
     "docs/configuration.md",
-    "docs/development.md",
-    "docs/usage.md",
     "docs/textmate-engine.md",
-    "pi-mark/README.md",
 }
 
 

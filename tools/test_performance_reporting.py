@@ -75,6 +75,25 @@ class CatalogPerformanceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "stale catalog-repeated.languages"):
             CORPORA.check_committed_manifest(manifest, checked)
 
+    def test_dynamic_corpus_does_not_lock_documentation_metadata(self):
+        manifest = {
+            "corpora": [
+                {
+                    "id": "representative-markdown",
+                    "bytes": 99,
+                    "tokenizer_lines": 10,
+                    "sha256": "changes-with-documentation",
+                }
+            ]
+        }
+        checked = {
+            "representative-markdown": {
+                "id": "representative-markdown",
+                "content_contract": "dynamic",
+            }
+        }
+        CORPORA.check_committed_manifest(manifest, checked)
+
     def test_policy_floor_is_the_default_source_of_truth(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "policy.json"

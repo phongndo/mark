@@ -262,6 +262,8 @@ def check_committed_manifest(manifest, checked=None):
         committed = checked.get(generated["id"])
         if committed is None:
             raise ValueError(f"{CHECKED_MANIFEST}: missing corpus {generated['id']}")
+        if committed.get("content_contract") == "dynamic":
+            continue
         for key in (
             "bytes",
             "tokenizer_lines",
