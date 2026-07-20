@@ -8,19 +8,23 @@ use std::{
 
 use mark_core::{MarkError, MarkResult};
 
-use crate::{
-    copy_to_writer,
-    stats::{PatchFileStat, PatchStats},
-};
+use crate::stats::{PatchFileStat, PatchStats};
 
-pub(super) fn git_diff_bytes(repo: &Path, args: &[String]) -> MarkResult<Vec<u8>> {
-    git_diff_bytes_with_index(repo, args, None)
+const MAX_CAPTURED_STDERR_BYTES: usize = 256 * 1024;
+
+pub(super) fn git_diff_bytes_limited(
+    repo: &Path,
+    args: &[String],
+    max_patch_bytes: Option<usize>,
+) -> MarkResult<Vec<u8>> {
+    git_diff_bytes_with_index(repo, args, None, max_patch_bytes)
 }
 
 fn git_diff_bytes_with_index(
     repo: &Path,
     args: &[String],
     index: Option<&Path>,
+    max_patch_bytes: Option<usize>,
 ) -> MarkResult<Vec<u8>> {
     let mut command = Command::new("git");
     command.arg("-C").arg(repo).args(args);
@@ -28,47 +32,54 @@ fn git_diff_bytes_with_index(
         command.env("GIT_INDEX_FILE", index);
     }
 
-    let output = command.output()?;
+    let output = command_output_limited(&mut command, max_patch_bytes)?;
     if !output.status.success() {
         return Err(git_error("failed to render git diff", &output));
     }
     Ok(output.stdout)
 }
 
-pub(super) fn git_diff_bytes_with_untracked(repo: &Path, args: &[String]) -> MarkResult<Vec<u8>> {
-    let untracked = untracked_paths(repo)?;
-    git_diff_bytes_with_untracked_paths(repo, args, untracked)
+pub(super) fn git_diff_bytes_with_untracked_limited(
+    repo: &Path,
+    args: &[String],
+    max_patch_bytes: Option<usize>,
+) -> MarkResult<Vec<u8>> {
+    let untracked = untracked_paths(repo, max_patch_bytes)?;
+    git_diff_bytes_with_untracked_paths(repo, args, untracked, max_patch_bytes)
 }
 
 pub(super) fn git_diff_bytes_with_untracked_pathspecs(
     repo: &Path,
     args: &[String],
     pathspecs: &[PathBuf],
+    max_patch_bytes: Option<usize>,
 ) -> MarkResult<Vec<u8>> {
-    let untracked = untracked_paths_for(repo, pathspecs)?;
-    git_diff_bytes_with_untracked_paths(repo, args, untracked)
+    let untracked = untracked_paths_for(repo, pathspecs, max_patch_bytes)?;
+    git_diff_bytes_with_untracked_paths(repo, args, untracked, max_patch_bytes)
 }
 
 fn git_diff_bytes_with_untracked_paths(
     repo: &Path,
     args: &[String],
     untracked: Vec<PathBuf>,
+    max_patch_bytes: Option<usize>,
 ) -> MarkResult<Vec<u8>> {
     if untracked.is_empty() {
-        return git_diff_bytes(repo, args);
+        return git_diff_bytes_limited(repo, args, max_patch_bytes);
     }
 
     let temp_index = create_temp_index(repo)?;
     add_intent_to_add(repo, temp_index.path(), &untracked)?;
-    git_diff_bytes_with_index(repo, args, Some(temp_index.path()))
+    git_diff_bytes_with_index(repo, args, Some(temp_index.path()), max_patch_bytes)
 }
 
 pub(super) fn git_diff_to_writer(
     repo: &Path,
     args: &[String],
     writer: impl Write,
+    max_patch_bytes: Option<usize>,
 ) -> MarkResult<()> {
-    git_diff_to_writer_with_index(repo, args, None, writer)
+    git_diff_to_writer_with_index(repo, args, None, writer, max_patch_bytes)
 }
 
 fn git_diff_to_writer_with_index(
@@ -76,6 +87,7 @@ fn git_diff_to_writer_with_index(
     args: &[String],
     index: Option<&Path>,
     mut writer: impl Write,
+    max_patch_bytes: Option<usize>,
 ) -> MarkResult<()> {
     let mut command = Command::new("git");
     let stderr = StderrCapture::new()?;
@@ -91,10 +103,10 @@ fn git_diff_to_writer_with_index(
 
     let mut child = command.spawn()?;
     if let Some(mut stdout) = child.stdout.take()
-        && let Err(error) = copy_to_writer(&mut stdout, &mut writer)
+        && let Err(error) = crate::copy_to_writer_limited(&mut stdout, &mut writer, max_patch_bytes)
     {
         abort_git_child(child, stderr);
-        return Err(error.into());
+        return Err(error);
     }
     wait_for_git_child(child, stderr, "failed to render git diff")
 }
@@ -103,25 +115,31 @@ pub(super) fn git_diff_to_writer_with_untracked(
     repo: &Path,
     args: &[String],
     writer: impl Write,
+    max_patch_bytes: Option<usize>,
 ) -> MarkResult<()> {
-    let untracked = untracked_paths(repo)?;
+    let untracked = untracked_paths(repo, max_patch_bytes)?;
     if untracked.is_empty() {
-        return git_diff_to_writer(repo, args, writer);
+        return git_diff_to_writer(repo, args, writer, max_patch_bytes);
     }
 
     let temp_index = create_temp_index(repo)?;
     add_intent_to_add(repo, temp_index.path(), &untracked)?;
-    git_diff_to_writer_with_index(repo, args, Some(temp_index.path()), writer)
+    git_diff_to_writer_with_index(repo, args, Some(temp_index.path()), writer, max_patch_bytes)
 }
 
-pub(super) fn git_numstat_stats(repo: &Path, args: &[String]) -> MarkResult<PatchStats> {
-    git_numstat_stats_with_index(repo, args, None)
+pub(super) fn git_numstat_stats(
+    repo: &Path,
+    args: &[String],
+    max_output_bytes: Option<usize>,
+) -> MarkResult<PatchStats> {
+    git_numstat_stats_with_index(repo, args, None, max_output_bytes)
 }
 
 fn git_numstat_stats_with_index(
     repo: &Path,
     args: &[String],
     index: Option<&Path>,
+    max_output_bytes: Option<usize>,
 ) -> MarkResult<PatchStats> {
     let mut command = Command::new("git");
     let stderr = StderrCapture::new()?;
@@ -137,14 +155,15 @@ fn git_numstat_stats_with_index(
 
     let mut child = command.spawn()?;
     let stats = match if let Some(stdout) = child.stdout.take() {
-        parse_numstat(stdout)
+        crate::read_to_end_limited(stdout, max_output_bytes)
+            .and_then(|bytes| parse_numstat(bytes.as_slice()).map_err(Into::into))
     } else {
         Ok(PatchStats::default())
     } {
         Ok(stats) => stats,
         Err(error) => {
             abort_git_child(child, stderr);
-            return Err(error.into());
+            return Err(error);
         }
     };
     wait_for_git_child(child, stderr, "failed to render git diff")?;
@@ -195,7 +214,17 @@ impl StderrCapture {
 
     fn read(mut self) -> io::Result<Vec<u8>> {
         drop(self.file.take());
-        fs::read(&self.path)
+        let file = fs::File::open(&self.path)?;
+        let read_limit = u64::try_from(MAX_CAPTURED_STDERR_BYTES)
+            .unwrap_or(u64::MAX)
+            .saturating_add(1);
+        let mut stderr = Vec::new();
+        file.take(read_limit).read_to_end(&mut stderr)?;
+        if stderr.len() > MAX_CAPTURED_STDERR_BYTES {
+            stderr.truncate(MAX_CAPTURED_STDERR_BYTES);
+            stderr.extend_from_slice(b"\n[git stderr truncated]");
+        }
+        Ok(stderr)
     }
 
     pub(super) fn discard(mut self) {
@@ -208,6 +237,36 @@ impl Drop for StderrCapture {
         drop(self.file.take());
         let _ = fs::remove_file(&self.path);
     }
+}
+
+pub(super) fn command_output_limited(
+    command: &mut Command,
+    max_stdout_bytes: Option<usize>,
+) -> MarkResult<process::Output> {
+    let Some(max_stdout_bytes) = max_stdout_bytes else {
+        return command.output().map_err(Into::into);
+    };
+
+    let stderr = StderrCapture::new()?;
+    command.stdout(Stdio::piped()).stderr(stderr.stdio()?);
+    let mut child = command.spawn()?;
+    let stdout = match child.stdout.take() {
+        Some(stdout) => match crate::read_to_end_limited(stdout, Some(max_stdout_bytes)) {
+            Ok(stdout) => stdout,
+            Err(error) => {
+                abort_git_child(child, stderr);
+                return Err(error);
+            }
+        },
+        None => Vec::new(),
+    };
+    let status = child.wait()?;
+    let stderr = stderr.read()?;
+    Ok(process::Output {
+        status,
+        stdout,
+        stderr,
+    })
 }
 
 fn wait_for_git_child(
@@ -237,15 +296,16 @@ fn abort_git_child(mut child: process::Child, stderr: StderrCapture) {
 pub(super) fn git_numstat_stats_with_untracked(
     repo: &Path,
     args: &[String],
+    max_output_bytes: Option<usize>,
 ) -> MarkResult<PatchStats> {
-    let untracked = untracked_paths(repo)?;
+    let untracked = untracked_paths(repo, max_output_bytes)?;
     if untracked.is_empty() {
-        return git_numstat_stats(repo, args);
+        return git_numstat_stats(repo, args, max_output_bytes);
     }
 
     let temp_index = create_temp_index(repo)?;
     add_intent_to_add(repo, temp_index.path(), &untracked)?;
-    git_numstat_stats_with_index(repo, args, Some(temp_index.path()))
+    git_numstat_stats_with_index(repo, args, Some(temp_index.path()), max_output_bytes)
 }
 
 pub(super) fn parse_numstat(mut reader: impl Read) -> io::Result<PatchStats> {
@@ -437,11 +497,15 @@ pub(super) fn temp_index_path(index_path: &Path, attempt: u32) -> MarkResult<Pat
     )))
 }
 
-fn untracked_paths(repo: &Path) -> MarkResult<Vec<PathBuf>> {
-    untracked_paths_for(repo, &[])
+fn untracked_paths(repo: &Path, max_output_bytes: Option<usize>) -> MarkResult<Vec<PathBuf>> {
+    untracked_paths_for(repo, &[], max_output_bytes)
 }
 
-fn untracked_paths_for(repo: &Path, pathspecs: &[PathBuf]) -> MarkResult<Vec<PathBuf>> {
+fn untracked_paths_for(
+    repo: &Path,
+    pathspecs: &[PathBuf],
+    max_output_bytes: Option<usize>,
+) -> MarkResult<Vec<PathBuf>> {
     let mut command = Command::new("git");
     command
         .arg("-C")
@@ -451,7 +515,7 @@ fn untracked_paths_for(repo: &Path, pathspecs: &[PathBuf]) -> MarkResult<Vec<Pat
         command.arg("--").args(pathspecs);
     }
 
-    let output = command.output()?;
+    let output = command_output_limited(&mut command, max_output_bytes)?;
 
     if !output.status.success() {
         return Err(git_error("failed to list untracked files", &output));

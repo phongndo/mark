@@ -113,7 +113,7 @@ impl DiffApp {
             let visible_files = self.document.model.visible_files().to_vec();
             let layout_files = self
                 .full_file_context_files_for_viewport(&visible_files, self.viewport.viewport_rows);
-            self.load_full_file_context_for_files(&layout_files);
+            self.load_full_file_context_for_files_sync(&layout_files);
         }
 
         let next_scroll = if enabled {
@@ -212,7 +212,7 @@ impl DiffApp {
 
     pub(crate) fn set_scroll_focused_on_hunk(&mut self, file: usize, hunk: usize) {
         if self.full_file_mode_active() && self.viewport.line_wrapping {
-            self.load_full_file_context_for_files(&[FileIndex::new(file)]);
+            self.load_full_file_context_for_files_sync(&[FileIndex::new(file)]);
         }
 
         let focus_range = if self.full_file_mode_active() {

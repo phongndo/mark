@@ -220,9 +220,49 @@ pub(crate) struct ContextSourceKey {
     pub(crate) side: DiffSide,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ContextLines {
+    text: Arc<String>,
+    ranges: Arc<[Range<u32>]>,
+}
+
+impl ContextLines {
+    pub(crate) fn new(text: String, max_lines: usize, max_line_bytes: usize) -> Option<Self> {
+        let base = text.as_ptr() as usize;
+        let mut ranges = Vec::new();
+        for line in text.lines() {
+            if ranges.len() >= max_lines || line.len() > max_line_bytes {
+                return None;
+            }
+            let start = (line.as_ptr() as usize).checked_sub(base)?;
+            let end = start.checked_add(line.len())?;
+            ranges.push(u32::try_from(start).ok()?..u32::try_from(end).ok()?);
+        }
+        Some(Self {
+            text: Arc::new(text),
+            ranges: Arc::from(ranges.into_boxed_slice()),
+        })
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.ranges.len()
+    }
+
+    pub(crate) fn get(&self, index: usize) -> Option<&str> {
+        let range = self.ranges.get(index)?;
+        self.text
+            .get(usize::try_from(range.start).ok()?..usize::try_from(range.end).ok()?)
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &str> {
+        (0..self.ranges.len()).filter_map(|index| self.get(index))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum ContextSourceEntry {
-    Lines(Arc<Vec<String>>),
+    Lines(Arc<ContextLines>),
+    Loading,
     Unavailable,
 }
 
@@ -1536,6 +1576,15 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn context_lines_share_text_and_enforce_index_limits() {
+        let lines = ContextLines::new("one\ntwo\nthree\n".to_owned(), 3, 5)
+            .expect("three lines should fit");
+        assert_eq!(lines.iter().collect::<Vec<_>>(), ["one", "two", "three"]);
+        assert!(ContextLines::new("one\ntwo\nthree\n".to_owned(), 2, 5).is_none());
+        assert!(ContextLines::new("oversized".to_owned(), 1, 5).is_none());
+    }
 
     #[test]
     fn sparse_model_matches_eager_rows_for_unified_and_split() {

@@ -614,6 +614,46 @@ fn trailing_context_starts_after_a_zero_count_new_range() {
 }
 
 #[test]
+fn trailing_context_discovery_rejects_oversized_source_lines() {
+    let repo = temp_test_dir("trailing-context-line-limit");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    fs::write(
+        repo.join("file.rs"),
+        format!("{}\ntail\n", "x".repeat(1024 * 1024 + 1)),
+    )
+    .expect("context file should be written");
+    let mut app = DiffApp::new(
+        DiffOptions::default(),
+        changeset_with_hunk_at(repo.clone(), 1),
+        DiffLayoutMode::Unified,
+    );
+    app.toggle_full_file();
+    app.set_viewport_rows(app.document.model.len().max(1));
+
+    assert!(app.discover_trailing_context_for_viewport());
+    for _ in 0..1_000 {
+        app.drain_trailing_context_worker();
+        if app.jobs.trailing_context_worker.is_none() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(1));
+    }
+    assert!(
+        app.jobs.trailing_context_worker.is_none(),
+        "trailing context worker did not finish"
+    );
+
+    let key = ContextKey {
+        file: FILE_0,
+        hunk: HUNK_1,
+    };
+    assert_eq!(app.document.trailing_context_lines.get(&key), Some(&0));
+    assert!(!app.document.trailing_context_sides.contains_key(&key));
+
+    fs::remove_dir_all(repo).expect("repo directory should be removed");
+}
+
+#[test]
 fn full_file_setting_starts_with_unchanged_lines_visible() {
     let repo = temp_test_dir("configured-full-file");
     fs::create_dir_all(&repo).expect("repo directory should be created");
@@ -655,6 +695,37 @@ fn full_file_setting_starts_with_unchanged_lines_visible() {
         app.document.model.row(row),
         Some(UiRow::Collapsed { .. } | UiRow::ContextHide { .. } | UiRow::HunkHeader { .. })
     )));
+}
+
+#[test]
+fn static_full_file_mode_omits_limit_rejected_source_expansions() {
+    let repo = temp_test_dir("static-full-file-line-limit");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    fs::write(repo.join("file.rs"), "x".repeat(1024 * 1024 + 1))
+        .expect("context file should be written");
+    let app = DiffApp::new_static_with_explicit_layout_and_settings(
+        DiffOptions::default(),
+        changeset_with_hunk_at(repo.clone(), 50_000_000),
+        DiffLayoutMode::Unified,
+        SyntaxStartupMode::Disabled,
+        SyntaxSettings {
+            full_file: true,
+            ..SyntaxSettings::default()
+        },
+    );
+
+    assert!(app.viewport.full_file);
+    assert!(!app.document.context_cache.is_empty());
+    assert!(
+        app.document
+            .context_cache
+            .values()
+            .all(|entry| matches!(entry, ContextSourceEntry::Unavailable))
+    );
+    assert!(app.document.context_expansions.is_empty());
+    assert!(app.document.model.len() < 100);
+
+    fs::remove_dir_all(repo).expect("repo directory should be removed");
 }
 
 #[test]
@@ -704,6 +775,148 @@ fn wrapped_full_file_setting_preloads_context_for_interactive_startup() {
         app.wrapped_visual_scroll_for_model_row(hunk_row),
         scroll_before_render
     );
+}
+
+#[test]
+fn full_file_viewport_context_loads_on_a_worker() {
+    let repo = temp_test_dir("async-full-file-context");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    fs::write(
+        repo.join("file.rs"),
+        (1..=30)
+            .map(|line| format!("line {line}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .expect("context file should be written");
+    let mut app = DiffApp::new_with_explicit_layout_and_settings(
+        DiffOptions::default(),
+        changeset_with_hunk_at(repo.clone(), 20),
+        DiffLayoutMode::Unified,
+        SyntaxStartupMode::Disabled,
+        SyntaxSettings {
+            full_file: true,
+            ..SyntaxSettings::default()
+        },
+    );
+
+    assert!(app.prepare_full_file_context_for_viewport(20));
+    assert!(matches!(
+        app.document.context_cache.get(&ContextSourceKey {
+            file: FILE_0,
+            side: DiffSide::New,
+        }),
+        Some(ContextSourceEntry::Loading)
+    ));
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    while app.jobs.context_load_worker.is_some() && std::time::Instant::now() < deadline {
+        app.drain_context_load_worker();
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+
+    assert!(app.jobs.context_load_worker.is_none());
+    assert!(matches!(
+        app.document.context_cache.get(&ContextSourceKey {
+            file: FILE_0,
+            side: DiffSide::New,
+        }),
+        Some(ContextSourceEntry::Lines(_))
+    ));
+    assert_eq!(app.context_line_text(0, 1, 1), "line 1");
+    fs::remove_dir_all(repo).expect("test directory should be removed");
+}
+
+#[test]
+fn disabling_full_file_cancels_pending_context_width_load() {
+    let repo = temp_test_dir("cancel-full-file-context");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    fs::write(
+        repo.join("file.rs"),
+        std::iter::once("x".repeat(200))
+            .chain((2..=30).map(|line| format!("line {line}")))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .expect("context file should be written");
+    let mut app = DiffApp::new_with_explicit_layout_and_settings(
+        DiffOptions::default(),
+        changeset_with_hunk_at(repo.clone(), 20),
+        DiffLayoutMode::Unified,
+        SyntaxStartupMode::Disabled,
+        SyntaxSettings {
+            full_file: true,
+            ..SyntaxSettings::default()
+        },
+    );
+    let diff_width = app.document.search_index.max_line_width();
+
+    assert!(app.prepare_full_file_context_for_viewport(20));
+    assert!(app.jobs.context_load_worker.is_some());
+    app.set_full_file(false);
+
+    assert!(app.jobs.context_load_worker.is_none());
+    assert!(
+        app.document
+            .context_cache
+            .values()
+            .all(|entry| !matches!(entry, ContextSourceEntry::Loading))
+    );
+    assert_eq!(app.document.max_line_width, diff_width);
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    assert!(!app.drain_context_load_worker());
+    assert_eq!(app.document.max_line_width, diff_width);
+
+    fs::remove_dir_all(repo).expect("test directory should be removed");
+}
+
+#[test]
+fn full_file_source_limit_rejects_growth_before_context_materialization() {
+    let repo = temp_test_dir("full-file-context-limit");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    fs::write(repo.join("file.rs"), "0123456789").expect("source file should be written");
+    let source = FullFileSource {
+        repo: repo.clone().into(),
+        kind: FullFileSourceKind::Worktree {
+            path: "file.rs".into(),
+        },
+    };
+
+    assert!(matches!(
+        load_full_file_source_limited(&source, 4),
+        Err(SyntaxSkipReason::TooLarge)
+    ));
+    let cancelled = std::sync::atomic::AtomicBool::new(true);
+    assert!(matches!(
+        load_full_file_source_limited_cancellable(&source, 32, &cancelled),
+        Err(SyntaxSkipReason::NoSource)
+    ));
+    fs::remove_dir_all(repo).expect("test directory should be removed");
+}
+
+#[cfg(unix)]
+#[test]
+fn full_file_worktree_source_rejects_symlink_escape() {
+    let root = temp_test_dir("full-file-context-symlink");
+    let repo = root.join("repo");
+    let outside = root.join("outside");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    fs::create_dir_all(&outside).expect("outside directory should be created");
+    fs::write(outside.join("secret.rs"), "secret").expect("outside file should be written");
+    std::os::unix::fs::symlink(&outside, repo.join("escape"))
+        .expect("escape symlink should be created");
+    let source = FullFileSource {
+        repo: repo.into(),
+        kind: FullFileSourceKind::Worktree {
+            path: "escape/secret.rs".into(),
+        },
+    };
+
+    assert!(matches!(
+        load_full_file_source_limited(&source, 32),
+        Err(SyntaxSkipReason::NoPath)
+    ));
+    fs::remove_dir_all(root).expect("test directory should be removed");
 }
 
 #[test]
@@ -908,7 +1121,7 @@ fn context_source_side_uses_loaded_fallback_side() {
         .ensure_context_lines(0)
         .expect("old context should load after new side fails");
     assert_eq!(side, DiffSide::Old);
-    assert_eq!(lines.first().map(String::as_str), Some("line 1"));
+    assert_eq!(lines.get(0), Some("line 1"));
     assert_eq!(app.context_source_side(0), Some(DiffSide::Old));
 
     fs::remove_dir_all(repo).expect("repo directory should be removed");

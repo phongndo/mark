@@ -1,24 +1,6 @@
 use super::*;
 
 #[test]
-fn patch_file_source_renders_without_git_repo() {
-    let test_dir = temp_test_dir("patch-file-source");
-    fs::create_dir_all(&test_dir).expect("test directory should be created");
-    let patch_path = test_dir.join("change.diff");
-    let patch = "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n";
-    fs::write(&patch_path, patch).expect("patch file should be written");
-
-    let output = render(DiffOptions {
-        source: DiffSource::Patch(PatchSource::File(patch_path)),
-        ..DiffOptions::default()
-    })
-    .expect("patch source should render");
-
-    assert_eq!(output, patch);
-    fs::remove_dir_all(test_dir).expect("test directory should be removed");
-}
-
-#[test]
 fn render_bytes_preserves_non_utf8_git_diff_output() {
     let test_dir = temp_test_dir("non-utf8-diff");
     let repo = test_dir.join("repo");

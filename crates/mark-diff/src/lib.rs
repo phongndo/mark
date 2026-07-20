@@ -16,13 +16,12 @@ mod parser;
 mod stats;
 mod types;
 
-use difftool::{difftool_patch_bytes, difftool_workdir};
+use difftool::difftool_workdir;
 use git_args::{
     append_pathspecs, diff_title, git_diff_args, should_include_untracked, validate_options,
 };
 use git_io::{
-    git_diff_bytes, git_diff_bytes_with_untracked, git_diff_bytes_with_untracked_pathspecs,
-    git_diff_to_writer, git_diff_to_writer_with_untracked,
+    git_diff_bytes_with_untracked_pathspecs, git_diff_to_writer, git_diff_to_writer_with_untracked,
 };
 pub use parser::{parse_patch, parse_patch_bytes, parse_patch_bytes_limited};
 #[cfg(test)]
@@ -97,13 +96,13 @@ fn load_changeset_with_patch_bytes_limited(
             .clone()
             .map(RepoArg::into_path_buf)
             .unwrap_or_default();
-        let patch = read_file_arc(path)?;
+        let patch = read_file_arc(path, limits.max_patch_bytes)?;
         let patch_bytes = u64::try_from(patch.len()).unwrap_or(u64::MAX);
         let changeset =
             changeset_from_shared_patch_limited(repo, title, patch, keep_raw_patch, limits)?;
         return Ok((changeset, patch_bytes));
     }
-    let (repo, patch) = diff_patch_bytes(options)?;
+    let (repo, patch) = diff_patch_bytes_limited(options, limits.max_patch_bytes)?;
     let patch_bytes = u64::try_from(patch.len()).unwrap_or(u64::MAX);
     let changeset = changeset_from_patch_limited(repo, title, patch, keep_raw_patch, limits)?;
     Ok((changeset, patch_bytes))
@@ -115,14 +114,9 @@ fn load_changeset_paths(
     keep_raw_patch: bool,
 ) -> MarkResult<Changeset> {
     let title = diff_title(options);
-    let (repo, patch) = diff_patch_bytes_paths(options, paths)?;
-    changeset_from_patch_limited(
-        repo,
-        title,
-        Cow::Owned(patch),
-        keep_raw_patch,
-        DiffLimits::from_env(),
-    )
+    let limits = DiffLimits::from_env();
+    let (repo, patch) = diff_patch_bytes_paths(options, paths, limits.max_patch_bytes)?;
+    changeset_from_patch_limited(repo, title, Cow::Owned(patch), keep_raw_patch, limits)
 }
 
 fn changeset_from_patch_limited(
@@ -169,7 +163,11 @@ fn changeset_from_shared_patch_limited(
     })
 }
 
-fn read_file_arc(path: &Path) -> io::Result<Arc<[u8]>> {
+fn read_file_arc(path: &Path, max_patch_bytes: Option<usize>) -> MarkResult<Arc<[u8]>> {
+    if max_patch_bytes.is_some() {
+        return read_patch_input_limited(fs::File::open(path)?, max_patch_bytes);
+    }
+
     let mut file = fs::File::open(path)?;
     let len = usize::try_from(file.metadata()?.len())
         .map_err(|_| io::Error::other("patch file is too large for this platform"))?;
@@ -192,6 +190,7 @@ fn read_file_arc(path: &Path) -> io::Result<Arc<[u8]>> {
 fn diff_patch_bytes_paths(
     options: &DiffOptions,
     paths: &[PathBuf],
+    max_patch_bytes: Option<usize>,
 ) -> MarkResult<(PathBuf, Vec<u8>)> {
     if matches!(
         options.source,
@@ -212,15 +211,22 @@ fn diff_patch_bytes_paths(
     let mut args = git_diff_args(options, &repo)?;
     append_pathspecs(&mut args, paths);
     let patch = if should_include_untracked(options) {
-        git_diff_bytes_with_untracked_pathspecs(&repo, &args, paths)?
+        git_diff_bytes_with_untracked_pathspecs(&repo, &args, paths, max_patch_bytes)?
     } else {
-        git_diff_bytes(&repo, &args)?
+        git_io::git_diff_bytes_limited(&repo, &args, max_patch_bytes)?
     };
 
     Ok((repo, patch))
 }
 
 fn diff_patch_bytes(options: &DiffOptions) -> MarkResult<(PathBuf, Cow<'_, [u8]>)> {
+    diff_patch_bytes_limited(options, DiffLimits::from_env().max_patch_bytes)
+}
+
+fn diff_patch_bytes_limited(
+    options: &DiffOptions,
+    max_patch_bytes: Option<usize>,
+) -> MarkResult<(PathBuf, Cow<'_, [u8]>)> {
     if let DiffSource::Patch(source) = &options.source {
         validate_options(options)?;
         let repo = options
@@ -228,13 +234,20 @@ fn diff_patch_bytes(options: &DiffOptions) -> MarkResult<(PathBuf, Cow<'_, [u8]>
             .clone()
             .map(RepoArg::into_path_buf)
             .unwrap_or_default();
-        return Ok((repo, patch_source_bytes(source)?));
+        let patch = patch_source_bytes(source, max_patch_bytes)?;
+        return Ok((repo, patch));
     }
 
     if let DiffSource::Difftool { left, right, path } = &options.source {
         validate_options(options)?;
         let repo = difftool_workdir(options)?;
-        let patch = difftool_patch_bytes(&repo, left, right, path.as_deref())?;
+        let patch = difftool::difftool_patch_bytes_limited(
+            &repo,
+            left,
+            right,
+            path.as_deref(),
+            max_patch_bytes,
+        )?;
         return Ok((repo, Cow::Owned(patch)));
     }
 
@@ -242,9 +255,9 @@ fn diff_patch_bytes(options: &DiffOptions) -> MarkResult<(PathBuf, Cow<'_, [u8]>
     validate_options(options)?;
     let args = git_diff_args(options, &repo)?;
     let patch = if should_include_untracked(options) {
-        git_diff_bytes_with_untracked(&repo, &args)?
+        git_io::git_diff_bytes_with_untracked_limited(&repo, &args, max_patch_bytes)?
     } else {
-        git_diff_bytes(&repo, &args)?
+        git_io::git_diff_bytes_limited(&repo, &args, max_patch_bytes)?
     };
 
     Ok((repo, Cow::Owned(patch)))
@@ -275,16 +288,23 @@ pub fn render_to_writer_ref(options: &DiffOptions, mut writer: impl Write) -> Ma
         return Ok(());
     }
 
+    let max_patch_bytes = DiffLimits::from_env().max_patch_bytes;
     if let DiffSource::Patch(source) = &options.source {
         validate_options(options)?;
-        write_patch_source(source, writer)?;
+        write_patch_source(source, writer, max_patch_bytes)?;
         return Ok(());
     }
 
     if let DiffSource::Difftool { left, right, path } = &options.source {
         validate_options(options)?;
         let repo = difftool_workdir(options)?;
-        writer.write_all(&difftool_patch_bytes(&repo, left, right, path.as_deref())?)?;
+        writer.write_all(&difftool::difftool_patch_bytes_limited(
+            &repo,
+            left,
+            right,
+            path.as_deref(),
+            max_patch_bytes,
+        )?)?;
         return Ok(());
     }
 
@@ -292,9 +312,9 @@ pub fn render_to_writer_ref(options: &DiffOptions, mut writer: impl Write) -> Ma
     validate_options(options)?;
     let args = git_diff_args(options, &repo)?;
     if should_include_untracked(options) {
-        git_diff_to_writer_with_untracked(&repo, &args, writer)
+        git_diff_to_writer_with_untracked(&repo, &args, writer, max_patch_bytes)
     } else {
-        git_diff_to_writer(&repo, &args, writer)
+        git_diff_to_writer(&repo, &args, writer, max_patch_bytes)
     }
 }
 
@@ -303,18 +323,53 @@ fn render_stat_bytes(options: &DiffOptions) -> MarkResult<Vec<u8>> {
     Ok(render_patch_stats(&stats).into_bytes())
 }
 
-fn write_patch_source(source: &PatchSource, mut writer: impl Write) -> MarkResult<()> {
+fn write_patch_source(
+    source: &PatchSource,
+    mut writer: impl Write,
+    max_patch_bytes: Option<usize>,
+) -> MarkResult<()> {
     match source {
         PatchSource::File(path) => {
             let mut file = fs::File::open(path)?;
-            copy_to_writer(&mut file, &mut writer)?;
+            copy_to_writer_limited(&mut file, &mut writer, max_patch_bytes)?;
         }
-        PatchSource::Stdin(patch) => writer.write_all(patch.as_ref())?,
+        PatchSource::Stdin(patch) => {
+            check_patch_byte_limit(patch.len(), max_patch_bytes)?;
+            writer.write_all(patch.as_ref())?;
+        }
         PatchSource::Text { patch, .. } | PatchSource::Review { patch, .. } => {
-            writer.write_all(patch.as_ref())?
+            check_patch_byte_limit(patch.len(), max_patch_bytes)?;
+            writer.write_all(patch.as_ref())?;
         }
     }
     Ok(())
+}
+
+fn copy_to_writer_limited(
+    mut reader: impl Read,
+    mut writer: impl Write,
+    max_patch_bytes: Option<usize>,
+) -> MarkResult<u64> {
+    let Some(max) = max_patch_bytes else {
+        return copy_to_writer(reader, writer).map_err(Into::into);
+    };
+
+    let mut total = 0usize;
+    let mut buffer = vec![0; STREAM_BUFFER_BYTES];
+    loop {
+        let remaining = max.saturating_sub(total);
+        let read_capacity = remaining.saturating_add(1).min(buffer.len());
+        let read = reader.read(&mut buffer[..read_capacity])?;
+        if read == 0 {
+            return Ok(u64::try_from(total).unwrap_or(u64::MAX));
+        }
+        let writable = read.min(remaining);
+        writer.write_all(&buffer[..writable])?;
+        total = total.saturating_add(read);
+        if read > remaining {
+            check_patch_byte_limit(total, Some(max))?;
+        }
+    }
 }
 
 fn copy_to_writer(mut reader: impl Read, mut writer: impl Write) -> io::Result<u64> {
@@ -331,14 +386,61 @@ fn copy_to_writer(mut reader: impl Read, mut writer: impl Write) -> io::Result<u
     Ok(total)
 }
 
-fn patch_source_bytes(source: &PatchSource) -> MarkResult<Cow<'_, [u8]>> {
-    match source {
-        PatchSource::File(path) => Ok(Cow::Owned(fs::read(path)?)),
-        PatchSource::Stdin(patch) => Ok(Cow::Borrowed(patch.as_ref())),
-        PatchSource::Text { patch, .. } | PatchSource::Review { patch, .. } => {
-            Ok(Cow::Borrowed(patch.as_ref()))
+pub fn read_patch_input_limited(
+    reader: impl Read,
+    max_patch_bytes: Option<usize>,
+) -> MarkResult<Arc<[u8]>> {
+    let patch = read_to_end_limited(reader, max_patch_bytes)?;
+    Ok(Arc::from(patch.into_boxed_slice()))
+}
+
+pub(crate) fn read_to_end_limited(
+    mut reader: impl Read,
+    max_patch_bytes: Option<usize>,
+) -> MarkResult<Vec<u8>> {
+    let mut patch = Vec::new();
+    match max_patch_bytes {
+        Some(max) => {
+            let read_limit = u64::try_from(max).unwrap_or(u64::MAX).saturating_add(1);
+            reader.take(read_limit).read_to_end(&mut patch)?;
+            check_patch_byte_limit(patch.len(), Some(max))?;
+        }
+        None => {
+            reader.read_to_end(&mut patch)?;
         }
     }
+    Ok(patch)
+}
+
+pub(crate) fn check_patch_byte_limit(
+    actual: usize,
+    max_patch_bytes: Option<usize>,
+) -> MarkResult<()> {
+    if let Some(max) = max_patch_bytes
+        && actual > max
+    {
+        return Err(MarkError::Usage(
+            DiffLimitExceeded::new("patch bytes", max, actual).to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn patch_source_bytes(
+    source: &PatchSource,
+    max_patch_bytes: Option<usize>,
+) -> MarkResult<Cow<'_, [u8]>> {
+    let patch = match source {
+        PatchSource::File(path) => {
+            Cow::Owned(read_to_end_limited(fs::File::open(path)?, max_patch_bytes)?)
+        }
+        PatchSource::Stdin(patch) => Cow::Borrowed(patch.as_ref()),
+        PatchSource::Text { patch, .. } | PatchSource::Review { patch, .. } => {
+            Cow::Borrowed(patch.as_ref())
+        }
+    };
+    check_patch_byte_limit(patch.len(), max_patch_bytes)?;
+    Ok(patch)
 }
 
 pub fn render_stat(changeset: &Changeset) -> String {

@@ -6,6 +6,7 @@ use crate::render::draw;
 use crate::theme::MAX_READY_EVENTS_PER_FRAME;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use mark_core::MarkResult;
+use mark_diff::DiffOptions;
 use ratatui::layout::Rect;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::Receiver;
@@ -25,15 +26,18 @@ pub(crate) async fn run_loop(
     loop {
         app.expire_toasts(Instant::now());
         drain_live_diff_invalidation(app, live_diff.as_ref());
-        sync_live_diff(live_diff, app, live_updates);
         drain_live_reloads(
             app,
-            live_diff.as_mut().map(|live_diff| &mut live_diff.reload_rx),
+            live_diff
+                .as_mut()
+                .map(|live_diff| (&live_diff.options, &mut live_diff.reload_rx)),
         );
+        sync_live_diff(live_diff, app, live_updates);
         app.drain_pending_diff_load();
         app.drain_diff_prefetch();
         app.start_due_filter_apply();
         app.drain_filter_worker();
+        app.drain_context_load_worker();
         app.drain_trailing_context_worker();
         app.drain_syntax();
         if app.runtime.dirty {
@@ -282,7 +286,9 @@ fn is_mouse_scroll_kind(kind: MouseEventKind) -> bool {
 }
 
 pub(crate) fn drain_live_diff_invalidation(app: &mut DiffApp, live_diff: Option<&LiveDiff>) {
-    if live_diff.is_some_and(|live_diff| live_diff.take_invalidated()) {
+    if live_diff.is_some_and(|live_diff| {
+        live_diff.options == app.document.options && live_diff.take_invalidated()
+    }) {
         app.mark_live_reload_invalidated();
     }
 }
@@ -304,11 +310,16 @@ pub(crate) fn sync_live_diff(
         return;
     }
 
-    if live_diff
-        .as_ref()
-        .is_some_and(|live_diff| live_diff.options == app.document.options)
-    {
-        return;
+    if let Some(current_live_diff) = live_diff.as_ref() {
+        if current_live_diff.options == app.document.options
+            && !current_live_diff._worker.is_finished()
+        {
+            return;
+        }
+        // A watcher is tied to the options it was created with. Drop stale
+        // watchers before honoring a failure sentinel for the newly selected
+        // options so their queued messages can never be applied later.
+        *live_diff = None;
     }
     if app.jobs.live_diff_failed_options.as_ref() == Some(&app.document.options) {
         return;
@@ -332,13 +343,17 @@ pub(crate) fn sync_live_diff(
 
 pub(crate) fn drain_live_reloads(
     app: &mut DiffApp,
-    live_reload_rx: Option<&mut Receiver<LiveDiffReload>>,
+    live_reload: Option<(&DiffOptions, &mut Receiver<LiveDiffReload>)>,
 ) {
-    let Some(live_reload_rx) = live_reload_rx else {
+    let Some((reload_options, live_reload_rx)) = live_reload else {
         return;
     };
+    let applies_to_current_options = reload_options == &app.document.options;
 
     while let Ok(reload) = live_reload_rx.try_recv() {
+        if !applies_to_current_options {
+            continue;
+        }
         match reload {
             LiveDiffReload::Started => {
                 if app.jobs.live_updates.status() != Some(LiveReloadStatus::Pending) {
@@ -349,6 +364,12 @@ pub(crate) fn drain_live_reloads(
             LiveDiffReload::Loaded(Err(error)) => {
                 app.jobs.live_updates.reset_reload();
                 app.set_error_log(format!("live reload failed: {error}"));
+            }
+            LiveDiffReload::WatcherFailed(error) => {
+                app.jobs.live_diff_failed_options = Some(app.document.options.clone());
+                app.jobs.live_updates.reset_reload();
+                app.clear_cached_diff_choices();
+                app.set_error_log(format!("live reload watcher failed: {error}"));
             }
         }
     }

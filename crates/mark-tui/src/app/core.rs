@@ -5,7 +5,7 @@ use super::{
 use crate::controls::{DiffChoice, DiffLayoutMode, is_review_options};
 use crate::editor::EditorTarget;
 use crate::keymap::GlobalAction;
-use crate::model::{ContextKey, FileIndex, HunkIndex, UiModel};
+use crate::model::{ContextKey, ContextLines, ContextSourceKey, FileIndex, HunkIndex, UiModel};
 use crate::search::{DiffSearchIndex, DiffSearchResult};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use mark_core::MarkResult;
@@ -14,7 +14,10 @@ use mark_syntax::DiffContextExpansion;
 use ratatui::layout::Rect;
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
 use tokio::sync::oneshot;
@@ -24,6 +27,7 @@ pub(crate) const EDITOR_RELOAD_POLL: Duration = Duration::from_millis(8);
 pub(crate) const FILTER_DEBOUNCE: Duration = Duration::from_millis(120);
 pub(crate) const DIFF_PREFETCH_POLL: Duration = Duration::from_millis(8);
 pub(crate) const FILTER_WORKER_POLL: Duration = Duration::from_millis(8);
+pub(crate) const CONTEXT_LOAD_WORKER_POLL: Duration = Duration::from_millis(8);
 pub(crate) const TRAILING_CONTEXT_WORKER_POLL: Duration = Duration::from_millis(8);
 pub(crate) const MAX_LIVE_GREP_MATCHES: usize = 10_000;
 pub(crate) const MAX_DIFF_CACHE_ENTRIES: usize = 4;
@@ -123,6 +127,7 @@ impl<T> std::fmt::Debug for AsyncJob<T> {
 
 pub(crate) struct TrailingContextWorker {
     pub(crate) generation: u64,
+    pub(crate) cancelled: Arc<AtomicBool>,
     pub(crate) job: AsyncJob<
         Vec<(
             crate::model::ContextKey,
@@ -132,11 +137,40 @@ pub(crate) struct TrailingContextWorker {
     >,
 }
 
+impl Drop for TrailingContextWorker {
+    fn drop(&mut self) {
+        self.cancelled.store(true, Ordering::Release);
+    }
+}
+
 impl std::fmt::Debug for TrailingContextWorker {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("TrailingContextWorker")
             .field("generation", &self.generation)
+            .finish_non_exhaustive()
+    }
+}
+
+pub(crate) struct ContextLoadWorker {
+    pub(crate) generation: u64,
+    pub(crate) keys: Vec<ContextSourceKey>,
+    pub(crate) cancelled: Arc<AtomicBool>,
+    pub(crate) job: AsyncJob<Vec<(ContextSourceKey, Option<Arc<ContextLines>>)>>,
+}
+
+impl Drop for ContextLoadWorker {
+    fn drop(&mut self) {
+        self.cancelled.store(true, Ordering::Release);
+    }
+}
+
+impl std::fmt::Debug for ContextLoadWorker {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ContextLoadWorker")
+            .field("generation", &self.generation)
+            .field("sources", &self.keys.len())
             .finish_non_exhaustive()
     }
 }

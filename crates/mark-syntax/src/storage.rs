@@ -73,7 +73,7 @@ fn write_config(path: &Path, config: &StoredSyntaxConfig) -> MarkResult<()> {
         fs::create_dir_all(parent)?;
     }
     let contents = serde_json::to_vec_pretty(config)?;
-    fs::write(path, contents)?;
+    mark_core::path_utils::atomic_write(path, &contents)?;
     Ok(())
 }
 

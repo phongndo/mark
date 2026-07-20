@@ -7,7 +7,7 @@ use std::{
 use mark_core::{MarkError, MarkResult};
 
 use crate::{
-    DiffOptions, DiffSource, DiffStats, PatchSource, diff_patch_bytes,
+    DiffOptions, DiffSource, DiffStats, PatchSource,
     difftool::patch_line_parts,
     git_args::{git_diff_numstat_args, should_include_untracked, validate_options},
     git_io::{git_numstat_stats, git_numstat_stats_with_untracked},
@@ -90,33 +90,51 @@ pub(super) fn patch_stats(options: &DiffOptions) -> MarkResult<PatchStats> {
     }
 
     if matches!(options.source, DiffSource::Difftool { .. }) {
-        let (_, patch) = diff_patch_bytes(options)?;
+        let (_, patch) = crate::diff_patch_bytes_limited(
+            options,
+            crate::DiffLimits::from_env().max_patch_bytes,
+        )?;
         return Ok(parse_patch_stats_lossy(patch.as_ref()));
     }
 
     let repo = mark_git::repository_root(options.repo.as_deref())?;
     validate_options(options)?;
     let args = git_diff_numstat_args(options, &repo)?;
+    let max_output_bytes = crate::DiffLimits::from_env().max_patch_bytes;
     if should_include_untracked(options) {
-        git_numstat_stats_with_untracked(&repo, &args)
+        git_numstat_stats_with_untracked(&repo, &args, max_output_bytes)
     } else {
-        git_numstat_stats(&repo, &args)
+        git_numstat_stats(&repo, &args, max_output_bytes)
     }
 }
 
 fn patch_source_stats(source: &PatchSource) -> MarkResult<PatchStats> {
+    let max_patch_bytes = crate::DiffLimits::from_env().max_patch_bytes;
     match source {
         PatchSource::File(path) => {
-            let file = fs::File::open(path)?;
-            parse_patch_stats(BufReader::new(file)).map_err(MarkError::Io)
+            parse_patch_stats_limited(fs::File::open(path)?, max_patch_bytes)
         }
-        PatchSource::Stdin(patch) => {
-            parse_patch_stats(BufReader::new(patch.as_ref())).map_err(MarkError::Io)
-        }
+        PatchSource::Stdin(patch) => parse_patch_stats_limited(patch.as_ref(), max_patch_bytes),
         PatchSource::Text { patch, .. } | PatchSource::Review { patch, .. } => {
-            parse_patch_stats(BufReader::new(patch.as_ref())).map_err(MarkError::Io)
+            parse_patch_stats_limited(patch.as_ref(), max_patch_bytes)
         }
     }
+}
+
+fn parse_patch_stats_limited(
+    reader: impl io::Read,
+    max_patch_bytes: Option<usize>,
+) -> MarkResult<PatchStats> {
+    let Some(max) = max_patch_bytes else {
+        return parse_patch_stats(BufReader::new(reader)).map_err(MarkError::Io);
+    };
+
+    let read_limit = u64::try_from(max).unwrap_or(u64::MAX).saturating_add(1);
+    let mut reader = reader.take(read_limit);
+    let stats = parse_patch_stats(BufReader::new(&mut reader)).map_err(MarkError::Io)?;
+    let actual = usize::try_from(read_limit.saturating_sub(reader.limit())).unwrap_or(usize::MAX);
+    crate::check_patch_byte_limit(actual, Some(max))?;
+    Ok(stats)
 }
 
 pub(super) fn parse_patch_stats(mut reader: impl BufRead) -> io::Result<PatchStats> {

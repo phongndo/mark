@@ -1,8 +1,9 @@
 use super::{
-    AppEffect, BuiltinTheme, DIFF_PREFETCH_POLL, DiffCacheEntry, EDITOR_RELOAD_POLL,
-    EditorReloadRequest, EditorReloadWorker, FILTER_WORKER_POLL, FilterWorker, MouseScroll,
-    OptionsDraft, PendingDiffLoad, PendingDiffPrefetch, PendingFilterApply, PendingReviewLoad,
-    SyntaxStartupMode, TRAILING_CONTEXT_WORKER_POLL, TrailingContextWorker, WrappedVisualLayout,
+    AppEffect, BuiltinTheme, CONTEXT_LOAD_WORKER_POLL, ContextLoadWorker, DIFF_PREFETCH_POLL,
+    DiffCacheEntry, EDITOR_RELOAD_POLL, EditorReloadRequest, EditorReloadWorker,
+    FILTER_WORKER_POLL, FilterWorker, MouseScroll, OptionsDraft, PendingDiffLoad,
+    PendingDiffPrefetch, PendingFilterApply, PendingReviewLoad, SyntaxStartupMode,
+    TRAILING_CONTEXT_WORKER_POLL, TrailingContextWorker, WrappedVisualLayout,
 };
 use crate::annotation::{AnnotationDraft, AnnotationKey, AnnotationStore, AnnotationTargetMode};
 use crate::controls::{BranchMenu, DiffFilterKind, DiffLayoutMode, GitCommit};
@@ -547,6 +548,7 @@ pub(crate) struct JobState {
     pub(crate) pending_filter_apply: Option<PendingFilterApply>,
     pub(crate) filter_worker: Option<FilterWorker>,
     pub(crate) filter_searching: bool,
+    pub(crate) context_load_worker: Option<ContextLoadWorker>,
     pub(crate) trailing_context_worker: Option<TrailingContextWorker>,
 }
 
@@ -643,6 +645,9 @@ impl JobState {
         }
         if self.filter_worker.is_some() {
             poll = poll.min(FILTER_WORKER_POLL);
+        }
+        if self.context_load_worker.is_some() {
+            poll = poll.min(CONTEXT_LOAD_WORKER_POLL);
         }
         if self.trailing_context_worker.is_some() {
             poll = poll.min(TRAILING_CONTEXT_WORKER_POLL);

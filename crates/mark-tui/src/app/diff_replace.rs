@@ -57,6 +57,7 @@ impl DiffApp {
         self.document.trailing_context_lines.clear();
         self.document.trailing_context_sides.clear();
         self.document.context_cache.clear();
+        self.jobs.context_load_worker = None;
         self.jobs.trailing_context_worker = None;
         self.document.generation = self.document.generation.wrapping_add(1);
         self.document.inline_cache.clear();
@@ -179,6 +180,7 @@ impl DiffApp {
         self.document.trailing_context_lines = trailing_context_lines;
         self.document.trailing_context_sides = trailing_context_sides;
         self.document.context_cache.clear();
+        self.jobs.context_load_worker = None;
         self.jobs.trailing_context_worker = None;
         self.document.generation = self.document.generation.wrapping_add(1);
         self.document.inline_cache.clear();
@@ -354,6 +356,7 @@ impl DiffApp {
         self.document.trailing_context_lines.clear();
         self.document.trailing_context_sides.clear();
         self.document.context_cache.clear();
+        self.jobs.context_load_worker = None;
         self.jobs.trailing_context_worker = None;
         self.document.generation = self.document.generation.wrapping_add(1);
         self.document.inline_cache.clear();

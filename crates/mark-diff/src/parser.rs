@@ -376,8 +376,8 @@ fn is_diff_no_newline_marker(raw: &str) -> bool {
 
 fn finish_hunk(file: &mut Option<DiffFileBuilder>, hunk: &mut Option<DiffHunkBuilder>) {
     if let (Some(file), Some(hunk)) = (file.as_mut(), hunk.take()) {
-        file.additions += hunk.additions;
-        file.deletions += hunk.deletions;
+        file.additions = file.additions.saturating_add(hunk.additions);
+        file.deletions = file.deletions.saturating_add(hunk.deletions);
         file.hunks.push(hunk.finish());
     }
 }
@@ -648,7 +648,11 @@ impl DiffHunkBuilder {
             new_line: new_start,
             additions: 0,
             deletions: 0,
-            lines: Vec::with_capacity(old_count.saturating_add(new_count)),
+            // Counts in a hunk header are untrusted claims about the rows that
+            // follow. Growing from observed rows prevents a tiny malformed
+            // patch from forcing an arbitrary allocation. Vec's amortized
+            // growth remains linear for valid large hunks.
+            lines: Vec::new(),
         }
     }
 
@@ -661,8 +665,8 @@ impl DiffHunkBuilder {
         match prefix {
             b'+' => {
                 let new_line = self.new_line;
-                self.new_line += 1;
-                self.additions += 1;
+                self.new_line = self.new_line.saturating_add(1);
+                self.additions = self.additions.saturating_add(1);
                 self.lines.push(DiffLine::addition(
                     new_line,
                     raw.get(1..).unwrap_or_default(),
@@ -670,8 +674,8 @@ impl DiffHunkBuilder {
             }
             b'-' => {
                 let old_line = self.old_line;
-                self.old_line += 1;
-                self.deletions += 1;
+                self.old_line = self.old_line.saturating_add(1);
+                self.deletions = self.deletions.saturating_add(1);
                 self.lines.push(DiffLine::deletion(
                     old_line,
                     raw.get(1..).unwrap_or_default(),
@@ -696,8 +700,8 @@ impl DiffHunkBuilder {
         match prefix {
             b'+' => {
                 let new_line = self.new_line;
-                self.new_line += 1;
-                self.additions += 1;
+                self.new_line = self.new_line.saturating_add(1);
+                self.additions = self.additions.saturating_add(1);
                 self.lines.push(DiffLine::addition_span(
                     new_line,
                     line_backing,
@@ -707,8 +711,8 @@ impl DiffHunkBuilder {
             }
             b'-' => {
                 let old_line = self.old_line;
-                self.old_line += 1;
-                self.deletions += 1;
+                self.old_line = self.old_line.saturating_add(1);
+                self.deletions = self.deletions.saturating_add(1);
                 self.lines.push(DiffLine::deletion_span(
                     old_line,
                     line_backing,
@@ -743,16 +747,16 @@ impl DiffHunkBuilder {
     fn push_context_owned(&mut self, text: String) {
         let old_line = self.old_line;
         let new_line = self.new_line;
-        self.old_line += 1;
-        self.new_line += 1;
+        self.old_line = self.old_line.saturating_add(1);
+        self.new_line = self.new_line.saturating_add(1);
         self.lines.push(DiffLine::context(old_line, new_line, text));
     }
 
     fn push_context_span(&mut self, backing: DiffLineTextBacking, offset: usize, len: usize) {
         let old_line = self.old_line;
         let new_line = self.new_line;
-        self.old_line += 1;
-        self.new_line += 1;
+        self.old_line = self.old_line.saturating_add(1);
+        self.new_line = self.new_line.saturating_add(1);
         self.lines.push(DiffLine::context_span(
             old_line, new_line, backing, offset, len,
         ));

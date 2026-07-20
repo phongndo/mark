@@ -1,7 +1,6 @@
 use std::{
-    io::{self, Read},
+    io,
     path::{Path, PathBuf},
-    sync::Arc,
 };
 
 use mark_core::{MarkError, MarkResult};
@@ -84,10 +83,10 @@ pub(crate) fn patch_options(args: PatchArgs) -> MarkResult<mark_command::DiffOpt
 
 pub(crate) fn patch_source(path: PathBuf) -> MarkResult<mark_command::DiffSource> {
     if path == Path::new("-") {
-        let mut patch = Vec::new();
-        io::stdin().read_to_end(&mut patch)?;
+        let max_patch_bytes = mark_diff::DiffLimits::from_env().max_patch_bytes;
+        let patch = mark_diff::read_patch_input_limited(io::stdin().lock(), max_patch_bytes)?;
         return Ok(mark_command::DiffSource::Patch(
-            mark_command::PatchSource::Stdin(Arc::from(patch.into_boxed_slice())),
+            mark_command::PatchSource::Stdin(patch),
         ));
     }
 

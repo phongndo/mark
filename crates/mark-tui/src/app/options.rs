@@ -569,27 +569,24 @@ pub(crate) fn persist_options_menu_draft_to_path(
         return Ok(());
     };
 
-    let mut table = if path.exists() {
+    let mut document = if path.exists() {
         let contents = fs::read_to_string(path)?;
         if contents.trim().is_empty() {
-            toml::Table::new()
+            toml_edit::DocumentMut::new()
         } else {
-            contents.parse::<toml::Table>().map_err(|error| {
-                MarkError::Usage(format!("failed to parse {}: {error}", path.display()))
-            })?
+            contents
+                .parse::<toml_edit::DocumentMut>()
+                .map_err(|error| {
+                    MarkError::Usage(format!("failed to parse {}: {error}", path.display()))
+                })?
         }
     } else {
-        toml::Table::new()
+        toml_edit::DocumentMut::new()
     };
 
-    table.remove("colorscheme");
-    table.insert("theme".to_owned(), toml::Value::String(name));
+    document.as_table_mut().remove("colorscheme");
+    document["theme"] = toml_edit::value(name);
 
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let contents = toml::to_string_pretty(&table)
-        .map_err(|error| MarkError::Usage(format!("failed to serialize settings: {error}")))?;
-    fs::write(path, contents)?;
+    mark_core::path_utils::atomic_write(path, document.to_string().as_bytes())?;
     Ok(())
 }

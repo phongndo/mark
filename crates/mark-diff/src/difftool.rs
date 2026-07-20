@@ -6,7 +6,10 @@ use std::{
 
 use mark_core::{MarkError, MarkResult};
 
-use crate::{DiffOptions, git_io::git_error};
+use crate::{
+    DiffOptions,
+    git_io::{command_output_limited, git_error},
+};
 
 pub(super) fn difftool_workdir(options: &DiffOptions) -> MarkResult<PathBuf> {
     options.repo.clone().map_or_else(
@@ -30,16 +33,18 @@ pub(super) fn difftool_display_path(left: &Path, right: &Path, path: Option<&Pat
         })
 }
 
-pub(super) fn difftool_patch_bytes(
+pub(super) fn difftool_patch_bytes_limited(
     workdir: &Path,
     left: &Path,
     right: &Path,
     display_path: Option<&Path>,
+    max_patch_bytes: Option<usize>,
 ) -> MarkResult<Vec<u8>> {
     reject_difftool_directory(workdir, left, "left")?;
     reject_difftool_directory(workdir, right, "right")?;
 
-    let output = Command::new("git")
+    let mut command = Command::new("git");
+    command
         .arg("-C")
         .arg(workdir)
         .args([
@@ -51,8 +56,8 @@ pub(super) fn difftool_patch_bytes(
             "--",
         ])
         .arg(left)
-        .arg(right)
-        .output()?;
+        .arg(right);
+    let output = command_output_limited(&mut command, max_patch_bytes)?;
 
     let status = output.status.code();
     let diff_succeeded = status == Some(0) || (status == Some(1) && !output.stdout.is_empty());
@@ -61,7 +66,9 @@ pub(super) fn difftool_patch_bytes(
     }
 
     let display_path = difftool_display_path(left, right, display_path);
-    Ok(rewrite_difftool_patch_paths(&output.stdout, &display_path))
+    let patch = rewrite_difftool_patch_paths(&output.stdout, &display_path);
+    crate::check_patch_byte_limit(patch.len(), max_patch_bytes)?;
+    Ok(patch)
 }
 
 fn reject_difftool_directory(workdir: &Path, path: &Path, side: &str) -> MarkResult<()> {

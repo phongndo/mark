@@ -1,9 +1,10 @@
 use std::{
     env,
-    io::{ErrorKind, Write},
+    io::{self, ErrorKind, Read, Write},
     path::{Path, PathBuf},
-    process::{Command as ProcessCommand, Stdio},
+    process::{Child, Command as ProcessCommand, Output, Stdio},
     sync::Arc,
+    thread,
 };
 
 use crate::{DiffOptions, DiffOutput, DiffSource, PatchSource, PullRequestId, UntrackedMode};
@@ -276,9 +277,11 @@ pub(crate) fn fetch_github_pull_request_diff(
     pull_request: &GitHubPullRequest,
 ) -> MarkResult<Vec<u8>> {
     let token = github_token();
+    let max_patch_bytes = mark_diff::DiffLimits::from_env().max_patch_bytes;
     let config = github_curl_config(
         &github_pull_request_diff_url(pull_request),
         token.as_deref(),
+        max_patch_bytes,
     );
     let mut child = ProcessCommand::new("curl")
         .args(["--config", "-"])
@@ -301,19 +304,112 @@ pub(crate) fn fetch_github_pull_request_diff(
         .write_all(config.as_bytes())?;
     drop(child.stdin.take());
 
-    let output = child.wait_with_output().map_err(MarkError::Io)?;
+    let output = wait_with_limited_output(child, max_patch_bytes)?;
 
     if !output.status.success() {
+        if let Some(max) = max_patch_bytes
+            && output.status.code() == Some(63)
+        {
+            return Err(patch_byte_limit_error(max, max.saturating_add(1)));
+        }
         return Err(github_fetch_error(pull_request, &output, token.is_some()));
     }
 
     Ok(output.stdout)
 }
 
-pub(crate) fn github_curl_config(url: &str, token: Option<&str>) -> String {
+const MAX_CURL_STDERR_BYTES: usize = 256 * 1024;
+
+fn wait_with_limited_output(
+    mut child: Child,
+    max_stdout_bytes: Option<usize>,
+) -> MarkResult<Output> {
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| MarkError::Io(io::Error::other("failed to capture curl stdout")))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| MarkError::Io(io::Error::other("failed to capture curl stderr")))?;
+    let stderr_worker =
+        thread::spawn(move || read_bounded_and_drain(stderr, MAX_CURL_STDERR_BYTES));
+
+    let stdout_result = read_output_limited(&mut stdout, max_stdout_bytes);
+    let exceeded = max_stdout_bytes
+        .zip(stdout_result.as_ref().ok().map(Vec::len))
+        .is_some_and(|(max, actual)| actual > max);
+    if exceeded || stdout_result.is_err() {
+        let _ = child.kill();
+    }
+    drop(stdout);
+    let status = child.wait();
+    let stderr = stderr_worker
+        .join()
+        .map_err(|_| MarkError::Io(io::Error::other("curl stderr reader panicked")))??;
+    let status = status.map_err(MarkError::Io)?;
+    let stdout = stdout_result.map_err(MarkError::Io)?;
+    if let Some(max) = max_stdout_bytes
+        && stdout.len() > max
+    {
+        return Err(patch_byte_limit_error(max, stdout.len()));
+    }
+
+    Ok(Output {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
+fn read_output_limited(reader: &mut impl Read, max_bytes: Option<usize>) -> io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    if let Some(max) = max_bytes {
+        let read_limit = u64::try_from(max).unwrap_or(u64::MAX).saturating_add(1);
+        reader.take(read_limit).read_to_end(&mut bytes)?;
+    } else {
+        reader.read_to_end(&mut bytes)?;
+    }
+    Ok(bytes)
+}
+
+fn read_bounded_and_drain(mut reader: impl Read, max_bytes: usize) -> io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    let read_limit = u64::try_from(max_bytes)
+        .unwrap_or(u64::MAX)
+        .saturating_add(1);
+    reader.by_ref().take(read_limit).read_to_end(&mut bytes)?;
+    let truncated = bytes.len() > max_bytes;
+    bytes.truncate(max_bytes);
+    io::copy(&mut reader, &mut io::sink())?;
+    if truncated {
+        bytes.extend_from_slice(b"\n[curl stderr truncated]");
+    }
+    Ok(bytes)
+}
+
+fn patch_byte_limit_error(max: usize, actual: usize) -> MarkError {
+    MarkError::Usage(
+        mark_diff::DiffLimitExceeded {
+            limit: "patch bytes",
+            max,
+            actual,
+        }
+        .to_string(),
+    )
+}
+
+pub(crate) fn github_curl_config(
+    url: &str,
+    token: Option<&str>,
+    max_patch_bytes: Option<usize>,
+) -> String {
     let mut config = String::from("fail\nlocation\nsilent\nshow-error\n");
     push_curl_config_value(&mut config, "connect-timeout", "10");
     push_curl_config_value(&mut config, "max-time", "60");
+    if let Some(max_patch_bytes) = max_patch_bytes {
+        push_curl_config_value(&mut config, "max-filesize", &max_patch_bytes.to_string());
+    }
     push_curl_config_value(&mut config, "header", "User-Agent: mark");
     if let Some(token) = token {
         push_curl_config_value(
@@ -378,4 +474,38 @@ pub(crate) fn github_fetch_error(
     }
 
     MarkError::Usage(message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bounded_output_reader_stops_after_limit_plus_one() {
+        let mut reader = io::Cursor::new(b"0123456789");
+        assert_eq!(
+            read_output_limited(&mut reader, Some(4)).expect("read should succeed"),
+            b"01234"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn oversized_child_output_is_terminated_early() {
+        let child = ProcessCommand::new("sh")
+            .args(["-c", "printf 0123456789; sleep 10"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("test child should start");
+        let started = std::time::Instant::now();
+
+        let error = wait_with_limited_output(child, Some(4))
+            .expect_err("oversized output should be rejected")
+            .to_string();
+
+        assert!(error.contains("patch bytes"));
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    }
 }
