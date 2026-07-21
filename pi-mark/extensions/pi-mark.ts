@@ -1,18 +1,52 @@
 import { spawn, spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { accessSync, constants, statSync } from "node:fs";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { delimiter, dirname, join, parse, resolve as resolvePath } from "node:path";
-import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionCommandContext,
+  ExtensionContext,
+  Theme,
+} from "@earendil-works/pi-coding-agent";
+import { Box, Text } from "@earendil-works/pi-tui";
 
 const INSTALL_HINT =
   "Install mark with:\n" +
   "curl -fsSL https://raw.githubusercontent.com/phongndo/mark/main/scripts/install.sh | sh";
+const MARK_ANNOTATIONS_PATH_ENV = "MARK_ANNOTATIONS_PATH";
+const ANNOTATION_CARD_TYPE = "pi-mark-annotations";
+const ANNOTATION_CONTEXT_TYPE = "pi-mark-annotations-context";
+const ANNOTATION_CONSUMED_TYPE = "pi-mark-annotations-consumed";
 
 type NotifyLevel = "info" | "warning" | "error";
 
 type MarkRunResult =
-  | { kind: "exited"; status: number }
+  | { kind: "exited"; status: number; annotations?: MarkAnnotations }
   | { kind: "signaled"; signal: string }
   | { kind: "failed"; error: string };
+
+type MarkAnnotation = {
+  path: string;
+  old_line?: number;
+  new_line?: number;
+  body: string;
+};
+
+type MarkAnnotations = {
+  version: 1;
+  marks: MarkAnnotation[];
+};
+
+type AnnotationCard = MarkAnnotations & {
+  id: string;
+  createdAt: number;
+};
+
+type ConsumedAnnotations = {
+  ids: string[];
+};
 
 type MarkCommand = "diff" | "show" | "review" | "patch" | "help";
 
@@ -26,15 +60,112 @@ type MarkInvocation = {
 type RepoArg = { kind: "absent" } | { kind: "missing-value" } | { kind: "value"; path: string };
 
 export default function piMark(pi: ExtensionAPI) {
+  const pendingAnnotations = new Map<string, AnnotationCard>();
+
+  pi.registerEntryRenderer<AnnotationCard>(ANNOTATION_CARD_TYPE, (entry, { expanded }, theme) =>
+    renderAnnotationCard(entry.data, expanded, theme),
+  );
+
+  const reconstructPendingAnnotations = (ctx: ExtensionContext) => {
+    pendingAnnotations.clear();
+    for (const entry of ctx.sessionManager.getBranch()) {
+      if (entry.type !== "custom") {
+        continue;
+      }
+      if (entry.customType === ANNOTATION_CARD_TYPE && isAnnotationCard(entry.data)) {
+        pendingAnnotations.set(entry.data.id, entry.data);
+      } else if (
+        entry.customType === ANNOTATION_CONSUMED_TYPE &&
+        isConsumedAnnotations(entry.data)
+      ) {
+        for (const id of entry.data.ids) {
+          pendingAnnotations.delete(id);
+        }
+      }
+    }
+  };
+
+  const takePendingAnnotations = (): AnnotationCard[] => {
+    const cards = [...pendingAnnotations.values()];
+    if (cards.length > 0) {
+      pi.appendEntry<ConsumedAnnotations>(ANNOTATION_CONSUMED_TYPE, {
+        ids: cards.map((card) => card.id),
+      });
+      pendingAnnotations.clear();
+    }
+    return cards;
+  };
+
+  pi.on("session_start", async (_event, ctx) => reconstructPendingAnnotations(ctx));
+  pi.on("session_tree", async (_event, ctx) => reconstructPendingAnnotations(ctx));
+  pi.on("before_agent_start", async () => {
+    const cards = takePendingAnnotations();
+    if (cards.length === 0) {
+      return;
+    }
+    return {
+      message: annotationContextMessage(cards),
+    };
+  });
+
   pi.registerCommand("mark", {
-    description: "Open mark diff reviewer",
+    description: "Open mark diff reviewer (or /mark send|clear)",
     handler: async (args, ctx) => {
-      await handleMarkCommand(args, ctx);
+      let commandArgs: string[];
+      try {
+        commandArgs = parseCommandLine(args);
+      } catch {
+        commandArgs = [];
+      }
+      if (commandArgs[0] === "clear" || commandArgs[0] === "send") {
+        const action = commandArgs[0];
+        if (commandArgs.length !== 1) {
+          report(ctx, `Usage: /mark ${action}`, "warning");
+          return;
+        }
+        const cards = takePendingAnnotations();
+        const count = cards.reduce((total, card) => total + card.marks.length, 0);
+        if (count === 0) {
+          report(ctx, "No pending mark annotations.", "warning");
+          return;
+        }
+        if (action === "send") {
+          pi.sendMessage(annotationContextMessage(cards), {
+            triggerTurn: true,
+            ...(ctx.isIdle() ? {} : { deliverAs: "followUp" as const }),
+          });
+          report(ctx, `Sent ${count} mark annotation${count === 1 ? "" : "s"}.`, "info");
+        } else {
+          report(ctx, `Cleared ${count} pending mark annotation${count === 1 ? "" : "s"}.`, "info");
+        }
+        return;
+      }
+
+      const annotations = await handleMarkCommand(args, ctx);
+      if (!annotations) {
+        return;
+      }
+
+      const card: AnnotationCard = {
+        ...annotations,
+        id: randomUUID(),
+        createdAt: Date.now(),
+      };
+      pendingAnnotations.set(card.id, card);
+      pi.appendEntry<AnnotationCard>(ANNOTATION_CARD_TYPE, card);
+      report(
+        ctx,
+        `${card.marks.length} review annotation${card.marks.length === 1 ? "" : "s"} attached to your next prompt. Run /mark send to send now.`,
+        "info",
+      );
     },
   });
 }
 
-async function handleMarkCommand(args: string, ctx: ExtensionCommandContext): Promise<void> {
+async function handleMarkCommand(
+  args: string,
+  ctx: ExtensionCommandContext,
+): Promise<MarkAnnotations | undefined> {
   if (ctx.mode !== "tui") {
     report(ctx, "/mark requires Pi interactive TUI mode.", "error");
     return;
@@ -100,7 +231,9 @@ async function handleMarkCommand(args: string, ctx: ExtensionCommandContext): Pr
     case "exited":
       if (result.status !== 0) {
         report(ctx, `mark exited with status ${result.status}.`, "error");
+        return;
       }
+      return result.annotations;
   }
 }
 
@@ -264,33 +397,59 @@ async function runMarkInTerminal(
   mark: string,
   argv: string[],
 ): Promise<MarkRunResult | undefined> {
-  return ctx.ui.custom<MarkRunResult>(async (tui, _theme, _keybindings, done) => {
-    let result: MarkRunResult;
+  let outputDirectory: string;
+  try {
+    outputDirectory = await mkdtemp(join(tmpdir(), "pi-mark-"));
+  } catch (error) {
+    return { kind: "failed", error: `could not create annotations output: ${errorMessage(error)}` };
+  }
 
-    try {
-      tui.stop();
-      process.stdout.write("\x1b[2J\x1b[H");
+  const annotationsPath = join(outputDirectory, "annotations.json");
+  try {
+    const result = await ctx.ui.custom<MarkRunResult>(async (tui, _theme, _keybindings, done) => {
+      let childResult: MarkRunResult;
 
-      const child = spawn(mark, argv, {
-        cwd: ctx.cwd,
-        env: process.env,
-        stdio: "inherit",
-      });
+      try {
+        tui.stop();
+        process.stdout.write("\x1b[2J\x1b[H");
 
-      result = await waitForChild(child);
-    } catch (error) {
-      result = {
-        kind: "failed",
-        error: errorMessage(error),
-      };
-    } finally {
-      tui.start();
-      tui.requestRender(true);
+        const child = spawn(mark, argv, {
+          cwd: ctx.cwd,
+          env: { ...process.env, [MARK_ANNOTATIONS_PATH_ENV]: annotationsPath },
+          stdio: "inherit",
+        });
+
+        childResult = await waitForChild(child);
+      } catch (error) {
+        childResult = {
+          kind: "failed",
+          error: errorMessage(error),
+        };
+      } finally {
+        tui.start();
+        tui.requestRender(true);
+      }
+
+      done(childResult);
+      return { render: () => [], invalidate: () => {} };
+    });
+
+    if (result?.kind !== "exited" || result.status !== 0) {
+      return result;
     }
 
-    done(result);
-    return { render: () => [], invalidate: () => {} };
-  });
+    try {
+      const annotations = await readSubmittedAnnotations(annotationsPath);
+      return annotations ? { ...result, annotations } : result;
+    } catch (error) {
+      return {
+        kind: "failed",
+        error: `could not read submitted annotations: ${errorMessage(error)}`,
+      };
+    }
+  } finally {
+    await rm(outputDirectory, { recursive: true, force: true });
+  }
 }
 
 function waitForChild(child: ReturnType<typeof spawn>): Promise<MarkRunResult> {
@@ -317,6 +476,154 @@ function waitForChild(child: ReturnType<typeof spawn>): Promise<MarkRunResult> {
       }
     });
   });
+}
+
+async function readSubmittedAnnotations(path: string): Promise<MarkAnnotations | undefined> {
+  let contents: string;
+  try {
+    contents = await readFile(path, "utf8");
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return undefined;
+    }
+    throw error;
+  }
+
+  if (Buffer.byteLength(contents) > 2 * 1024 * 1024) {
+    throw new Error("annotations output exceeds 2 MiB");
+  }
+  return parseMarkAnnotations(JSON.parse(contents));
+}
+
+export function parseMarkAnnotations(value: unknown): MarkAnnotations {
+  if (!isRecord(value) || value.version !== 1 || !Array.isArray(value.marks)) {
+    throw new Error("expected mark annotations schema version 1");
+  }
+
+  const marks = value.marks.map((candidate, index): MarkAnnotation => {
+    if (
+      !isRecord(candidate) ||
+      typeof candidate.path !== "string" ||
+      candidate.path.length === 0 ||
+      typeof candidate.body !== "string" ||
+      !optionalPositiveInteger(candidate.old_line) ||
+      !optionalPositiveInteger(candidate.new_line) ||
+      (candidate.old_line === undefined && candidate.new_line === undefined)
+    ) {
+      throw new Error(`invalid annotation at index ${index}`);
+    }
+    return {
+      path: candidate.path,
+      ...(candidate.old_line === undefined ? {} : { old_line: candidate.old_line as number }),
+      ...(candidate.new_line === undefined ? {} : { new_line: candidate.new_line as number }),
+      body: candidate.body,
+    };
+  });
+
+  if (marks.length === 0) {
+    throw new Error("annotations output contains no marks");
+  }
+  return { version: 1, marks };
+}
+
+function annotationContextMessage(cards: AnnotationCard[]) {
+  const annotations: MarkAnnotations = {
+    version: 1,
+    marks: cards.flatMap((card) => card.marks),
+  };
+  return {
+    customType: ANNOTATION_CONTEXT_TYPE,
+    content:
+      "The user attached review annotations from mark. Treat them as requested code-review changes and address each one.\n\n" +
+      JSON.stringify(annotations, null, 2),
+    display: false,
+    details: annotations,
+  };
+}
+
+function renderAnnotationCard(card: AnnotationCard | undefined, expanded: boolean, theme: Theme) {
+  const box = new Box(1, 1, (text) => theme.bg("customMessageBg", text));
+  if (!card) {
+    box.addChild(new Text(theme.fg("warning", "mark annotations unavailable"), 0, 0));
+    return box;
+  }
+
+  const count = card.marks.length;
+  box.addChild(
+    new Text(
+      theme.fg("toolTitle", theme.bold("mark annotations ")) +
+        theme.fg("muted", `${count} review note${count === 1 ? "" : "s"}`),
+      0,
+      0,
+    ),
+  );
+
+  const displayed = expanded ? card.marks : card.marks.slice(0, 8);
+  for (const mark of displayed) {
+    const location = safeDisplayText(annotationLocation(mark));
+    const body = safeDisplayText(mark.body)
+      .split("\n")
+      .map((line) => `  ${line}`)
+      .join("\n");
+    box.addChild(new Text(`\n${theme.fg("accent", location)}\n${theme.fg("text", body)}`, 0, 0));
+  }
+  if (displayed.length < count) {
+    box.addChild(
+      new Text(theme.fg("dim", `\n… ${count - displayed.length} more (Ctrl-O to expand)`), 0, 0),
+    );
+  }
+  box.addChild(new Text(theme.fg("dim", "\nAttached to next prompt · /mark send sends now"), 0, 0));
+  return box;
+}
+
+function annotationLocation(annotation: MarkAnnotation): string {
+  if (annotation.new_line !== undefined) {
+    return `${annotation.path}:${annotation.new_line}`;
+  }
+  return `${annotation.path}:${annotation.old_line} (old)`;
+}
+
+function safeDisplayText(text: string): string {
+  return [...text]
+    .filter((character) => {
+      const code = character.codePointAt(0) ?? 0;
+      return (
+        character === "\n" ||
+        character === "\t" ||
+        (code >= 32 && code !== 127 && (code < 128 || code > 159))
+      );
+    })
+    .join("");
+}
+
+function isAnnotationCard(value: unknown): value is AnnotationCard {
+  if (!isRecord(value) || typeof value.id !== "string" || typeof value.createdAt !== "number") {
+    return false;
+  }
+  try {
+    parseMarkAnnotations(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isConsumedAnnotations(value: unknown): value is ConsumedAnnotations {
+  return (
+    isRecord(value) && Array.isArray(value.ids) && value.ids.every((id) => typeof id === "string")
+  );
+}
+
+function optionalPositiveInteger(value: unknown): boolean {
+  return value === undefined || (Number.isSafeInteger(value) && (value as number) > 0);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error;
 }
 
 export function parseCommandLine(input: string): string[] {

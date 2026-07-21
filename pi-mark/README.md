@@ -48,10 +48,18 @@ PI_MARK_BIN=/path/to/mark pi
 
 ## Development
 
-Run the extension from this repository root without installing the npm package:
+Run the extension and the current local Mark binary from this repository root:
 
 ```sh
-pi -e ./pi-mark/extensions/pi-mark.ts
+nix develop
+just pi-dev
+```
+
+The equivalent manual command is:
+
+```sh
+cargo build -p mark-cli --locked
+PI_MARK_BIN="$PWD/target/debug/mark" pi -e ./pi-mark/extensions/pi-mark.ts
 ```
 
 Developer checks use pnpm:
@@ -94,12 +102,21 @@ for this repository and workflow before the publish step can succeed.
 /mark review 123
 /mark review https://github.com/owner/repo/pull/123
 /mark patch changes.diff
+/mark send
+/mark clear
 ```
 
 Hosted reviews currently resolve GitHub pull requests.
 
 The external `mark` terminal UI opens immediately from interactive Pi, including
 while an agent turn is still running. Pi's TUI is restored when `mark` exits.
+
+Add review annotations with `a` (single) or `A` (sticky batch), then press
+`Shift-Q` to submit them and return to Pi. Pi renders a tool-style annotation
+card in the transcript and attaches the annotations as context to your next
+prompt. Run `/mark send` to send pending annotations immediately without an
+additional prompt, or `/mark clear` to discard them. Plain `q` exits without
+submitting annotations.
 
 `/mark patch -` is intentionally rejected because Pi cannot pipe stdin into the
 external viewer from a slash command. Write the patch to a file and pass the
