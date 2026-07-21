@@ -96,6 +96,18 @@ fn handle_test_key_event(app: &mut DiffApp, key: KeyEvent) -> bool {
         .expect("key event should be handled")
 }
 
+fn finish_trailing_context_discovery(app: &mut DiffApp) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        app.drain_trailing_context_worker();
+        if app.jobs.trailing_context_worker.is_none() {
+            return;
+        }
+        thread::sleep(Duration::from_millis(1));
+    }
+    panic!("trailing context worker did not finish");
+}
+
 fn set_test_file_modified(file: &mut mark_diff::DiffFile, path: &str) {
     file.change = FileChange::modified(path.to_owned());
 }
