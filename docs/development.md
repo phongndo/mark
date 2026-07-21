@@ -165,7 +165,7 @@ mark update
 ```
 
 Keep `vnightly` marked as a prerelease and not latest. The installer only
-resolves semver tags like `v0.10.3` for the default `latest` channel, so stable
+resolves semver tags like `v0.10.4` for the default `latest` channel, so stable
 updates do not accidentally install nightly.
 
 Nightly builds set `MARK_BUILD_CHANNEL=nightly`, so `mark --version` includes
