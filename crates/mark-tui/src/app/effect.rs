@@ -5,11 +5,12 @@ use super::{
 use crate::render::compositor::ComponentEventResult;
 use crate::toast::ToastLevel;
 use mark_core::MarkResult;
-use std::io;
-
+use std::{env, fs, io};
+pub(crate) const MARK_ANNOTATIONS_PATH_ENV: &str = "MARK_ANNOTATIONS_PATH";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum AppEffect {
     Quit,
+    SubmitMarks(String),
     Reload,
     OpenEditorShortcut,
     OpenFocusedHunkInEditor,
@@ -24,7 +25,6 @@ pub(crate) enum AppEffect {
         changed_item: OptionsMenuItem,
     },
 }
-
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) enum ActionOutcome {
     #[default]
@@ -33,7 +33,6 @@ pub(crate) enum ActionOutcome {
         effects: Vec<AppEffect>,
     },
 }
-
 impl ActionOutcome {
     pub(crate) fn ignored() -> Self {
         Self::Ignored
@@ -66,7 +65,7 @@ impl ActionOutcome {
             Self::Consumed { effects } => Some(
                 effects
                     .iter()
-                    .any(|effect| matches!(effect, AppEffect::Quit)),
+                    .any(|effect| matches!(effect, AppEffect::Quit | AppEffect::SubmitMarks(..))),
             ),
         }
     }
@@ -93,7 +92,6 @@ impl ActionOutcome {
         }
     }
 }
-
 impl DiffApp {
     pub(crate) fn queue_effect(&mut self, effect: AppEffect) {
         self.runtime.push_effect(effect);
@@ -113,6 +111,16 @@ impl DiffApp {
     pub(crate) fn run_effect(&mut self, effect: AppEffect) -> MarkResult<()> {
         match effect {
             AppEffect::Quit => Ok(()),
+            AppEffect::SubmitMarks(text) => {
+                match env::var(MARK_ANNOTATIONS_PATH_ENV) {
+                    Ok(path) if !path.is_empty() => fs::write(path, text)?,
+                    _ => {
+                        let mut stdout = io::stdout().lock();
+                        write_osc52_clipboard(&mut stdout, &text)?;
+                    }
+                }
+                Ok(())
+            }
             AppEffect::Reload => self.reload(),
             AppEffect::OpenEditorShortcut => {
                 self.open_editor_shortcut(None);

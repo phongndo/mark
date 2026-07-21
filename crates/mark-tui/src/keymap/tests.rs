@@ -310,6 +310,11 @@ fn default_mark_bindings_are_configurable_actions() {
         GlobalAction::CopyMarks,
         KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE)
     ));
+    assert!(keymap.matches_single(
+        GlobalAction::SubmitMarks,
+        KeyEvent::new(KeyCode::Char('Q'), KeyModifiers::SHIFT)
+    ));
+    assert_eq!(keymap.global_action_label(GlobalAction::SubmitMarks), "Q");
     assert_eq!(keymap.global_action_label(GlobalAction::CopyMarks), "y");
     assert!(!keymap.is_prefix(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE)));
 }

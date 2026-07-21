@@ -30,6 +30,7 @@ pub(crate) enum GlobalAction {
     CollapseContextAll,
     FullFile,
     Quit,
+    SubmitMarks,
     Layout,
     LineWrapping,
     HorizontalScrollLock,
@@ -179,6 +180,7 @@ const GLOBAL_ACTION_SPECS: &[GlobalActionSpec] = &[
     ),
     global_action_spec!(GlobalAction::FullFile, "full_file", ["e"]),
     global_action_spec!(GlobalAction::Quit, "quit", ["q"]),
+    global_action_spec!(GlobalAction::SubmitMarks, "submit_marks", ["shift-q"]),
     global_action_spec!(GlobalAction::Layout, "layout", ["s"]),
     global_action_spec!(GlobalAction::LineWrapping, "line_wrapping", ["w"]),
     global_action_spec!(
@@ -256,15 +258,16 @@ impl Default for Keymap {
 }
 
 impl Keymap {
+    pub(crate) fn action_has_prefix(&self, action: GlobalAction, prefix: KeyPress) -> bool {
+        self.global_sequences(action)
+            .iter()
+            .any(|sequence| sequence.0.len() == 2 && sequence.0.first() == Some(&prefix))
+    }
+
     fn has_sequence_starting_with(&self, prefix: KeyPress) -> bool {
         GLOBAL_ACTION_SPECS
             .iter()
-            .map(|spec| self.global_sequences(spec.action))
-            .any(|bindings| {
-                bindings
-                    .iter()
-                    .any(|sequence| sequence.0.len() == 2 && sequence.0.first() == Some(&prefix))
-            })
+            .any(|spec| self.action_has_prefix(spec.action, prefix))
     }
 
     pub(crate) fn is_prefix(&self, key: KeyEvent) -> bool {

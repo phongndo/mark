@@ -12,6 +12,7 @@ struct FakeKeyCtx {
     reset_mouse_scroll_calls: usize,
     editor_shortcut: bool,
     filter_input: bool,
+    submit_marks: Option<bool>,
     annotation_input: bool,
     help_menu: Option<bool>,
     branch_menu: Option<bool>,
@@ -28,7 +29,6 @@ struct FakeKeyCtx {
     error_log_resize: bool,
     navigation: bool,
 }
-
 impl KeyEventContext for FakeKeyCtx {
     fn handle_annotation_target_key_if_open(&mut self, _key: KeyEvent) -> bool {
         self.annotation_target
@@ -44,6 +44,10 @@ impl KeyEventContext for FakeKeyCtx {
 
     fn editor_shortcut_requested(&self, _key: KeyEvent) -> bool {
         self.editor_shortcut
+    }
+
+    fn handle_submit_marks_key(&mut self, _key: KeyEvent) -> MarkResult<Option<bool>> {
+        Ok(self.submit_marks)
     }
 
     fn handle_annotation_input_key_if_open(&mut self, _key: KeyEvent) -> bool {
@@ -187,6 +191,21 @@ fn annotation_draft_bindings_preempt_lower_key_layers() {
 
     assert_eq!(result, ComponentEventResult::Consumed);
     assert_eq!(ctx.reset_mouse_scroll_calls, 0);
+}
+
+#[test]
+fn submit_marks_preempts_annotation_target_and_text_input() {
+    let mut ctx = FakeKeyCtx {
+        submit_marks: Some(true),
+        annotation_target: true,
+        annotation_input: true,
+        ..Default::default()
+    };
+
+    let result = route_event_through_layers(KEY_LAYERS, key(KeyCode::Char('Q')), &mut ctx)
+        .expect("route key");
+
+    assert_eq!(result, ComponentEventResult::Quit);
 }
 
 #[test]

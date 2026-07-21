@@ -17,6 +17,10 @@ pub(crate) const HELP_MENU_ROWS: &[HelpMenuRow] = &[
     HelpMenuRow::Section("Global"),
     HelpMenuRow::Binding(HelpMenuKey::Global(GlobalAction::Help), "open keybindings"),
     HelpMenuRow::Binding(HelpMenuKey::Global(GlobalAction::Quit), "quit"),
+    HelpMenuRow::Binding(
+        HelpMenuKey::Global(GlobalAction::SubmitMarks),
+        "submit marks and quit",
+    ),
     HelpMenuRow::Binding(HelpMenuKey::Static("Ctrl-C"), "force quit"),
     HelpMenuRow::Binding(HelpMenuKey::Static("Esc"), "close"),
     HelpMenuRow::Section("Navigate"),

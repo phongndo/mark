@@ -36,6 +36,7 @@ impl Keymap {
         let mut stored_menu = stored.menu;
         let mut stored_annotation_menu = stored.annotation_menu;
         let copy_marks_configured = stored_global.copy_marks.is_some();
+        let submit_marks_configured = stored_global.submit_marks.is_some();
         let line_wrapping_configured = stored_global.line_wrapping.is_some();
         let horizontal_scroll_lock_configured = stored_global.horizontal_scroll_lock.is_some();
         let full_file_configured = stored_global.full_file.is_some();
@@ -59,6 +60,9 @@ impl Keymap {
         }
         if !copy_marks_configured {
             keymap.clear_default_on_conflict(GlobalAction::CopyMarks);
+        }
+        if !submit_marks_configured {
+            keymap.clear_default_on_conflict(GlobalAction::SubmitMarks);
         }
         // New default bindings must not invalidate configs that already used those keys.
         if !line_wrapping_configured {
@@ -281,6 +285,7 @@ struct StoredGlobalKeymap {
     collapse_context_all: Option<KeySpec>,
     full_file: Option<KeySpec>,
     quit: Option<KeySpec>,
+    submit_marks: Option<KeySpec>,
     layout: Option<KeySpec>,
     line_wrapping: Option<KeySpec>,
     horizontal_scroll_lock: Option<KeySpec>,
@@ -323,6 +328,7 @@ impl StoredGlobalKeymap {
             GlobalAction::CollapseContextAll => self.collapse_context_all.take(),
             GlobalAction::FullFile => self.full_file.take(),
             GlobalAction::Quit => self.quit.take(),
+            GlobalAction::SubmitMarks => self.submit_marks.take(),
             GlobalAction::Layout => self.layout.take(),
             GlobalAction::LineWrapping => self.line_wrapping.take(),
             GlobalAction::HorizontalScrollLock => self.horizontal_scroll_lock.take(),
