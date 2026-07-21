@@ -10,7 +10,7 @@ import type {
   ExtensionContext,
   Theme,
 } from "@earendil-works/pi-coding-agent";
-import { Box, Text } from "@earendil-works/pi-tui";
+import { Box, Text, type Component } from "@earendil-works/pi-tui";
 
 const INSTALL_HINT =
   "Install mark with:\n" +
@@ -46,9 +46,49 @@ type AnnotationCard = MarkAnnotations & {
 
 type ConsumedAnnotations = {
   ids: string[];
+  hideCards?: boolean;
+};
+
+type DismissibleAnnotationCard = Component & {
+  setHidden(hidden: boolean): void;
+  setSubmitted(submitted: boolean): void;
 };
 
 type MarkCommand = "diff" | "show" | "review" | "patch" | "help";
+
+const MARK_COMMAND_COMPLETIONS = [
+  { value: "diff", label: "diff", description: "Review working tree or revision changes" },
+  { value: "show", label: "show", description: "Review a commit or revision" },
+  { value: "review", label: "review", description: "Review a GitHub pull request" },
+  { value: "patch", label: "patch", description: "Review a patch file" },
+  { value: "send", label: "send", description: "Submit pending annotations to the agent" },
+  { value: "clear", label: "clear", description: "Discard pending annotations" },
+  { value: "help", label: "help", description: "Show mark command help" },
+] as const;
+
+const MARK_HELP_COMPLETIONS = MARK_COMMAND_COMPLETIONS.filter(
+  ({ value }) => value !== "send" && value !== "clear" && value !== "help",
+).map(({ value, label, description }) => ({
+  value: `help ${value}`,
+  label,
+  description,
+}));
+
+export function markArgumentCompletions(prefix: string) {
+  const argumentPrefix = prefix.trimStart();
+  const helpPrefix = argumentPrefix.match(/^help\s+([^\s]*)$/);
+  if (helpPrefix) {
+    const commandPrefix = helpPrefix[1].toLowerCase();
+    const matches = MARK_HELP_COMPLETIONS.filter(({ label }) => label.startsWith(commandPrefix));
+    return matches.length > 0 ? matches : null;
+  }
+  if (/\s/.test(argumentPrefix)) {
+    return null;
+  }
+  const commandPrefix = argumentPrefix.toLowerCase();
+  const matches = MARK_COMMAND_COMPLETIONS.filter(({ value }) => value.startsWith(commandPrefix));
+  return matches.length > 0 ? [...matches] : null;
+}
 
 type MarkInvocation = {
   command: MarkCommand;
@@ -61,13 +101,34 @@ type RepoArg = { kind: "absent" } | { kind: "missing-value" } | { kind: "value";
 
 export default function piMark(pi: ExtensionAPI) {
   const pendingAnnotations = new Map<string, AnnotationCard>();
+  const hiddenAnnotationCards = new Set<string>();
+  const submittedAnnotationCards = new Set<string>();
+  const renderedAnnotationCards = new Map<string, DismissibleAnnotationCard>();
 
-  pi.registerEntryRenderer<AnnotationCard>(ANNOTATION_CARD_TYPE, (entry, { expanded }, theme) =>
-    renderAnnotationCard(entry.data, expanded, theme),
-  );
+  pi.registerEntryRenderer<AnnotationCard>(ANNOTATION_CARD_TYPE, (entry, { expanded }, theme) => {
+    const card = entry.data;
+    if (card && hiddenAnnotationCards.has(card.id)) {
+      return undefined;
+    }
+    const component = dismissibleAnnotationCard(card, expanded, theme);
+    if (card) {
+      component.setSubmitted(submittedAnnotationCards.has(card.id));
+      renderedAnnotationCards.set(card.id, component);
+    }
+    return component;
+  });
+
+  const syncRenderedAnnotationCards = () => {
+    for (const [id, component] of renderedAnnotationCards) {
+      component.setHidden(hiddenAnnotationCards.has(id));
+      component.setSubmitted(submittedAnnotationCards.has(id));
+    }
+  };
 
   const reconstructPendingAnnotations = (ctx: ExtensionContext) => {
     pendingAnnotations.clear();
+    hiddenAnnotationCards.clear();
+    submittedAnnotationCards.clear();
     for (const entry of ctx.sessionManager.getBranch()) {
       if (entry.type !== "custom") {
         continue;
@@ -80,18 +141,34 @@ export default function piMark(pi: ExtensionAPI) {
       ) {
         for (const id of entry.data.ids) {
           pendingAnnotations.delete(id);
+          if (entry.data.hideCards) {
+            hiddenAnnotationCards.add(id);
+          } else {
+            submittedAnnotationCards.add(id);
+          }
         }
       }
     }
+    syncRenderedAnnotationCards();
   };
 
-  const takePendingAnnotations = (): AnnotationCard[] => {
+  const takePendingAnnotations = (hideCards = false): AnnotationCard[] => {
     const cards = [...pendingAnnotations.values()];
     if (cards.length > 0) {
+      const ids = cards.map((card) => card.id);
       pi.appendEntry<ConsumedAnnotations>(ANNOTATION_CONSUMED_TYPE, {
-        ids: cards.map((card) => card.id),
+        ids,
+        ...(hideCards ? { hideCards: true } : {}),
       });
       pendingAnnotations.clear();
+      for (const id of ids) {
+        if (hideCards) {
+          hiddenAnnotationCards.add(id);
+        } else {
+          submittedAnnotationCards.add(id);
+        }
+      }
+      syncRenderedAnnotationCards();
     }
     return cards;
   };
@@ -110,6 +187,7 @@ export default function piMark(pi: ExtensionAPI) {
 
   pi.registerCommand("mark", {
     description: "Open mark diff reviewer (or /mark send|clear)",
+    getArgumentCompletions: markArgumentCompletions,
     handler: async (args, ctx) => {
       let commandArgs: string[];
       try {
@@ -117,10 +195,24 @@ export default function piMark(pi: ExtensionAPI) {
       } catch {
         commandArgs = [];
       }
-      if (commandArgs[0] === "clear" || commandArgs[0] === "send") {
-        const action = commandArgs[0];
+      if (commandArgs[0] === "clear") {
         if (commandArgs.length !== 1) {
-          report(ctx, `Usage: /mark ${action}`, "warning");
+          report(ctx, "Usage: /mark clear", "warning");
+          return;
+        }
+        const cards = takePendingAnnotations(true);
+        const count = cards.reduce((total, card) => total + card.marks.length, 0);
+        if (count === 0) {
+          report(ctx, "No pending mark annotations.", "warning");
+          return;
+        }
+        refreshTranscriptEntryRenderers(ctx);
+        report(ctx, `Cleared ${count} pending mark annotation${count === 1 ? "" : "s"}.`, "info");
+        return;
+      }
+      if (commandArgs[0] === "send") {
+        if (commandArgs.length !== 1) {
+          report(ctx, "Usage: /mark send", "warning");
           return;
         }
         const cards = takePendingAnnotations();
@@ -129,15 +221,15 @@ export default function piMark(pi: ExtensionAPI) {
           report(ctx, "No pending mark annotations.", "warning");
           return;
         }
-        if (action === "send") {
-          pi.sendMessage(annotationContextMessage(cards), {
-            triggerTurn: true,
-            ...(ctx.isIdle() ? {} : { deliverAs: "followUp" as const }),
-          });
-          report(ctx, `Sent ${count} mark annotation${count === 1 ? "" : "s"}.`, "info");
-        } else {
-          report(ctx, `Cleared ${count} pending mark annotation${count === 1 ? "" : "s"}.`, "info");
-        }
+        pi.sendMessage(annotationContextMessage(cards), {
+          triggerTurn: true,
+          ...(ctx.isIdle() ? {} : { deliverAs: "followUp" as const }),
+        });
+        report(
+          ctx,
+          `Submitted ${count} mark annotation${count === 1 ? "" : "s"} to the agent.`,
+          "info",
+        );
         return;
       }
 
@@ -155,7 +247,7 @@ export default function piMark(pi: ExtensionAPI) {
       pi.appendEntry<AnnotationCard>(ANNOTATION_CARD_TYPE, card);
       report(
         ctx,
-        `${card.marks.length} review annotation${card.marks.length === 1 ? "" : "s"} attached to your next prompt. Run /mark send to send now.`,
+        `${card.marks.length} review annotation${card.marks.length === 1 ? "" : "s"} ready. Run /mark send to submit now, or include them with your next prompt.`,
         "info",
       );
     },
@@ -541,7 +633,47 @@ function annotationContextMessage(cards: AnnotationCard[]) {
   };
 }
 
-function renderAnnotationCard(card: AnnotationCard | undefined, expanded: boolean, theme: Theme) {
+function refreshTranscriptEntryRenderers(ctx: ExtensionCommandContext): void {
+  if (ctx.mode !== "tui") {
+    return;
+  }
+
+  // Pi owns each custom entry's leading spacer. Rebuild the host wrappers so
+  // renderers that now return undefined remove that spacer along with the card.
+  const expanded = ctx.ui.getToolsExpanded();
+  ctx.ui.setToolsExpanded(!expanded);
+  ctx.ui.setToolsExpanded(expanded);
+}
+
+function dismissibleAnnotationCard(
+  card: AnnotationCard | undefined,
+  expanded: boolean,
+  theme: Theme,
+): DismissibleAnnotationCard {
+  let hidden = false;
+  let submitted = false;
+  let content = renderAnnotationCard(card, expanded, submitted, theme);
+  return {
+    render: (width) => (hidden ? [] : content.render(width)),
+    invalidate: () => content.invalidate(),
+    setHidden: (nextHidden) => {
+      hidden = nextHidden;
+    },
+    setSubmitted: (nextSubmitted) => {
+      if (submitted !== nextSubmitted) {
+        submitted = nextSubmitted;
+        content = renderAnnotationCard(card, expanded, submitted, theme);
+      }
+    },
+  };
+}
+
+function renderAnnotationCard(
+  card: AnnotationCard | undefined,
+  expanded: boolean,
+  submitted: boolean,
+  theme: Theme,
+) {
   const box = new Box(1, 1, (text) => theme.bg("customMessageBg", text));
   if (!card) {
     box.addChild(new Text(theme.fg("warning", "mark annotations unavailable"), 0, 0));
@@ -572,7 +704,10 @@ function renderAnnotationCard(card: AnnotationCard | undefined, expanded: boolea
       new Text(theme.fg("dim", `\n… ${count - displayed.length} more (Ctrl-O to expand)`), 0, 0),
     );
   }
-  box.addChild(new Text(theme.fg("dim", "\nAttached to next prompt · /mark send sends now"), 0, 0));
+  const status = submitted
+    ? "\nSubmitted to agent"
+    : "\nPending · /mark send submits now · /mark clear discards";
+  box.addChild(new Text(theme.fg("dim", status), 0, 0));
   return box;
 }
 
@@ -610,7 +745,10 @@ function isAnnotationCard(value: unknown): value is AnnotationCard {
 
 function isConsumedAnnotations(value: unknown): value is ConsumedAnnotations {
   return (
-    isRecord(value) && Array.isArray(value.ids) && value.ids.every((id) => typeof id === "string")
+    isRecord(value) &&
+    Array.isArray(value.ids) &&
+    value.ids.every((id) => typeof id === "string") &&
+    (value.hideCards === undefined || typeof value.hideCards === "boolean")
   );
 }
 

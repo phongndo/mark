@@ -59,7 +59,7 @@ The equivalent manual command is:
 
 ```sh
 cargo build -p mark-cli --locked
-PI_MARK_BIN="$PWD/target/debug/mark" pi -e ./pi-mark/extensions/pi-mark.ts
+PI_MARK_BIN="$PWD/target/debug/mark" pi --no-extensions -e ./pi-mark/extensions/pi-mark.ts
 ```
 
 Developer checks use pnpm:
@@ -113,10 +113,10 @@ while an agent turn is still running. Pi's TUI is restored when `mark` exits.
 
 Add review annotations with `a` (single) or `A` (sticky batch), then press
 `Shift-Q` to submit them and return to Pi. Pi renders a tool-style annotation
-card in the transcript and attaches the annotations as context to your next
-prompt. Run `/mark send` to send pending annotations immediately without an
-additional prompt, or `/mark clear` to discard them. Plain `q` exits without
-submitting annotations.
+card in the transcript. Run `/mark send` to submit pending annotations to the
+agent immediately, or continue with a normal prompt to include them there. Run
+`/mark clear` to discard pending annotations and remove their cards from the
+transcript. Plain `q` exits without submitting annotations.
 
 `/mark patch -` is intentionally rejected because Pi cannot pipe stdin into the
 external viewer from a slash command. Write the patch to a file and pass the
