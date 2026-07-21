@@ -7,15 +7,22 @@ import { fileURLToPath } from "node:url";
 
 import { discoverAndLoadExtensions } from "@earendil-works/pi-coding-agent";
 import extension, {
+  markArgumentCompletions,
   markInvocationNeedsGit,
   parseCommandLine,
   parseMarkAnnotations,
 } from "../extensions/pi-mark.ts";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const testTheme = {
+  bg: (_color, text) => text,
+  fg: (_color, text) => text,
+  bold: (text) => text,
+};
 
 function loadExtension(overrides = {}) {
   extension({
+    registerCommand() {},
     registerEntryRenderer() {},
     on() {},
     appendEntry() {},
@@ -28,13 +35,38 @@ test("extension registers mark source commands", () => {
   const registered = [];
   loadExtension({
     registerCommand(name, options) {
-      registered.push({ name, description: options.description });
+      registered.push({
+        name,
+        description: options.description,
+        completions: options.getArgumentCompletions("").map(({ value }) => value),
+      });
     },
   });
 
   assert.deepEqual(registered, [
-    { name: "mark", description: "Open mark diff reviewer (or /mark send|clear)" },
+    {
+      name: "mark",
+      description: "Open mark diff reviewer (or /mark send|clear)",
+      completions: ["diff", "show", "review", "patch", "send", "clear", "help"],
+    },
   ]);
+});
+
+test("mark command autocompletes every supported action", () => {
+  assert.deepEqual(
+    markArgumentCompletions("").map(({ value }) => value),
+    ["diff", "show", "review", "patch", "send", "clear", "help"],
+  );
+  assert.deepEqual(
+    markArgumentCompletions("  p").map(({ value }) => value),
+    ["patch"],
+  );
+  assert.deepEqual(
+    markArgumentCompletions("help r").map(({ value }) => value),
+    ["help review"],
+  );
+  assert.equal(markArgumentCompletions("diff "), null);
+  assert.equal(markArgumentCompletions("unknown"), null);
 });
 
 test("package manifest loads mark source commands", async () => {
@@ -87,6 +119,43 @@ test("parseMarkAnnotations validates structured mark output", () => {
     () => parseMarkAnnotations({ version: 1, marks: [{ path: "src/app.ts", body: "missing" }] }),
     /invalid annotation/,
   );
+});
+
+test("cleared annotation cards stay hidden after session restore", async () => {
+  let entryRenderer;
+  let sessionStart;
+  loadExtension({
+    registerEntryRenderer(_customType, renderer) {
+      entryRenderer = renderer;
+    },
+    on(name, handler) {
+      if (name === "session_start") sessionStart = handler;
+    },
+  });
+
+  const card = {
+    id: "card-1",
+    createdAt: 1,
+    version: 1,
+    marks: [{ path: "src/app.ts", new_line: 12, body: "Handle this edge case" }],
+  };
+  await sessionStart(
+    {},
+    {
+      sessionManager: {
+        getBranch: () => [
+          { type: "custom", customType: "pi-mark-annotations", data: card },
+          {
+            type: "custom",
+            customType: "pi-mark-annotations-consumed",
+            data: { ids: [card.id], hideCards: true },
+          },
+        ],
+      },
+    },
+  );
+
+  assert.equal(entryRenderer({ data: card }, { expanded: false }, testTheme), undefined);
 });
 
 test("markInvocationNeedsGit allows patch files", () => {
@@ -194,7 +263,11 @@ process.exit(0);
     const events = new Map();
     const entries = [];
     const sentMessages = [];
+    let entryRenderer;
     loadExtension({
+      registerEntryRenderer(_customType, renderer) {
+        entryRenderer = renderer;
+      },
       registerCommand(name, options) {
         handlers.set(name, options.handler);
       },
@@ -210,6 +283,27 @@ process.exit(0);
     });
 
     const notifications = [];
+    const transcriptEntries = [];
+    let toolsExpanded = false;
+    const mountAnnotationEntry = (data) => {
+      let expanded = toolsExpanded;
+      let content = entryRenderer({ data }, { expanded }, testTheme);
+      const entry = {
+        setExpanded(nextExpanded) {
+          if (expanded !== nextExpanded) {
+            expanded = nextExpanded;
+            content = entryRenderer({ data }, { expanded }, testTheme);
+          }
+        },
+        render(width) {
+          // Pi's CustomEntryComponent owns this leading spacer whenever its
+          // renderer returns a component.
+          return content ? ["", ...content.render(width)] : [];
+        },
+      };
+      transcriptEntries.push(entry);
+      return entry;
+    };
     const commandContext = {
       mode: "tui",
       cwd: tempDir,
@@ -220,6 +314,15 @@ process.exit(0);
       ui: {
         notify(message, level) {
           notifications.push({ message, level });
+        },
+        getToolsExpanded() {
+          return toolsExpanded;
+        },
+        setToolsExpanded(expanded) {
+          toolsExpanded = expanded;
+          for (const entry of transcriptEntries) {
+            entry.setExpanded(expanded);
+          }
         },
         async custom(render) {
           let result;
@@ -241,7 +344,7 @@ process.exit(0);
     assert.deepEqual(entries[0].data.marks, [
       { path: "src/app.ts", new_line: 12, body: "Handle this edge case" },
     ]);
-    assert.match(notifications[0].message, /attached to your next prompt/);
+    assert.match(notifications[0].message, /ready.*\/mark send to submit now/);
 
     const injection = await events.get("before_agent_start")({}, {});
     assert.equal(injection.message.customType, "pi-mark-annotations-context");
@@ -250,18 +353,27 @@ process.exit(0);
     assert.equal(entries[1].customType, "pi-mark-annotations-consumed");
 
     await handlers.get("mark")("patch changes.diff", commandContext);
-    await handlers.get("mark")("send", commandContext);
     assert.equal(entries[2].customType, "pi-mark-annotations");
+    const submittedCard = mountAnnotationEntry(entries[2].data);
+    assert.match(submittedCard.render(120).join("\n"), /Pending/);
+
+    await handlers.get("mark")("send", commandContext);
     assert.equal(entries[3].customType, "pi-mark-annotations-consumed");
     assert.equal(sentMessages[0].message.customType, "pi-mark-annotations-context");
     assert.deepEqual(sentMessages[0].options, { triggerTurn: true });
-    assert.match(notifications.at(-1).message, /Sent 1 mark annotation/);
+    assert.match(submittedCard.render(120).join("\n"), /Submitted to agent/);
+    assert.match(notifications.at(-1).message, /Submitted 1 mark annotation/);
     assert.equal(await events.get("before_agent_start")({}, {}), undefined);
 
     await handlers.get("mark")("patch changes.diff", commandContext);
-    await handlers.get("mark")("clear", commandContext);
     assert.equal(entries[4].customType, "pi-mark-annotations");
+    const clearedCard = mountAnnotationEntry(entries[4].data);
+    assert.ok(clearedCard.render(120).length > 0);
+
+    await handlers.get("mark")("clear", commandContext);
     assert.equal(entries[5].customType, "pi-mark-annotations-consumed");
+    assert.equal(entries[5].data.hideCards, true);
+    assert.deepEqual(clearedCard.render(120), []);
     assert.match(notifications.at(-1).message, /Cleared 1 pending mark annotation/);
     assert.equal(await events.get("before_agent_start")({}, {}), undefined);
   } finally {

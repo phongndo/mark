@@ -43,4 +43,4 @@ pi-check:
 
 pi-dev:
     cargo build -p mark-cli --locked
-    PI_MARK_BIN="$PWD/target/debug/mark" pi -e ./pi-mark/extensions/pi-mark.ts
+    PI_MARK_BIN="$PWD/target/debug/mark" pi --no-extensions -e ./pi-mark/extensions/pi-mark.ts
