@@ -34,13 +34,16 @@
     "check": "node --experimental-strip-types --check extensions/pi-mark.ts && pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm test && pnpm pack --dry-run"
   },
   "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.80.10",
+    "@earendil-works/pi-tui": "^0.80.10",
     "@types/node": "^25.9.3",
     "oxfmt": "^0.55.0",
     "oxlint": "^1.70.0",
     "typescript": "^6.0.3"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*"
+    "@earendil-works/pi-coding-agent": ">=0.80.10",
+    "@earendil-works/pi-tui": ">=0.80.10"
   },
   "packageManager": "pnpm@11.7.0",
   "pi": {

@@ -42,4 +42,5 @@ pi-check:
     cd pi-mark && pnpm run check
 
 pi-dev:
-    pi -e ./pi-mark/extensions/pi-mark.ts
+    cargo build -p mark-cli --locked
+    PI_MARK_BIN="$PWD/target/debug/mark" pi -e ./pi-mark/extensions/pi-mark.ts

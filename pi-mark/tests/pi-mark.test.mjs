@@ -6,19 +6,35 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { discoverAndLoadExtensions } from "@earendil-works/pi-coding-agent";
-import extension, { markInvocationNeedsGit, parseCommandLine } from "../extensions/pi-mark.ts";
+import extension, {
+  markInvocationNeedsGit,
+  parseCommandLine,
+  parseMarkAnnotations,
+} from "../extensions/pi-mark.ts";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
+function loadExtension(overrides = {}) {
+  extension({
+    registerEntryRenderer() {},
+    on() {},
+    appendEntry() {},
+    sendMessage() {},
+    ...overrides,
+  });
+}
+
 test("extension registers mark source commands", () => {
   const registered = [];
-  extension({
+  loadExtension({
     registerCommand(name, options) {
       registered.push({ name, description: options.description });
     },
   });
 
-  assert.deepEqual(registered, [{ name: "mark", description: "Open mark diff reviewer" }]);
+  assert.deepEqual(registered, [
+    { name: "mark", description: "Open mark diff reviewer (or /mark send|clear)" },
+  ]);
 });
 
 test("package manifest loads mark source commands", async () => {
@@ -54,6 +70,23 @@ test("parseCommandLine preserves quoted arguments", () => {
 
 test("parseCommandLine rejects unterminated quotes", () => {
   assert.throws(() => parseCommandLine('review "missing'), /Unterminated double quote/);
+});
+
+test("parseMarkAnnotations validates structured mark output", () => {
+  assert.deepEqual(
+    parseMarkAnnotations({
+      version: 1,
+      marks: [{ path: "src/app.ts", new_line: 12, body: "Handle this edge case" }],
+    }),
+    {
+      version: 1,
+      marks: [{ path: "src/app.ts", new_line: 12, body: "Handle this edge case" }],
+    },
+  );
+  assert.throws(
+    () => parseMarkAnnotations({ version: 1, marks: [{ path: "src/app.ts", body: "missing" }] }),
+    /invalid annotation/,
+  );
 });
 
 test("markInvocationNeedsGit allows patch files", () => {
@@ -99,7 +132,7 @@ test("markInvocationNeedsGit requires git for diffs, revisions, and review numbe
 
 test("mark command rejects stdin patch sources before preflight", async () => {
   let handler;
-  extension({
+  loadExtension({
     registerCommand(name, options) {
       if (name === "mark") {
         handler = options.handler;
@@ -137,6 +170,110 @@ test("mark command rejects stdin patch sources before preflight", async () => {
   ]);
 });
 
+test("Shift-Q output is rendered as a card and attached to the next prompt", async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "pi-mark-test-"));
+  const markPath = join(tempDir, "mark");
+  const oldPiMarkBin = process.env.PI_MARK_BIN;
+
+  try {
+    await writeFile(
+      markPath,
+      `#!/usr/bin/env node
+import { writeFileSync } from "node:fs";
+writeFileSync(process.env.MARK_ANNOTATIONS_PATH, JSON.stringify({
+  version: 1,
+  marks: [{ path: "src/app.ts", new_line: 12, body: "Handle this edge case" }],
+}));
+process.exit(0);
+`,
+    );
+    await chmod(markPath, 0o755);
+    process.env.PI_MARK_BIN = markPath;
+
+    const handlers = new Map();
+    const events = new Map();
+    const entries = [];
+    const sentMessages = [];
+    loadExtension({
+      registerCommand(name, options) {
+        handlers.set(name, options.handler);
+      },
+      on(name, handler) {
+        events.set(name, handler);
+      },
+      appendEntry(customType, data) {
+        entries.push({ customType, data });
+      },
+      sendMessage(message, options) {
+        sentMessages.push({ message, options });
+      },
+    });
+
+    const notifications = [];
+    const commandContext = {
+      mode: "tui",
+      cwd: tempDir,
+      hasUI: true,
+      isIdle() {
+        return true;
+      },
+      ui: {
+        notify(message, level) {
+          notifications.push({ message, level });
+        },
+        async custom(render) {
+          let result;
+          await render(
+            { stop() {}, start() {}, requestRender() {} },
+            undefined,
+            undefined,
+            (value) => {
+              result = value;
+            },
+          );
+          return result;
+        },
+      },
+    };
+    await handlers.get("mark")("patch changes.diff", commandContext);
+
+    assert.equal(entries[0].customType, "pi-mark-annotations");
+    assert.deepEqual(entries[0].data.marks, [
+      { path: "src/app.ts", new_line: 12, body: "Handle this edge case" },
+    ]);
+    assert.match(notifications[0].message, /attached to your next prompt/);
+
+    const injection = await events.get("before_agent_start")({}, {});
+    assert.equal(injection.message.customType, "pi-mark-annotations-context");
+    assert.equal(injection.message.display, false);
+    assert.match(injection.message.content, /Handle this edge case/);
+    assert.equal(entries[1].customType, "pi-mark-annotations-consumed");
+
+    await handlers.get("mark")("patch changes.diff", commandContext);
+    await handlers.get("mark")("send", commandContext);
+    assert.equal(entries[2].customType, "pi-mark-annotations");
+    assert.equal(entries[3].customType, "pi-mark-annotations-consumed");
+    assert.equal(sentMessages[0].message.customType, "pi-mark-annotations-context");
+    assert.deepEqual(sentMessages[0].options, { triggerTurn: true });
+    assert.match(notifications.at(-1).message, /Sent 1 mark annotation/);
+    assert.equal(await events.get("before_agent_start")({}, {}), undefined);
+
+    await handlers.get("mark")("patch changes.diff", commandContext);
+    await handlers.get("mark")("clear", commandContext);
+    assert.equal(entries[4].customType, "pi-mark-annotations");
+    assert.equal(entries[5].customType, "pi-mark-annotations-consumed");
+    assert.match(notifications.at(-1).message, /Cleared 1 pending mark annotation/);
+    assert.equal(await events.get("before_agent_start")({}, {}), undefined);
+  } finally {
+    if (oldPiMarkBin === undefined) {
+      delete process.env.PI_MARK_BIN;
+    } else {
+      process.env.PI_MARK_BIN = oldPiMarkBin;
+    }
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("top-level help and version flags run mark without git preflight", async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "pi-mark-test-"));
   const markPath = join(tempDir, "mark");
@@ -159,7 +296,7 @@ process.exit(0);
     process.env.PI_MARK_TEST_ARGS = argsPath;
 
     const handlers = new Map();
-    extension({
+    loadExtension({
       registerCommand(name, options) {
         handlers.set(name, options.handler);
       },
@@ -254,7 +391,7 @@ process.exit(0);
     process.env.PI_MARK_TEST_ARGS = argsPath;
 
     let handler;
-    extension({
+    loadExtension({
       registerCommand(name, options) {
         if (name === "mark") {
           handler = options.handler;
@@ -374,7 +511,7 @@ process.exit(1);
       let waitForIdleCalled = false;
       let handler;
 
-      extension({
+      loadExtension({
         registerCommand(name, options) {
           if (name === "mark") {
             handler = options.handler;
@@ -478,7 +615,7 @@ process.exit(1);
     let customCalled = false;
     let handler;
 
-    extension({
+    loadExtension({
       registerCommand(name, options) {
         if (name === "mark") {
           handler = options.handler;
