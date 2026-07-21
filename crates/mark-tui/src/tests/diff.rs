@@ -591,17 +591,7 @@ fn trailing_context_starts_after_a_zero_count_new_range() {
     app.set_viewport_rows(app.document.model.len().max(1));
 
     assert!(app.discover_trailing_context_for_viewport());
-    for _ in 0..1_000 {
-        app.drain_trailing_context_worker();
-        if app.jobs.trailing_context_worker.is_none() {
-            break;
-        }
-        thread::sleep(Duration::from_millis(1));
-    }
-    assert!(
-        app.jobs.trailing_context_worker.is_none(),
-        "trailing context worker did not finish"
-    );
+    finish_trailing_context_discovery(&mut app);
 
     let key = ContextKey {
         file: FILE_0,
@@ -631,17 +621,7 @@ fn trailing_context_discovery_rejects_oversized_source_lines() {
     app.set_viewport_rows(app.document.model.len().max(1));
 
     assert!(app.discover_trailing_context_for_viewport());
-    for _ in 0..1_000 {
-        app.drain_trailing_context_worker();
-        if app.jobs.trailing_context_worker.is_none() {
-            break;
-        }
-        thread::sleep(Duration::from_millis(1));
-    }
-    assert!(
-        app.jobs.trailing_context_worker.is_none(),
-        "trailing context worker did not finish"
-    );
+    finish_trailing_context_discovery(&mut app);
 
     let key = ContextKey {
         file: FILE_0,

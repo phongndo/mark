@@ -862,17 +862,6 @@ fn copy_marks_includes_marks_on_collapsed_context_lines() {
     );
 }
 
-fn finish_trailing_context_discovery(app: &mut DiffApp) {
-    for _ in 0..1_000 {
-        app.drain_trailing_context_worker();
-        if app.jobs.trailing_context_worker.is_none() {
-            return;
-        }
-        thread::sleep(Duration::from_millis(1));
-    }
-    panic!("trailing context worker did not finish");
-}
-
 #[test]
 fn revision_backed_trailing_context_discovery_runs_on_a_worker() {
     let repo = temp_test_dir("trailing-context-control");
