@@ -567,6 +567,177 @@ fn copy_marks_writes_structured_json_to_clipboard_sequence() {
 }
 
 #[test]
+fn submit_marks_shortcut_commits_open_annotation_and_requests_exit() {
+    use crate::annotation::{AnnotationDraft, AnnotationKey};
+
+    let mut changeset = changeset_with_line_text("hello");
+    changeset.files[0].hunks_mut()[0].lines[0] = DiffLine::addition(1, "hello");
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    let code_row = app
+        .document
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
+        .expect("unified line");
+    let key = AnnotationKey::from_ui_row(
+        &app.document.changeset,
+        app.document.model.row(code_row).expect("row"),
+    )
+    .expect("annotation key");
+    app.annotations_state.annotation_draft = Some(AnnotationDraft {
+        key: key.clone(),
+        model_row_index: code_row,
+        input: "send this draft".to_owned(),
+        cursor: "send this draft".len(),
+    });
+
+    let should_quit = app
+        .handle_key(KeyEvent::new(KeyCode::Char('Q'), KeyModifiers::SHIFT))
+        .expect("submit shortcut should be handled");
+
+    assert!(should_quit);
+    assert!(app.annotations_state.annotation_draft.is_none());
+    assert_eq!(
+        app.annotations_state
+            .annotations
+            .get(&key)
+            .map(String::as_str),
+        Some("send this draft")
+    );
+}
+
+#[test]
+fn submit_marks_shortcut_preempts_sticky_annotation_target_mode() {
+    use crate::annotation::AnnotationKey;
+
+    let mut changeset = changeset_with_line_text("hello");
+    changeset.files[0].hunks_mut()[0].lines[0] = DiffLine::addition(1, "hello");
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(10);
+    let code_row = app
+        .document
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
+        .expect("unified line");
+    let key = AnnotationKey::from_ui_row(
+        &app.document.changeset,
+        app.document.model.row(code_row).expect("row"),
+    )
+    .expect("annotation key");
+    app.annotations_state
+        .annotations
+        .insert(key, "send this note".to_owned());
+    app.open_sticky_annotation_target_mode();
+    assert!(app.annotations_state.annotation_target_mode.is_some());
+
+    let should_quit = app
+        .handle_key(KeyEvent::new(KeyCode::Char('Q'), KeyModifiers::SHIFT))
+        .expect("submit shortcut should preempt target hints");
+
+    assert!(should_quit);
+}
+
+#[test]
+fn configured_multi_key_submit_shortcut_works_while_drafting() {
+    use crate::{
+        annotation::{AnnotationDraft, AnnotationKey},
+        keymap::Keymap,
+    };
+
+    let mut changeset = changeset_with_line_text("hello");
+    changeset.files[0].hunks_mut()[0].lines[0] = DiffLine::addition(1, "hello");
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.config.keymap = Keymap::parse(
+        r#"
+        [keymap.global]
+        submit_marks = "z x"
+        "#,
+    )
+    .expect("submit keymap should parse");
+    let code_row = app
+        .document
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
+        .expect("unified line");
+    let key = AnnotationKey::from_ui_row(
+        &app.document.changeset,
+        app.document.model.row(code_row).expect("row"),
+    )
+    .expect("annotation key");
+    app.annotations_state.annotation_draft = Some(AnnotationDraft {
+        key: key.clone(),
+        model_row_index: code_row,
+        input: "send this draft".to_owned(),
+        cursor: "send this draft".len(),
+    });
+
+    let should_quit = app
+        .handle_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE))
+        .expect("submit prefix should be handled");
+    assert!(!should_quit);
+    assert_eq!(
+        app.annotations_state
+            .annotation_draft
+            .as_ref()
+            .map(|draft| draft.input.as_str()),
+        Some("send this draft")
+    );
+
+    let should_quit = app
+        .handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE))
+        .expect("submit sequence should be handled");
+
+    assert!(should_quit);
+    assert!(app.annotations_state.annotation_draft.is_none());
+    assert_eq!(
+        app.annotations_state
+            .annotations
+            .get(&key)
+            .map(String::as_str),
+        Some("send this draft")
+    );
+}
+
+#[test]
+fn submit_marks_action_exports_marks_and_requests_exit() {
+    use crate::annotation::AnnotationKey;
+
+    let mut changeset = changeset_with_line_text("hello");
+    changeset.files[0].hunks_mut()[0].lines[0] = DiffLine::addition(1, "hello");
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    let code_row = app
+        .document
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
+        .expect("unified line");
+    let key = AnnotationKey::from_ui_row(
+        &app.document.changeset,
+        app.document.model.row(code_row).expect("row"),
+    )
+    .expect("annotation key");
+    app.annotations_state
+        .annotations
+        .insert(key, "send this note".to_owned());
+
+    let outcome = app
+        .perform_app_action_with_effects(AppAction::SubmitMarks)
+        .expect("submit action should export marks");
+
+    assert_eq!(outcome.handled_quit_request(), Some(true));
+    assert!(matches!(
+        outcome.into_effects().as_slice(),
+        [AppEffect::SubmitMarks(text)] if text.contains("send this note")
+    ));
+}
+
+#[test]
 fn copy_marks_omits_annotations_without_current_diff_line() {
     use crate::annotation::{AnnotationKey, AnnotationSide};
 

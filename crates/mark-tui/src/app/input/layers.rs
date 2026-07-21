@@ -26,6 +26,7 @@ enum KeyComponent {
     ErrorLogClose,
     OpenMenu,
     AnnotationInput,
+    SubmitMarks,
     FilterInput,
     MouseScrollReset,
     EditorShortcut,
@@ -44,6 +45,7 @@ impl<C: KeyEventContext> EventComponent<KeyEvent, C> for KeyComponent {
             Self::ErrorLogClose => ComponentId::ErrorLog,
             Self::OpenMenu => ComponentId::OpenMenuKey,
             Self::AnnotationInput => ComponentId::AnnotationInput,
+            Self::SubmitMarks => ComponentId::GlobalAction,
             Self::FilterInput => ComponentId::FilterInput,
             Self::MouseScrollReset => ComponentId::MouseScrollReset,
             Self::EditorShortcut => ComponentId::EditorShortcut,
@@ -63,6 +65,7 @@ impl<C: KeyEventContext> EventComponent<KeyEvent, C> for KeyComponent {
             Self::ErrorLogClose => handle_error_log_close_key_layer(key, ctx),
             Self::OpenMenu => handle_open_menu_key_layer(key, ctx),
             Self::AnnotationInput => handle_annotation_input_key_layer(key, ctx),
+            Self::SubmitMarks => handle_submit_marks_key_layer(key, ctx),
             Self::FilterInput => handle_filter_input_key_layer(key, ctx),
             Self::MouseScrollReset => handle_mouse_scroll_reset_key_layer(key, ctx),
             Self::EditorShortcut => handle_editor_shortcut_key_layer(key, ctx),
@@ -81,6 +84,7 @@ const PENDING_PREFIX_KEY_COMPONENT: KeyComponent = KeyComponent::PendingPrefix;
 const ERROR_LOG_CLOSE_KEY_COMPONENT: KeyComponent = KeyComponent::ErrorLogClose;
 const OPEN_MENU_KEY_COMPONENT: KeyComponent = KeyComponent::OpenMenu;
 const ANNOTATION_INPUT_KEY_COMPONENT: KeyComponent = KeyComponent::AnnotationInput;
+const SUBMIT_MARKS_KEY_COMPONENT: KeyComponent = KeyComponent::SubmitMarks;
 const FILTER_INPUT_KEY_COMPONENT: KeyComponent = KeyComponent::FilterInput;
 const MOUSE_SCROLL_RESET_KEY_COMPONENT: KeyComponent = KeyComponent::MouseScrollReset;
 const EDITOR_SHORTCUT_KEY_COMPONENT: KeyComponent = KeyComponent::EditorShortcut;
@@ -101,8 +105,9 @@ const KEY_LAYERS: &[KeyLayer] = &[
     MOUSE_SCROLL_RESET_KEY_COMPONENT,
     EDITOR_SHORTCUT_KEY_COMPONENT,
     QUIT_KEY_COMPONENT,
-    ANNOTATION_DRAFT_BINDINGS_KEY_COMPONENT,
     ANNOTATION_TARGET_KEY_COMPONENT,
+    SUBMIT_MARKS_KEY_COMPONENT,
+    ANNOTATION_DRAFT_BINDINGS_KEY_COMPONENT,
 ];
 
 fn key_route_result(should_quit: bool) -> ComponentEventResult {
@@ -125,7 +130,7 @@ pub(super) fn route_key_through_layers(
     app: &mut DiffApp,
     key: KeyEvent,
 ) -> MarkResult<ComponentEventResult> {
-    let mut ctx = KeyEventCtx::new(app);
+    let mut ctx = KeyEventCtx { app };
     route_event_through_layers(KEY_LAYERS, key, &mut ctx)
 }
 
@@ -189,6 +194,16 @@ fn handle_filter_input_key_layer(
         ComponentEventResult::Consumed
     } else {
         ComponentEventResult::Ignored
+    })
+}
+
+fn handle_submit_marks_key_layer(
+    key: KeyEvent,
+    ctx: &mut dyn KeyEventContext,
+) -> MarkResult<ComponentEventResult> {
+    Ok(match ctx.handle_submit_marks_key(key)? {
+        Some(should_quit) => key_route_result(should_quit),
+        None => ComponentEventResult::Ignored,
     })
 }
 

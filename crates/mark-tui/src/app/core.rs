@@ -37,6 +37,7 @@ pub(crate) const ERROR_LOG_MIN_HEIGHT: u16 = 3;
 pub(crate) const ERROR_LOG_MAX_HEIGHT: u16 = 40;
 pub(crate) const POST_EDITOR_QUIT_KEY_IGNORE: Duration = Duration::from_millis(250);
 pub(crate) const NORMAL_GLOBAL_ACTIONS: &[GlobalAction] = &[
+    GlobalAction::SubmitMarks,
     GlobalAction::Quit,
     GlobalAction::Help,
     GlobalAction::Reload,

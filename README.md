@@ -86,7 +86,9 @@ mark patch changes.diff      # review an existing patch file
 git diff | mark pager        # use mark as a diff pager
 ```
 
-Plain `mark` is a shortcut for `mark diff`.
+Plain `mark` is a shortcut for `mark diff`. While reviewing, use `a` or `A` to
+add annotations, `y` to copy them, and `Shift-Q` to copy the annotations and
+quit (`q` quits without submitting them).
 
 ## Built for huge diffs
 

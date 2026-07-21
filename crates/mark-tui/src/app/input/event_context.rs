@@ -16,6 +16,7 @@ pub(super) trait KeyEventContext:
     fn handle_annotation_save_or_cancel_key(&mut self, key: KeyEvent) -> bool;
     fn reset_mouse_scroll(&mut self);
     fn editor_shortcut_requested(&self, key: KeyEvent) -> bool;
+    fn handle_submit_marks_key(&mut self, key: KeyEvent) -> MarkResult<Option<bool>>;
     fn handle_annotation_input_key_if_open(&mut self, key: KeyEvent) -> bool;
     fn close_error_log_on_key(&mut self, key: KeyEvent) -> bool;
     fn handle_pending_prefix_key(&mut self, key: KeyEvent) -> MarkResult<Option<bool>>;
@@ -25,13 +26,7 @@ pub(super) trait KeyEventContext:
 }
 
 pub(super) struct KeyEventCtx<'a> {
-    app: &'a mut DiffApp,
-}
-
-impl<'a> KeyEventCtx<'a> {
-    pub(super) fn new(app: &'a mut DiffApp) -> Self {
-        Self { app }
-    }
+    pub(super) app: &'a mut DiffApp,
 }
 
 impl KeyEventContext for KeyEventCtx<'_> {
@@ -53,6 +48,40 @@ impl KeyEventContext for KeyEventCtx<'_> {
             .keymap
             .matches_single(GlobalAction::EditHunk, key)
             && self.app.editor_shortcut_available()
+    }
+
+    fn handle_submit_marks_key(&mut self, key: KeyEvent) -> MarkResult<Option<bool>> {
+        if self.app.annotations_state.annotation_draft.is_none()
+            && self.app.annotations_state.annotation_target_mode.is_none()
+        {
+            return Ok(None);
+        }
+
+        let action = GlobalAction::SubmitMarks;
+        if let Some(prefix) = self.app.input.key_prefix_pending
+            && self.app.config.keymap.action_has_prefix(action, prefix)
+        {
+            self.app.input.clear_key_prefix();
+            self.app.runtime.dirty = true;
+            if key.code == KeyCode::Esc {
+                return Ok(Some(false));
+            }
+            if self.app.config.keymap.matches_prefix(action, prefix, key) {
+                return self.app.perform_global_action(action);
+            }
+            return Ok(Some(false));
+        }
+
+        if self.app.config.keymap.matches_single(action, key) {
+            return self.app.perform_global_action(action);
+        }
+        let prefix = KeyPress::from(key);
+        if self.app.config.keymap.action_has_prefix(action, prefix) {
+            self.app.input.begin_key_prefix(prefix);
+            self.app.runtime.dirty = true;
+            return Ok(Some(false));
+        }
+        Ok(None)
     }
 
     fn handle_annotation_input_key_if_open(&mut self, key: KeyEvent) -> bool {

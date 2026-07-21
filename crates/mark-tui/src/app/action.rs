@@ -7,6 +7,7 @@ use mark_core::MarkResult;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AppAction {
     Quit,
+    SubmitMarks,
     ToggleHelp,
     Reload,
     OpenFileFilter,
@@ -46,6 +47,7 @@ impl AppAction {
     pub(crate) fn from_global(action: GlobalAction) -> Option<Self> {
         Some(match action {
             GlobalAction::Quit => Self::Quit,
+            GlobalAction::SubmitMarks => Self::SubmitMarks,
             GlobalAction::Help => Self::ToggleHelp,
             GlobalAction::Reload => Self::Reload,
             GlobalAction::FileFilter => Self::OpenFileFilter,
@@ -98,6 +100,18 @@ impl DiffApp {
     ) -> MarkResult<ActionOutcome> {
         match action {
             AppAction::Quit => Ok(ActionOutcome::effect(AppEffect::Quit)),
+            AppAction::SubmitMarks => {
+                if let Some(draft) = self.annotations_state.annotation_draft.take() {
+                    self.commit_annotation_draft(draft);
+                }
+                let Some(text) = self.marks_clipboard_json() else {
+                    return Ok(ActionOutcome::effect(AppEffect::Toast(
+                        ToastLevel::Warning,
+                        "no marks to submit".to_owned(),
+                    )));
+                };
+                Ok(ActionOutcome::effect(AppEffect::SubmitMarks(text)))
+            }
             AppAction::ToggleHelp => {
                 self.toggle_help_menu();
                 Ok(ActionOutcome::consumed())
