@@ -63,7 +63,6 @@ pub enum BuiltinTextMateTheme {
     TokenLight,
     GruvboxMaterialDark,
     GruvboxMaterialLight,
-    Origin,
     Mfd,
     MfdDark,
     MfdStealth,
@@ -156,7 +155,6 @@ impl BuiltinTextMateTheme {
             Self::TokenLight => "token-light",
             Self::GruvboxMaterialDark => "gruvbox-material-dark",
             Self::GruvboxMaterialLight => "gruvbox-material-light",
-            Self::Origin => "origin",
             Self::Mfd => "mfd",
             Self::MfdDark => "mfd-dark",
             Self::MfdStealth => "mfd-stealth",
@@ -229,7 +227,6 @@ impl BuiltinTextMateTheme {
             Self::TokenLight,
             Self::GruvboxMaterialDark,
             Self::GruvboxMaterialLight,
-            Self::Origin,
             Self::Mfd,
             Self::MfdDark,
             Self::MfdStealth,
@@ -1010,7 +1007,6 @@ vendored_theme!(token_dark, "token-dark.json");
 vendored_theme!(token_light, "token-light.json");
 vendored_theme!(gruvbox_material_dark, "gruvbox-material-dark.json");
 vendored_theme!(gruvbox_material_light, "gruvbox-material-light.json");
-vendored_theme!(origin, "origin.json");
 vendored_theme!(mfd, "mfd.json");
 vendored_theme!(mfd_dark, "mfd-dark.json");
 vendored_theme!(mfd_stealth, "mfd-stealth.json");
@@ -1077,7 +1073,6 @@ fn builtin_theme(theme: BuiltinTextMateTheme) -> &'static TextMateTheme {
         BuiltinTextMateTheme::TokenLight => token_light(),
         BuiltinTextMateTheme::GruvboxMaterialDark => gruvbox_material_dark(),
         BuiltinTextMateTheme::GruvboxMaterialLight => gruvbox_material_light(),
-        BuiltinTextMateTheme::Origin => origin(),
         BuiltinTextMateTheme::Mfd => mfd(),
         BuiltinTextMateTheme::MfdDark => mfd_dark(),
         BuiltinTextMateTheme::MfdStealth => mfd_stealth(),

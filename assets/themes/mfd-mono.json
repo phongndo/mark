@@ -10,7 +10,7 @@
       "name": "Comments",
       "scope": "comment",
       "settings": {
-        "foreground": "#282830",
+        "foreground": "#575760",
         "fontStyle": "italic"
       }
     },

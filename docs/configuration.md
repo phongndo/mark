@@ -161,7 +161,6 @@ canonical `theme` values.
 - Everforest: `everforest-dark` and `everforest-light`.
 - Token: `token-dark` and `token-light`.
 - Gruvbox Material: `gruvbox-material-dark` and `gruvbox-material-light`.
-- Origin: `origin`.
 - Zenbones collection: `zenbones-dark`, `zenbones-light`, `duckbones`,
   `forestbones-dark`, `forestbones-light`, `kanagawabones`, `neobones-dark`,
   `neobones-light`, `nordbones`, `rosebones-dark`, `rosebones-light`,

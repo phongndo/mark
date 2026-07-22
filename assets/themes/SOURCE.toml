@@ -309,13 +309,8 @@ sha256 = "3eeaeadcbfca6475db1815b47dc714f4ce6b30f6f3b3eb8d4143ecae976823c4"
 
 [[source.theme]]
 id = "mfd-mono"
-source_path = "colors/mfd-mono.lua (adapted TextMate rules)"
-sha256 = "7580e5d99aa42128e74d726e215935ed24c29dc7f9b0f0ef140c6266d74e2bde"
-
-[[source.theme]]
-id = "origin"
-source_path = "colors/mfd-mono.lua + Ghostty mono palette (adapted TextMate rules)"
-sha256 = "42a73b08d00f375da2a62395ea8abd553a168972e00a4d673f9037b629cd72db"
+source_path = "colors/mfd-mono.lua (adapted TextMate rules; brighter muted text)"
+sha256 = "e4ad1d4b87f4a04e0710012bb280ea94880c70dc976345d262d93dbd448c87a4"
 
 [[source.theme]]
 id = "mfd-scarlet"

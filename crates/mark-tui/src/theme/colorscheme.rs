@@ -485,8 +485,7 @@ fn builtin_base16_palette(
             0xFBF1C7, 0xEBDAB4, 0x928374, 0x654735, 0x3C3836, 0xC14A4A, 0xC35E0A, 0xB47109,
             0x6C782E, 0x4C7A5D, 0x45707A, 0x945E80
         ),
-        Theme::Origin
-        | Theme::Mfd
+        Theme::Mfd
         | Theme::MfdDark
         | Theme::MfdStealth
         | Theme::MfdAmber
