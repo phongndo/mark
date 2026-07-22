@@ -134,6 +134,17 @@ impl RgbColor {
             blue: mix(self.blue, other.blue),
         }
     }
+
+    pub(crate) fn surface(self) -> Self {
+        let luminance =
+            (u16::from(self.red) * 3 + u16::from(self.green) * 6 + u16::from(self.blue)) / 10;
+        let contrast = if luminance < 160 {
+            Self::new(0xff, 0xff, 0xff)
+        } else {
+            Self::new(0, 0, 0)
+        };
+        self.blend(contrast, 0.08)
+    }
 }
 
 pub(crate) fn diff_theme_from_config(config: &SyntaxThemeConfig) -> MarkResult<DiffTheme> {
@@ -474,7 +485,8 @@ fn builtin_base16_palette(
             0xFBF1C7, 0xEBDAB4, 0x928374, 0x654735, 0x3C3836, 0xC14A4A, 0xC35E0A, 0xB47109,
             0x6C782E, 0x4C7A5D, 0x45707A, 0x945E80
         ),
-        Theme::Mfd
+        Theme::Origin
+        | Theme::Mfd
         | Theme::MfdDark
         | Theme::MfdStealth
         | Theme::MfdAmber
@@ -513,9 +525,6 @@ fn diff_theme_from_textmate(theme: BuiltinTextMateTheme, palette: Base16Scheme) 
     }
     if let Some(search) = color("editor.findMatchBackground") {
         result.search_match_bg = search.color();
-    }
-    if let Some(statusline) = color("statusBar.background") {
-        result.statusline_bg = statusline.color();
     }
     if let Some(addition) = color("gitDecoration.addedResourceForeground") {
         result.addition_fg = addition.color();

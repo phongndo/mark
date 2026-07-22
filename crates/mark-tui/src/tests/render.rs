@@ -3330,6 +3330,35 @@ fn packaged_builtin_themes_are_available() {
         let theme = builtin_diff_theme(Some(name)).expect("built-in theme should load");
 
         assert_ne!(theme.statusline_accent_bg, Color::Reset);
+        assert_ne!(
+            theme.gutter_bg, theme.background,
+            "{name} should distinguish gutters from the editor background"
+        );
+        assert_ne!(
+            theme.statusline_bg, theme.background,
+            "{name} should distinguish the status header from the editor background"
+        );
+        if let Color::Rgb(red, green, blue) = theme.background {
+            let luminance = |color| match color {
+                Color::Rgb(red, green, blue) => {
+                    Some((u16::from(red) * 3 + u16::from(green) * 6 + u16::from(blue)) / 10)
+                }
+                _ => None,
+            };
+            let background_luminance =
+                (u16::from(red) * 3 + u16::from(green) * 6 + u16::from(blue)) / 10;
+            if background_luminance < 160 {
+                assert!(
+                    luminance(theme.gutter_bg).is_some_and(|value| value > background_luminance),
+                    "{name} should use a lighter gutter on a dark background"
+                );
+                assert!(
+                    luminance(theme.statusline_bg)
+                        .is_some_and(|value| value > background_luminance),
+                    "{name} should use a lighter status header on a dark background"
+                );
+            }
+        }
         assert!(
             theme.syntax.color(SyntaxClass::Keyword).is_some(),
             "{name} should set syntax keyword foreground"
