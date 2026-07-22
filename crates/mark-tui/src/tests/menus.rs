@@ -3274,7 +3274,6 @@ fn color_scheme_picker_lists_supported_builtin_themes_alphabetically() {
             BuiltinTheme::Nord,
             BuiltinTheme::Nordbones,
             BuiltinTheme::Nordic,
-            BuiltinTheme::Origin,
             BuiltinTheme::RosebonesDark,
             BuiltinTheme::RosebonesLight,
             BuiltinTheme::SeoulbonesDark,
