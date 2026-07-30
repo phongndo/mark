@@ -30,6 +30,7 @@ use crate::{
 
 mod content;
 mod context;
+mod empty;
 mod split;
 mod unified;
 pub(crate) use content::{
@@ -46,6 +47,9 @@ pub(crate) use context::{
     context_expand_marker_for_theme, context_hide_line, context_hide_marker_for_theme,
     context_show_line, render_context_line, render_context_line_wrapped,
 };
+use empty::draw_empty_diff;
+#[cfg(test)]
+pub(crate) use empty::empty_diff_message;
 #[cfg(test)]
 pub(crate) use split::{SplitCellRender, SplitSide, split_cell_spans_at_scroll};
 pub(crate) use split::{
@@ -59,19 +63,7 @@ pub(crate) use unified::{render_unified_line_at_scroll, row_bg};
 
 pub(crate) fn draw_diff(frame: &mut Frame<'_>, app: &mut DiffApp, area: Rect) {
     if app.document.model.is_empty() {
-        let message = if app.filters.active() && !app.document.base_changeset.files.is_empty() {
-            "No files match filters."
-        } else {
-            "No changes."
-        };
-        frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                message,
-                Style::default().fg(app.config.theme.muted),
-            )))
-            .style(Style::default().bg(diff_base_bg(app.config.theme))),
-            area,
-        );
+        draw_empty_diff(frame, app, area);
         return;
     }
 

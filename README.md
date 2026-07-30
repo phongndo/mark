@@ -78,8 +78,8 @@ Nightly binaries report their channel and build commit in `mark --version`.
 
 ```sh
 mark                         # review current worktree changes
-mark diff --base main        # review current branch against main
-mark diff main feature       # review a revision range
+mark main                    # review current branch against main
+mark main feature            # review a revision range
 mark show HEAD~1             # review one commit
 mark review 123              # review GitHub PR #123 from the current repo
 mark patch changes.diff      # review an existing patch file
@@ -110,27 +110,31 @@ row local run are documented in the
 
 ## How it compares
 
-These tools solve related but different problems. Mark and
+These tools solve related but different problems. Mark,
+[Tuicr](https://github.com/agavra/tuicr), and
 [Hunk](https://github.com/modem-dev/hunk) are interactive reviewers,
 [delta](https://github.com/dandavison/delta) is primarily a syntax-highlighting
 pager, and [Difftastic](https://github.com/Wilfred/difftastic) is a structural
 diff engine.
 
-| Built-in capability | Mark | Hunk | delta | Difftastic |
-| --- | :---: | :---: | :---: | :---: |
-| Interactive multi-file review UI | Yes | Yes | — | — |
-| Split / side-by-side view | Yes | Yes | Yes | Yes |
-| Runtime layout switching | Yes | Yes | — | — |
-| Inline review annotations | Yes | Yes | — | — |
-| Live worktree or file reload | Yes | Yes | — | — |
-| File filtering | Yes | Yes | — | — |
-| In-diff text search | Yes | — | — | — |
-| Direct GitHub pull request review | Yes | — | — | — |
-| Git pager workflow | Yes | Yes | Yes | — |
-| Git difftool / external-diff workflow | Yes | Yes | — | Yes |
-| Native Jujutsu and Sapling detection | — | Yes | — | — |
-| Structural, syntax-aware diff algorithm | — | — | — | Yes |
-| Syntax highlighting | Yes | Yes | Yes | Yes |
+| Built-in capability | Mark | Tuicr | Hunk | delta | Difftastic |
+| --- | :---: | :---: | :---: | :---: | :---: |
+| Interactive multi-file review UI | Yes | Yes | Yes | — | — |
+| Split / side-by-side view | Yes | Yes | Yes | Yes | Yes |
+| Runtime layout switching | Yes | Yes | Yes | — | — |
+| Inline review annotations | Yes | Yes | Yes | — | — |
+| Persistent review sessions | — | Yes | — | — | — |
+| GitHub review submission | — | Yes | — | — | — |
+| GitLab merge request review | — | Yes | — | — | — |
+| Live worktree or file reload | Yes | — | Yes | — | — |
+| File filtering | Yes | Yes | Yes | — | — |
+| In-diff text search | Yes | Yes | — | — | — |
+| Direct GitHub pull request review | Yes | Yes | — | — | — |
+| Git pager workflow | Yes | — | Yes | Yes | — |
+| Git difftool / external-diff workflow | Yes | — | Yes | — | Yes |
+| Native non-Git VCS support | — | Jujutsu, Mercurial | Jujutsu, Sapling | — | — |
+| Structural, syntax-aware diff algorithm | — | — | — | — | Yes |
+| Syntax highlighting | Yes | Yes | Yes | Yes | Yes |
 
 The table compares documented, built-in workflows. Each tool can be composed
 with other Git and shell commands beyond what is listed here.
@@ -158,6 +162,7 @@ bundle the CLI.
 
 ```sh
 pi install npm:pi-mark
+```
 
 The slash command moved from `/diff`, `/show`, and `/patch` to `/mark` with
 subcommands (`/mark diff`, `/mark show`, `/mark patch`). `PI_DX_BIN` is now

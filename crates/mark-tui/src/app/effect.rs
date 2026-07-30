@@ -152,7 +152,7 @@ impl DiffApp {
                 draft,
                 changed_item,
             } => {
-                if changed_item != OptionsMenuItem::ColorScheme {
+                if !changed_item.persists() {
                     return Ok(());
                 }
 

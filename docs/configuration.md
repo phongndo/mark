@@ -288,9 +288,11 @@ for one process.
 For captured/static pager output, `MARK_STATIC_RAW_FALLBACK_BYTES` controls the
 patch-size threshold where Mark skips formatted static rendering and prints the
 sanitized raw diff instead. The default is 128 MiB.
-The settings menu can change the decoration mode for the current session;
+The settings menu writes decoration mode changes back to the user config.
 `empty_fill` is config/CLI-controlled, and `no_borders` is config-only.
-Only Theme changes are written back to config.
+Layout, full-file mode, line wrapping, syntax highlighting, live reload, theme,
+and notification changes made through the settings menu are also persisted.
+Horizontal scroll lock remains session-only.
 
 ## Notifications
 
@@ -313,7 +315,7 @@ make UI behavior easier to trace.
 The configured `timeout_ms` is clamped to 10,000 ms.
 
 These notification settings can also be changed from the interactive settings
-menu for the current session.
+menu; changes there are written back to the user config.
 
 `[diff]` controls visual emphasis:
 

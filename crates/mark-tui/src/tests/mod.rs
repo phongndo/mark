@@ -2,8 +2,8 @@ use crate::render::{
     diff::{
         SplitCellRender, SplitLineRender, SplitSide, build_diff_viewport_lines,
         content_spans_at_scroll, context_expand_marker, context_hide_line, context_hide_marker,
-        context_show_line, empty_diff_fill_from, inline_bg, render_row, render_row_with_focus,
-        render_row_wrapped_with_focus, render_split_context_line_wrapped,
+        context_show_line, empty_diff_fill_from, empty_diff_message, inline_bg, render_row,
+        render_row_with_focus, render_row_wrapped_with_focus, render_split_context_line_wrapped,
         render_split_line_with_focus, render_unified_line_at_scroll, row_bg,
         split_cell_spans_at_scroll, syntax_fg,
     },

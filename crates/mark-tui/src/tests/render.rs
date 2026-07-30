@@ -1534,6 +1534,37 @@ fn file_sidebar_truncates_long_paths_before_stats() {
 }
 
 #[test]
+fn empty_diff_message_explains_clean_worktree_and_available_actions() {
+    let app = DiffApp::new(
+        DiffOptions::default(),
+        changeset_with_files(&[]),
+        DiffLayoutMode::Unified,
+    );
+
+    let (title, hint) = empty_diff_message(&app);
+
+    assert_eq!(title, "Working tree is clean.");
+    assert!(hint.contains("m m choose source"));
+    assert!(hint.contains("? help"));
+}
+
+#[test]
+fn empty_diff_message_explains_filtered_results() {
+    let mut app = DiffApp::new(
+        DiffOptions::default(),
+        changeset_with_files(&["src/lib.rs"]),
+        DiffLayoutMode::Unified,
+    );
+    app.filters.file_filter = "missing".to_owned();
+    app.apply_filters(PostFilterNavigation::Preserve);
+
+    let (title, hint) = empty_diff_message(&app);
+
+    assert_eq!(title, "No files match the active filters.");
+    assert!(hint.contains("Ctrl-U clear filters"));
+}
+
+#[test]
 fn statusline_header_right_aligns_current_file() {
     let changeset = changeset_with_files(&["src/lib.rs", "README.md", "docs/guide.md"]);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
@@ -1562,6 +1593,29 @@ fn statusline_header_right_aligns_current_file() {
     assert_eq!(file.style.fg, Some(app.config.theme.statusline_info_fg));
     assert_eq!(file.style.bg, Some(app.config.theme.statusline_info_bg));
     assert!(file.style.add_modifier.contains(Modifier::BOLD));
+}
+
+#[test]
+fn statusline_header_shows_saved_annotation_count() {
+    use crate::annotation::AnnotationKey;
+
+    let changeset = changeset_with_files(&["src/lib.rs"]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    let key = (0..app.document.model.len())
+        .find_map(|row| {
+            app.document
+                .model
+                .row(row)
+                .and_then(|row| AnnotationKey::from_ui_row(&app.document.changeset, row))
+        })
+        .expect("diff should contain an annotatable row");
+    app.annotations_state
+        .annotations
+        .insert(key, "review note".to_owned());
+
+    let text = line_text(&statusline_header_line(&app, 120));
+
+    assert!(text.contains("1 note"));
 }
 
 #[test]
