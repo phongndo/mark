@@ -180,6 +180,32 @@ pub(crate) fn push_statusline_left_spans(
             .add_modifier(Modifier::BOLD),
         remaining,
     );
+    let annotation_count = app.annotations_state.annotations.len();
+    if annotation_count > 0 {
+        push_fitted_statusline_span(
+            spans,
+            "  ",
+            Style::default().bg(statusline_bg(app.config.theme)),
+            remaining,
+        );
+        push_fitted_statusline_span(
+            spans,
+            format!(
+                "{} {}",
+                format_count(annotation_count),
+                if annotation_count == 1 {
+                    "note"
+                } else {
+                    "notes"
+                }
+            ),
+            Style::default()
+                .fg(app.config.theme.notice)
+                .bg(statusline_bg(app.config.theme))
+                .add_modifier(Modifier::BOLD),
+            remaining,
+        );
+    }
 }
 
 pub(crate) fn statusline_file_count_label(app: &DiffApp) -> String {

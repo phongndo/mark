@@ -404,7 +404,11 @@ impl DiffApp {
             self.notifications.toasts.configure(notification_settings);
             self.runtime.dirty = true;
         }
-        self.persist_options_menu_draft(changed_item);
+        let setting_was_applied = changed_item != OptionsMenuItem::SyntaxHighlighting
+            || draft.syntax_enabled == self.config.syntax.is_some();
+        if setting_was_applied {
+            self.persist_options_menu_draft(changed_item);
+        }
 
         if live_reload_reenabled {
             self.invalidate_diff_cache();
@@ -416,7 +420,7 @@ impl DiffApp {
     }
 
     fn persist_options_menu_draft(&mut self, changed_item: OptionsMenuItem) {
-        if changed_item != OptionsMenuItem::ColorScheme {
+        if !changed_item.persists() {
             return;
         }
 

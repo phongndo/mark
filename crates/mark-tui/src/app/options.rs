@@ -456,8 +456,13 @@ pub(crate) enum OptionsMenuItem {
 }
 
 // Construct the legacy-only variant so unused-option linting stays meaningful.
-// It remains session-only like every non-colorscheme TUI option.
 const _: OptionsMenuItem = OptionsMenuItem::ContextExpansion;
+
+impl OptionsMenuItem {
+    pub(crate) fn persists(self) -> bool {
+        !matches!(self, Self::HorizontalScrollLock)
+    }
+}
 
 pub(crate) const COMMON_OPTIONS_MENU_ITEMS: &[OptionsMenuItem] = &[
     // Review-view controls: most likely to vary per session.
@@ -559,34 +564,209 @@ pub(crate) fn persist_options_menu_draft_to_path(
     draft: OptionsDraft,
     changed_item: OptionsMenuItem,
 ) -> MarkResult<()> {
-    if changed_item != OptionsMenuItem::ColorScheme {
+    if !changed_item.persists() {
         return Ok(());
     }
 
-    let Some(SyntaxThemeConfig::Builtin { name: Some(name) }) =
-        color_scheme_config(draft.color_scheme)
-    else {
-        return Ok(());
-    };
-
-    let mut document = if path.exists() {
-        let contents = fs::read_to_string(path)?;
-        if contents.trim().is_empty() {
-            toml_edit::DocumentMut::new()
-        } else {
-            contents
-                .parse::<toml_edit::DocumentMut>()
-                .map_err(|error| {
-                    MarkError::Usage(format!("failed to parse {}: {error}", path.display()))
-                })?
-        }
+    let color_scheme = if changed_item == OptionsMenuItem::ColorScheme {
+        let Some(SyntaxThemeConfig::Builtin { name: Some(name) }) =
+            color_scheme_config(draft.color_scheme)
+        else {
+            return Ok(());
+        };
+        Some(name)
     } else {
-        toml_edit::DocumentMut::new()
+        None
     };
 
-    document.as_table_mut().remove("colorscheme");
-    document["theme"] = toml_edit::value(name);
+    let mut document = load_options_document(path)?;
+    match changed_item {
+        OptionsMenuItem::Layout => set_root_value(
+            &mut document,
+            "layout",
+            toml_edit::Value::from(layout_setting_label(draft.layout)),
+        ),
+        OptionsMenuItem::FullFile => {
+            document.as_table_mut().remove("show_full_file");
+            set_root_value(
+                &mut document,
+                "full_file",
+                toml_edit::Value::from(draft.full_file),
+            );
+        }
+        OptionsMenuItem::LiveReload => set_root_value(
+            &mut document,
+            "live_reload",
+            toml_edit::Value::from(draft.live_updates_enabled),
+        ),
+        OptionsMenuItem::ContextExpansion => {
+            remove_table_keys(
+                &mut document,
+                "diff",
+                &["context_lines", "context_expand", "expand_context"],
+            )?;
+            let value = match draft.context_expansion {
+                DiffContextExpansion::Lines(lines) => {
+                    toml_edit::Value::from(i64::try_from(lines).map_err(|_| {
+                        MarkError::Usage("context expansion is too large to persist".to_owned())
+                    })?)
+                }
+                DiffContextExpansion::Full => toml_edit::Value::from("full"),
+            };
+            set_table_value(&mut document, "diff", "context_expansion", value)?;
+        }
+        OptionsMenuItem::SyntaxHighlighting => set_root_value(
+            &mut document,
+            "syntax_highlighting",
+            toml_edit::Value::from(draft.syntax_enabled),
+        ),
+        OptionsMenuItem::LineWrapping => {
+            document.as_table_mut().remove("word_wrap");
+            document.as_table_mut().remove("wrap_lines");
+            set_root_value(
+                &mut document,
+                "line_wrapping",
+                toml_edit::Value::from(draft.line_wrapping),
+            );
+        }
+        OptionsMenuItem::HorizontalScrollLock => return Ok(()),
+        OptionsMenuItem::Decorations => {
+            if document
+                .get("decorations")
+                .and_then(toml_edit::Item::as_value)
+                .is_some_and(|value| value.as_inline_table().is_none())
+            {
+                document.as_table_mut().remove("decorations");
+            }
+            set_table_value(
+                &mut document,
+                "decorations",
+                "mode",
+                toml_edit::Value::from(decoration_preference_label(draft.decorations)),
+            )?;
+        }
+        OptionsMenuItem::ColorScheme => {
+            document.as_table_mut().remove("colorscheme");
+            set_root_value(
+                &mut document,
+                "theme",
+                toml_edit::Value::from(color_scheme.expect("built-in theme should have a name")),
+            );
+        }
+        OptionsMenuItem::NotificationMode => set_table_value(
+            &mut document,
+            "notifications",
+            "mode",
+            toml_edit::Value::from(notification_mode_label(draft.notification_mode)),
+        )?,
+        OptionsMenuItem::ToastCorner => set_table_value(
+            &mut document,
+            "notifications",
+            "corner",
+            toml_edit::Value::from(toast_corner_label(draft.toast_corner)),
+        )?,
+        OptionsMenuItem::ToastTimeout => set_table_value(
+            &mut document,
+            "notifications",
+            "timeout_ms",
+            toml_edit::Value::from(i64::try_from(draft.toast_timeout_ms).map_err(|_| {
+                MarkError::Usage("toast timeout is too large to persist".to_owned())
+            })?),
+        )?,
+        OptionsMenuItem::ToastMaxVisible => {
+            set_table_value(
+                &mut document,
+                "notifications",
+                "max_visible",
+                toml_edit::Value::from(i64::try_from(draft.toast_max_visible).map_err(|_| {
+                    MarkError::Usage("toast count is too large to persist".to_owned())
+                })?),
+            )?
+        }
+    }
 
     mark_core::path_utils::atomic_write(path, document.to_string().as_bytes())?;
     Ok(())
+}
+
+fn load_options_document(path: &Path) -> MarkResult<toml_edit::DocumentMut> {
+    if !path.exists() {
+        return Ok(toml_edit::DocumentMut::new());
+    }
+
+    let contents = fs::read_to_string(path)?;
+    if contents.trim().is_empty() {
+        return Ok(toml_edit::DocumentMut::new());
+    }
+
+    contents
+        .parse()
+        .map_err(|error| MarkError::Usage(format!("failed to parse {}: {error}", path.display())))
+}
+
+fn set_root_value(document: &mut toml_edit::DocumentMut, key: &str, value: toml_edit::Value) {
+    set_item_value(&mut document.as_table_mut()[key], value);
+}
+
+fn set_table_value(
+    document: &mut toml_edit::DocumentMut,
+    table_name: &str,
+    key: &str,
+    value: toml_edit::Value,
+) -> MarkResult<()> {
+    if document.get(table_name).is_none() {
+        document[table_name] = toml_edit::Item::Table(toml_edit::Table::new());
+    }
+    let item = document
+        .get_mut(table_name)
+        .ok_or_else(|| MarkError::Usage(format!("`{table_name}` must be a table")))?;
+    if let Some(table) = item.as_table_mut() {
+        set_item_value(&mut table[key], value);
+        return Ok(());
+    }
+    if let Some(table) = item
+        .as_value_mut()
+        .and_then(toml_edit::Value::as_inline_table_mut)
+    {
+        set_inline_table_value(table, key, value);
+        return Ok(());
+    }
+    Err(MarkError::Usage(format!("`{table_name}` must be a table")))
+}
+
+fn set_inline_table_value(
+    table: &mut toml_edit::InlineTable,
+    key: &str,
+    mut value: toml_edit::Value,
+) {
+    if let Some(existing) = table.get_mut(key) {
+        *value.decor_mut() = existing.decor().clone();
+        *existing = value;
+    } else {
+        table.insert(key, value);
+    }
+}
+
+fn remove_table_keys(
+    document: &mut toml_edit::DocumentMut,
+    table_name: &str,
+    keys: &[&str],
+) -> MarkResult<()> {
+    let Some(item) = document.get_mut(table_name) else {
+        return Ok(());
+    };
+    let table = item
+        .as_table_mut()
+        .ok_or_else(|| MarkError::Usage(format!("`{table_name}` must be a table")))?;
+    for key in keys {
+        table.remove(key);
+    }
+    Ok(())
+}
+
+fn set_item_value(item: &mut toml_edit::Item, mut value: toml_edit::Value) {
+    if let Some(existing) = item.as_value() {
+        *value.decor_mut() = existing.decor().clone();
+    }
+    *item = toml_edit::Item::Value(value);
 }

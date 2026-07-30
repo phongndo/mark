@@ -20,8 +20,8 @@ options:
 
 examples:
   mark
-  mark diff --base main
-  mark diff main feature
+  mark main
+  mark main feature
   mark difftool -- \"$LOCAL\" \"$REMOTE\" \"$MERGED\"
   mark show
   mark show HEAD~1
@@ -44,7 +44,7 @@ pub(crate) const RELEASE_REPO: &str = "phongndo/mark";
 #[command(
     name = "mark",
     version = CLI_VERSION,
-    about = "Terminal Git diff review tool",
+    about = "Fast, keyboard-first terminal Git diff reviewer",
     override_usage = "mark [OPTIONS] [COMMAND|REV] [REV]",
     help_template = HELP_TEMPLATE,
     next_help_heading = "options",
@@ -69,7 +69,7 @@ pub(crate) fn help_styles() -> Styles {
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
     #[command(
-        about = "Review a Git diff",
+        about = "Review local changes or a revision range",
         after_help = "\
 examples:
   mark diff
@@ -105,7 +105,7 @@ examples:
     )]
     Show(ShowArgs),
     #[command(
-        about = "Review a hosted code review",
+        about = "Open a GitHub pull request for review",
         after_help = "\
 examples:
   mark review 123
@@ -220,7 +220,8 @@ pub(crate) struct SyntaxAvailableArgs {
 
 #[derive(Debug, Args, Default)]
 pub(crate) struct RepoArgs {
-    #[arg(short = 'r', long)]
+    /// Run against this repository instead of the current directory.
+    #[arg(short = 'r', long, value_name = "PATH")]
     pub(crate) repo: Option<PathBuf>,
 }
 
@@ -233,6 +234,7 @@ pub(crate) struct DisplayArgs {
     pub(crate) decorations: DecorationArgs,
     #[command(flatten)]
     pub(crate) empty_diff_fill: EmptyDiffFillArgs,
+    /// Print diff statistics instead of opening the reviewer.
     #[arg(short = 's', long)]
     pub(crate) stat: bool,
 }
@@ -331,12 +333,15 @@ impl EmptyDiffFillArgs {
 
 #[derive(Debug, Args, Default)]
 pub(crate) struct DiffArgs {
+    /// One revision is a worktree base; two revisions compare a range.
     #[arg(value_name = "REV", num_args = 0..=2)]
     pub(crate) revs: Vec<String>,
     #[command(flatten)]
     pub(crate) repo: RepoArgs,
-    #[arg(short = 'b', long)]
+    /// Compare the worktree with the merge base of this revision and HEAD.
+    #[arg(short = 'b', long, value_name = "REV")]
     pub(crate) base: Option<String>,
+    /// Exclude untracked files from a worktree review.
     #[arg(long = "no-untracked")]
     pub(crate) no_untracked: bool,
     #[command(flatten)]

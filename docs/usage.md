@@ -19,9 +19,12 @@ Common local review modes:
 
 ```sh
 mark diff --no-untracked
-mark diff --base main
-mark diff main feature
+mark main                  # current branch against main
+mark main feature          # revision range
 ```
+
+The explicit forms `mark diff --base main` and `mark diff main feature` are
+equivalent when preferred for scripts or discoverability.
 
 Use `--repo` when running from outside the target repository:
 

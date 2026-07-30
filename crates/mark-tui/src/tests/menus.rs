@@ -1396,7 +1396,7 @@ fn options_menu_toggles_setting_on_enter() {
 }
 
 #[test]
-fn options_menu_persistence_writes_only_theme_and_migrates_legacy_key() {
+fn options_menu_theme_persistence_updates_only_theme_and_migrates_legacy_key() {
     let dir = temp_test_dir("settings-menu-persist-colorscheme-only");
     let path = dir.join("config.toml");
     fs::create_dir_all(&dir).expect("test dir should be created");
@@ -1496,11 +1496,122 @@ context_expand = 7
 }
 
 #[test]
-fn options_menu_session_only_settings_do_not_rewrite_config() {
-    let dir = temp_test_dir("settings-menu-session-only-no-rewrite");
+fn options_menu_decorations_persistence_preserves_inline_table_fields() {
+    let dir = temp_test_dir("settings-menu-persist-inline-decorations");
     let path = dir.join("config.toml");
     fs::create_dir_all(&dir).expect("test dir should be created");
-    let original = r#"
+    fs::write(
+        &path,
+        r#"decorations = { mode = "fancy", empty_fill = false, no_borders = true } # keep this comment
+"#,
+    )
+    .expect("settings file should be written");
+
+    persist_options_menu_draft_to_path(
+        &path,
+        OptionsDraft {
+            decorations: DecorationPreference::Minimal,
+            ..default_options_draft()
+        },
+        OptionsMenuItem::Decorations,
+    )
+    .expect("decorations should persist");
+
+    let saved_text = fs::read_to_string(&path).expect("settings file should be readable");
+    assert!(saved_text.contains(
+        r#"decorations = { mode = "minimal", empty_fill = false, no_borders = true } # keep this comment"#
+    ));
+    let saved: toml::Value = toml::from_str(&saved_text).expect("settings should stay valid toml");
+    let decorations = saved["decorations"]
+        .as_table()
+        .expect("decorations should stay a table");
+    assert_eq!(
+        decorations.get("mode").and_then(toml::Value::as_str),
+        Some("minimal")
+    );
+    assert_eq!(
+        decorations.get("empty_fill").and_then(toml::Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        decorations.get("no_borders").and_then(toml::Value::as_bool),
+        Some(true)
+    );
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn options_menu_notification_persistence_supports_inline_tables() {
+    let dir = temp_test_dir("settings-menu-persist-inline-notifications");
+    let path = dir.join("config.toml");
+    fs::create_dir_all(&dir).expect("test dir should be created");
+    fs::write(
+        &path,
+        r#"notifications = { mode = "default", corner = "top-right", timeout_ms = 1500, max_visible = 3 } # keep this comment
+"#,
+    )
+    .expect("settings file should be written");
+
+    let draft = OptionsDraft {
+        notification_mode: NotificationMode::Debug,
+        toast_corner: ToastCorner::BottomLeft,
+        toast_timeout_ms: 5_000,
+        toast_max_visible: 5,
+        ..default_options_draft()
+    };
+    for changed_item in [
+        OptionsMenuItem::NotificationMode,
+        OptionsMenuItem::ToastCorner,
+        OptionsMenuItem::ToastTimeout,
+        OptionsMenuItem::ToastMaxVisible,
+    ] {
+        persist_options_menu_draft_to_path(&path, draft, changed_item)
+            .expect("notification setting should persist");
+    }
+
+    let saved_text = fs::read_to_string(&path).expect("settings file should be readable");
+    assert!(saved_text.contains(
+        r#"notifications = { mode = "debug", corner = "bottom-left", timeout_ms = 5000, max_visible = 5 } # keep this comment"#
+    ));
+    let saved: toml::Value = toml::from_str(&saved_text).expect("settings should stay valid toml");
+    let notifications = saved["notifications"]
+        .as_table()
+        .expect("notifications should stay a table");
+    assert_eq!(
+        notifications.get("mode").and_then(toml::Value::as_str),
+        Some("debug")
+    );
+    assert_eq!(
+        notifications.get("corner").and_then(toml::Value::as_str),
+        Some("bottom-left")
+    );
+    assert_eq!(
+        notifications
+            .get("timeout_ms")
+            .and_then(toml::Value::as_integer),
+        Some(5_000)
+    );
+    assert_eq!(
+        notifications
+            .get("max_visible")
+            .and_then(toml::Value::as_integer),
+        Some(5)
+    );
+
+    let _ = fs::remove_dir_all(dir);
+}
+
+#[test]
+fn options_menu_persists_durable_settings_and_preserves_unrelated_config() {
+    let dir = temp_test_dir("settings-menu-persist-durable");
+    let path = dir.join("config.toml");
+    fs::create_dir_all(&dir).expect("test dir should be created");
+    fs::write(
+        &path,
+        r#"
+# keep this user comment
+layout = "dynamic" # keep this inline comment
 word_wrap = false
 wrap_lines = false
 
@@ -1515,8 +1626,9 @@ mode = "default"
 corner = "top-right"
 timeout_ms = 1500
 max_visible = 3
-"#;
-    fs::write(&path, original).expect("settings file should be written");
+"#,
+    )
+    .expect("settings file should be written");
 
     let draft = OptionsDraft {
         layout: LayoutSetting::Split,
@@ -1539,7 +1651,6 @@ max_visible = 3
         OptionsMenuItem::FullFile,
         OptionsMenuItem::ContextExpansion,
         OptionsMenuItem::LineWrapping,
-        OptionsMenuItem::HorizontalScrollLock,
         OptionsMenuItem::SyntaxHighlighting,
         OptionsMenuItem::Decorations,
         OptionsMenuItem::LiveReload,
@@ -1549,28 +1660,79 @@ max_visible = 3
         OptionsMenuItem::ToastMaxVisible,
     ] {
         persist_options_menu_draft_to_path(&path, draft, changed_item)
-            .expect("session-only setting should not fail persistence");
-        assert_eq!(
-            fs::read_to_string(&path).expect("settings file should be readable"),
-            original
-        );
+            .expect("durable setting should persist");
     }
+
+    let saved_text = fs::read_to_string(&path).expect("settings file should be readable");
+    assert!(saved_text.contains("# keep this user comment"));
+    assert!(saved_text.contains("# keep this inline comment"));
+    let saved: toml::Value = toml::from_str(&saved_text).expect("settings should stay valid toml");
+    let diff = saved["diff"].as_table().expect("diff should stay a table");
+    let decorations = saved["decorations"]
+        .as_table()
+        .expect("decorations should be a table");
+    let notifications = saved["notifications"]
+        .as_table()
+        .expect("notifications should stay a table");
+
+    assert_eq!(saved["layout"].as_str(), Some("split"));
+    assert_eq!(saved["full_file"].as_bool(), Some(true));
+    assert_eq!(saved["live_reload"].as_bool(), Some(false));
+    assert_eq!(saved["syntax_highlighting"].as_bool(), Some(false));
+    assert_eq!(saved["line_wrapping"].as_bool(), Some(true));
+    assert!(saved.get("word_wrap").is_none());
+    assert!(saved.get("wrap_lines").is_none());
+    assert_eq!(
+        decorations.get("mode").and_then(toml::Value::as_str),
+        Some("minimal")
+    );
+    assert_eq!(
+        diff.get("line_background").and_then(toml::Value::as_str),
+        Some("none")
+    );
+    assert_eq!(
+        diff.get("context_expansion").and_then(toml::Value::as_str),
+        Some("full")
+    );
+    assert!(diff.get("context_lines").is_none());
+    assert!(diff.get("context_expand").is_none());
+    assert!(diff.get("expand_context").is_none());
+    assert_eq!(
+        notifications.get("mode").and_then(toml::Value::as_str),
+        Some("debug")
+    );
+    assert_eq!(
+        notifications.get("corner").and_then(toml::Value::as_str),
+        Some("bottom-left")
+    );
+    assert_eq!(
+        notifications
+            .get("timeout_ms")
+            .and_then(toml::Value::as_integer),
+        Some(5_000)
+    );
+    assert_eq!(
+        notifications
+            .get("max_visible")
+            .and_then(toml::Value::as_integer),
+        Some(5)
+    );
 
     let _ = fs::remove_dir_all(dir);
 }
 
 #[test]
-fn options_menu_session_only_settings_do_not_create_config() {
+fn options_menu_session_only_setting_does_not_create_config() {
     let dir = temp_test_dir("settings-menu-session-only-no-create");
     let path = dir.join("config.toml");
 
     persist_options_menu_draft_to_path(
         &path,
         OptionsDraft {
-            live_updates_enabled: false,
+            horizontal_scroll_locked: true,
             ..default_options_draft()
         },
-        OptionsMenuItem::LiveReload,
+        OptionsMenuItem::HorizontalScrollLock,
     )
     .expect("session-only setting should not create config");
 
@@ -1667,7 +1829,7 @@ fn options_menu_keeps_failed_syntax_enable_session_only() {
 }
 
 #[test]
-fn options_menu_toggles_full_file_for_the_session() {
+fn options_menu_toggles_full_file_and_marks_setting_for_persistence() {
     let repo = temp_test_dir("full-file-option");
     fs::create_dir_all(&repo).expect("repo directory should be created");
     let text = (1..=20)
@@ -1696,7 +1858,10 @@ fn options_menu_toggles_full_file_for_the_session() {
             ..
         })
     ));
-    assert_eq!(app.config.last_persisted_options_menu_draft, None);
+    assert!(matches!(
+        app.config.last_persisted_options_menu_draft,
+        Some((_, OptionsMenuItem::FullFile))
+    ));
 }
 
 #[test]
@@ -1722,6 +1887,10 @@ fn options_menu_toggles_line_wrapping_and_clamps_horizontal_scroll() {
     assert_eq!(app.viewport.horizontal_scroll, 0);
     assert_eq!(app.max_horizontal_scroll(), 0);
     assert_eq!(app.option_value(OptionsMenuItem::LineWrapping), "[x]");
+    assert!(matches!(
+        app.config.last_persisted_options_menu_draft,
+        Some((_, OptionsMenuItem::LineWrapping))
+    ));
 }
 
 #[test]
@@ -1749,10 +1918,11 @@ fn options_menu_toggles_horizontal_scroll_lock() {
         app.option_value(OptionsMenuItem::HorizontalScrollLock),
         "[x]"
     );
+    assert_eq!(app.config.last_persisted_options_menu_draft, None);
 }
 
 #[test]
-fn options_menu_cycles_decorations_session_only() {
+fn options_menu_cycles_decorations_and_marks_setting_for_persistence() {
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
 
@@ -1778,7 +1948,10 @@ fn options_menu_cycles_decorations_session_only() {
     );
     assert_eq!(app.config.theme.decorations.mode, DecorationMode::Minimal);
     assert_eq!(app.option_value(OptionsMenuItem::Decorations), "[minimal]");
-    assert_eq!(app.config.last_persisted_options_menu_draft, None);
+    assert!(matches!(
+        app.config.last_persisted_options_menu_draft,
+        Some((_, OptionsMenuItem::Decorations))
+    ));
 }
 
 #[test]
@@ -1830,7 +2003,7 @@ fn options_menu_cycles_notification_settings() {
 }
 
 #[test]
-fn options_menu_cycles_custom_notification_values_to_nearest_choices_session_only() {
+fn options_menu_cycles_custom_notification_values_to_nearest_choices() {
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
     app.config.syntax_settings.notifications = NotificationSettings::new(
@@ -1849,7 +2022,10 @@ fn options_menu_cycles_custom_notification_values_to_nearest_choices_session_onl
     app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE))
         .expect("right should cycle custom toast timeout to next choice");
     assert_eq!(app.config.syntax_settings.notifications.timeout_ms(), 2_500);
-    assert_eq!(app.config.last_persisted_options_menu_draft, None);
+    assert!(matches!(
+        app.config.last_persisted_options_menu_draft,
+        Some((_, OptionsMenuItem::ToastTimeout))
+    ));
 
     app.set_options_menu_selection(11);
     assert_eq!(
@@ -1859,7 +2035,10 @@ fn options_menu_cycles_custom_notification_values_to_nearest_choices_session_onl
     app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE))
         .expect("right should cycle custom toast max visible to nearest choice");
     assert_eq!(app.config.syntax_settings.notifications.max_visible(), 5);
-    assert_eq!(app.config.last_persisted_options_menu_draft, None);
+    assert!(matches!(
+        app.config.last_persisted_options_menu_draft,
+        Some((_, OptionsMenuItem::ToastMaxVisible))
+    ));
 }
 
 #[test]
