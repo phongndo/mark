@@ -1,11 +1,9 @@
 #!/bin/sh
 # Profile-guided release build for the `mark` binary.
 #
-# Instruments the workspace, trains on the committed engine corpora (via the
-# profile-cold example) and the mega-diff bench fixtures (via mark-bench),
-# merges the profiles, and rebuilds `mark` with profile-use. Engine sweep
-# gains over a plain release build measured at +5-35% per corpus
-# (docs/performance-reports/2026-07-12-engine-optimization.md).
+# Instruments Mark, trains on whole-application benchmark fixtures, merges
+# the profiles, and rebuilds `mark` with profile-use. Syntaxmate owns its own
+# tokenizer-specific profiling and release artifacts.
 #
 # usage: scripts/build-pgo [target-dir]
 set -eu
@@ -21,13 +19,6 @@ if [ ! -x "$profdata" ]; then
     exit 1
 fi
 
-assets="$root/assets/grammars/languages"
-corpora="$root/target/textmate-performance/corpora/core-repeated"
-if [ ! -d "$corpora" ]; then
-    echo "building training corpora (tools/build-textmate-corpora.py)..."
-    python3 "$root/tools/build-textmate-corpora.py"
-fi
-
 fixtures="$root/target/syntax-fixtures"
 if [ ! -d "$fixtures/huge-mixed-stress" ]; then
     cargo build --release -p mark-bench --locked
@@ -40,27 +31,9 @@ mkdir -p "$profile_dir"
 
 echo "== building instrumented binaries =="
 RUSTFLAGS="-Cprofile-generate=$profile_dir" cargo build --release --locked \
-    -p mark-cli -p mark-bench -p mark-syntax --example profile-cold \
-    --target-dir "$target_dir/instrumented"
+    -p mark-cli -p mark-bench --target-dir "$target_dir/instrumented"
 
-pc="$target_dir/instrumented/release/examples/profile-cold"
 bench="$target_dir/instrumented/release/mark-bench"
-
-echo "== training: engine corpora =="
-for entry in \
-    "source.nix $corpora/nix/smoke.nix" \
-    "source.php $corpora/php/smoke.php" \
-    "source.cpp $corpora/cpp/stress.cpp" \
-    "text.html.markdown $corpora/markdown/stress.md" \
-    "source.ts $corpora/typescript/stress.ts" \
-    "source.rust $corpora/rust/stress.rs" \
-    "source.python $corpora/python/stress.py" \
-    "source.go $corpora/go/stress.go"; do
-    scope=${entry%% *}
-    file=${entry#* }
-    [ -f "$file" ] && "$pc" --mode process-cold --assets "$assets" \
-        --scope "$scope" "$file" 4 > /dev/null 2>&1 || true
-done
 
 echo "== training: whole-binary bench =="
 "$bench" measure --fixtures "$fixtures" --scenario huge-mixed-stress \

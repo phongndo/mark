@@ -1,10 +1,7 @@
-#[doc(hidden)]
-pub mod engine;
-#[doc(hidden)]
-pub mod grammars;
 mod highlight;
 mod language;
 mod paths;
+mod scopes;
 mod storage;
 #[cfg(test)]
 mod tests;
@@ -20,6 +17,8 @@ pub use paths::{
     colorscheme_dir, config_path, load_settings, settings_path, settings_read_path,
     settings_write_path,
 };
+#[cfg(feature = "diagnostics")]
+pub use syntaxmate::diagnostics::EngineCounters;
 pub use types::*;
 
 #[cfg(test)]
@@ -31,13 +30,13 @@ pub(crate) use paths::*;
 pub(crate) use storage::*;
 
 pub fn canonical_language(language: &str) -> Option<String> {
-    grammars::canonical_language(language)
+    syntaxmate::canonical_language(language)
 }
 
 pub fn has_language(language: &str) -> bool {
-    grammars::has_language(language)
+    syntaxmate::canonical_language(language).is_some()
 }
 
 pub fn classify_scope_name(scope: &str) -> Option<SyntaxClass> {
-    engine::scopes::classify_scope_name(scope)
+    scopes::classify_scope_name(scope)
 }
