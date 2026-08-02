@@ -10,7 +10,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const outputRoot = path.join(root, 'assets/themes')
 const check = process.argv.includes('--check')
 const require = createRequire(import.meta.url)
-const paths = [path.join(root, 'tools/golden-oracle')]
+const paths = [path.join(root, 'tools/theme-assets')]
 const resolve = name => require.resolve(name, { paths })
 const githubRoot = path.dirname(resolve('github-vscode-themes'))
 

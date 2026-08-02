@@ -9,13 +9,8 @@ import subprocess
 import sys
 from typing import Iterable
 
-LANES = ("rust", "syntax", "generated", "performance", "pi", "workflows")
+LANES = ("rust", "generated", "performance", "pi", "workflows")
 ZERO_SHA = "0" * 40
-GENERATED_DOC_SOURCES = {
-    "README.md",
-    "docs/configuration.md",
-    "docs/textmate-engine.md",
-}
 
 
 def _is(path: str, *names: str) -> bool:
@@ -43,12 +38,7 @@ def classify_paths(paths: Iterable[str]) -> dict[str, bool]:
         if path.startswith("crates/"):
             result["rust"] = True
             result["performance"] = True
-            if path.startswith("crates/mark-syntax/"):
-                result["syntax"] = True
-                result["generated"] = True
-
-        if path.startswith("assets/"):
-            result["syntax"] = True
+        if path.startswith("assets/themes/"):
             result["generated"] = True
             result["performance"] = True
 
@@ -66,14 +56,10 @@ def classify_paths(paths: Iterable[str]) -> dict[str, bool]:
             if _is(path, "scripts/check-startup", "scripts/build-pgo"):
                 result["performance"] = True
 
-        if path == "docs/language-status.md" or path in GENERATED_DOC_SOURCES:
-            result["generated"] = True
-
         if _is(path, "Cargo.toml", "Cargo.lock", "rust-toolchain.toml") or (
             path.startswith("crates/") and path.endswith("/Cargo.toml")
         ):
             result["rust"] = True
-            result["syntax"] = True
             result["generated"] = True
             result["performance"] = True
 
@@ -150,15 +136,7 @@ def main() -> int:
     paths = changed_paths(args.base, args.head)
     if paths is not None:
         subprocess.run(
-            [
-                "git",
-                "diff",
-                "--check",
-                f"{args.base}...{args.head}",
-                "--",
-                ".",
-                ":(exclude)crates/mark-syntax/tests/fixtures/**",
-            ],
+            ["git", "diff", "--check", f"{args.base}...{args.head}"],
             check=True,
         )
     result = {lane: True for lane in LANES} if paths is None else classify_paths(paths)

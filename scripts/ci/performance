@@ -29,6 +29,30 @@ cargo run -p mark-bench --locked -- measure \
   --json
 
 cargo run -p mark-bench --locked -- fixtures \
+  --out "$work_dir/syntax-rust" \
+  --scenario syntax-many-small-rust \
+  --force
+cargo run -p mark-bench --locked -- measure \
+  --fixtures "$work_dir/syntax-rust" \
+  --scenario syntax-many-small-rust \
+  --syntax-language rust \
+  --max-scroll-steps 20 \
+  --json > "$work_dir/syntax-rust.json"
+cat "$work_dir/syntax-rust.json"
+python3 - "$work_dir/syntax-rust.json" <<'PY'
+import json
+import sys
+
+report = json.load(open(sys.argv[1], encoding="utf-8"))
+syntax_runs = [run for run in report["runs"] if run["tui"]["syntax_enabled"]]
+if len(syntax_runs) != 1:
+    raise SystemExit(f"expected one syntax run, found {len(syntax_runs)}")
+metrics = syntax_runs[0]["tui"]["syntax"]
+if metrics["jobs_completed"] <= 0 or metrics["jobs_failed"] != 0:
+    raise SystemExit(f"syntax regression: {metrics}")
+PY
+
+cargo run -p mark-bench --locked -- fixtures \
   --out "$work_dir/mega-diff" \
   --scenario mega-diff-1m \
   --force
@@ -45,17 +69,4 @@ else
     --scenario mega-diff-1m \
     --max-scroll-steps 20 \
     --json
-fi
-
-cargo run -p mark-syntax --locked --release --example bundle-measure -- \
-  --assert-max-bundle-bytes 9000000
-
-if [ "$mode" = extended ]; then
-  cargo run -p mark-syntax --locked --release --example profile-cold -- \
-    --mode process-cold \
-    --assets assets/grammars/languages \
-    --scope source.rust \
-    --assert-min-mb-s 0.05 \
-    crates/mark-syntax/tests/fixtures/textmate/rust/stress.rs \
-    1
 fi

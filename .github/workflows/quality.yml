@@ -25,7 +25,6 @@ jobs:
     timeout-minutes: 5
     outputs:
       rust: ${{ steps.classify.outputs.rust }}
-      syntax: ${{ steps.classify.outputs.syntax }}
       generated: ${{ steps.classify.outputs.generated }}
       performance: ${{ steps.classify.outputs.performance }}
       pi: ${{ steps.classify.outputs.pi }}
@@ -37,6 +36,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Test change classifier
+        run: python3 -m unittest tools/test_ci_changes.py
 
       - name: Classify impacted lanes
         id: classify
@@ -81,8 +83,6 @@ jobs:
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    env:
-      MARK_TEXTMATE_STRICT: "1"
 
     steps:
       - name: Checkout
@@ -127,7 +127,7 @@ jobs:
         run: cargo check --workspace --all-targets --all-features --locked
 
   generated:
-    name: Generated and oracle contracts
+    name: Vendored theme contracts
     needs: changes
     if: needs.changes.outputs.generated == 'true'
     runs-on: ubuntu-latest
@@ -149,39 +149,10 @@ jobs:
         with:
           node-version: "24"
           cache: npm
-          cache-dependency-path: tools/golden-oracle/package-lock.json
+          cache-dependency-path: tools/theme-assets/package-lock.json
 
-      - name: Run generated and oracle suite
+      - name: Run vendored theme checks
         run: scripts/ci/generated
-
-  textmate-golden:
-    name: TextMate golden shard ${{ matrix.shard }}/4
-    needs: changes
-    if: needs.changes.outputs.syntax == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [0, 1, 2, 3]
-    env:
-      MARK_TEXTMATE_STRICT: "1"
-      MARK_TEXTMATE_SHARD_INDEX: ${{ matrix.shard }}
-      MARK_TEXTMATE_SHARD_TOTAL: "4"
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-        with:
-          persist-credentials: false
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
-        with:
-          toolchain: stable
-
-      - name: Run golden shard
-        run: cargo test -p mark-syntax --test textmate_golden --locked manifest_golden_cases_
 
   performance:
     name: Deterministic performance smoke
@@ -246,7 +217,6 @@ jobs:
       - rust
       - msrv
       - generated
-      - textmate-golden
       - performance
       - pi-mark
     if: always()
@@ -264,8 +234,6 @@ jobs:
           MSRV_RESULT: ${{ needs.msrv.result }}
           GENERATED_SELECTED: ${{ needs.changes.outputs.generated }}
           GENERATED_RESULT: ${{ needs.generated.result }}
-          SYNTAX_SELECTED: ${{ needs.changes.outputs.syntax }}
-          TEXTMATE_RESULT: ${{ needs.textmate-golden.result }}
           PERFORMANCE_SELECTED: ${{ needs.changes.outputs.performance }}
           PERFORMANCE_RESULT: ${{ needs.performance.result }}
           PI_SELECTED: ${{ needs.changes.outputs.pi }}
@@ -284,7 +252,6 @@ jobs:
             "rust:$RUST_SELECTED:$RUST_RESULT" \
             "msrv:$RUST_SELECTED:$MSRV_RESULT" \
             "generated:$GENERATED_SELECTED:$GENERATED_RESULT" \
-            "textmate:$SYNTAX_SELECTED:$TEXTMATE_RESULT" \
             "performance:$PERFORMANCE_SELECTED:$PERFORMANCE_RESULT" \
             "pi-mark:$PI_SELECTED:$PI_RESULT"
           do
