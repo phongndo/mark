@@ -10,7 +10,7 @@ repository.workspace = true
 mimalloc.workspace = true
 clap.workspace = true
 mark-diff.workspace = true
-mark-syntax.workspace = true
+mark-syntax = { workspace = true, features = ["diagnostics"] }
 mark-tui.workspace = true
 serde.workspace = true
 serde_json.workspace = true

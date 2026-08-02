@@ -201,9 +201,9 @@ Keybindings can be customized in the user config file. See
 
 ## Syntax languages
 
-Mark includes a Rust-native TextMate engine with 30 bundled languages. The
-engine uses the same grammar model as VS Code while emitting Mark's compact
-terminal syntax classes:
+Mark uses the Rust-native Syntaxmate TextMate engine with 264 bundled language
+IDs. Syntaxmate emits exact TextMate scopes; Mark's adapter derives compact
+terminal syntax classes while retaining those scopes for theme resolution:
 
 ```sh
 mark syntax add ruby elixir

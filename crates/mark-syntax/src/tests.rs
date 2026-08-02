@@ -363,7 +363,7 @@ fn syntax_update_selection_rejects_ambiguous_all_flag() {
 }
 
 #[test]
-fn direct_highlighting_uses_the_bundled_native_backend() {
+fn direct_highlighting_uses_syntaxmate() {
     let mut highlighter = SyntaxHighlighter::new();
 
     let highlighted = highlighter
@@ -371,11 +371,20 @@ fn direct_highlighting_uses_the_bundled_native_backend() {
         .unwrap();
 
     assert_eq!(highlighted.lines.len(), 3);
-    assert!(
-        highlighted
-            .lines
-            .iter()
-            .any(|line| { line.segments.iter().any(|segment| segment.class.is_some()) })
+    assert!(highlighted.lines[0].matches_text("fn main() {"));
+    let keyword = &highlighted.lines[0].segments[0];
+    assert_eq!((keyword.byte_start, keyword.byte_end), (0, 2));
+    assert_eq!(keyword.class, Some(SyntaxClass::Keyword));
+    assert_eq!(
+        highlighted.lines[0]
+            .scope_table
+            .stack_names(keyword.scope_stack)
+            .collect::<Vec<_>>(),
+        [
+            "source.rust",
+            "meta.function.definition.rust",
+            "keyword.other.fn.rust"
+        ]
     );
     assert!(highlighter.loaded_languages.contains("rust"));
 }

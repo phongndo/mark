@@ -1,0 +1,13 @@
+{
+  "name": "mark-theme-assets",
+  "private": true,
+  "description": "Development-only pinned sources for Mark's vendored TextMate themes.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@shikijs/themes": "3.23.0",
+    "github-vscode-themes": "6.3.4"
+  }
+}

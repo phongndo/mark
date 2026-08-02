@@ -950,15 +950,10 @@ name = "mark-syntax"
 version = "0.10.6"
 dependencies = [
  "mark-core",
- "memchr",
- "mimalloc",
- "miniz_oxide",
  "serde",
  "serde_json",
+ "syntaxmate",
  "toml",
- "unicode-general-category",
- "unicode-script",
- "unicode-segmentation",
  "unicode-width",
 ]
 
@@ -1751,6 +1746,21 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "syntaxmate"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32179258de61276e17335a8e22c28ee7a2b1ead184c635798f8f7d99f08556ae"
+dependencies = [
+ "memchr",
+ "miniz_oxide",
+ "serde",
+ "serde_json",
+ "unicode-general-category",
+ "unicode-script",
+ "unicode-segmentation",
 ]
 
 [[package]]

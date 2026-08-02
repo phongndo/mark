@@ -739,7 +739,7 @@ struct RawSyntaxEngineReport {
     highlight_micros: u128,
     bytes_per_second: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    counters: Option<mark_syntax::engine::counters::EngineCounters>,
+    counters: Option<mark_syntax::EngineCounters>,
 }
 
 trait DiffBenchmarkSelection {

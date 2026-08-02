@@ -27,11 +27,15 @@ class CiChangesTests(unittest.TestCase):
         result = changes.classify_paths(["docs/development.md", "CONTRIBUTING.md"])
         self.assertFalse(any(result.values()))
 
-    def test_managed_language_docs_select_generated_contracts(self):
+    def test_documentation_does_not_select_theme_contracts(self):
         result = changes.classify_paths(["README.md", "docs/configuration.md"])
+        self.assertFalse(any(result.values()))
+
+    def test_theme_assets_select_generated_contracts(self):
+        result = changes.classify_paths(["assets/themes/github-dark.json"])
         self.assertEqual(
             {lane for lane, selected in result.items() if selected},
-            {"generated"},
+            {"generated", "performance"},
         )
 
     def test_pi_change_is_isolated(self):
@@ -41,11 +45,11 @@ class CiChangesTests(unittest.TestCase):
             {"pi"},
         )
 
-    def test_syntax_change_selects_transitive_lanes(self):
+    def test_syntax_adapter_change_selects_rust_and_performance(self):
         result = changes.classify_paths(["crates/mark-syntax/src/lib.rs"])
         self.assertEqual(
             {lane for lane, selected in result.items() if selected},
-            {"rust", "syntax", "generated", "performance"},
+            {"rust", "performance"},
         )
 
     def test_workflow_change_runs_every_lane(self):
@@ -55,7 +59,6 @@ class CiChangesTests(unittest.TestCase):
     def test_cargo_change_runs_rust_and_catalog_contracts(self):
         result = changes.classify_paths(["Cargo.toml"])
         self.assertTrue(result["rust"])
-        self.assertTrue(result["syntax"])
         self.assertTrue(result["generated"])
         self.assertTrue(result["performance"])
 

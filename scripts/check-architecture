@@ -25,9 +25,25 @@ check_absent 'settings_write_path\(' -g '!effect.rs' -g '!options.rs' crates/mar
 check_absent 'persist_options_menu_draft_to_path\(' -g '!effect.rs' -g '!options.rs' crates/mark-tui/src/app
 check_absent 'ThreadPoolBuilder|rayon::(join|scope|spawn)' crates -g '*.rs' -g '!**/mark-runtime/src/lib.rs'
 check_absent '\.(par_iter|par_iter_mut|into_par_iter)\(' crates -g '*.rs' -g '!**/mark-diff/src/parser.rs' -g '!**/mark-tui/src/search.rs'
+check_absent 'syntaxmate::(engine|grammars)' crates/mark-syntax/src -g '*.rs'
+
+for removed_path in \
+  assets/grammars \
+  crates/mark-syntax/src/engine \
+  crates/mark-syntax/src/grammars \
+  crates/mark-syntax/tests/fixtures \
+  tools/golden-oracle
+do
+  if [ -e "$removed_path" ]; then
+    echo "$removed_path: duplicated Syntaxmate implementation or assets must not return" >&2
+    fail=1
+  fi
+done
 
 python3 - <<'PY'
 from pathlib import Path
+import json
+import subprocess
 import sys
 
 # Budgets are intentionally local to architectural seam files. Large data tables,
@@ -93,6 +109,43 @@ budgets = {
 }
 
 failed = False
+
+metadata = json.loads(
+    subprocess.check_output(
+        ['cargo', 'metadata', '--locked', '--format-version', '1'],
+        text=True,
+    )
+)
+syntaxmate_packages = [
+    package for package in metadata['packages'] if package['name'] == 'syntaxmate'
+]
+registry_source = 'registry+https://github.com/rust-lang/crates.io-index'
+if len(syntaxmate_packages) != 1:
+    print(
+        f'expected one resolved Syntaxmate package, found {len(syntaxmate_packages)}',
+        file=sys.stderr,
+    )
+    failed = True
+elif syntaxmate_packages[0].get('source') != registry_source:
+    print(
+        'Syntaxmate must resolve from crates.io without a path, Git, or patch override',
+        file=sys.stderr,
+    )
+    failed = True
+
+mark_syntax = next(
+    (package for package in metadata['packages'] if package['name'] == 'mark-syntax'),
+    None,
+)
+syntaxmate_dependencies = [] if mark_syntax is None else [
+    dependency
+    for dependency in mark_syntax['dependencies']
+    if dependency['name'] == 'syntaxmate'
+]
+if len(syntaxmate_dependencies) != 1 or syntaxmate_dependencies[0].get('source') != registry_source:
+    print('mark-syntax must declare Syntaxmate as a crates.io dependency', file=sys.stderr)
+    failed = True
+
 for path, max_lines in budgets.items():
     lines = Path(path).read_text().count('\n') + 1
     if lines > max_lines:

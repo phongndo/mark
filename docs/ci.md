@@ -11,8 +11,7 @@ Classify changes
   ├─ Workflow lint
   ├─ Rust correctness
   ├─ MSRV
-  ├─ Generated and oracle contracts
-  ├─ TextMate golden shards
+  ├─ Vendored theme contracts
   ├─ Deterministic performance smoke
   └─ pi-mark package quality
           ↓
@@ -26,7 +25,9 @@ lanes.
 
 The lane mapping lives in [`scripts/ci/changes.py`](../scripts/ci/changes.py).
 Keep it conservative and add a case to `tools/test_ci_changes.py` whenever a
-new generated artifact or cross-component dependency is introduced. Do not use
+new vendored asset or cross-component dependency is introduced. Syntaxmate owns
+its tokenizer oracle and generated-asset gates; Mark's Rust suite exercises the
+published API as a downstream consumer. Do not use
 workflow-level `paths` filters for required checks: GitHub can leave a skipped
 required workflow pending indefinitely.
 
