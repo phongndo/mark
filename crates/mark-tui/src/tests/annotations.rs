@@ -1736,13 +1736,14 @@ fn annotation_target_mode_shows_only_matching_hint_suffixes() {
 
     let expected_suffix = target.hint.strip_prefix(first).expect("remaining suffix");
     assert_eq!(
-        app.annotation_target_hint_at_visual_scroll(target.visual_scroll)
-            .map(|(hint, _, _, _)| hint),
+        app.annotation_target_hints_at_visual_scroll(target.visual_scroll)
+            .first()
+            .map(|(hint, _, _, _)| *hint),
         Some(expected_suffix)
     );
     assert!(
-        app.annotation_target_hint_at_visual_scroll(nonmatching_scroll)
-            .is_none()
+        app.annotation_target_hints_at_visual_scroll(nonmatching_scroll)
+            .is_empty()
     );
     let header = line_text(&statusline_header_line(&app, 80));
     assert!(header.contains(&format!("{first}… ·")));

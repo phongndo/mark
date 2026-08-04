@@ -1776,20 +1776,6 @@ impl DiffApp {
             .collect()
     }
 
-    pub(crate) fn annotation_target_hint_at_visual_scroll(
-        &self,
-        visual_scroll: usize,
-    ) -> Option<(
-        &str,
-        crate::annotation::AnnotationScope,
-        AnnotationSide,
-        bool,
-    )> {
-        self.annotation_target_hints_at_visual_scroll(visual_scroll)
-            .into_iter()
-            .next()
-    }
-
     pub(crate) fn annotation_cursor_at_model_row(&self, model_row: usize) -> bool {
         self.annotation_cursor_is_visible()
             && self

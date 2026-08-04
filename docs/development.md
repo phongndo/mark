@@ -41,7 +41,8 @@ just hooks
 hk's global hooks require Git 2.54 or newer. The Nix development shell provides
 a new enough Git. The hook command is a no-op in repositories without `hk.pkl`.
 This repository's pre-commit hook runs fast staged-file checks and safe fixers;
-pre-push enables the slower `full` and `pi` profiles for affected files.
+pre-push directly requires the slower Clippy, rust-analyzer, and affected
+`pi-mark` package checks.
 
 ## Common commands
 

@@ -41,7 +41,15 @@ local hygiene = new Mapping<String, Step | Group> {
   ["symlinks"] = Builtins.check_symlinks
   ["bom"] = Builtins.byte_order_marker
   ["line-endings"] = Builtins.mixed_line_ending
-  ["newlines"] = Builtins.newlines
+  ["newlines"] = (Builtins.newlines) {
+    // These files preserve the exact bytes from github-vscode-themes.
+    exclude = List(
+      "assets/themes/github-dark.json",
+      "assets/themes/github-dark-high-contrast.json",
+      "assets/themes/github-light.json",
+      "assets/themes/github-light-high-contrast.json",
+    )
+  }
   ["trailing-whitespace"] = Builtins.trailing_whitespace
 }
 
@@ -128,6 +136,16 @@ local all = new Mapping<String, Step | Group> {
   ...ci
 }
 
+// Pre-push quality gates are mandatory, not profile-gated. Hook-local
+// environment variables are passed to commands after hk selects steps, so
+// they cannot safely enable profiles used during selection.
+local prePush = new Mapping<String, Step | Group> {
+  ...fast
+  ["rust-analyzer"] = (full["rust-analyzer"]) { profiles = List() }
+  ["cargo-clippy"] = (full["cargo-clippy"]) { profiles = List() }
+  ["pi-check"] = (full["pi-check"]) { profiles = List() }
+}
+
 hooks {
   ["pre-commit"] {
     fix = true
@@ -135,10 +153,7 @@ hooks {
     steps = fast
   }
 
-  ["pre-push"] {
-    env { ["HK_PROFILE"] = "full,pi" }
-    steps = all
-  }
+  ["pre-push"] { steps = prePush }
 
   ["check"] { steps = all }
 
