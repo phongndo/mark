@@ -1,6 +1,6 @@
 use super::super::{AsyncJob, DiffApp, HunkFocusScrollBehavior, TrailingContextWorker};
 use crate::model::{
-    ContextKey, ContextSourceEntry, ContextSourceKey, FileIndex, HunkIndex, UiRow, line_after_hunk,
+    ContextKey, ContextSourceEntry, ContextSourceKey, FileIndex, HunkIndex, line_after_hunk,
 };
 use crate::runtime;
 use crate::syntax::{
@@ -202,13 +202,7 @@ impl DiffApp {
 
         let anchor = self
             .model_row_at_scroll(self.viewport.scroll)
-            .and_then(|(row, _)| {
-                if matches!(self.document.model.row(row), Some(UiRow::FileSeparator)) {
-                    self.document.model.file_at_row(row.saturating_add(1))
-                } else {
-                    self.document.model.file_at_row(row)
-                }
-            })
+            .and_then(|(row, _)| self.document.model.file_at_row(row))
             .map(|file| (file, self.relative_scroll_from_file_start(file)));
         let mut model_changed = false;
         if worker.generation == self.document.generation

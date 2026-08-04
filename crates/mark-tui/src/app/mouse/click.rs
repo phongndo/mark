@@ -1,9 +1,11 @@
 use super::super::DiffApp;
+use crate::annotation::{AnnotationKey, AnnotationSide};
+use crate::controls::DiffLayoutMode;
 use crate::render::annotations::{
     annotation_close_hit_at_column, annotation_edit_hit_at_column, annotation_submit_hit_at_column,
 };
 use crate::render::menus::diff_selector_width;
-use crate::render::viewport_plan::model_row_for_viewport_row;
+use crate::render::viewport_plan::{model_row_for_viewport_row, visual_scroll_for_viewport_row};
 
 impl DiffApp {
     pub(crate) fn handle_click(&mut self, column: u16, row: u16) {
@@ -157,18 +159,51 @@ impl DiffApp {
         {
             return true;
         }
-        if self
-            .viewport
-            .mouse_hover
-            .is_some_and(|(_, hover_row)| hover_row == viewport_row)
-            && self.try_open_annotation_draft_at_viewport_row(viewport_row, diff_column)
-        {
-            return true;
-        }
+        let selected_cursor =
+            self.select_annotation_cursor_at_viewport_row(diff_column, viewport_row);
+        let Some(model_row) = model_row_for_viewport_row(self, viewport_row) else {
+            return selected_cursor;
+        };
+        self.handle_context_at_row(model_row) || selected_cursor
+    }
 
+    fn select_annotation_cursor_at_viewport_row(
+        &mut self,
+        diff_column: u16,
+        viewport_row: u16,
+    ) -> bool {
+        if !self.annotation_cursor_enabled()
+            || self.filters.filter_input.is_some()
+            || visual_scroll_for_viewport_row(self, viewport_row).is_none()
+        {
+            return false;
+        }
         let Some(model_row) = model_row_for_viewport_row(self, viewport_row) else {
             return false;
         };
-        self.handle_context_at_row(model_row)
+        self.select_annotation_cursor_model_row(model_row);
+        self.select_split_annotation_side(model_row, diff_column);
+        true
+    }
+
+    fn select_split_annotation_side(&mut self, model_row: usize, diff_column: u16) {
+        if self.viewport.layout != DiffLayoutMode::Split {
+            return;
+        }
+        let side = if usize::from(diff_column) < self.viewport.viewport_width / 2 {
+            AnnotationSide::Old
+        } else {
+            AnnotationSide::New
+        };
+        let Some(row) = self.document.model.row(model_row) else {
+            return;
+        };
+        let Some(key) = AnnotationKey::candidates_from_ui_row(&self.document.changeset, row)
+            .into_iter()
+            .find(|key| key.side == side)
+        else {
+            return;
+        };
+        self.select_annotation_cursor(&key);
     }
 }

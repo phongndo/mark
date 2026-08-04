@@ -67,7 +67,6 @@ pub(crate) struct ViewportState {
     pub(crate) manual_hunk_focus: Option<(FileIndex, HunkIndex)>,
     pub(crate) terminal_area: Rect,
     pub(crate) rendered_diff_area: Option<Rect>,
-    pub(crate) mouse_hover: Option<(u16, u16)>,
 }
 
 impl ViewportState {
@@ -127,6 +126,7 @@ impl FileSidebarState {
 pub(crate) struct AnnotationState {
     pub(crate) annotations: AnnotationStore,
     pub(crate) annotation_rows: RefCell<HashMap<AnnotationKey, Option<usize>>>,
+    pub(crate) annotation_keys_by_row: RefCell<Option<HashMap<usize, Vec<AnnotationKey>>>>,
     pub(crate) annotation_heights: RefCell<HashMap<AnnotationKey, AnnotationHeightCacheEntry>>,
     pub(crate) annotation_draft: Option<AnnotationDraft>,
     pub(crate) annotation_cursor: Option<AnnotationCursor>,

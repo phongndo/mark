@@ -237,7 +237,11 @@ fn selecting_file_scrolls_file_to_top_and_focuses_its_first_hunk() {
 
     assert_eq!(
         app.viewport.scroll,
-        app.document.model.file_start_row(1).unwrap()
+        app.document
+            .model
+            .file_start_row(1)
+            .unwrap()
+            .min(app.max_scroll())
     );
     assert_eq!(app.sidebar.selected_file, FILE_1);
     assert_eq!(app.focused_hunk_for_viewport(7), Some((FILE_1, HUNK_0)));
@@ -351,6 +355,7 @@ fn focused_hunk_editor_target_falls_back_to_hunk_start() {
     let repo = PathBuf::from("/repo");
     let changeset = changeset_with_hunks_at(repo.clone(), &[20, 40]);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.config.annotation_targeting = AnnotationTargeting::Hints;
     app.set_viewport_rows(5);
     app.set_scroll(1);
 
@@ -1001,16 +1006,15 @@ fn path_changeset_removes_file_when_diff_disappears() {
 }
 
 #[test]
-fn ui_model_inserts_file_separator_between_files() {
+fn ui_model_places_file_headers_without_separator_rows() {
     let changeset = changeset_with_files(&["a.rs", "b.rs"]);
     let model = UiModel::new(&changeset, DiffLayoutMode::Unified, &HashMap::new());
 
     assert_eq!(model.file_start_row(0), Some(0));
-    assert_eq!(model.file_start_row(1), Some(4));
-    assert_eq!(model.row(3), Some(UiRow::FileSeparator));
-    assert_eq!(model.row(4), Some(UiRow::FileHeader(FILE_1)));
-    assert_eq!(model.file_at_row(3), Some(0));
-    assert_eq!(model.file_at_row(4), Some(1));
+    assert_eq!(model.file_start_row(1), Some(3));
+    assert_eq!(model.row(3), Some(UiRow::FileHeader(FILE_1)));
+    assert_eq!(model.file_at_row(2), Some(0));
+    assert_eq!(model.file_at_row(3), Some(1));
 }
 
 #[test]
@@ -1260,7 +1264,6 @@ fn file_filter_edit_with_active_grep_preserves_current_grep_match() {
     app.apply_filters(PostFilterNavigation::JumpToGrep);
     app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE))
         .expect("n should move to next grep match");
-    let scroll_before_file_filter = app.viewport.scroll;
 
     app.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE))
         .expect("f should open file filter");
@@ -1270,8 +1273,8 @@ fn file_filter_edit_with_active_grep_preserves_current_grep_match() {
     }
 
     assert_eq!(visible_paths(&app), vec!["a.rs", "b.rs", "c.rs"]);
-    assert_eq!(app.current_grep_match_row(), Some(6));
-    assert_eq!(app.viewport.scroll, scroll_before_file_filter);
+    assert_eq!(app.current_grep_match_row(), Some(5));
+    assert!((app.viewport.scroll..app.viewport.scroll + app.viewport.viewport_rows).contains(&5));
 }
 
 #[test]

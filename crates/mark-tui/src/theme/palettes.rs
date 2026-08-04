@@ -588,8 +588,8 @@ impl DiffTheme {
             file: palette.text.color(),
             hunk: palette.mauve.color(),
             notice: palette.green.color(),
-            cursor: palette.text.color(),
-            cursor_line_bg: palette.base.blend(palette.text, 0.10).color(),
+            cursor: Color::White,
+            cursor_line_bg: palette.surface0.color(),
             muted: palette.overlay0.color(),
             gutter_bg: palette.base.surface().color(),
             empty_diff: palette.surface0.color(),
@@ -638,8 +638,8 @@ impl DiffTheme {
             file: palette.fg1.color(),
             hunk: palette.bright_purple.color(),
             notice: addition.color(),
-            cursor: palette.fg0.color(),
-            cursor_line_bg: palette.bg0.blend(palette.fg0, 0.10).color(),
+            cursor: Color::White,
+            cursor_line_bg: palette.bg1.color(),
             muted: palette.gray.color(),
             gutter_bg: palette.bg0.surface().color(),
             empty_diff: palette.bg1.color(),
@@ -696,11 +696,10 @@ impl DiffTheme {
             file: palette.fg_default.color(),
             hunk: palette.done_fg.color(),
             notice: palette.success_fg.color(),
-            cursor: palette.fg_default.color(),
-            cursor_line_bg: palette
-                .canvas_default
-                .blend(palette.accent_fg, 0.10)
-                .color(),
+            // Keep the caret consistently visible while preserving each
+            // GitHub variant's authentic neutral active-line surface.
+            cursor: Color::White,
+            cursor_line_bg: palette.canvas_subtle.color(),
             muted: palette.fg_muted.color(),
             gutter_bg: palette.canvas_default.surface().color(),
             empty_diff: palette.canvas_inset.color(),

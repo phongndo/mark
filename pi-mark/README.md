@@ -111,8 +111,8 @@ Hosted reviews currently resolve GitHub pull requests.
 The external `mark` terminal UI opens immediately from interactive Pi, including
 while an agent turn is still running. Pi's TUI is restored when `mark` exits.
 
-Add review annotations with `a` (single) or `A` (sticky batch), then press
-`Shift-Q` to submit them and return to Pi. Pi renders a tool-style annotation
+Move to a line, hunk header, or file header and press `Enter` to add a review
+annotation, then press `Shift-Q` to submit annotations and return to Pi. Pi renders a tool-style annotation
 card in the transcript. Run `/mark send` to submit pending annotations to the
 agent immediately, or continue with a normal prompt to include them there. Run
 `/mark clear` to discard pending annotations and remove their cards from the

@@ -48,7 +48,6 @@ pub(crate) fn file_changed_since(path: &Path, before: Option<FileFingerprint>) -
 
 fn full_file_row_file(row: UiRow) -> Option<FileIndex> {
     match row {
-        UiRow::FileSeparator => None,
         UiRow::FileHeader(file)
         | UiRow::FileBodyNotice(file)
         | UiRow::Collapsed { file, .. }
@@ -125,6 +124,10 @@ impl DiffApp {
             return None;
         }
 
+        if let Some(target) = self.annotation_cursor_editor_target_and_anchor() {
+            return Some(target);
+        }
+
         if self.full_file_mode_active() {
             let (file, line, row_visual_offset, viewport_row) = self.full_file_editor_position()?;
             let file_diff = self.document.changeset.files.get(file.get())?;
@@ -169,6 +172,37 @@ impl DiffApp {
         ))
     }
 
+    fn annotation_cursor_editor_target_and_anchor(
+        &self,
+    ) -> Option<(EditorTarget, EditorViewAnchor)> {
+        if !self.annotation_cursor_enabled() {
+            return None;
+        }
+        let cursor = self.annotation_cursor_target()?;
+        let rendered_row = self
+            .rendered_diff_rows_for_viewport(self.viewport.viewport_rows)
+            .into_iter()
+            .find(|row| row.model_row == cursor.model_row_index)?;
+        let (file, line) = self.editor_line_at_full_file_row(cursor.model_row_index)?;
+        let file_diff = self.document.changeset.files.get(file.get())?;
+        let path = file_diff.new_path()?;
+        let row_visual_offset = rendered_row
+            .visual_scroll
+            .saturating_sub(self.scroll_for_model_row(cursor.model_row_index));
+
+        Some((
+            EditorTarget {
+                path: repo_file_path(&self.document.changeset.repo, path),
+                line,
+            },
+            EditorViewAnchor {
+                line,
+                row_visual_offset,
+                viewport_row: rendered_row.viewport_row,
+            },
+        ))
+    }
+
     pub(crate) fn focused_hunk_editor_reload_request(&self) -> Option<EditorReloadRequest> {
         if matches!(
             self.document.options.source,
@@ -177,7 +211,13 @@ impl DiffApp {
             return None;
         }
 
-        let file = if self.full_file_mode_active() {
+        let file = if self.annotation_cursor_editor_target_and_anchor().is_some() {
+            FileIndex::new(
+                self.document
+                    .model
+                    .file_at_row(self.annotation_cursor_target()?.model_row_index)?,
+            )
+        } else if self.full_file_mode_active() {
             self.full_file_editor_position()?.0
         } else {
             self.focused_hunk_for_viewport(self.viewport.viewport_rows)?
@@ -218,7 +258,6 @@ impl DiffApp {
     fn editor_line_at_full_file_row(&self, row_index: usize) -> Option<(FileIndex, usize)> {
         let row = self.document.model.row(row_index)?;
         let (file, line) = match row {
-            UiRow::FileSeparator => return None,
             UiRow::FileHeader(file) | UiRow::FileBodyNotice(file) => (file, 1),
             UiRow::Collapsed {
                 file, new_start, ..

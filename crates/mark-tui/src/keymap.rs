@@ -160,7 +160,7 @@ const GLOBAL_ACTION_SPECS: &[GlobalActionSpec] = &[
     global_action_spec!(GlobalAction::CommitPicker, "commit_picker", ["m c"]),
     global_action_spec!(GlobalAction::OptionsMenu, "options_menu", ["o"]),
     global_action_spec!(GlobalAction::AnnotationMenu, "annotation_menu", ["n"], 1),
-    global_action_spec!(GlobalAction::AnnotateLine, "annotate_line", ["a"], 1),
+    global_action_spec!(GlobalAction::AnnotateLine, "annotate_line", ["enter"], 1),
     global_action_spec!(GlobalAction::AnnotateBatch, "annotate_batch", ["A"], 1),
     global_action_spec!(GlobalAction::FileBrowser, "file_browser", ["b"]),
     global_action_spec!(GlobalAction::PreviousFile, "previous_file", ["shift-tab"]),

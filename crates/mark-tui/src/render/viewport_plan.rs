@@ -1,7 +1,6 @@
 use crate::{
     annotation::{AnnotationDraft, AnnotationKey},
     app::DiffApp,
-    model::UiRow,
     render::annotations::{annotation_compose_block_height, annotation_saved_block_height},
 };
 
@@ -82,7 +81,7 @@ fn plan_unwrapped_viewport_rows(
             },
         });
 
-        if let Some(key) = AnnotationKey::from_ui_row(&app.document.changeset, row) {
+        for key in app.annotation_keys_at_model_row(visual_row, row) {
             if let Some(draft) = draft.filter(|d| d.model_row_index == visual_row && d.key == key) {
                 push_compose_plan_slots(
                     &mut plans,
@@ -158,37 +157,38 @@ fn plan_wrapped_viewport_rows(
         if plans.len() >= visible_rows {
             break;
         }
-        if wraps_left == 0
-            && (draft.is_some() || !annotations.is_empty())
-            && let Some(key) = AnnotationKey::from_ui_row(&app.document.changeset, row)
-        {
-            if let Some(draft) = draft.filter(|d| d.model_row_index == row_index && d.key == key) {
-                push_compose_plan_slots(
-                    &mut plans,
-                    row_index,
-                    draft,
-                    app.viewport.viewport_width,
-                    visible_rows,
-                );
-            } else if let Some(text) = annotations.get(&key)
-                && draft.is_none_or(|d| d.key != key)
-            {
-                let block_scroll = app
-                    .annotations_state
-                    .annotation_block_scroll
-                    .as_ref()
-                    .filter(|(scroll_key, _)| scroll_key == &key)
-                    .map(|(_, offset)| *offset)
-                    .unwrap_or_default();
-                push_saved_plan_slots(
-                    &mut plans,
-                    row_index,
-                    key,
-                    text,
-                    app.viewport.viewport_width,
-                    block_scroll,
-                    visible_rows,
-                );
+        if wraps_left == 0 && (draft.is_some() || !annotations.is_empty()) {
+            for key in app.annotation_keys_at_model_row(row_index, row) {
+                if let Some(draft) =
+                    draft.filter(|d| d.model_row_index == row_index && d.key == key)
+                {
+                    push_compose_plan_slots(
+                        &mut plans,
+                        row_index,
+                        draft,
+                        app.viewport.viewport_width,
+                        visible_rows,
+                    );
+                } else if let Some(text) = annotations.get(&key)
+                    && draft.is_none_or(|d| d.key != key)
+                {
+                    let block_scroll = app
+                        .annotations_state
+                        .annotation_block_scroll
+                        .as_ref()
+                        .filter(|(scroll_key, _)| scroll_key == &key)
+                        .map(|(_, offset)| *offset)
+                        .unwrap_or_default();
+                    push_saved_plan_slots(
+                        &mut plans,
+                        row_index,
+                        key,
+                        text,
+                        app.viewport.viewport_width,
+                        block_scroll,
+                        visible_rows,
+                    );
+                }
             }
         }
         row_index = row_index.saturating_add(1);
@@ -329,11 +329,4 @@ pub(crate) fn annotation_saved_key_at_top_border(
         } => Some((*model_row, key.clone())),
         _ => None,
     }
-}
-
-pub(crate) fn row_has_diff_code_content(row: UiRow) -> bool {
-    matches!(
-        row,
-        UiRow::UnifiedLine { .. } | UiRow::SplitLine { .. } | UiRow::ContextLine { .. }
-    )
 }

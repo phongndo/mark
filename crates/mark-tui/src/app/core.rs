@@ -243,11 +243,22 @@ impl std::fmt::Debug for FilterWorker {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum MarkScope {
+    File,
+    Hunk,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MarkExport {
     pub(crate) path: String,
+    pub(crate) scope: Option<MarkScope>,
     pub(crate) old_line: Option<usize>,
     pub(crate) new_line: Option<usize>,
+    pub(crate) old_start: Option<usize>,
+    pub(crate) old_count: Option<usize>,
+    pub(crate) new_start: Option<usize>,
+    pub(crate) new_count: Option<usize>,
     pub(crate) body: String,
 }
 

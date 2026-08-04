@@ -3,10 +3,9 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::{
     annotation::{
-        ANNOTATION_ADD_BUTTON, ANNOTATION_ADD_BUTTON_WIDTH, ANNOTATION_CLOSE_BUTTON,
-        ANNOTATION_CLOSE_BUTTON_WIDTH, ANNOTATION_EDIT_BUTTON, ANNOTATION_EDIT_BUTTON_ASCII,
-        ANNOTATION_EDIT_BUTTON_WIDTH, ANNOTATION_SUBMIT_BUTTON, ANNOTATION_SUBMIT_BUTTON_ASCII,
-        ANNOTATION_SUBMIT_BUTTON_WIDTH, AnnotationDraft,
+        ANNOTATION_CLOSE_BUTTON, ANNOTATION_CLOSE_BUTTON_WIDTH, ANNOTATION_EDIT_BUTTON,
+        ANNOTATION_EDIT_BUTTON_ASCII, ANNOTATION_EDIT_BUTTON_WIDTH, ANNOTATION_SUBMIT_BUTTON,
+        ANNOTATION_SUBMIT_BUTTON_ASCII, ANNOTATION_SUBMIT_BUTTON_WIDTH, AnnotationDraft,
     },
     controls::INPUT_CURSOR,
     render::style::{base_bg, input_cursor_style, spans_with_input_cursor},
@@ -19,51 +18,6 @@ fn annotation_border_style(theme: DiffTheme) -> Style {
         .fg(theme.hunk)
         .bg(base_bg(theme))
         .add_modifier(Modifier::BOLD)
-}
-
-pub(crate) fn append_annotation_add_button(
-    line: Line<'static>,
-    width: usize,
-    theme: DiffTheme,
-) -> Line<'static> {
-    if width < ANNOTATION_ADD_BUTTON_WIDTH {
-        return line;
-    }
-
-    let content_width = width.saturating_sub(ANNOTATION_ADD_BUTTON_WIDTH);
-    let mut out = Vec::new();
-    let mut used = 0usize;
-    for span in line.spans {
-        if used >= content_width {
-            break;
-        }
-        let text = span.content.as_ref();
-        let span_width = text.width();
-        if used + span_width <= content_width {
-            out.push(span);
-            used += span_width;
-            continue;
-        }
-        let remaining = content_width.saturating_sub(used);
-        out.push(Span::styled(fit_padded(text, remaining), span.style));
-        used = content_width;
-        break;
-    }
-    let cursorline_bg = theme.cursor_line_bg;
-    if used < content_width {
-        out.push(Span::styled(
-            spaces(content_width - used),
-            Style::default().bg(cursorline_bg),
-        ));
-    }
-    out.push(Span::styled(
-        ANNOTATION_ADD_BUTTON.to_owned(),
-        Style::default()
-            .fg(theme.hunk)
-            .bg(cursorline_bg)
-            .add_modifier(Modifier::BOLD),
-    ));
-    Line::from(out)
 }
 
 fn annotation_top_border_line(
@@ -81,8 +35,7 @@ fn annotation_top_border_line(
     let rule_width = width.saturating_sub(ANNOTATION_CLOSE_BUTTON_WIDTH);
     let mut spans = Vec::with_capacity(2);
     if let Some(label) = label {
-        let label = format!("{label} ");
-        let label = fit(&label, rule_width);
+        let label = fit(&format!("{label} "), rule_width);
         let label_width = label.width();
         if label_width > 0 {
             spans.push(Span::styled(
@@ -338,15 +291,6 @@ fn text_with_cursor(input: &str, cursor: usize) -> String {
     } else {
         format!("{input}{INPUT_CURSOR}")
     }
-}
-
-pub(crate) fn annotation_hit_at_column(column: u16, width: usize) -> bool {
-    let width = width as u16;
-    if width < ANNOTATION_ADD_BUTTON_WIDTH as u16 {
-        return false;
-    }
-    let start = width.saturating_sub(ANNOTATION_ADD_BUTTON_WIDTH as u16);
-    column >= start
 }
 
 pub(crate) fn annotation_close_hit_at_column(column: u16, width: usize) -> bool {

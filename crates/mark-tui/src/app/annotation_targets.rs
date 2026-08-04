@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use mark_syntax::AnnotationTargeting;
@@ -9,7 +9,7 @@ use crate::{
         AnnotationKey, AnnotationSide, AnnotationTarget, AnnotationTargetMode,
         annotation_hint_codes,
     },
-    model::{AnnotationCandidateSearchResult, FileIndex, HunkIndex},
+    model::{FileIndex, HunkIndex},
     render::{
         annotations::annotation_compose_block_height,
         viewport_plan::{
@@ -19,18 +19,9 @@ use crate::{
 };
 
 const ANNOTATION_CURSOR_SCROLL_OFF: usize = 8;
-const MAX_EAGER_ANNOTATION_CURSOR_ROWS: usize = 256;
-const MAX_LAZY_CURSOR_DISCOVERY_CANDIDATES: usize = 256;
-
+const MAX_EAGER_DIFF_CURSOR_ROWS: usize = 256;
 #[derive(Debug)]
-enum AnnotationTargetSearchResult {
-    Target(AnnotationTarget),
-    Unindexed,
-    Exhausted,
-}
-
-#[derive(Debug)]
-enum AnnotationTargetDeltaResult {
+enum CursorTargetDeltaResult {
     Target(AnnotationTarget),
     Unindexed,
 }
@@ -61,7 +52,6 @@ impl DiffApp {
             return;
         }
 
-        self.clear_diff_mouse_hover();
         self.input.reset_mouse_scroll();
         self.annotations_state.annotation_target_mode = Some(AnnotationTargetMode {
             targets,
@@ -81,21 +71,25 @@ impl DiffApp {
             return;
         }
 
-        if self.document.model.len() > MAX_EAGER_ANNOTATION_CURSOR_ROWS {
+        if self.document.model.len() > MAX_EAGER_DIFF_CURSOR_ROWS {
             let target = preferred
                 .as_ref()
                 .and_then(|key| self.annotation_target_for_key(key))
                 .or_else(|| self.annotation_target_near_viewport_focus())
-                .or_else(|| {
-                    self.nearest_annotation_target_bounded(
-                        self.viewport_focus_row(),
-                        MAX_LAZY_CURSOR_DISCOVERY_CANDIDATES,
-                    )
-                });
+                .or_else(|| self.cursor_target_near_viewport_focus())
+                .or_else(|| self.cursor_target_for_model_row(self.viewport_focus_row()));
+            let mut preferred_keys = HashMap::new();
+            if let Some(target) = target
+                .as_ref()
+                .filter(|target| preferred.as_ref() == Some(&target.key))
+            {
+                preferred_keys.insert(target.model_row_index, target.key.clone());
+            }
             self.annotations_state.annotation_cursor = Some(crate::annotation::AnnotationCursor {
                 model_identity: self.document.model.identity(),
                 targets: target.into_iter().collect(),
                 selected: 0,
+                preferred_keys,
                 lazy: true,
                 previous_exhausted: false,
                 next_exhausted: false,
@@ -103,15 +97,28 @@ impl DiffApp {
             return;
         }
 
-        let (targets, fallback) = self.annotation_cursor_targets();
+        let (mut targets, fallback) = self.annotation_cursor_targets();
+        let preferred = preferred.as_ref().and_then(|key| {
+            let target = self.annotation_target_for_key(key)?;
+            targets
+                .iter()
+                .position(|candidate| candidate.model_row_index == target.model_row_index)
+                .map(|selected| (selected, target.key))
+        });
         let selected = preferred
             .as_ref()
-            .and_then(|key| targets.iter().position(|target| &target.key == key))
+            .map(|(selected, _)| *selected)
             .unwrap_or(fallback);
+        let mut preferred_keys = HashMap::new();
+        if let Some((selected, key)) = preferred {
+            targets[selected].key = key.clone();
+            preferred_keys.insert(targets[selected].model_row_index, key);
+        }
         self.annotations_state.annotation_cursor = Some(crate::annotation::AnnotationCursor {
             model_identity: self.document.model.identity(),
             targets,
             selected,
+            preferred_keys,
             lazy: false,
             previous_exhausted: false,
             next_exhausted: false,
@@ -197,13 +204,16 @@ impl DiffApp {
         if (!has_target && lazy) || (has_target && !target_is_rendered) {
             self.annotations_state.annotation_block_scroll = None;
             if lazy {
-                if let Some(target) = self.annotation_target_near_viewport_focus() {
+                if let Some(target) = self.cursor_target_near_viewport_focus() {
                     self.set_lazy_annotation_cursor_target(target);
                 } else {
                     self.refresh_annotation_cursor_target_layout();
                 }
             } else {
-                self.reset_annotation_cursor(None);
+                let preferred = self
+                    .cursor_target_near_viewport_focus()
+                    .map(|target| target.key);
+                self.reset_annotation_cursor(preferred);
             }
         } else {
             self.refresh_annotation_cursor_target_layout();
@@ -229,28 +239,65 @@ impl DiffApp {
     }
 
     pub(in crate::app) fn select_annotation_cursor(&mut self, key: &AnnotationKey) {
+        if key.is_cursor_only() {
+            self.select_annotation_cursor_model_row(key.line);
+            return;
+        }
+        let Some(target) = self.annotation_target_for_key(key) else {
+            return;
+        };
+        self.select_annotation_cursor_model_row_with_key(target.model_row_index, Some(key));
+    }
+
+    pub(crate) fn select_annotation_cursor_model_row(&mut self, model_row: usize) {
+        self.select_annotation_cursor_model_row_with_key(model_row, None);
+    }
+
+    fn select_annotation_cursor_model_row_with_key(
+        &mut self,
+        model_row: usize,
+        key: Option<&AnnotationKey>,
+    ) {
         let previous = self
             .annotation_cursor_target()
             .map(|target| (target.key.clone(), target.model_row_index));
         self.ensure_annotation_cursor();
+        if let Some(key) = key
+            && let Some(cursor) = self.annotations_state.annotation_cursor.as_mut()
+        {
+            cursor.preferred_keys.insert(model_row, key.clone());
+        }
         let lazy = self
             .annotations_state
             .annotation_cursor
             .as_ref()
             .is_some_and(|cursor| cursor.lazy);
         if lazy {
-            let Some(target) = self.annotation_target_for_key(key) else {
-                return;
+            let target = match key {
+                Some(key) => self.cursor_target_for_model_row_with_key(model_row, key.clone()),
+                None => {
+                    let Some(target) = self.cursor_target_for_model_row(model_row) else {
+                        return;
+                    };
+                    target
+                }
             };
             self.set_lazy_annotation_cursor_target(target);
         } else {
             let Some(cursor) = self.annotations_state.annotation_cursor.as_mut() else {
                 return;
             };
-            let Some(selected) = cursor.targets.iter().position(|target| &target.key == key) else {
+            let Some(selected) = cursor
+                .targets
+                .iter()
+                .position(|target| target.model_row_index == model_row)
+            else {
                 return;
             };
             cursor.selected = selected;
+            if let Some(key) = key {
+                cursor.targets[selected].key = key.clone();
+            }
         }
         let changed = self.annotation_cursor_target().is_some_and(|target| {
             previous.as_ref().is_none_or(|(key, model_row)| {
@@ -362,12 +409,14 @@ impl DiffApp {
             .filter(|target| {
                 self.document.model.file_at_row(target.model_row_index) == Some(file.get())
             });
-        let target = visible_target.or_else(|| {
-            self.document
-                .model
-                .file_row_range(file)
-                .and_then(|range| self.nearest_annotation_target_in_range(model_row, range))
-        });
+        let target = visible_target
+            .or_else(|| {
+                self.document
+                    .model
+                    .file_row_range(file)
+                    .and_then(|range| self.nearest_annotation_target_in_range(model_row, range))
+            })
+            .or_else(|| self.cursor_target_for_model_row(model_row));
         if let Some(target) = target {
             self.select_annotation_cursor(&target.key);
             if !self.keep_annotation_cursor_rendered() {
@@ -392,22 +441,66 @@ impl DiffApp {
     }
 
     fn annotation_target_for_key(&self, key: &AnnotationKey) -> Option<AnnotationTarget> {
+        if key.is_cursor_only() {
+            return self
+                .cursor_target_for_model_row(key.line)
+                .filter(|target| &target.key == key);
+        }
         let model_row = self.annotation_model_row(key)?;
-        self.annotation_target_for_model_row(model_row)
-            .filter(|target| &target.key == key)
+        // Structural annotations can intentionally use a content-row anchor
+        // when their header is omitted (for example in full-file mode).
+        self.document.model.row(model_row)?;
+        Some(self.cursor_target_for_model_row_with_key(model_row, key.clone()))
     }
 
     fn annotation_target_for_model_row(&self, model_row_index: usize) -> Option<AnnotationTarget> {
         let row = self.document.model.row(model_row_index)?;
         let key = AnnotationKey::from_ui_row(&self.document.changeset, row)?;
-        Some(AnnotationTarget {
+        Some(self.cursor_target_for_model_row_with_key(model_row_index, key))
+    }
+
+    fn cursor_target_for_model_row(&self, model_row_index: usize) -> Option<AnnotationTarget> {
+        let row = self.document.model.row(model_row_index)?;
+        let candidates = AnnotationKey::candidates_from_ui_row(&self.document.changeset, row);
+        let preferred = self
+            .annotations_state
+            .annotation_cursor
+            .as_ref()
+            .and_then(|cursor| cursor.preferred_keys.get(&model_row_index))
+            .filter(|key| {
+                candidates.contains(key)
+                    || (!key.is_cursor_only()
+                        && !key.is_line()
+                        && self.annotation_model_row(key) == Some(model_row_index))
+            })
+            .cloned();
+        let existing = {
+            let mut annotated = candidates
+                .iter()
+                .filter(|key| self.annotations_state.annotations.contains_key(*key));
+            let first = annotated.next().cloned();
+            first.filter(|_| annotated.next().is_none())
+        };
+        let key = preferred
+            .or(existing)
+            .or_else(|| AnnotationKey::from_ui_row(&self.document.changeset, row))
+            .unwrap_or_else(|| AnnotationKey::cursor_only(model_row_index));
+        Some(self.cursor_target_for_model_row_with_key(model_row_index, key))
+    }
+
+    fn cursor_target_for_model_row_with_key(
+        &self,
+        model_row_index: usize,
+        key: AnnotationKey,
+    ) -> AnnotationTarget {
+        AnnotationTarget {
             key,
             model_row_index,
             visual_scroll: self.scroll_for_model_row(model_row_index),
             visual_height: self.annotation_visual_height_for_model_row(model_row_index),
             viewport_row: usize::MAX,
             hint: String::new(),
-        })
+        }
     }
 
     fn set_lazy_annotation_cursor_target(&mut self, target: AnnotationTarget) {
@@ -487,6 +580,28 @@ impl DiffApp {
         }
     }
 
+    fn cursor_target_near_viewport_focus(&self) -> Option<AnnotationTarget> {
+        let visible_rows = self.viewport.viewport_rows.clamp(1, usize::from(u16::MAX));
+        let focus_viewport_row = self.rendered_viewport_focus_row(visible_rows);
+        plan_diff_viewport_rows(self, visible_rows)
+            .into_iter()
+            .enumerate()
+            .filter_map(|(viewport_row, slot)| {
+                let ViewportSlotKind::DiffVisual { model_row, .. } = slot.kind else {
+                    return None;
+                };
+                let mut target = self.cursor_target_for_model_row(model_row)?;
+                target.viewport_row = viewport_row;
+                Some((
+                    viewport_row.abs_diff(focus_viewport_row),
+                    viewport_row,
+                    target,
+                ))
+            })
+            .min_by_key(|(distance, viewport_row, _)| (*distance, *viewport_row))
+            .map(|(_, _, target)| target)
+    }
+
     fn annotation_target_near_viewport_focus(&self) -> Option<AnnotationTarget> {
         let visible_rows = self.viewport.viewport_rows.clamp(1, usize::from(u16::MAX));
         let focused_hunk = self.focused_hunk_for_viewport(visible_rows);
@@ -517,41 +632,6 @@ impl DiffApp {
                 (*outside_focus, *distance, *viewport_row)
             })
             .map(|(_, _, _, target)| target)
-    }
-
-    fn nearest_annotation_target_bounded(
-        &self,
-        model_row: usize,
-        max_candidates: usize,
-    ) -> Option<AnnotationTarget> {
-        let mut previous = self.annotation_candidate_at_or_before(model_row);
-        let mut next = model_row
-            .checked_add(1)
-            .and_then(|row| self.annotation_candidate_at_or_after(row));
-        for _ in 0..max_candidates {
-            let moving_up = match (previous, next) {
-                (Some(previous), Some(next)) => {
-                    previous.abs_diff(model_row) <= next.abs_diff(model_row)
-                }
-                (Some(_), None) => true,
-                (None, Some(_)) => false,
-                (None, None) => return None,
-            };
-            let candidate = if moving_up { previous? } else { next? };
-            if moving_up {
-                previous = candidate
-                    .checked_sub(1)
-                    .and_then(|row| self.annotation_candidate_at_or_before(row));
-            } else {
-                next = candidate
-                    .checked_add(1)
-                    .and_then(|row| self.annotation_candidate_at_or_after(row));
-            }
-            if let Some(target) = self.annotation_target_for_model_row(candidate) {
-                return Some(target);
-            }
-        }
-        None
     }
 
     fn nearest_annotation_target_in_hunk(
@@ -607,93 +687,6 @@ impl DiffApp {
         }
     }
 
-    fn annotation_target_at_or_after(
-        &self,
-        model_row: usize,
-        end: usize,
-    ) -> Option<AnnotationTarget> {
-        match self.annotation_target_search_at_or_after(model_row, end) {
-            AnnotationTargetSearchResult::Target(target) => Some(target),
-            AnnotationTargetSearchResult::Unindexed | AnnotationTargetSearchResult::Exhausted => {
-                None
-            }
-        }
-    }
-
-    fn annotation_target_search_at_or_after(
-        &self,
-        mut model_row: usize,
-        end: usize,
-    ) -> AnnotationTargetSearchResult {
-        loop {
-            let candidate = match self
-                .document
-                .model
-                .annotation_candidate_search_at_or_after(&self.document.changeset, model_row)
-            {
-                AnnotationCandidateSearchResult::Candidate(candidate) if candidate < end => {
-                    candidate
-                }
-                AnnotationCandidateSearchResult::Candidate(_)
-                | AnnotationCandidateSearchResult::Exhausted => {
-                    return AnnotationTargetSearchResult::Exhausted;
-                }
-                AnnotationCandidateSearchResult::Unindexed => {
-                    return AnnotationTargetSearchResult::Unindexed;
-                }
-            };
-            if let Some(target) = self.annotation_target_for_model_row(candidate) {
-                return AnnotationTargetSearchResult::Target(target);
-            }
-            model_row = candidate.saturating_add(1);
-        }
-    }
-
-    fn annotation_target_at_or_before(
-        &self,
-        model_row: usize,
-        start: usize,
-    ) -> Option<AnnotationTarget> {
-        match self.annotation_target_search_at_or_before(model_row, start) {
-            AnnotationTargetSearchResult::Target(target) => Some(target),
-            AnnotationTargetSearchResult::Unindexed | AnnotationTargetSearchResult::Exhausted => {
-                None
-            }
-        }
-    }
-
-    fn annotation_target_search_at_or_before(
-        &self,
-        mut model_row: usize,
-        start: usize,
-    ) -> AnnotationTargetSearchResult {
-        loop {
-            let candidate = match self
-                .document
-                .model
-                .annotation_candidate_search_at_or_before(&self.document.changeset, model_row)
-            {
-                AnnotationCandidateSearchResult::Candidate(candidate) if candidate >= start => {
-                    candidate
-                }
-                AnnotationCandidateSearchResult::Candidate(_)
-                | AnnotationCandidateSearchResult::Exhausted => {
-                    return AnnotationTargetSearchResult::Exhausted;
-                }
-                AnnotationCandidateSearchResult::Unindexed => {
-                    return AnnotationTargetSearchResult::Unindexed;
-                }
-            };
-            if let Some(target) = self.annotation_target_for_model_row(candidate) {
-                return AnnotationTargetSearchResult::Target(target);
-            }
-            let Some(previous) = candidate.checked_sub(1) else {
-                return AnnotationTargetSearchResult::Exhausted;
-            };
-            model_row = previous;
-        }
-    }
-
     fn annotation_candidate_at_or_after(&self, model_row: usize) -> Option<usize> {
         self.document
             .model
@@ -713,40 +706,32 @@ impl DiffApp {
     fn open_annotation_draft_at_cursor(&mut self, sticky: bool) {
         self.ensure_annotation_cursor();
         let Some(target) = self.annotation_cursor_target().cloned() else {
-            self.set_notice("no annotatable lines");
+            self.set_notice("no cursor line");
             return;
         };
-        if self.annotation_cursor_viewport_row().is_none() {
-            self.set_notice("no annotatable lines");
+        if target.key.is_cursor_only() {
+            if self.handle_context_at_row(target.model_row_index) {
+                return;
+            }
+            self.set_notice("this row cannot be annotated");
             return;
         }
-        self.clear_diff_mouse_hover();
+        if self.annotation_cursor_viewport_row().is_none() {
+            self.set_notice("cursor line is outside the viewport");
+            return;
+        }
         if self.open_annotation_draft_for_key(target.key, target.model_row_index) {
             self.annotations_state.sticky_annotation_draft = sticky;
         }
     }
 
     fn annotation_cursor_targets(&self) -> (Vec<AnnotationTarget>, usize) {
-        let mut seen = HashSet::new();
         let mut targets = self
             .document
             .model
             .iter_rows()
             .enumerate()
-            .filter_map(|(model_row_index, row)| {
-                let key = AnnotationKey::from_ui_row(&self.document.changeset, row)?;
-                if !seen.insert(key.clone()) {
-                    return None;
-                }
-                Some(AnnotationTarget {
-                    key,
-                    model_row_index,
-                    visual_scroll: self.scroll_for_model_row(model_row_index),
-                    visual_height: self.annotation_visual_height_for_model_row(model_row_index),
-                    viewport_row: usize::MAX,
-                    hint: String::new(),
-                })
-            })
+            .filter_map(|(model_row_index, _)| self.cursor_target_for_model_row(model_row_index))
             .collect::<Vec<_>>();
         if targets.is_empty() {
             return (targets, 0);
@@ -791,24 +776,42 @@ impl DiffApp {
                     .is_some_and(|hunk| Some(hunk) == focused_hunk);
                 (
                     index,
+                    !target.key.is_line(),
                     !in_focused_hunk,
                     target.viewport_row.abs_diff(focus_viewport_row),
                     target.viewport_row,
                 )
             })
-            .min_by_key(|(_, outside_focus, distance, viewport_row)| {
-                (*outside_focus, *distance, *viewport_row)
+            .min_by_key(|(_, structural, outside_focus, distance, viewport_row)| {
+                (*structural, *outside_focus, *distance, *viewport_row)
             })
-            .map(|(index, _, _, _)| index)
+            .map(|(index, _, _, _, _)| index)
             .unwrap_or_else(|| {
                 let focus_model_row = self.viewport_focus_row();
                 targets
                     .iter()
                     .enumerate()
-                    .min_by_key(|(_, target)| target.model_row_index.abs_diff(focus_model_row))
+                    .min_by_key(|(_, target)| {
+                        (
+                            !target.key.is_line(),
+                            target.model_row_index.abs_diff(focus_model_row),
+                        )
+                    })
                     .map(|(index, _)| index)
                     .unwrap_or_default()
             });
+        let selected = if !targets[selected].key.is_line() {
+            let focus_model_row = self.viewport_focus_row();
+            targets
+                .iter()
+                .enumerate()
+                .filter(|(_, target)| target.key.is_line())
+                .min_by_key(|(_, target)| target.model_row_index.abs_diff(focus_model_row))
+                .map(|(index, _)| index)
+                .unwrap_or(selected)
+        } else {
+            selected
+        };
 
         (targets, selected)
     }
@@ -835,25 +838,24 @@ impl DiffApp {
             let Some(row) = self.document.model.row(model_row) else {
                 continue;
             };
-            let Some(key) = AnnotationKey::from_ui_row(&self.document.changeset, row) else {
-                continue;
-            };
-            if !seen.insert(key.clone()) {
-                continue;
-            }
+            for key in AnnotationKey::candidates_from_ui_row(&self.document.changeset, row) {
+                if !seen.insert(key.clone()) {
+                    continue;
+                }
 
-            focused.push(
-                row.typed_hunk_key()
-                    .is_some_and(|hunk| Some(hunk) == focused_hunk),
-            );
-            targets.push(AnnotationTarget {
-                key,
-                model_row_index: model_row,
-                visual_scroll,
-                visual_height: self.annotation_visual_height_for_model_row(model_row),
-                viewport_row,
-                hint: String::new(),
-            });
+                focused.push(
+                    row.typed_hunk_key()
+                        .is_some_and(|hunk| Some(hunk) == focused_hunk),
+                );
+                targets.push(AnnotationTarget {
+                    key,
+                    model_row_index: model_row,
+                    visual_scroll,
+                    visual_height: self.annotation_visual_height_for_model_row(model_row),
+                    viewport_row,
+                    hint: String::new(),
+                });
+            }
         }
 
         // The viewport defines eligibility. Hunk focus only ranks targets so
@@ -1032,9 +1034,9 @@ impl DiffApp {
             let mut edge = current.clone();
             loop {
                 let step = if moving_up { -1 } else { 1 };
-                let candidate = match self.annotation_target_by_delta(&edge, step) {
-                    AnnotationTargetDeltaResult::Target(candidate) => candidate,
-                    AnnotationTargetDeltaResult::Unindexed => break,
+                let candidate = match self.cursor_target_by_delta(&edge, step) {
+                    CursorTargetDeltaResult::Target(candidate) => candidate,
+                    CursorTargetDeltaResult::Unindexed => break,
                 };
                 if candidate.key == edge.key && candidate.model_row_index == edge.model_row_index {
                     break;
@@ -1407,20 +1409,20 @@ impl DiffApp {
         }
 
         let next = if delta == isize::MIN {
-            self.boundary_annotation_target(false)
-                .map(AnnotationTargetDeltaResult::Target)
+            self.boundary_cursor_target(false)
+                .map(CursorTargetDeltaResult::Target)
         } else if delta == isize::MAX {
-            self.boundary_annotation_target(true)
-                .map(AnnotationTargetDeltaResult::Target)
+            self.boundary_cursor_target(true)
+                .map(CursorTargetDeltaResult::Target)
         } else {
-            Some(self.annotation_target_by_delta(&previous, delta))
+            Some(self.cursor_target_by_delta(&previous, delta))
         };
         let Some(next) = next else {
             return;
         };
         let next = match next {
-            AnnotationTargetDeltaResult::Target(next) => next,
-            AnnotationTargetDeltaResult::Unindexed => {
+            CursorTargetDeltaResult::Target(next) => next,
+            CursorTargetDeltaResult::Unindexed => {
                 if let Some(cursor) = self.annotations_state.annotation_cursor.as_mut() {
                     if moving_up {
                         cursor.previous_exhausted = false;
@@ -1463,13 +1465,14 @@ impl DiffApp {
     fn initialize_lazy_annotation_cursor_for_move(&mut self, delta: isize) {
         let moving_up = delta < 0;
         let target = if delta == isize::MIN {
-            self.boundary_annotation_target(false)
+            self.boundary_cursor_target(false)
         } else if delta == isize::MAX {
-            self.boundary_annotation_target(true)
-        } else if moving_up {
-            self.annotation_target_at_or_before(self.viewport_focus_row(), 0)
+            self.boundary_cursor_target(true)
         } else {
-            self.annotation_target_at_or_after(self.viewport_focus_row(), self.document.model.len())
+            self.cursor_target_for_model_row(
+                self.viewport_focus_row()
+                    .min(self.document.model.len().saturating_sub(1)),
+            )
         };
         let Some(target) = target else {
             if let Some(cursor) = self.annotations_state.annotation_cursor.as_mut() {
@@ -1491,57 +1494,32 @@ impl DiffApp {
         self.runtime.dirty = true;
     }
 
-    fn boundary_annotation_target(&self, last: bool) -> Option<AnnotationTarget> {
-        if last {
-            self.annotation_target_at_or_before(self.document.model.len().checked_sub(1)?, 0)
+    fn boundary_cursor_target(&self, last: bool) -> Option<AnnotationTarget> {
+        let model_row = if last {
+            self.document.model.len().checked_sub(1)?
         } else {
-            self.annotation_target_at_or_after(0, self.document.model.len())
-        }
+            0
+        };
+        self.cursor_target_for_model_row(model_row)
     }
 
-    fn annotation_target_by_delta(
+    fn cursor_target_by_delta(
         &self,
         current: &AnnotationTarget,
         delta: isize,
-    ) -> AnnotationTargetDeltaResult {
-        if delta == 0 {
-            return AnnotationTargetDeltaResult::Target(current.clone());
-        }
-        let mut remaining = delta.unsigned_abs();
-        let mut closest = current.clone();
-        let mut candidate_row = current.model_row_index;
-        let mut seen = HashSet::from([current.key.clone()]);
-        while remaining > 0 {
-            let search = if delta < 0 {
-                let Some(row) = candidate_row.checked_sub(1) else {
-                    break;
-                };
-                self.annotation_target_search_at_or_before(row, 0)
-            } else {
-                let Some(row) = candidate_row.checked_add(1) else {
-                    break;
-                };
-                self.annotation_target_search_at_or_after(row, self.document.model.len())
-            };
-            let target = match search {
-                AnnotationTargetSearchResult::Target(target) => target,
-                AnnotationTargetSearchResult::Unindexed => {
-                    if closest.key == current.key
-                        && closest.model_row_index == current.model_row_index
-                    {
-                        return AnnotationTargetDeltaResult::Unindexed;
-                    }
-                    break;
-                }
-                AnnotationTargetSearchResult::Exhausted => break,
-            };
-            candidate_row = target.model_row_index;
-            if seen.insert(target.key.clone()) {
-                remaining = remaining.saturating_sub(1);
-                closest = target;
-            }
-        }
-        AnnotationTargetDeltaResult::Target(closest)
+    ) -> CursorTargetDeltaResult {
+        let last = self.document.model.len().saturating_sub(1);
+        let model_row = if delta < 0 {
+            current.model_row_index.saturating_sub(delta.unsigned_abs())
+        } else {
+            current
+                .model_row_index
+                .saturating_add(delta as usize)
+                .min(last)
+        };
+        self.cursor_target_for_model_row(model_row)
+            .map(CursorTargetDeltaResult::Target)
+            .unwrap_or(CursorTargetDeltaResult::Unindexed)
     }
 
     fn focus_hunk_at_annotation_cursor(&mut self) {
@@ -1669,7 +1647,7 @@ impl DiffApp {
         self.annotation_cursor_viewport_row().is_some()
     }
 
-    fn annotation_cursor_viewport_row(&self) -> Option<usize> {
+    pub(in crate::app) fn annotation_cursor_viewport_row(&self) -> Option<usize> {
         let target = self.annotation_cursor_target()?;
         plan_diff_viewport_rows_at_scroll(
             self,
@@ -1695,7 +1673,7 @@ impl DiffApp {
 
     pub(crate) fn annotation_cursor_is_visible(&self) -> bool {
         self.annotation_cursor_enabled()
-            && !self.diff_modal_blocks_mouse_hover()
+            && !self.diff_modal_hides_annotation_cursor()
             && !self.overlays.annotation_menu_is_open()
     }
 
@@ -1777,15 +1755,39 @@ impl DiffApp {
         true
     }
 
+    pub(crate) fn annotation_target_hints_at_visual_scroll(
+        &self,
+        visual_scroll: usize,
+    ) -> Vec<(
+        &str,
+        crate::annotation::AnnotationScope,
+        AnnotationSide,
+        bool,
+    )> {
+        let Some(mode) = self.annotations_state.annotation_target_mode.as_ref() else {
+            return Vec::new();
+        };
+        mode.targets_at_visual_scroll(visual_scroll)
+            .filter_map(|target| {
+                let remaining = target.hint.strip_prefix(&mode.prefix)?;
+                let existing = self.annotations_state.annotations.contains_key(&target.key);
+                Some((remaining, target.key.scope, target.key.side, existing))
+            })
+            .collect()
+    }
+
     pub(crate) fn annotation_target_hint_at_visual_scroll(
         &self,
         visual_scroll: usize,
-    ) -> Option<(&str, AnnotationSide, bool)> {
-        let mode = self.annotations_state.annotation_target_mode.as_ref()?;
-        let target = mode.target_at_visual_scroll(visual_scroll)?;
-        let remaining = target.hint.strip_prefix(&mode.prefix)?;
-        let existing = self.annotations_state.annotations.contains_key(&target.key);
-        Some((remaining, target.key.side, existing))
+    ) -> Option<(
+        &str,
+        crate::annotation::AnnotationScope,
+        AnnotationSide,
+        bool,
+    )> {
+        self.annotation_target_hints_at_visual_scroll(visual_scroll)
+            .into_iter()
+            .next()
     }
 
     pub(crate) fn annotation_cursor_at_model_row(&self, model_row: usize) -> bool {

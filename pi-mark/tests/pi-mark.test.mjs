@@ -115,10 +115,61 @@ test("parseMarkAnnotations validates structured mark output", () => {
       marks: [{ path: "src/app.ts", new_line: 12, body: "Handle this edge case" }],
     },
   );
+  assert.deepEqual(
+    parseMarkAnnotations({
+      version: 1,
+      marks: [
+        { path: "src/app.ts", scope: "file", body: "Review the entire file" },
+        {
+          path: "src/app.ts",
+          scope: "hunk",
+          old_start: 10,
+          old_count: 2,
+          new_start: 10,
+          new_count: 4,
+          body: "Review the entire hunk",
+        },
+      ],
+    }),
+    {
+      version: 1,
+      marks: [
+        { path: "src/app.ts", scope: "file", body: "Review the entire file" },
+        {
+          path: "src/app.ts",
+          scope: "hunk",
+          old_start: 10,
+          old_count: 2,
+          new_start: 10,
+          new_count: 4,
+          body: "Review the entire hunk",
+        },
+      ],
+    },
+  );
   assert.throws(
     () => parseMarkAnnotations({ version: 1, marks: [{ path: "src/app.ts", body: "missing" }] }),
     /invalid annotation/,
   );
+  for (const mark of [
+    {
+      path: "src/app.ts",
+      scope: "hunk",
+      old_line: "bad",
+      old_start: 10,
+      old_count: 2,
+      new_start: 10,
+      new_count: 4,
+      body: "mixed hunk target",
+    },
+    { path: "src/app.ts", scope: "file", old_start: 10, body: "mixed file target" },
+    { path: "src/app.ts", new_line: 12, new_count: 1, body: "mixed line target" },
+  ]) {
+    assert.throws(
+      () => parseMarkAnnotations({ version: 1, marks: [mark] }),
+      /invalid annotation/,
+    );
+  }
 });
 
 test("cleared annotation cards stay hidden after session restore", async () => {

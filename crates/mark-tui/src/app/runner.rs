@@ -395,12 +395,8 @@ pub(crate) fn handle_event(
             run_event_effects(app, outcome.into_effects(), live_diff, events)?;
             Ok(should_quit)
         }
-        Event::FocusLost => {
-            app.clear_diff_mouse_hover();
-            Ok(false)
-        }
+        Event::FocusLost => Ok(false),
         Event::Resize(width, height) => {
-            app.clear_diff_mouse_hover();
             app.set_terminal_area(Rect {
                 x: 0,
                 y: 0,

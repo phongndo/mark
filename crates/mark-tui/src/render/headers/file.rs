@@ -1,36 +1,13 @@
 use ratatui::prelude::{Line, Modifier, Span, Style};
 
 use crate::{
-    controls::DiffLayoutMode,
     render::{
         headers::{HeaderStyles, file_delta_parts, header_spans},
         style::{diff_base_bg, file_sidebar_style},
-        text::{spaces, status_code},
+        text::status_code,
     },
     theme::DiffTheme,
 };
-
-pub(crate) fn file_separator_line(
-    _layout: DiffLayoutMode,
-    width: usize,
-    theme: DiffTheme,
-) -> Line<'static> {
-    if width == 0 {
-        return Line::default();
-    }
-
-    let text = if theme.decorations.is_fancy() {
-        "─".repeat(width)
-    } else {
-        spaces(width).into_owned()
-    };
-    Line::from(Span::styled(
-        text,
-        Style::default()
-            .fg(theme.empty_diff)
-            .bg(diff_base_bg(theme)),
-    ))
-}
 
 pub(crate) fn file_header_line(
     file: &mark_diff::DiffFile,

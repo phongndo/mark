@@ -12,9 +12,7 @@ impl DiffApp {
 
     #[cfg(test)]
     pub(crate) fn set_rendered_diff_area(&mut self, area: Rect) {
-        if self.viewport.set_rendered_diff_area(Some(area)) {
-            self.clear_diff_mouse_hover();
-        }
+        self.viewport.set_rendered_diff_area(Some(area));
         self.runtime.hit_map.diff_area = Some(area);
     }
 
@@ -61,9 +59,7 @@ impl DiffApp {
             .error_log_separator_row
             .filter(|_| self.notifications.error_log.is_some());
 
-        if self.viewport.set_rendered_diff_area(hit_map.diff_area) {
-            self.clear_diff_mouse_hover();
-        }
+        self.viewport.set_rendered_diff_area(hit_map.diff_area);
         self.overlays.rendered_diff_menu_area = hit_map.diff_menu_area;
         self.overlays.rendered_branch_menu_area = hit_map.branch_menu_area;
         self.overlays.rendered_commit_menu_area = hit_map.commit_menu_area;

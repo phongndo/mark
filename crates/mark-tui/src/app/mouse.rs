@@ -9,8 +9,8 @@ use crate::theme::HORIZONTAL_SCROLL_STEP;
 
 mod annotation_clicks;
 mod click;
+mod cursor;
 mod event_context;
-mod hover;
 mod scroll;
 mod sidebar;
 
@@ -168,7 +168,6 @@ impl DiffApp {
             return Ok(self.mouse_burst_outcome());
         }
 
-        self.update_diff_mouse_hover(mouse.column, mouse.row);
         match mouse.kind {
             MouseEventKind::ScrollDown => {
                 if self.is_file_sidebar_position(mouse.column, mouse.row) {
@@ -176,7 +175,6 @@ impl DiffApp {
                     self.scroll_file_sidebar_by(ticks.min(isize::MAX as usize) as isize);
                 } else {
                     self.mouse_scroll_or_focus_hunk_ticks(MouseScrollDirection::Down, ticks);
-                    self.update_diff_mouse_hover(mouse.column, mouse.row);
                 }
                 Ok(self.mouse_burst_outcome())
             }
@@ -186,7 +184,6 @@ impl DiffApp {
                     self.scroll_file_sidebar_by(-(ticks.min(isize::MAX as usize) as isize));
                 } else {
                     self.mouse_scroll_or_focus_hunk_ticks(MouseScrollDirection::Up, ticks);
-                    self.update_diff_mouse_hover(mouse.column, mouse.row);
                 }
                 Ok(self.mouse_burst_outcome())
             }
@@ -198,7 +195,6 @@ impl DiffApp {
                         .saturating_mul(ticks)
                         .min(isize::MAX as usize) as isize;
                     self.scroll_horizontally_by(-delta);
-                    self.update_diff_mouse_hover(mouse.column, mouse.row);
                 }
                 Ok(self.mouse_burst_outcome())
             }
@@ -210,7 +206,6 @@ impl DiffApp {
                         .saturating_mul(ticks)
                         .min(isize::MAX as usize) as isize;
                     self.scroll_horizontally_by(delta);
-                    self.update_diff_mouse_hover(mouse.column, mouse.row);
                 }
                 Ok(self.mouse_burst_outcome())
             }

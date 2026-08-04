@@ -1,7 +1,7 @@
 use ratatui::prelude::{Line, Modifier, Span, Style};
 
 use crate::{
-    annotation::AnnotationSide,
+    annotation::{AnnotationScope, AnnotationSide},
     controls::DiffLayoutMode,
     render::text::{display_width, fit_with_width, skip_display_prefix, spaces},
     theme::{DiffTheme, GUTTER_WIDTH, UNIFIED_GUTTER_WIDTH},
@@ -11,6 +11,7 @@ const LINE_NUMBER_WIDTH: usize = 5;
 const UNIFIED_NEW_LINE_OFFSET: usize = LINE_NUMBER_WIDTH + 1;
 
 pub(crate) struct AnnotationTargetHint<'a> {
+    pub(crate) scope: AnnotationScope,
     pub(crate) side: AnnotationSide,
     pub(crate) hint: &'a str,
     pub(crate) existing_annotation: bool,
@@ -30,13 +31,25 @@ pub(crate) fn apply_annotation_target_hint(
         target.hint.to_owned()
     };
     let hint_width = display_width(&hint);
-    let Some((start, mut field_width)) =
-        annotation_target_hint_range(layout, width, target.side, hint_width)
-    else {
+    let Some((start, mut field_width)) = annotation_target_hint_range_for_scope(
+        layout,
+        width,
+        target.scope,
+        target.side,
+        hint_width,
+    ) else {
         return line;
     };
-    field_width =
-        extend_overflow_line_number_field(&line, layout, width, target.side, start, field_width);
+    if matches!(target.scope, AnnotationScope::Line) {
+        field_width = extend_overflow_line_number_field(
+            &line,
+            layout,
+            width,
+            target.side,
+            start,
+            field_width,
+        );
+    }
     let hint_style = if target.existing_annotation {
         Style::default()
             .fg(theme.hunk)
@@ -50,12 +63,22 @@ pub(crate) fn apply_annotation_target_hint(
     overlay_line_cells(line, start, field_width, &hint, hint_style)
 }
 
-fn annotation_target_hint_range(
+fn annotation_target_hint_range_for_scope(
     layout: DiffLayoutMode,
     width: usize,
+    scope: AnnotationScope,
     side: AnnotationSide,
     hint_width: usize,
 ) -> Option<(usize, usize)> {
+    match scope {
+        AnnotationScope::File => {
+            return (hint_width > 0 && hint_width <= width).then_some((0, hint_width));
+        }
+        AnnotationScope::Hunk { .. } => {
+            return (hint_width > 0 && hint_width < width).then_some((1, hint_width));
+        }
+        AnnotationScope::Line => {}
+    }
     let range = match layout {
         DiffLayoutMode::Unified => {
             let offset = match side {
@@ -83,6 +106,16 @@ fn annotation_target_hint_range(
             AnnotationSide::New => (width.saturating_sub(hint_width), hint_width),
         })
     })
+}
+
+#[cfg(test)]
+fn annotation_target_hint_range(
+    layout: DiffLayoutMode,
+    width: usize,
+    side: AnnotationSide,
+    hint_width: usize,
+) -> Option<(usize, usize)> {
+    annotation_target_hint_range_for_scope(layout, width, AnnotationScope::Line, side, hint_width)
 }
 
 fn extend_overflow_line_number_field(
@@ -333,7 +366,7 @@ mod tests {
         overlay_line_cells,
     };
     use crate::{
-        annotation::{AnnotationSide, annotation_hint_codes},
+        annotation::{AnnotationScope, AnnotationSide, annotation_hint_codes},
         controls::DiffLayoutMode,
         theme::DiffTheme,
     };
@@ -404,6 +437,7 @@ mod tests {
                 DiffLayoutMode::Unified,
                 40,
                 AnnotationTargetHint {
+                    scope: AnnotationScope::Line,
                     side: AnnotationSide::New,
                     hint,
                     existing_annotation: false,
@@ -444,6 +478,7 @@ mod tests {
             DiffLayoutMode::Unified,
             width,
             AnnotationTargetHint {
+                scope: AnnotationScope::Line,
                 side: AnnotationSide::Old,
                 hint: &hint,
                 existing_annotation: false,
@@ -475,6 +510,7 @@ mod tests {
             DiffLayoutMode::Unified,
             width,
             AnnotationTargetHint {
+                scope: AnnotationScope::Line,
                 side: AnnotationSide::Old,
                 hint: "ssssss",
                 existing_annotation: false,
@@ -539,6 +575,7 @@ mod tests {
                 layout,
                 width,
                 AnnotationTargetHint {
+                    scope: AnnotationScope::Line,
                     side,
                     hint: "a",
                     existing_annotation: false,

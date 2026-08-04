@@ -79,7 +79,6 @@ impl DiffApp {
         requested_files: &mut HashSet<ContextSourceKey>,
     ) {
         match row {
-            UiRow::FileSeparator => {}
             UiRow::UnifiedLine { file, hunk, line } => {
                 let Some(diff_line) = self
                     .document
@@ -249,8 +248,7 @@ impl DiffApp {
             UiRow::ContextLine { file, .. } => {
                 key.source.generation == self.document.generation && key.source.file == file.get()
             }
-            UiRow::FileSeparator
-            | UiRow::FileHeader(_)
+            UiRow::FileHeader(_)
             | UiRow::FileBodyNotice(_)
             | UiRow::Collapsed { .. }
             | UiRow::ContextHide { .. }

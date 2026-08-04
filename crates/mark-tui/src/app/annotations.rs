@@ -2,10 +2,10 @@ use super::{
     DiffApp, HunkFocusScrollBehavior, POST_EDITOR_QUIT_KEY_IGNORE, create_annotation_scratch_file,
     normalize_annotation_editor_contents, viewport_center_offset,
 };
-use crate::annotation::{AnnotationDraft, AnnotationKey, AnnotationSide};
+use crate::annotation::{AnnotationDraft, AnnotationKey, AnnotationScope, AnnotationSide};
 use crate::editor::{configured_editor, open_text_in_editor};
 use crate::keymap::{AnnotationMenuAction, GlobalAction, MenuAction};
-use crate::model::{DiffLineIndex, FileIndex, HunkIndex};
+use crate::model::{DiffLineIndex, FileIndex, HunkIndex, UiRow};
 use crate::render::viewport_plan::{ViewportSlotKind, plan_diff_viewport_rows_at_scroll};
 use crate::selector::{SelectorController, SelectorMovement};
 use crate::syntax::DiffSide;
@@ -13,7 +13,7 @@ use crate::text_input::{TextInputKeyResult, handle_text_input_key};
 use crossterm::event::{KeyCode, KeyEvent};
 use mark_core::MarkResult;
 use mark_diff::FileStatus;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::time::Instant;
 
@@ -217,6 +217,7 @@ impl DiffApp {
             .annotation_rows
             .borrow_mut()
             .remove(&item.key);
+        *self.annotations_state.annotation_keys_by_row.borrow_mut() = None;
         self.annotations_state
             .annotation_heights
             .borrow_mut()
@@ -271,21 +272,79 @@ impl DiffApp {
 
         let mut found = Vec::with_capacity(missing.len());
         for (index, row) in self.document.model.iter_rows().enumerate() {
-            let Some(key) = AnnotationKey::from_ui_row(&self.document.changeset, row) else {
-                continue;
-            };
-            if missing.remove(&key) {
-                found.push((key, Some(index)));
-                if missing.is_empty() {
-                    break;
+            for key in AnnotationKey::candidates_from_ui_row(&self.document.changeset, row) {
+                if missing.remove(&key) {
+                    found.push((key, Some(index)));
+                    if missing.is_empty() {
+                        break;
+                    }
                 }
             }
+            if missing.is_empty() {
+                break;
+            }
         }
-        found.extend(missing.into_iter().map(|key| (key, None)));
+        found.extend(missing.into_iter().map(|key| {
+            let model_row = self.find_annotation_model_row(&key);
+            (key, model_row)
+        }));
         self.annotations_state
             .annotation_rows
             .borrow_mut()
             .extend(found);
+        *self.annotations_state.annotation_keys_by_row.borrow_mut() = None;
+    }
+
+    fn cache_annotation_keys_by_model_row(&self) {
+        if self
+            .annotations_state
+            .annotation_keys_by_row
+            .borrow()
+            .is_some()
+        {
+            return;
+        }
+        self.cache_annotation_model_rows();
+        let annotation_rows = self.annotations_state.annotation_rows.borrow();
+        let mut keys_by_row = HashMap::<usize, Vec<AnnotationKey>>::new();
+        for key in self.annotations_state.annotations.keys() {
+            if let Some(model_row) = annotation_rows.get(key).copied().flatten() {
+                keys_by_row.entry(model_row).or_default().push(key.clone());
+            }
+        }
+        *self.annotations_state.annotation_keys_by_row.borrow_mut() = Some(keys_by_row);
+    }
+
+    pub(crate) fn annotation_keys_at_model_row(
+        &self,
+        model_row: usize,
+        row: UiRow,
+    ) -> Vec<AnnotationKey> {
+        let mut keys = AnnotationKey::candidates_from_ui_row(&self.document.changeset, row);
+        if let Some(draft) = self
+            .annotations_state
+            .annotation_draft
+            .as_ref()
+            .filter(|draft| draft.model_row_index == model_row)
+            && !keys.contains(&draft.key)
+        {
+            keys.push(draft.key.clone());
+        }
+        self.cache_annotation_keys_by_model_row();
+        if let Some(anchored_keys) = self
+            .annotations_state
+            .annotation_keys_by_row
+            .borrow()
+            .as_ref()
+            .and_then(|keys_by_row| keys_by_row.get(&model_row))
+        {
+            for key in anchored_keys {
+                if !keys.contains(key) {
+                    keys.push(key.clone());
+                }
+            }
+        }
+        keys
     }
 
     pub(crate) fn annotation_model_row(&self, key: &AnnotationKey) -> Option<usize> {
@@ -298,6 +357,7 @@ impl DiffApp {
             .annotation_rows
             .borrow_mut()
             .insert(key.clone(), model_row);
+        *self.annotations_state.annotation_keys_by_row.borrow_mut() = None;
         model_row
     }
 
@@ -307,6 +367,37 @@ impl DiffApp {
                 continue;
             }
             let file_index = FileIndex::new(file_index);
+            match key.scope {
+                AnnotationScope::File => {
+                    return self.document.model.file_start_row(file_index.get());
+                }
+                AnnotationScope::Hunk {
+                    old_start,
+                    old_count,
+                    new_start,
+                    new_count,
+                } => {
+                    let hunk = file.hunks().iter().position(|hunk| {
+                        hunk.old_start() == old_start
+                            && hunk.old_count() == old_count
+                            && hunk.new_start() == new_start
+                            && hunk.new_count() == new_count
+                    })?;
+                    let hunk_index = HunkIndex::new(hunk);
+                    return self
+                        .document
+                        .model
+                        .hunk_header_row(file_index, hunk_index)
+                        .map(crate::model::ModelRow::get)
+                        .or_else(|| {
+                            self.document
+                                .model
+                                .hunk_row_range(file_index.get(), hunk_index.get())
+                                .and_then(|range| (!range.is_empty()).then_some(range.start))
+                        });
+                }
+                AnnotationScope::Line => {}
+            }
             for (hunk_index, hunk) in file.hunks().iter().enumerate() {
                 let line_index = hunk.lines.iter().position(|line| match key.side {
                     AnnotationSide::Old => line.old_line() == Some(key.line),
@@ -325,7 +416,9 @@ impl DiffApp {
                 let Some(row) = self.document.model.row(model_row.get()) else {
                     continue;
                 };
-                if AnnotationKey::from_ui_row(&self.document.changeset, row).as_ref() == Some(key) {
+                if AnnotationKey::candidates_from_ui_row(&self.document.changeset, row)
+                    .contains(key)
+                {
                     return Some(model_row.get());
                 }
             }
@@ -338,7 +431,8 @@ impl DiffApp {
                 .model
                 .context_line_row_for_side(file_index, side, key.line)
                 && let Some(row) = self.document.model.row(model_row.get())
-                && AnnotationKey::from_ui_row(&self.document.changeset, row).as_ref() == Some(key)
+                && AnnotationKey::candidates_from_ui_row(&self.document.changeset, row)
+                    .contains(key)
             {
                 return Some(model_row.get());
             }
@@ -361,8 +455,9 @@ impl DiffApp {
                 Some((self.annotation_anchor_visual_scroll(row), row, key.clone()))
             })
             .collect::<Vec<_>>();
-        targets.sort_unstable_by_key(|(anchor, row, _)| (*anchor, *row));
-        targets.dedup_by(|left, right| left.0 == right.0 && left.1 == right.1);
+        targets.sort_unstable_by(|left, right| {
+            (&left.0, &left.1, &left.2).cmp(&(&right.0, &right.1, &right.2))
+        });
 
         if targets.is_empty() {
             self.set_notice("annotations are hidden");
@@ -370,7 +465,17 @@ impl DiffApp {
         }
 
         let focus_scroll = self.annotation_navigation_focus_scroll();
-        let target = if delta < 0 {
+        let selected = self
+            .annotation_cursor_target()
+            .and_then(|current| targets.iter().position(|target| target.2 == current.key));
+        let target = if let Some(selected) = selected {
+            let index = if delta < 0 {
+                selected.checked_sub(1).unwrap_or(targets.len() - 1)
+            } else {
+                selected.saturating_add(1) % targets.len()
+            };
+            targets[index].clone()
+        } else if delta < 0 {
             targets
                 .iter()
                 .rev()
@@ -528,6 +633,7 @@ impl DiffApp {
     pub(super) fn commit_annotation_draft(&mut self, draft: AnnotationDraft) {
         let draft_key = draft.key.clone();
         self.annotations_state.annotation_block_scroll = None;
+        *self.annotations_state.annotation_keys_by_row.borrow_mut() = None;
         self.annotations_state
             .annotation_heights
             .borrow_mut()

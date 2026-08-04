@@ -376,6 +376,7 @@ fn j_and_k_scroll_then_move_hunk_focus_at_edges_in_scrollable_diff() {
 fn mouse_wheel_moves_hunk_focus_when_diff_fits_viewport() {
     let changeset = changeset_with_hunks_at(PathBuf::from("/repo"), &[1, 2, 3]);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.config.annotation_targeting = AnnotationTargeting::Hints;
     app.set_viewport_rows(20);
 
     assert_eq!(app.max_scroll(), 0);
@@ -428,6 +429,7 @@ fn mouse_wheel_scrolls_then_accumulates_hunk_focus_at_edge_in_scrollable_diff() 
         "a.rs", "b.rs", "c.rs", "d.rs", "e.rs", "f.rs", "g.rs", "h.rs",
     ]);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.config.annotation_targeting = AnnotationTargeting::Hints;
     app.set_viewport_rows(6);
 
     assert!(app.max_scroll() > 0);
@@ -466,6 +468,7 @@ fn mouse_wheel_scrolls_then_accumulates_hunk_focus_at_edge_in_scrollable_diff() 
 fn mouse_wheel_focus_at_top_does_not_recenter_and_loop_back() {
     let changeset = changeset_with_hunks_at(PathBuf::from("/repo"), &[1, 2, 3, 4, 5, 6, 7, 8]);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.config.annotation_targeting = AnnotationTargeting::Hints;
     app.set_viewport_rows(8);
 
     assert!(app.max_scroll() > 0);
@@ -552,22 +555,22 @@ fn bracket_hunk_navigation_focuses_visible_hunk_when_scroll_is_clamped() {
 fn bracket_hunk_navigation_can_return_to_first_hunk_in_short_scrollable_diff() {
     let changeset = changeset_with_files(&["a.rs", "b.rs", "c.rs", "d.rs", "e.rs", "f.rs"]);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
-    app.set_viewport_rows(20);
+    app.set_viewport_rows(17);
 
     assert!(app.max_scroll() > 0);
-    assert_eq!(app.focused_hunk_for_viewport(20), Some((FILE_0, HUNK_0)));
+    assert_eq!(app.focused_hunk_for_viewport(17), Some((FILE_0, HUNK_0)));
 
     for _ in 0..10 {
         app.previous_hunk();
     }
     assert_eq!(app.viewport.scroll, 0);
-    assert_eq!(app.focused_hunk_for_viewport(20), Some((FILE_0, HUNK_0)));
+    assert_eq!(app.focused_hunk_for_viewport(17), Some((FILE_0, HUNK_0)));
 
     app.next_hunk();
-    assert_eq!(app.focused_hunk_for_viewport(20), Some((FILE_1, HUNK_0)));
+    assert_eq!(app.focused_hunk_for_viewport(17), Some((FILE_1, HUNK_0)));
 
     app.previous_hunk();
-    assert_eq!(app.focused_hunk_for_viewport(20), Some((FILE_0, HUNK_0)));
+    assert_eq!(app.focused_hunk_for_viewport(17), Some((FILE_0, HUNK_0)));
 }
 
 #[test]
@@ -720,6 +723,83 @@ fn bounded_context_expansion_config_does_not_limit_mouse_expansion() {
             hunk: HUNK_0,
             lines: 49,
         })
+    );
+}
+
+#[test]
+fn cursor_visits_file_context_and_hunk_headers_without_skipping_rows() {
+    let repo = temp_test_dir("cursor-structural-rows");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    let text = (1..=80)
+        .map(|line| format!("line {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(repo.join("file.rs"), text).expect("context file should be written");
+    let changeset = changeset_with_hunk_at(repo, 50);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(4);
+    app.navigate_diff_to_boundary(false);
+
+    assert!(
+        (0..app.document.model.len())
+            .any(|row| matches!(app.document.model.row(row), Some(UiRow::Collapsed { .. })))
+    );
+    assert!(
+        (0..app.document.model.len())
+            .any(|row| matches!(app.document.model.row(row), Some(UiRow::HunkHeader { .. })))
+    );
+
+    for expected_row in 0..app.document.model.len() {
+        assert_eq!(
+            app.annotation_cursor_target()
+                .map(|target| target.model_row_index),
+            Some(expected_row)
+        );
+        if expected_row + 1 < app.document.model.len() {
+            assert!(app.move_annotation_cursor(1));
+        }
+    }
+
+    app.set_scroll(0);
+    app.select_annotation_cursor_model_row(1);
+    let cursor_viewport_row = 1;
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("Enter should activate the selected context control");
+    assert!(matches!(
+        app.document.model.row(1),
+        Some(UiRow::ContextLine { .. })
+    ));
+    let hide_row = (0..app.document.model.len())
+        .find(|row| {
+            matches!(
+                app.document.model.row(*row),
+                Some(UiRow::ContextHide { .. })
+            )
+        })
+        .expect("expanded context hide control");
+    assert_eq!(
+        app.annotation_cursor_target()
+            .map(|target| target.model_row_index),
+        Some(hide_row)
+    );
+    assert_eq!(
+        hide_row.saturating_sub(app.viewport.scroll),
+        cursor_viewport_row
+    );
+
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("Enter should collapse the selected context control");
+    let collapsed_row = (0..app.document.model.len())
+        .find(|row| matches!(app.document.model.row(*row), Some(UiRow::Collapsed { .. })))
+        .expect("collapsed context control");
+    assert_eq!(
+        app.annotation_cursor_target()
+            .map(|target| target.model_row_index),
+        Some(collapsed_row)
+    );
+    assert_eq!(
+        collapsed_row.saturating_sub(app.viewport.scroll),
+        cursor_viewport_row
     );
 }
 
@@ -2543,8 +2623,8 @@ fn number_key_does_not_switch_show_source_diff_choice() {
 }
 
 #[test]
-fn diff_mouse_hover_tracks_position_inside_diff_area() {
-    let changeset = changeset_with_line_text("abcdef");
+fn mouse_movement_does_not_create_a_second_diff_cursor() {
+    let changeset = changeset_with_line_texts(&["one", "two", "three"]);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
     app.set_rendered_diff_area(Rect {
         x: 10,
@@ -2552,50 +2632,59 @@ fn diff_mouse_hover_tracks_position_inside_diff_area() {
         width: 40,
         height: 8,
     });
-
     app.set_viewport_rows(8);
-    app.update_diff_mouse_hover(22, 5);
-    assert_eq!(app.viewport.mouse_hover, Some((12, 2)));
+    let selected = app.annotation_cursor_target().cloned();
+
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Moved,
+        column: 22,
+        row: 5,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("mouse movement");
+
+    assert_eq!(app.annotation_cursor_target(), selected.as_ref());
+}
+
+#[test]
+fn left_click_moves_the_annotation_cursor_to_the_clicked_line() {
+    let changeset = changeset_with_line_texts(&["one", "two", "three", "four"]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_rendered_diff_area(Rect {
+        x: 0,
+        y: 1,
+        width: 40,
+        height: 4,
+    });
+    app.set_viewport_width(40);
+    app.set_viewport_rows(4);
+    let code_row = app
+        .document
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
+        .expect("first code row");
+    app.viewport.scroll = code_row;
+
+    assert!(app.handle_diff_click(20, 3));
     assert_eq!(
-        app.diff_mouse_highlight_visual_row(),
-        crate::render::viewport_plan::visual_scroll_for_viewport_row(&app, 2)
+        app.annotation_cursor_target()
+            .map(|target| target.model_row_index),
+        Some(code_row + 2)
     );
 
-    app.update_diff_mouse_hover(22, 5);
-    app.update_diff_mouse_hover(0, 5);
-    assert_eq!(app.viewport.mouse_hover, None);
+    app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+        .expect("keyboard navigation should continue from the clicked line");
+    assert_eq!(
+        app.annotation_cursor_target()
+            .map(|target| target.model_row_index),
+        Some(code_row + 3)
+    );
 }
 
 #[test]
-fn diff_mouse_hover_clears_when_diff_area_changes() {
-    let changeset = changeset_with_line_text("abcdef");
-    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
-    let area = Rect {
-        x: 0,
-        y: 1,
-        width: 40,
-        height: 5,
-    };
-    app.set_rendered_diff_area(area);
-
-    app.update_diff_mouse_hover(38, 1);
-    assert_eq!(app.viewport.mouse_hover, Some((38, 0)));
-
-    app.set_rendered_diff_area(area);
-    assert_eq!(app.viewport.mouse_hover, Some((38, 0)));
-
-    app.set_rendered_diff_area(Rect {
-        x: 10,
-        y: area.y,
-        width: area.width,
-        height: area.height,
-    });
-
-    assert_eq!(app.viewport.mouse_hover, None);
-}
-
-#[test]
-fn diff_mouse_hover_clears_on_non_mouse_scroll() {
+fn mouse_movement_leaves_only_the_keyboard_cursor_highlight() {
     let lines: Vec<&str> = (0..12).map(|_| "line").collect();
     let changeset = changeset_with_line_texts(&lines);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
@@ -2615,20 +2704,32 @@ fn diff_mouse_hover_clears_on_non_mouse_scroll() {
         .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
         .expect("unified line");
     app.viewport.scroll = code_row;
-    app.update_diff_mouse_hover(38, 1);
+    app.select_annotation_cursor_model_row(code_row);
+    let selected = app.annotation_cursor_target().cloned();
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Moved,
+        column: 38,
+        row: 4,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("mouse movement");
 
-    let before = crate::render::diff::build_diff_viewport_lines(&mut app, 40, 5);
-    assert!(line_text(&before[0]).contains("[+]"));
-
-    app.scroll_by(1);
-
-    assert_eq!(app.viewport.mouse_hover, None);
+    assert_eq!(app.annotation_cursor_target(), selected.as_ref());
     let after = crate::render::diff::build_diff_viewport_lines(&mut app, 40, 5);
-    assert!(!after.iter().any(|line| line_text(line).contains("[+]")));
+    assert_eq!(
+        after
+            .iter()
+            .filter(|line| line
+                .spans
+                .iter()
+                .any(|span| span.style.bg == Some(app.config.theme.cursor_line_bg)))
+            .count(),
+        1
+    );
 }
 
 #[test]
-fn diff_mouse_hover_stays_on_mouse_scroll_inside_diff_area() {
+fn mouse_scroll_keeps_a_single_visible_annotation_cursor() {
     let lines: Vec<&str> = (0..12).map(|_| "line").collect();
     let changeset = changeset_with_line_texts(&lines);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
@@ -2648,6 +2749,11 @@ fn diff_mouse_hover_stays_on_mouse_scroll_inside_diff_area() {
         .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
         .expect("unified line");
     app.viewport.scroll = code_row;
+    app.select_annotation_cursor_model_row(code_row + 2);
+    let cursor_viewport_row = app
+        .annotation_cursor_target()
+        .map(|target| target.model_row_index - app.viewport.scroll)
+        .expect("cursor row");
 
     app.handle_mouse(MouseEvent {
         kind: MouseEventKind::ScrollDown,
@@ -2657,9 +2763,28 @@ fn diff_mouse_hover_stays_on_mouse_scroll_inside_diff_area() {
     })
     .expect("mouse scroll");
 
-    assert_eq!(app.viewport.mouse_hover, Some((38, 0)));
+    assert_eq!(app.viewport.scroll, code_row + 1);
+    assert_eq!(
+        app.annotation_cursor_target()
+            .map(|target| target.model_row_index),
+        Some(code_row + 3)
+    );
+    assert_eq!(
+        app.annotation_cursor_target()
+            .map(|target| target.model_row_index - app.viewport.scroll),
+        Some(cursor_viewport_row)
+    );
     let after = crate::render::diff::build_diff_viewport_lines(&mut app, 40, 5);
-    assert!(line_text(&after[0]).contains("[+]"));
+    assert_eq!(
+        after
+            .iter()
+            .filter(|line| line
+                .spans
+                .iter()
+                .any(|span| span.style.bg == Some(app.config.theme.cursor_line_bg)))
+            .count(),
+        1
+    );
 }
 
 #[test]

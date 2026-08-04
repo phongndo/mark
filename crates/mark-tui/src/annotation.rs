@@ -4,8 +4,6 @@ use mark_diff::{Changeset, DiffFile, DiffLine, DiffLineKind};
 
 use crate::model::UiRow;
 
-pub(crate) const ANNOTATION_ADD_BUTTON: &str = " [+]";
-pub(crate) const ANNOTATION_ADD_BUTTON_WIDTH: usize = 4;
 pub(crate) const ANNOTATION_CLOSE_BUTTON: &str = "[x]";
 pub(crate) const ANNOTATION_CLOSE_BUTTON_WIDTH: usize = 3;
 pub(crate) const ANNOTATION_SUBMIT_BUTTON: &str = "[✓]";
@@ -15,11 +13,24 @@ pub(crate) const ANNOTATION_EDIT_BUTTON: &str = "[↻]";
 pub(crate) const ANNOTATION_EDIT_BUTTON_ASCII: &str = "[e]";
 pub(crate) const ANNOTATION_EDIT_BUTTON_WIDTH: usize = 3;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct AnnotationKey {
     pub(crate) path: String,
     pub(crate) side: AnnotationSide,
     pub(crate) line: usize,
+    pub(crate) scope: AnnotationScope,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum AnnotationScope {
+    File,
+    Hunk {
+        old_start: usize,
+        old_count: usize,
+        new_start: usize,
+        new_count: usize,
+    },
+    Line,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -38,8 +49,15 @@ impl AnnotationSide {
 }
 
 impl AnnotationKey {
+    const CURSOR_ONLY_PATH: &'static str = "\0mark-cursor";
+
     pub(crate) fn from_ui_row(changeset: &Changeset, row: UiRow) -> Option<Self> {
         match row {
+            UiRow::FileHeader(file) => Self::for_file(changeset.files.get(file.get())?),
+            UiRow::HunkHeader { file, hunk } => {
+                let file = changeset.files.get(file.get())?;
+                Self::for_hunk(file, file.hunks().get(hunk.get())?)
+            }
             UiRow::UnifiedLine { file, hunk, line } | UiRow::MetaLine { file, hunk, line } => {
                 let file = changeset.files.get(file.get())?;
                 let hunk = file.hunks().get(hunk.get())?;
@@ -56,11 +74,11 @@ impl AnnotationKey {
                 let lines = &hunk.lines;
                 if let Some(index) = right.get() {
                     // Prefer the right/current side when a split row has both sides;
-                    // unpaired left-only rows remain old-side deletion marks.
+                    // left-only rows remain old-side deletion marks.
                     let line = lines.get(index.get())?.new_line()?;
                     return Self::for_file_line(file, AnnotationSide::New, line);
                 }
-                Self::unpaired_deletion_candidate(file, lines, left.get()?.get())
+                Self::deletion_candidate(file, lines, left.get()?.get())
             }
             UiRow::ContextLine {
                 file,
@@ -78,9 +96,31 @@ impl AnnotationKey {
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn candidates_from_ui_row(changeset: &Changeset, row: UiRow) -> Vec<Self> {
-        Self::from_ui_row(changeset, row).into_iter().collect()
+        let UiRow::SplitLine {
+            file,
+            hunk,
+            left,
+            right,
+        } = row
+        else {
+            return Self::from_ui_row(changeset, row).into_iter().collect();
+        };
+        let Some(file) = changeset.files.get(file.get()) else {
+            return Vec::new();
+        };
+        let Some(hunk) = file.hunks().get(hunk.get()) else {
+            return Vec::new();
+        };
+        let lines = &hunk.lines;
+        let old = left
+            .get()
+            .and_then(|index| Self::deletion_candidate(file, lines, index.get()));
+        let new = right.get().and_then(|index| {
+            let line = lines.get(index.get())?.new_line()?;
+            Self::for_file_line(file, AnnotationSide::New, line)
+        });
+        old.into_iter().chain(new).collect()
     }
 
     fn from_hunk_line(file: &DiffFile, lines: &[DiffLine], line_index: usize) -> Option<Self> {
@@ -96,27 +136,22 @@ impl AnnotationKey {
             DiffLineKind::Addition => line
                 .new_line()
                 .and_then(|line| Self::for_file_line(file, AnnotationSide::New, line)),
-            DiffLineKind::Deletion => Self::unpaired_deletion_candidate(file, lines, line_index),
+            DiffLineKind::Deletion => Self::deletion_candidate(file, lines, line_index),
             DiffLineKind::Meta => None,
         }
     }
 
-    fn unpaired_deletion_candidate(
-        file: &DiffFile,
-        lines: &[DiffLine],
-        line_index: usize,
-    ) -> Option<Self> {
+    fn deletion_candidate(file: &DiffFile, lines: &[DiffLine], line_index: usize) -> Option<Self> {
         let line = lines.get(line_index)?;
-        if !matches!(line.kind(), DiffLineKind::Deletion)
-            || deletion_has_paired_addition(lines, line_index)
-        {
+        if !matches!(line.kind(), DiffLineKind::Deletion) {
             return None;
         }
         Self::for_file_line(file, AnnotationSide::Old, line.old_line()?)
     }
 
     fn for_file_line(file: &DiffFile, side: AnnotationSide, line: usize) -> Option<Self> {
-        Self::path_for_side(file, side).map(|path| Self::new(path, side, line))
+        Self::path_for_side(file, side)
+            .map(|path| Self::new(path, side, line, AnnotationScope::Line))
     }
 
     pub(crate) fn path_for_side(file: &DiffFile, side: AnnotationSide) -> Option<&str> {
@@ -126,13 +161,61 @@ impl AnnotationKey {
         }
     }
 
-    fn new(path: &str, side: AnnotationSide, line: usize) -> Self {
+    fn for_file(file: &DiffFile) -> Option<Self> {
+        let (path, side) = preferred_file_path_and_side(file)?;
+        Some(Self::new(path, side, 0, AnnotationScope::File))
+    }
+
+    fn for_hunk(file: &DiffFile, hunk: &mark_diff::DiffHunk) -> Option<Self> {
+        let (path, side) = preferred_file_path_and_side(file)?;
+        let line = match side {
+            AnnotationSide::Old => hunk.old_start(),
+            AnnotationSide::New => hunk.new_start(),
+        };
+        Some(Self::new(
+            path,
+            side,
+            line,
+            AnnotationScope::Hunk {
+                old_start: hunk.old_start(),
+                old_count: hunk.old_count(),
+                new_start: hunk.new_start(),
+                new_count: hunk.new_count(),
+            },
+        ))
+    }
+
+    fn new(path: &str, side: AnnotationSide, line: usize, scope: AnnotationScope) -> Self {
         Self {
             path: path.to_owned(),
             side,
             line,
+            scope,
         }
     }
+
+    pub(crate) fn cursor_only(model_row: usize) -> Self {
+        Self::new(
+            Self::CURSOR_ONLY_PATH,
+            AnnotationSide::New,
+            model_row,
+            AnnotationScope::Line,
+        )
+    }
+
+    pub(crate) fn is_cursor_only(&self) -> bool {
+        self.path == Self::CURSOR_ONLY_PATH
+    }
+
+    pub(crate) fn is_line(&self) -> bool {
+        matches!(self.scope, AnnotationScope::Line) && !self.is_cursor_only()
+    }
+}
+
+fn preferred_file_path_and_side(file: &DiffFile) -> Option<(&str, AnnotationSide)> {
+    file.new_path()
+        .map(|path| (path, AnnotationSide::New))
+        .or_else(|| file.old_path().map(|path| (path, AnnotationSide::Old)))
 }
 
 pub(crate) fn paired_old_line_for_addition(
@@ -145,16 +228,6 @@ pub(crate) fn paired_old_line_for_addition(
         .position(|index| *index == addition_index)?;
     let deletion_index = *deletions.get(pair_index)?;
     lines.get(deletion_index)?.old_line()
-}
-
-fn deletion_has_paired_addition(lines: &[DiffLine], deletion_index: usize) -> bool {
-    let Some((deletions, additions)) = change_block_line_indices(lines, deletion_index) else {
-        return false;
-    };
-    let Some(pair_index) = deletions.iter().position(|index| *index == deletion_index) else {
-        return false;
-    };
-    pair_index < additions.len()
 }
 
 fn change_block_line_indices(lines: &[DiffLine], index: usize) -> Option<(Vec<usize>, Vec<usize>)> {
@@ -223,12 +296,14 @@ pub(crate) struct AnnotationTarget {
 pub(crate) struct AnnotationCursor {
     /// Identity of the model whose row coordinates these targets use.
     pub(crate) model_identity: u64,
-    /// Eager cursors use an empty list for a checked model with no targets;
-    /// lazy cursors use it until a target is discovered in or from the viewport.
+    /// Eager cursors include every diff row, including structural rows that
+    /// cannot hold annotations. Large models keep only the selected row.
     pub(crate) targets: Vec<AnnotationTarget>,
     pub(crate) selected: usize,
-    /// Large models keep only the selected target and discover adjacent targets
-    /// on demand instead of cloning every annotatable key up front.
+    /// Explicit key choices retained while revisiting rows in this model.
+    pub(crate) preferred_keys: HashMap<usize, AnnotationKey>,
+    /// Large models discover adjacent rows on demand instead of cloning the
+    /// complete row list up front.
     pub(crate) lazy: bool,
     /// A failed lazy move is cached until the selected target changes.
     pub(crate) previous_exhausted: bool,
@@ -243,11 +318,11 @@ pub(crate) struct AnnotationTargetMode {
 }
 
 impl AnnotationTargetMode {
-    pub(crate) fn target_at_visual_scroll(
+    pub(crate) fn targets_at_visual_scroll(
         &self,
         visual_scroll: usize,
-    ) -> Option<&AnnotationTarget> {
-        self.targets.iter().find(|target| {
+    ) -> impl Iterator<Item = &AnnotationTarget> {
+        self.targets.iter().filter(move |target| {
             target.visual_scroll == visual_scroll && target.hint.starts_with(&self.prefix)
         })
     }

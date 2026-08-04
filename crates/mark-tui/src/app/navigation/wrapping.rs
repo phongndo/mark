@@ -102,8 +102,7 @@ impl DiffApp {
                     .unwrap_or(1);
                 left_rows.max(right_rows).max(1)
             }
-            UiRow::FileSeparator
-            | UiRow::FileHeader(_)
+            UiRow::FileHeader(_)
             | UiRow::FileBodyNotice(_)
             | UiRow::Collapsed { .. }
             | UiRow::ContextHide { .. }
