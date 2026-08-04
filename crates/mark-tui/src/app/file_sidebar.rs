@@ -130,6 +130,9 @@ impl DiffApp {
         } else {
             self.runtime.dirty = true;
         }
+        if let Some(row) = self.document.model.file_start_row(selected_file.get()) {
+            self.select_annotation_cursor_near_model_row_in_file(row, selected_file);
+        }
         self.ensure_file_sidebar_selection_visible(self.visible_file_sidebar_rows());
     }
 

@@ -94,12 +94,20 @@ fn plan_unwrapped_viewport_rows(
             } else if let Some(text) = annotations.get(&key)
                 && draft.is_none_or(|d| d.key != key)
             {
+                let block_scroll = app
+                    .annotations_state
+                    .annotation_block_scroll
+                    .as_ref()
+                    .filter(|(scroll_key, _)| scroll_key == &key)
+                    .map(|(_, offset)| *offset)
+                    .unwrap_or_default();
                 push_saved_plan_slots(
                     &mut plans,
                     visual_row,
                     key,
                     text,
                     app.viewport.viewport_width,
+                    block_scroll,
                     visible_rows,
                 );
             }
@@ -165,12 +173,20 @@ fn plan_wrapped_viewport_rows(
             } else if let Some(text) = annotations.get(&key)
                 && draft.is_none_or(|d| d.key != key)
             {
+                let block_scroll = app
+                    .annotations_state
+                    .annotation_block_scroll
+                    .as_ref()
+                    .filter(|(scroll_key, _)| scroll_key == &key)
+                    .map(|(_, offset)| *offset)
+                    .unwrap_or_default();
                 push_saved_plan_slots(
                     &mut plans,
                     row_index,
                     key,
                     text,
                     app.viewport.viewport_width,
+                    block_scroll,
                     visible_rows,
                 );
             }
@@ -210,10 +226,12 @@ fn push_saved_plan_slots(
     key: AnnotationKey,
     text: &str,
     width: usize,
+    block_scroll: usize,
     visible_rows: usize,
 ) {
     let block_rows = annotation_saved_block_height(text, width);
-    for block_row in 0..block_rows {
+    let block_scroll = block_scroll.min(block_rows.saturating_sub(1));
+    for block_row in block_scroll..block_rows {
         if plans.len() >= visible_rows {
             break;
         }

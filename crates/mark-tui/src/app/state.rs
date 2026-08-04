@@ -5,7 +5,9 @@ use super::{
     PendingDiffPrefetch, PendingFilterApply, PendingReviewLoad, SyntaxStartupMode,
     TRAILING_CONTEXT_WORKER_POLL, TrailingContextWorker, WrappedVisualLayout,
 };
-use crate::annotation::{AnnotationDraft, AnnotationKey, AnnotationStore, AnnotationTargetMode};
+use crate::annotation::{
+    AnnotationCursor, AnnotationDraft, AnnotationKey, AnnotationStore, AnnotationTargetMode,
+};
 use crate::controls::{BranchMenu, DiffFilterKind, DiffLayoutMode, GitCommit};
 use crate::keymap::{KeyPress, Keymap};
 use crate::live_diff::live_diff_supported;
@@ -21,7 +23,7 @@ use crate::theme::{DecorationPreference, DiffTheme, EVENT_POLL};
 use crate::toast::{ToastLevel, Toasts};
 use crossterm::event::KeyEvent;
 use mark_diff::{BranchName, Changeset, DiffOptions, DiffStats};
-use mark_syntax::{ColorOverrides, SyntaxLimits, SyntaxSettings};
+use mark_syntax::{AnnotationTargeting, ColorOverrides, SyntaxLimits, SyntaxSettings};
 use ratatui::layout::Rect;
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
@@ -60,6 +62,7 @@ pub(crate) struct ViewportState {
     pub(crate) line_wrapping: bool,
     pub(crate) viewport_rows: usize,
     pub(crate) viewport_width: usize,
+    pub(crate) dimensions_initialized: bool,
     pub(crate) wrapped_visual_layout: RefCell<Option<WrappedVisualLayout>>,
     pub(crate) manual_hunk_focus: Option<(FileIndex, HunkIndex)>,
     pub(crate) terminal_area: Rect,
@@ -126,6 +129,8 @@ pub(crate) struct AnnotationState {
     pub(crate) annotation_rows: RefCell<HashMap<AnnotationKey, Option<usize>>>,
     pub(crate) annotation_heights: RefCell<HashMap<AnnotationKey, AnnotationHeightCacheEntry>>,
     pub(crate) annotation_draft: Option<AnnotationDraft>,
+    pub(crate) annotation_cursor: Option<AnnotationCursor>,
+    pub(crate) annotation_block_scroll: Option<(AnnotationKey, usize)>,
     pub(crate) annotation_target_mode: Option<AnnotationTargetMode>,
     pub(crate) sticky_annotation_draft: bool,
 }
@@ -722,9 +727,11 @@ pub(crate) struct AppConfigState {
     pub(crate) theme_color_overrides: ColorOverrides,
     pub(crate) theme_transparent_background: Option<bool>,
     pub(crate) settings_persistence_enabled: bool,
+    pub(crate) interactive: bool,
     #[cfg(test)]
     pub(crate) last_persisted_options_menu_draft: Option<(OptionsDraft, OptionsMenuItem)>,
     pub(crate) syntax_settings: SyntaxSettings,
+    pub(crate) annotation_targeting: AnnotationTargeting,
     pub(crate) syntax_startup_mode: SyntaxStartupMode,
     pub(crate) syntax_limits: SyntaxLimits,
     pub(crate) syntax: Option<SyntaxRuntime>,

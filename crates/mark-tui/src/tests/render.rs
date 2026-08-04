@@ -51,6 +51,7 @@ fn layout_toggle_resets_manual_hunk_focus_when_diff_fits_viewport() {
 fn j_and_k_move_hunk_focus_when_diff_fits_viewport() {
     let changeset = changeset_with_hunks_at(PathBuf::from("/repo"), &[1, 2, 3]);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.config.annotation_targeting = AnnotationTargeting::Hints;
     app.set_viewport_rows(20);
 
     assert_eq!(app.max_scroll(), 0);

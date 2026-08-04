@@ -5,12 +5,13 @@ use std::{
 };
 
 use crate::{
-    BASENAME_LANGUAGES, CORE_LANGUAGES, DecorationSettings, DiffContextExpansion, DiffSettings,
-    LANGUAGE_ALIASES, LEGACY_CONFIG_FILE, NotificationSettings, StoredDecorationSettings,
-    StoredDiffContextExpansion, StoredDiffContextExpansionMode, StoredDiffSettings,
-    StoredLanguageMapping, StoredNotificationSettings, StoredSyntaxConfig, StoredSyntaxLimits,
-    StoredSyntaxSettings, StoredSyntaxThemeConfig, StoredSyntaxThemeTable, SyntaxLimits,
-    SyntaxMode, SyntaxSettings, SyntaxThemeConfig, SyntaxThemeSource, config_path, load_settings,
+    AnnotationTargeting, BASENAME_LANGUAGES, CORE_LANGUAGES, DecorationSettings,
+    DiffContextExpansion, DiffSettings, LANGUAGE_ALIASES, LEGACY_CONFIG_FILE, NotificationSettings,
+    StoredDecorationSettings, StoredDiffContextExpansion, StoredDiffContextExpansionMode,
+    StoredDiffSettings, StoredLanguageMapping, StoredNotificationSettings, StoredSyntaxConfig,
+    StoredSyntaxLimits, StoredSyntaxSettings, StoredSyntaxThemeConfig, StoredSyntaxThemeTable,
+    SyntaxLimits, SyntaxMode, SyntaxSettings, SyntaxThemeConfig, SyntaxThemeSource, config_path,
+    load_settings,
 };
 use mark_core::{MarkError, MarkResult};
 
@@ -77,9 +78,17 @@ fn write_config(path: &Path, config: &StoredSyntaxConfig) -> MarkResult<()> {
     Ok(())
 }
 
+#[cfg(test)]
 pub(crate) fn parse_settings(contents: &str) -> Result<SyntaxSettings, toml::de::Error> {
+    parse_settings_with_annotation_targeting(contents).map(|(settings, _)| settings)
+}
+
+pub(crate) fn parse_settings_with_annotation_targeting(
+    contents: &str,
+) -> Result<(SyntaxSettings, AnnotationTargeting), toml::de::Error> {
     let stored: StoredSyntaxSettings = toml::from_str(contents)?;
-    Ok(settings_from_stored(stored))
+    let targeting = stored.annotations.targeting;
+    Ok((settings_from_stored(stored), targeting))
 }
 
 pub(crate) fn settings_from_stored(stored: StoredSyntaxSettings) -> SyntaxSettings {
@@ -107,7 +116,7 @@ pub(crate) fn settings_from_stored(stored: StoredSyntaxSettings) -> SyntaxSettin
         transparent_background_override: stored.transparent_background,
         diff: diff_from_stored(stored.diff),
         notifications: notifications_from_stored(stored.notifications),
-        annotations: stored.annotations,
+        annotations: stored.annotations.settings,
         limits: limits_from_stored(stored.limits),
     }
 }

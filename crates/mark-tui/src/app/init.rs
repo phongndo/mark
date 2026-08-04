@@ -30,7 +30,7 @@ use crate::theme::{
 use crate::toast::Toasts;
 use mark_core::MarkResult;
 use mark_diff::{Changeset, DiffOptions};
-use mark_syntax::SyntaxSettings;
+use mark_syntax::{AnnotationTargeting, SyntaxSettings};
 use ratatui::layout::Rect;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -38,14 +38,26 @@ use std::sync::{Arc, atomic::AtomicU64};
 
 pub(crate) fn load_syntax_settings_for_diff(
     load_user_settings: bool,
-) -> (SyntaxSettings, Option<String>) {
+) -> (SyntaxSettings, AnnotationTargeting, Option<String>) {
     if !load_user_settings {
-        return (SyntaxSettings::default(), None);
+        return (
+            SyntaxSettings::default(),
+            AnnotationTargeting::default(),
+            None,
+        );
     }
 
-    syntax_settings_for_diff(mark_syntax::load_settings())
+    match mark_syntax::load_settings_with_annotation_targeting() {
+        Ok((settings, targeting)) => (settings, targeting, None),
+        Err(error) => (
+            SyntaxSettings::default(),
+            AnnotationTargeting::default(),
+            Some(format!("syntax settings ignored: {error}")),
+        ),
+    }
 }
 
+#[cfg(test)]
 pub(crate) fn syntax_settings_for_diff(
     result: MarkResult<SyntaxSettings>,
 ) -> (SyntaxSettings, Option<String>) {
@@ -158,15 +170,18 @@ fn load_user_settings_for_syntax_mode(syntax_mode: &SyntaxStartupMode) -> bool {
 
 struct LoadedSyntaxSettings {
     settings: SyntaxSettings,
+    annotation_targeting: AnnotationTargeting,
     startup_error_log: Option<String>,
     load_user_settings: bool,
 }
 
 fn loaded_syntax_settings_for_mode(syntax_mode: &SyntaxStartupMode) -> LoadedSyntaxSettings {
     let load_user_settings = load_user_settings_for_syntax_mode(syntax_mode);
-    let (settings, startup_error_log) = load_syntax_settings_for_diff(load_user_settings);
+    let (settings, annotation_targeting, startup_error_log) =
+        load_syntax_settings_for_diff(load_user_settings);
     LoadedSyntaxSettings {
         settings,
+        annotation_targeting,
         startup_error_log,
         load_user_settings,
     }
@@ -262,6 +277,7 @@ impl DiffApp {
                 true,
                 LoadedSyntaxSettings {
                     settings,
+                    annotation_targeting: AnnotationTargeting::default(),
                     startup_error_log: None,
                     load_user_settings: false,
                 },
@@ -285,6 +301,7 @@ impl DiffApp {
             syntax_mode,
             LoadedSyntaxSettings {
                 settings,
+                annotation_targeting: AnnotationTargeting::default(),
                 startup_error_log: None,
                 load_user_settings: false,
             },
@@ -350,6 +367,7 @@ impl DiffApp {
     ) -> Self {
         let LoadedSyntaxSettings {
             settings,
+            annotation_targeting,
             mut startup_error_log,
             load_user_settings,
         } = loaded_syntax_settings;
@@ -386,12 +404,13 @@ impl DiffApp {
         if let Some(setting_layout) = layout_override {
             layout = setting_layout;
         }
-        let model = UiModel::new_with_trailing_context_and_controls(
+        let model = UiModel::new_with_trailing_context_controls_and_annotation_candidates(
             &changeset,
             layout,
             &context_expansions,
             &trailing_context_lines,
             !full_file_mode,
+            build_search_index && annotation_targeting == AnnotationTargeting::Cursor,
         );
         let search_index = Arc::new(if build_search_index {
             DiffSearchIndex::new(&changeset)
@@ -510,6 +529,7 @@ impl DiffApp {
                 line_wrapping: settings.line_wrapping,
                 viewport_rows: 1,
                 viewport_width: 1,
+                dimensions_initialized: false,
                 wrapped_visual_layout: RefCell::new(None),
                 manual_hunk_focus,
                 terminal_area: Rect::default(),
@@ -529,6 +549,8 @@ impl DiffApp {
                 annotation_rows: RefCell::new(HashMap::new()),
                 annotation_heights: RefCell::new(HashMap::new()),
                 annotation_draft: None,
+                annotation_cursor: None,
+                annotation_block_scroll: None,
                 annotation_target_mode: None,
                 sticky_annotation_draft: false,
             },
@@ -632,9 +654,11 @@ impl DiffApp {
                 theme_color_overrides,
                 theme_transparent_background,
                 settings_persistence_enabled: !cfg!(test),
+                interactive: build_search_index,
                 #[cfg(test)]
                 last_persisted_options_menu_draft: None,
                 syntax_settings: settings,
+                annotation_targeting,
                 syntax_startup_mode: syntax_mode,
                 syntax_limits,
                 syntax,
@@ -650,6 +674,9 @@ impl DiffApp {
             let visible_files = app.document.model.visible_files().to_vec();
             app.prepare_full_file_context_layout(&visible_files);
         }
+        // The cursor is initialized by the first viewport layout, after the
+        // terminal width is known. This avoids building wrapped targets at the
+        // construction-time placeholder width.
         app
     }
 }

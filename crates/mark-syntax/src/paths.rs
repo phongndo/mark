@@ -4,8 +4,8 @@ use std::{
 };
 
 use crate::{
-    CONFIG_DIR, CONFIG_FILE, LEGACY_SETTINGS_FILE, SETTINGS_FILE, SyntaxSettings, config_home,
-    parse_settings,
+    AnnotationTargeting, CONFIG_DIR, CONFIG_FILE, LEGACY_SETTINGS_FILE, LoadedSyntaxSettings,
+    SETTINGS_FILE, SyntaxSettings, config_home, parse_settings_with_annotation_targeting,
 };
 use mark_core::{MarkError, MarkResult};
 
@@ -50,8 +50,12 @@ pub fn colorscheme_dir() -> MarkResult<PathBuf> {
 }
 
 pub fn load_settings() -> MarkResult<SyntaxSettings> {
+    load_settings_with_annotation_targeting().map(|(settings, _)| settings)
+}
+
+pub fn load_settings_with_annotation_targeting() -> MarkResult<LoadedSyntaxSettings> {
     let path = settings_read_path()?;
-    load_settings_from_read_path(&path)
+    load_settings_with_annotation_targeting_from_read_path(&path)
 }
 
 #[cfg(test)]
@@ -69,13 +73,20 @@ pub(crate) fn load_settings_from_paths(
     load_settings_from_read_path(path)
 }
 
+#[cfg(test)]
 fn load_settings_from_read_path(path: &Path) -> MarkResult<SyntaxSettings> {
+    load_settings_with_annotation_targeting_from_read_path(path).map(|(settings, _)| settings)
+}
+
+fn load_settings_with_annotation_targeting_from_read_path(
+    path: &Path,
+) -> MarkResult<(SyntaxSettings, AnnotationTargeting)> {
     if !path.exists() {
-        return Ok(SyntaxSettings::default());
+        return Ok((SyntaxSettings::default(), AnnotationTargeting::default()));
     }
 
     let contents = fs::read_to_string(path)?;
-    parse_settings_from_path(path, &contents)
+    parse_settings_with_annotation_targeting_from_path(path, &contents)
 }
 
 fn settings_read_path_from_paths<'a>(path: &'a Path, legacy_path: &'a Path) -> &'a Path {
@@ -86,7 +97,10 @@ fn settings_read_path_from_paths<'a>(path: &'a Path, legacy_path: &'a Path) -> &
     }
 }
 
-fn parse_settings_from_path(path: &Path, contents: &str) -> MarkResult<SyntaxSettings> {
-    parse_settings(contents)
+fn parse_settings_with_annotation_targeting_from_path(
+    path: &Path,
+    contents: &str,
+) -> MarkResult<(SyntaxSettings, AnnotationTargeting)> {
+    parse_settings_with_annotation_targeting(contents)
         .map_err(|error| MarkError::Usage(format!("failed to parse {}: {error}", path.display())))
 }

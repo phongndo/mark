@@ -24,8 +24,8 @@ in the same focused review UI.
   bottom while rendering only the visible viewport.
 - **Find the relevant change.** Filter files, grep the diff, expand context, or
   switch from hunks to the full file without leaving the reviewer.
-- **Leave review context.** Add inline annotations one at a time or use sticky
-  batch annotation mode across the visible viewport.
+- **Leave review context.** Move the highlighted annotation row across the diff
+  to add inline annotations one at a time or in sticky batch mode.
 - **Work the way you want.** Toggle split and unified layouts, choose a built-in
   or custom theme, customize keybindings, and open the focused code in your
   editor.

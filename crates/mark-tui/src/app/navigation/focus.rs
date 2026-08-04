@@ -24,14 +24,17 @@ impl DiffApp {
             self.sync_full_file_context_expansions();
             self.prepare_full_file_context_layout(visible_files);
         }
-        self.document.model = UiModel::new_filtered_with_trailing_context_and_controls(
-            &self.document.changeset,
-            self.viewport.layout,
-            &self.document.context_expansions,
-            &self.document.trailing_context_lines,
-            visible_files,
-            !full_file_mode,
-        );
+        let build_annotation_candidates = self.annotation_cursor_enabled();
+        self.document.model =
+            UiModel::new_filtered_with_trailing_context_controls_and_annotation_candidates(
+                &self.document.changeset,
+                self.viewport.layout,
+                &self.document.context_expansions,
+                &self.document.trailing_context_lines,
+                visible_files,
+                !full_file_mode,
+                build_annotation_candidates,
+            );
         self.annotations_state.annotation_rows.borrow_mut().clear();
         self.invalidate_wrapped_visual_layout();
         self.viewport.manual_hunk_focus = match hunk_focus_behavior {
@@ -46,6 +49,7 @@ impl DiffApp {
             HunkFocusModelBehavior::Clear => None,
         };
         self.reanchor_annotation_draft();
+        self.rebuild_annotation_cursor();
     }
 
     pub(in crate::app) fn scroll_with_model_row_rendered(

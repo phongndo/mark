@@ -19,6 +19,88 @@ impl DiffApp {
         self.set_scroll(next);
     }
 
+    pub(crate) fn vertical_page_delta(&self, full_page: bool) -> isize {
+        let viewport_rows = self.viewport.viewport_rows.clamp(1, isize::MAX as usize);
+        let rows = if full_page {
+            viewport_rows.saturating_sub(2).max(1)
+        } else {
+            (viewport_rows / 2).max(1)
+        };
+        rows as isize
+    }
+
+    pub(crate) fn navigate_diff_vertically(&mut self, delta: isize) {
+        if self.annotations_state.annotation_draft.is_some() {
+            return;
+        }
+        if self.annotation_cursor_enabled() {
+            self.ensure_annotation_cursor();
+            let has_target = self.annotation_cursor_target().is_some();
+            let bounded = self.annotation_cursor_target().is_none_or(|target| {
+                self.document
+                    .model
+                    .annotation_candidate_navigation_is_bounded(target.model_row_index)
+            });
+            if bounded && (!has_target || self.annotation_cursor_target_is_rendered()) {
+                let moved = self.move_annotation_cursor(delta);
+                if moved && self.annotation_cursor_target_is_rendered() {
+                    return;
+                }
+            }
+        }
+        self.scroll_or_focus_hunk(delta);
+    }
+
+    pub(crate) fn navigate_diff_by_visual_page(&mut self, delta: isize) {
+        if self.annotations_state.annotation_draft.is_some() {
+            return;
+        }
+        if self.annotation_cursor_enabled() {
+            self.ensure_annotation_cursor();
+            let bounded = self.annotation_cursor_target().is_some_and(|target| {
+                self.document
+                    .model
+                    .annotation_candidate_navigation_is_bounded(target.model_row_index)
+            });
+            if bounded && self.annotation_cursor_target_is_rendered() {
+                self.move_annotation_cursor_by_visual_delta(delta);
+                if self.annotation_cursor_target_is_rendered() {
+                    return;
+                }
+            }
+        }
+        self.scroll_or_focus_hunk(delta);
+    }
+
+    pub(crate) fn navigate_diff_to_boundary(&mut self, last: bool) {
+        if self.annotations_state.annotation_draft.is_some() {
+            return;
+        }
+        if self.annotation_cursor_enabled() {
+            self.ensure_annotation_cursor();
+            let bounded = self.annotation_cursor_target().is_some_and(|target| {
+                let range = if last {
+                    target.model_row_index..self.document.model.len()
+                } else {
+                    0..target.model_row_index.saturating_add(1)
+                };
+                self.document
+                    .model
+                    .annotation_candidate_navigation_range_is_bounded(range)
+            });
+            if bounded {
+                self.move_annotation_cursor(if last { isize::MAX } else { isize::MIN });
+            }
+            if bounded && self.annotation_cursor_target().is_some() {
+                self.keep_annotation_cursor_inside_scroll_region(!last);
+                if self.annotation_cursor_target_is_rendered() {
+                    return;
+                }
+            }
+        }
+        self.set_scroll(if last { self.max_scroll() } else { 0 });
+    }
+
     pub(crate) fn scroll_or_focus_hunk(&mut self, delta: isize) {
         let previous_scroll = self.viewport.scroll;
         self.scroll_by(delta);
@@ -109,6 +191,7 @@ impl DiffApp {
             return;
         }
 
+        self.annotations_state.annotation_block_scroll = None;
         if enabled && self.full_file_mode_active() {
             let visible_files = self.document.model.visible_files().to_vec();
             let layout_files = self
@@ -131,6 +214,7 @@ impl DiffApp {
 
     pub(crate) fn set_scroll(&mut self, scroll: usize) {
         self.set_scroll_with_grep_sync(scroll, true, HunkFocusScrollBehavior::ClearOnScroll);
+        self.sync_annotation_cursor_to_viewport();
     }
 
     pub(in crate::app) fn scroll_for_model_row(&self, row: usize) -> usize {
@@ -277,6 +361,7 @@ impl DiffApp {
         }
         if self.viewport.scroll != previous_scroll || self.sidebar.selected_file != previous_file {
             if self.viewport.scroll != previous_scroll {
+                self.annotations_state.annotation_block_scroll = None;
                 self.clear_diff_mouse_hover();
             }
             self.runtime.dirty = true;
@@ -313,7 +398,15 @@ impl DiffApp {
                 }
                 let anchor = self.annotation_anchor_visual_scroll(model_row);
                 let height = self.annotation_saved_block_height(key, text);
-                blocks.push((anchor, height));
+                let block_scroll = self
+                    .annotations_state
+                    .annotation_block_scroll
+                    .as_ref()
+                    .filter(|(scroll_key, _)| scroll_key == key)
+                    .map(|(_, offset)| *offset)
+                    .unwrap_or_default()
+                    .min(height.saturating_sub(1));
+                blocks.push((anchor, height.saturating_sub(block_scroll)));
             }
         }
         if let Some(draft) = self.annotations_state.annotation_draft.as_ref() {
@@ -324,7 +417,7 @@ impl DiffApp {
         max_scroll_for_annotated_viewport(row_count, self.viewport.viewport_rows, blocks)
     }
 
-    fn annotation_saved_block_height(
+    pub(in crate::app) fn annotation_saved_block_height(
         &self,
         key: &crate::annotation::AnnotationKey,
         text: &str,

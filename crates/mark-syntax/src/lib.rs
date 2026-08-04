@@ -14,8 +14,8 @@ pub use language::{
     enabled_languages, installed_languages, language_statuses, remove_languages, update_languages,
 };
 pub use paths::{
-    colorscheme_dir, config_path, load_settings, settings_path, settings_read_path,
-    settings_write_path,
+    colorscheme_dir, config_path, load_settings, load_settings_with_annotation_targeting,
+    settings_path, settings_read_path, settings_write_path,
 };
 #[cfg(feature = "diagnostics")]
 pub use syntaxmate::diagnostics::EngineCounters;

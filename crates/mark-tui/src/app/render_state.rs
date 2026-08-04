@@ -85,8 +85,24 @@ impl DiffApp {
         if let Some(rows) = state.file_sidebar_visible_rows {
             self.clamp_file_sidebar_scroll(rows);
         }
-        self.set_viewport_rows(state.viewport_rows);
+        // Cursor targeting needs both real viewport dimensions. Width reflow
+        // can initialize it against the construction-time one-row placeholder,
+        // so discard that provisional cursor before applying rows normally.
+        let initializing_cursor = self.annotation_cursor_enabled()
+            && self.annotations_state.annotation_draft.is_none()
+            && !self.viewport.dimensions_initialized;
+        if initializing_cursor {
+            self.annotations_state.annotation_cursor = None;
+        }
         self.set_viewport_width(state.viewport_width);
+        if initializing_cursor {
+            self.annotations_state.annotation_cursor = None;
+        }
+        self.set_viewport_rows(state.viewport_rows);
+        if initializing_cursor {
+            self.sync_annotation_cursor_to_viewport();
+        }
+        self.viewport.dimensions_initialized = true;
 
         if let Some(rows) = state.options_menu_visible_rows {
             self.ensure_options_menu_selection_visible(rows);

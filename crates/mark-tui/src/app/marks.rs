@@ -2,7 +2,7 @@ use super::{DiffApp, MarkExport, json_string};
 use crate::annotation::{AnnotationKey, AnnotationSide, paired_old_line_for_addition};
 use crate::model::{UiModel, UiRow, line_after_hunk};
 use crate::syntax::{DiffSide, available_context_lines};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 #[cfg(test)]
 use super::write_osc52_clipboard;
@@ -64,10 +64,13 @@ impl DiffApp {
         // Copy marks for the current diff, not stale annotations whose path still
         // exists after a reload. Build an unfiltered model so active file/grep
         // filters do not hide otherwise-current marks from export.
-        let export_model = UiModel::new(
+        let export_model = UiModel::new_with_trailing_context_controls_and_annotation_candidates(
             &self.document.changeset,
             self.viewport.layout,
             &self.document.context_expansions,
+            &HashMap::new(),
+            true,
+            false,
         );
         let exportable_keys = self.exportable_annotation_keys(&export_model);
         self.annotations_state

@@ -676,7 +676,8 @@ fn settings_write_path_preserves_legacy_settings_source() {
 
 #[test]
 fn syntax_settings_default_to_builtin_system_colorscheme() {
-    let settings = parse_settings("").expect("empty settings should parse");
+    let (settings, annotation_targeting) =
+        parse_settings_with_annotation_targeting("").expect("empty settings should parse");
 
     assert_eq!(settings.mode, SyntaxMode::Builtin);
     assert_eq!(settings.theme.source(), SyntaxThemeSource::Builtin);
@@ -691,20 +692,23 @@ fn syntax_settings_default_to_builtin_system_colorscheme() {
     assert_eq!(settings.transparent_background_override, None);
     assert_eq!(settings.diff, DiffSettings::default());
     assert_eq!(settings.annotations, AnnotationSettings::default());
+    assert_eq!(annotation_targeting, AnnotationTargeting::Cursor);
     assert_eq!(settings.limits, SyntaxLimits::default());
 }
 
 #[test]
-fn syntax_settings_supports_annotation_hint_preferences() {
-    let settings = parse_settings(
+fn syntax_settings_supports_annotation_targeting_preferences() {
+    let (settings, annotation_targeting) = parse_settings_with_annotation_targeting(
         r#"
 [annotations]
+targeting = "hints"
 hint_keys = "arstneio"
 uppercase_hints = true
 "#,
     )
     .expect("annotation settings should parse");
 
+    assert_eq!(annotation_targeting, AnnotationTargeting::Hints);
     assert_eq!(settings.annotations.hint_keys, "arstneio");
     assert!(settings.annotations.uppercase_hints);
 }

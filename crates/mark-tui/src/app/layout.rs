@@ -60,6 +60,7 @@ impl DiffApp {
         }
         self.clamp_file_sidebar_scroll(self.visible_file_sidebar_rows());
         self.ensure_annotation_draft_visible();
+        self.sync_annotation_cursor_to_viewport();
     }
 
     pub(crate) fn set_viewport_width(&mut self, width: usize) {
@@ -69,6 +70,7 @@ impl DiffApp {
         }
 
         self.close_annotation_target_mode();
+        self.annotations_state.annotation_block_scroll = None;
         let wrapped_position = self
             .viewport
             .line_wrapping
@@ -87,6 +89,7 @@ impl DiffApp {
             self.set_scroll(self.viewport.scroll);
         }
         self.ensure_annotation_draft_visible();
+        self.sync_annotation_cursor_to_viewport();
     }
 
     pub(crate) fn toggle_layout(&mut self) {
@@ -127,6 +130,7 @@ impl DiffApp {
         }
 
         self.close_annotation_target_mode();
+        self.annotations_state.annotation_block_scroll = None;
         self.viewport.layout = layout;
         let search_result = self.document.search_index.search_with_grep_match_limit(
             &self.document.changeset,

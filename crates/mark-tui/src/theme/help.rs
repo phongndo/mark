@@ -24,8 +24,9 @@ pub(crate) const HELP_MENU_ROWS: &[HelpMenuRow] = &[
     HelpMenuRow::Binding(HelpMenuKey::Static("Ctrl-C"), "force quit"),
     HelpMenuRow::Binding(HelpMenuKey::Static("Esc"), "close"),
     HelpMenuRow::Section("Navigate"),
-    HelpMenuRow::Binding(HelpMenuKey::Static("j/k, ↑/↓"), "scroll"),
-    HelpMenuRow::Binding(HelpMenuKey::Static("d/Ctrl-D/PgDn, u/PgUp"), "page"),
+    HelpMenuRow::Binding(HelpMenuKey::Static("j/k, ↑/↓"), "navigate vertically"),
+    HelpMenuRow::Binding(HelpMenuKey::Static("d/u, Ctrl-D"), "half page"),
+    HelpMenuRow::Binding(HelpMenuKey::Static("PgDn/PgUp"), "full page"),
     HelpMenuRow::Binding(HelpMenuKey::Static("g/G, Home/End"), "top / bottom"),
     HelpMenuRow::Binding(HelpMenuKey::Static("h/l, ←/→"), "horizontal"),
     HelpMenuRow::Binding(
@@ -120,16 +121,15 @@ pub(crate) const HELP_MENU_ROWS: &[HelpMenuRow] = &[
     HelpMenuRow::Section("Annotations"),
     HelpMenuRow::Binding(
         HelpMenuKey::Global(GlobalAction::AnnotateLine),
-        "annotate visible line",
+        "annotate a line",
     ),
     HelpMenuRow::Binding(
         HelpMenuKey::Global(GlobalAction::AnnotateBatch),
-        "batch annotate visible lines",
+        "annotate repeatedly",
     ),
-    HelpMenuRow::Binding(
-        HelpMenuKey::Static("hint / Esc"),
-        "select / cancel line target",
-    ),
+    HelpMenuRow::Binding(HelpMenuKey::Static("j/k / ↑/↓"), "move one line"),
+    HelpMenuRow::Binding(HelpMenuKey::Static("d/u / PgUp/PgDn"), "move by page"),
+    HelpMenuRow::Binding(HelpMenuKey::Static("g/G / Home/End"), "first / last line"),
     HelpMenuRow::Binding(
         HelpMenuKey::Global(GlobalAction::AnnotationMenu),
         "search annotations",
