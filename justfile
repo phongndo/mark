@@ -4,7 +4,7 @@ setup:
     cargo build -p mark-cli --locked
 
 check:
-    HK_PROFILE=full mise x -- hk check --all --check
+    HK_PROFILE=full,pi mise x -- hk check --all --check
 
 ci-check: ci-rust ci-generated ci-performance pi-check ci-workflows
 

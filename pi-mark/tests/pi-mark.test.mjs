@@ -165,10 +165,7 @@ test("parseMarkAnnotations validates structured mark output", () => {
     { path: "src/app.ts", scope: "file", old_start: 10, body: "mixed file target" },
     { path: "src/app.ts", new_line: 12, new_count: 1, body: "mixed line target" },
   ]) {
-    assert.throws(
-      () => parseMarkAnnotations({ version: 1, marks: [mark] }),
-      /invalid annotation/,
-    );
+    assert.throws(() => parseMarkAnnotations({ version: 1, marks: [mark] }), /invalid annotation/);
   }
 });
 
