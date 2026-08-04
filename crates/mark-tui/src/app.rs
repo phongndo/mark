@@ -53,12 +53,12 @@ pub(crate) use core::{
     EditorScopedReload, EditorViewAnchor, FILTER_DEBOUNCE, FILTER_WORKER_POLL, FilterWorker,
     FocusedEditorLaunch, HunkFocusModelBehavior, HunkFocusScrollBehavior, HunkFocusSearch,
     MAX_COLOR_SCHEME_MENU_ROWS, MAX_DIFF_CACHE_ENTRIES, MAX_LIVE_GREP_MATCHES,
-    MOUSE_HUNK_FOCUS_SCROLL_TICKS, MarkExport, NORMAL_GLOBAL_ACTIONS, POST_EDITOR_QUIT_KEY_IGNORE,
-    PendingDiffLoad, PendingDiffPrefetch, PendingFilterApply, PendingReviewLoad,
-    PostFilterNavigation, RenderedDiffRow, SyntaxStartupMode, TRAILING_CONTEXT_WORKER_POLL,
-    TrailingContextWorker, WrappedVisualLayout, cacheable_diff_options, diff_choice_for_options,
-    is_plain_char_key, next_context_expansion, previous_context_expansion, rect_contains,
-    show_rev_from_options,
+    MOUSE_HUNK_FOCUS_SCROLL_TICKS, MarkExport, MarkScope, NORMAL_GLOBAL_ACTIONS,
+    POST_EDITOR_QUIT_KEY_IGNORE, PendingDiffLoad, PendingDiffPrefetch, PendingFilterApply,
+    PendingReviewLoad, PostFilterNavigation, RenderedDiffRow, SyntaxStartupMode,
+    TRAILING_CONTEXT_WORKER_POLL, TrailingContextWorker, WrappedVisualLayout,
+    cacheable_diff_options, diff_choice_for_options, is_plain_char_key, next_context_expansion,
+    previous_context_expansion, rect_contains, show_rev_from_options,
 };
 pub(crate) use diff_files::{
     diff_content_width, diff_file_matches_path, editor_reload_request_for_file, repo_relative_path,

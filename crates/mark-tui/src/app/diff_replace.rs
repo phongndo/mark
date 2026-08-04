@@ -234,6 +234,7 @@ impl DiffApp {
                 self.prepare_full_file_context_layout(&visible_files);
             }
             self.annotations_state.annotation_rows.borrow_mut().clear();
+            *self.annotations_state.annotation_keys_by_row.borrow_mut() = None;
             self.invalidate_wrapped_visual_layout();
             self.reanchor_annotation_draft();
             self.viewport.manual_hunk_focus = None;

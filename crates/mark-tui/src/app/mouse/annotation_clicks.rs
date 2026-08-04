@@ -1,11 +1,9 @@
 use super::super::{DiffApp, HunkFocusScrollBehavior, annotation_scroll_for_block};
-use crate::annotation::{AnnotationDraft, AnnotationKey};
-use crate::model::UiRow;
-use crate::render::annotations::{annotation_compose_block_height, annotation_hit_at_column};
+use crate::annotation::{AnnotationDraft, AnnotationKey, AnnotationScope};
+use crate::render::annotations::annotation_compose_block_height;
 use crate::render::viewport_plan::{
     annotation_saved_key_at_bottom_border, annotation_saved_key_at_top_border,
     compose_block_bottom_viewport_row, compose_block_top_viewport_row,
-    visual_scroll_for_viewport_row,
 };
 
 impl DiffApp {
@@ -35,7 +33,17 @@ impl DiffApp {
     }
 
     pub(crate) fn annotation_label(&self, key: &AnnotationKey) -> Option<String> {
-        Some(format!("{} {}{}", key.path, key.side.label(), key.line))
+        let target = match key.scope {
+            AnnotationScope::File => "file".to_owned(),
+            AnnotationScope::Hunk {
+                old_start,
+                old_count,
+                new_start,
+                new_count,
+            } => format!("@@ -{old_start},{old_count} +{new_start},{new_count} @@"),
+            AnnotationScope::Line => format!("{}{}", key.side.label(), key.line),
+        };
+        Some(format!("{} {target}", key.path))
     }
 
     pub(super) fn handle_annotation_submit_click(&mut self, viewport_row: u16) -> bool {
@@ -96,6 +104,7 @@ impl DiffApp {
                 .annotation_rows
                 .borrow_mut()
                 .remove(&key);
+            *self.annotations_state.annotation_keys_by_row.borrow_mut() = None;
             self.annotations_state
                 .annotation_heights
                 .borrow_mut()
@@ -110,54 +119,6 @@ impl DiffApp {
             return true;
         }
         false
-    }
-
-    pub(super) fn try_open_annotation_draft_at_viewport_row(
-        &mut self,
-        viewport_row: u16,
-        column: u16,
-    ) -> bool {
-        if self.filters.filter_input.is_some() {
-            return false;
-        }
-        if self.annotations_state.annotation_draft.is_some() {
-            return false;
-        }
-        let Some(visual_row) = visual_scroll_for_viewport_row(self, viewport_row) else {
-            return false;
-        };
-        let row_index = if self.viewport.line_wrapping {
-            let Some((row_index, _)) = self.model_row_at_scroll(visual_row) else {
-                return false;
-            };
-            row_index
-        } else {
-            visual_row
-        };
-        let Some(row) = self.document.model.row(row_index) else {
-            return false;
-        };
-        if !crate::render::viewport_plan::row_has_diff_code_content(row) {
-            return false;
-        }
-        if self.annotation_anchor_visual_scroll(row_index) != visual_row {
-            return false;
-        }
-        let Some(key) = self.annotation_key_for_add_click(row, column) else {
-            return false;
-        };
-        self.open_annotation_draft_for_key(key, row_index)
-    }
-
-    pub(super) fn annotation_key_for_add_click(
-        &self,
-        row: UiRow,
-        column: u16,
-    ) -> Option<AnnotationKey> {
-        if !annotation_hit_at_column(column, self.viewport.viewport_width) {
-            return None;
-        }
-        AnnotationKey::from_ui_row(&self.document.changeset, row)
     }
 
     pub(in crate::app) fn open_annotation_draft_for_key(

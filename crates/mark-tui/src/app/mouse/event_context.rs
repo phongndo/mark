@@ -121,8 +121,6 @@ impl MouseEventContext for MouseEventCtx<'_> {
     }
 
     fn handle_diff_mouse(&mut self, mouse: MouseEvent) -> bool {
-        self.app.update_diff_mouse_hover(mouse.column, mouse.row);
-
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 if self.app.start_error_log_resize(mouse.row) {
@@ -142,7 +140,6 @@ impl MouseEventContext for MouseEventCtx<'_> {
                 }
                 self.app
                     .mouse_scroll_or_focus_hunk(MouseScrollDirection::Down);
-                self.app.update_diff_mouse_hover(mouse.column, mouse.row);
                 true
             }
             MouseEventKind::ScrollUp => {
@@ -153,7 +150,6 @@ impl MouseEventContext for MouseEventCtx<'_> {
                 }
                 self.app
                     .mouse_scroll_or_focus_hunk(MouseScrollDirection::Up);
-                self.app.update_diff_mouse_hover(mouse.column, mouse.row);
                 true
             }
             MouseEventKind::ScrollLeft => {
@@ -163,7 +159,6 @@ impl MouseEventContext for MouseEventCtx<'_> {
                 }
                 self.app
                     .scroll_horizontally_by(-(HORIZONTAL_SCROLL_STEP as isize));
-                self.app.update_diff_mouse_hover(mouse.column, mouse.row);
                 true
             }
             MouseEventKind::ScrollRight => {
@@ -173,7 +168,6 @@ impl MouseEventContext for MouseEventCtx<'_> {
                 }
                 self.app
                     .scroll_horizontally_by(HORIZONTAL_SCROLL_STEP as isize);
-                self.app.update_diff_mouse_hover(mouse.column, mouse.row);
                 true
             }
             _ => false,

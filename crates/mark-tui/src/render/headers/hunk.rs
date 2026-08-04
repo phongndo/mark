@@ -6,10 +6,10 @@ use crate::{
         headers::{
             HeaderSpanPart, HeaderStyles, compact_delta_parts, hunk_header_spans_with_delta,
         },
-        style::{diff_indicator_span, focused_diff_indicator_span},
+        style::{diff_base_bg, diff_indicator_span, focused_diff_indicator_span},
         text::terminal_text,
     },
-    theme::{DiffTheme, line_gutter_bg},
+    theme::DiffTheme,
 };
 
 pub(crate) fn hunk_header_line(
@@ -30,7 +30,7 @@ pub(crate) fn hunk_header_line_with_focus(
         return Line::default();
     }
 
-    let gutter_bg = line_gutter_bg(DiffLineKind::Meta, theme);
+    let content_bg = diff_base_bg(theme);
     let content_width = width.saturating_sub(1);
     let mut spans = Vec::new();
     spans.push(if focused {
@@ -39,9 +39,14 @@ pub(crate) fn hunk_header_line_with_focus(
         diff_indicator_span(DiffLineKind::Meta, theme)
     });
     if content_width > 0 {
-        spans.push(Span::styled(" ", Style::default().bg(gutter_bg)));
+        spans.push(Span::styled(" ", Style::default().bg(content_bg)));
         if content_width > 1 {
-            spans.extend(hunk_header_spans(hunk, content_width - 1, theme, gutter_bg));
+            spans.extend(hunk_header_spans(
+                hunk,
+                content_width - 1,
+                theme,
+                content_bg,
+            ));
         }
     }
 

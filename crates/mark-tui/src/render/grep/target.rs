@@ -142,10 +142,9 @@ pub(crate) fn grep_highlight_targets_for_row(
             }
             targets
         }
-        UiRow::FileSeparator
-        | UiRow::Collapsed { .. }
-        | UiRow::ContextLine { .. }
-        | UiRow::ContextHide { .. } => Vec::new(),
+        UiRow::Collapsed { .. } | UiRow::ContextLine { .. } | UiRow::ContextHide { .. } => {
+            Vec::new()
+        }
     }
 }
 

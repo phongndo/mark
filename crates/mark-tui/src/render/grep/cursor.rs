@@ -7,19 +7,42 @@ use super::{
     target::{span_position_for_column, split_content_start_column, unified_content_start_column},
 };
 
-pub(crate) fn highlighted_mouse_diff_content_line(
+pub(crate) fn highlighted_cursor_diff_content_line(
     line: Line<'static>,
     layout: DiffLayoutMode,
     width: usize,
     theme: DiffTheme,
 ) -> Line<'static> {
+    highlighted_cursor_line_in_ranges(line, diff_content_column_ranges(layout, width), theme)
+}
+
+pub(crate) fn highlighted_cursor_meta_line(
+    line: Line<'static>,
+    width: usize,
+    theme: DiffTheme,
+) -> Line<'static> {
+    highlighted_cursor_line_in_ranges(line, vec![(1.min(width), width)], theme)
+}
+
+pub(crate) fn highlighted_cursor_full_line(
+    line: Line<'static>,
+    width: usize,
+    theme: DiffTheme,
+) -> Line<'static> {
+    highlighted_cursor_line_in_ranges(line, vec![(0, width)], theme)
+}
+
+fn highlighted_cursor_line_in_ranges(
+    line: Line<'static>,
+    column_ranges: Vec<(usize, usize)>,
+    theme: DiffTheme,
+) -> Line<'static> {
     let spans = line.spans;
-    if spans.is_empty() || width == 0 {
+    if spans.is_empty() || column_ranges.is_empty() {
         return Line::from(spans);
     }
 
-    let column_ranges = diff_content_column_ranges(layout, width);
-    let highlight = mouse_diff_content_line_style(theme);
+    let highlight = cursor_diff_content_line_style(theme);
     let ranges_by_span: Vec<Vec<std::ops::Range<usize>>> = (0..spans.len())
         .map(|index| byte_ranges_for_column_ranges(&spans, index, &column_ranges))
         .collect();
@@ -88,6 +111,6 @@ fn byte_ranges_for_column_ranges(
     ranges
 }
 
-fn mouse_diff_content_line_style(theme: DiffTheme) -> Style {
+fn cursor_diff_content_line_style(theme: DiffTheme) -> Style {
     Style::default().bg(theme.cursor_line_bg)
 }

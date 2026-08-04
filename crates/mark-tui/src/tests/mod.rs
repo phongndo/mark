@@ -8,10 +8,10 @@ use crate::render::{
         split_cell_spans_at_scroll, syntax_fg,
     },
     grep::{
-        grep_highlight_target_for_columns, highlighted_grep_text_line,
-        highlighted_mouse_diff_content_line, unified_content_start_column,
+        grep_highlight_target_for_columns, highlighted_cursor_diff_content_line,
+        highlighted_grep_text_line, unified_content_start_column,
     },
-    headers::{file_header_line, file_separator_line, hunk_header_line, hunk_header_spans},
+    headers::{file_header_line, hunk_header_line, hunk_header_spans},
     menus::{
         branch_menu_block, diff_comparison_label, diff_selector_text, diff_selector_width,
         help_menu_bg, help_menu_content_rows, help_menu_lines, help_menu_list_visible_rows,

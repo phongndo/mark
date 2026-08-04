@@ -534,7 +534,6 @@ impl DiffApp {
                 manual_hunk_focus,
                 terminal_area: Rect::default(),
                 rendered_diff_area: None,
-                mouse_hover: None,
             },
             sidebar: FileSidebarState {
                 selected_file: FileIndex::new(0),
@@ -547,6 +546,7 @@ impl DiffApp {
             annotations_state: AnnotationState {
                 annotations: AnnotationStore::default(),
                 annotation_rows: RefCell::new(HashMap::new()),
+                annotation_keys_by_row: RefCell::new(None),
                 annotation_heights: RefCell::new(HashMap::new()),
                 annotation_draft: None,
                 annotation_cursor: None,

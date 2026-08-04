@@ -78,7 +78,7 @@ base_branch = "m b"
 commit_picker = "m c"
 options_menu = "o"
 annotation_menu = "n"
-annotate_line = "a"
+annotate_line = "enter"
 annotate_batch = "A"
 file_browser = "b"
 previous_file = "shift-tab"
@@ -346,11 +346,11 @@ targeting = "cursor"
 
 The row highlight is active whenever the diff has focus. Move it with `j` / `k`
 or Up / Down. `d` / `u` move half a viewport; Page Up / Page Down move a full
-viewport. `g` / `G` or Home / End jump
-to the first or last target. As with Vim's `scrolloff=8`, the selection stays
-eight rows from either viewport edge while scrolling, except near diff
-boundaries or in short viewports. Press `a` to open an annotation draft on the
-selected line; `A` annotates and advances after save.
+viewport. `g` / `G` or Home / End jump to the first or last target. As with
+Vim's `scrolloff=8`, the selection stays eight rows from either viewport edge
+while scrolling, except near diff boundaries or in short viewports. Press
+`Enter` on a code line, hunk header, or file header to annotate that line,
+entire hunk, or entire file; `A` annotates and advances after save.
 
 The previous label-jump workflow remains available:
 
@@ -440,7 +440,7 @@ head_branch = "m h"
 base_branch = "m b"
 commit_picker = "m c"
 full_file = "e"
-annotate_line = "a"
+annotate_line = "enter"
 annotate_batch = "A"
 copy_marks = "y"
 save_mark = "ctrl-s"

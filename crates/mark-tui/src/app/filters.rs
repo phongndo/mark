@@ -18,7 +18,6 @@ use super::PendingFilterApply;
 impl DiffApp {
     pub(crate) fn open_filter_input(&mut self, kind: DiffFilterKind) {
         self.filters.filter_input = Some(kind);
-        self.clear_diff_mouse_hover();
         self.close_color_scheme_picker();
         self.overlays.hide_diff_menu();
         self.overlays.hide_options_menu();

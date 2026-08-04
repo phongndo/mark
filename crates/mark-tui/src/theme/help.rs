@@ -121,7 +121,7 @@ pub(crate) const HELP_MENU_ROWS: &[HelpMenuRow] = &[
     HelpMenuRow::Section("Annotations"),
     HelpMenuRow::Binding(
         HelpMenuKey::Global(GlobalAction::AnnotateLine),
-        "annotate a line",
+        "annotate selected line, hunk, or file",
     ),
     HelpMenuRow::Binding(
         HelpMenuKey::Global(GlobalAction::AnnotateBatch),
@@ -134,10 +134,9 @@ pub(crate) const HELP_MENU_ROWS: &[HelpMenuRow] = &[
         HelpMenuKey::Global(GlobalAction::AnnotationMenu),
         "search annotations",
     ),
-    HelpMenuRow::Binding(HelpMenuKey::Static("hover [+]"), "add / edit annotation"),
     HelpMenuRow::Binding(HelpMenuKey::Global(GlobalAction::SaveMark), "save mark"),
     HelpMenuRow::Binding(HelpMenuKey::Global(GlobalAction::CancelMark), "cancel mark"),
-    HelpMenuRow::Binding(HelpMenuKey::Static("Enter"), "new annotation line"),
+    HelpMenuRow::Binding(HelpMenuKey::Static("Enter"), "new annotation paragraph"),
     HelpMenuRow::Binding(HelpMenuKey::Static("Cmd-←/→, Ctrl-A/E"), "line start / end"),
     HelpMenuRow::Binding(HelpMenuKey::Static("Alt-←/→"), "word left / right"),
     HelpMenuRow::Binding(HelpMenuKey::Static("Cmd-Delete"), "delete to line start"),

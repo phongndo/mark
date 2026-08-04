@@ -73,7 +73,7 @@ budgets = {
     'crates/mark-tui/src/render/diff/unified.rs': 260,
     'crates/mark-tui/src/render/grep.rs': 40,
     'crates/mark-tui/src/render/grep/highlight.rs': 180,
-    'crates/mark-tui/src/render/grep/mouse.rs': 120,
+    'crates/mark-tui/src/render/grep/cursor.rs': 120,
     'crates/mark-tui/src/render/grep/target.rs': 340,
     'crates/mark-tui/src/render/grep/types.rs': 60,
     'crates/mark-tui/src/render/headers.rs': 40,

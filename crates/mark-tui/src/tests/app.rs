@@ -99,10 +99,10 @@ fn n_and_p_navigate_grep_matches_when_grep_filter_is_active() {
 
     app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE))
         .expect("n should move to next grep match");
-    assert_eq!(app.current_grep_match_row(), Some(6));
+    assert_eq!(app.current_grep_match_row(), Some(5));
     assert_eq!(
         app.viewport.scroll + viewport_center_offset(app.viewport.viewport_rows),
-        6
+        5
     );
 
     app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE))

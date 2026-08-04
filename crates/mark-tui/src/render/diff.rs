@@ -11,17 +11,12 @@ use crate::{
     model::{FileIndex, HunkIndex, UiRow},
     render::{
         annotation_hints::{AnnotationTargetHint, apply_annotation_target_hint},
-        annotations::{
-            append_annotation_add_button, render_annotation_compose_block,
-            render_annotation_saved_block,
-        },
+        annotations::{render_annotation_compose_block, render_annotation_saved_block},
         grep::{
-            grep_highlight_targets_for_row, highlighted_grep_text_line,
-            highlighted_mouse_diff_content_line,
+            grep_highlight_targets_for_row, highlighted_cursor_diff_content_line,
+            highlighted_cursor_full_line, highlighted_cursor_meta_line, highlighted_grep_text_line,
         },
-        headers::{
-            file_header_line, file_separator_line, hunk_header_line, hunk_header_line_with_focus,
-        },
+        headers::{file_header_line, hunk_header_line, hunk_header_line_with_focus},
         style::diff_base_bg,
         text::fit_padded,
     },
@@ -89,7 +84,6 @@ pub(crate) fn build_diff_viewport_lines(
         return build_wrapped_viewport_lines(app, width, visible_rows);
     }
 
-    let mouse_highlight = mouse_highlight_for_viewport(app);
     let theme = app.config.theme;
     let layout = app.viewport.layout;
     let draft = app.annotations_state.annotation_draft.clone();
@@ -106,26 +100,18 @@ pub(crate) fn build_diff_viewport_lines(
             break;
         };
         let mut line = render_row_with_focus(app, visual_row, row, width, focused_hunk);
-        if mouse_highlight.is_some_and(|(_, highlight_row)| highlight_row == visual_row)
-            && row_has_diff_code_content(row)
-            && draft.is_none()
-        {
-            line = highlighted_mouse_diff_content_line(line, layout, width, theme);
-            if row_has_annotation_target(app, row) {
-                line = append_annotation_add_button(line, width, theme);
-            }
-        }
         if app.annotation_cursor_at_visual_scroll(visual_row) {
-            line = highlighted_mouse_diff_content_line(line, layout, width, theme);
+            line = highlighted_cursor_row(line, row, layout, width, theme);
         }
-        if let Some((hint, side, existing)) =
-            app.annotation_target_hint_at_visual_scroll(visual_row)
+        for (hint, scope, side, existing) in
+            app.annotation_target_hints_at_visual_scroll(visual_row)
         {
             line = apply_annotation_target_hint(
                 line,
                 layout,
                 width,
                 AnnotationTargetHint {
+                    scope,
                     side,
                     hint,
                     existing_annotation: existing,
@@ -136,31 +122,31 @@ pub(crate) fn build_diff_viewport_lines(
         }
         lines.push(line);
 
-        if has_annotation_blocks
-            && let Some(key) = AnnotationKey::from_ui_row(&app.document.changeset, row)
-        {
-            if let Some(draft) = draft
-                .as_ref()
-                .filter(|d| d.model_row_index == visual_row && d.key == key)
-            {
-                let label = app.annotation_label(&draft.key);
-                push_annotation_block(
-                    &mut lines,
-                    render_annotation_compose_block(draft, width, theme, label.as_deref()),
-                    visible_rows,
-                );
-            } else if let Some(text) = app.annotations_state.annotations.get(&key)
-                && draft.as_ref().is_none_or(|d| d.key != key)
-            {
-                let label = app.annotation_label(&key);
-                let block_scroll = annotation_saved_block_scroll(app, &key);
-                push_annotation_block(
-                    &mut lines,
-                    render_annotation_saved_block(text, width, theme, label.as_deref())
-                        .into_iter()
-                        .skip(block_scroll),
-                    visible_rows,
-                );
+        if has_annotation_blocks {
+            for key in app.annotation_keys_at_model_row(visual_row, row) {
+                if let Some(draft) = draft
+                    .as_ref()
+                    .filter(|d| d.model_row_index == visual_row && d.key == key)
+                {
+                    let label = app.annotation_label(&draft.key);
+                    push_annotation_block(
+                        &mut lines,
+                        render_annotation_compose_block(draft, width, theme, label.as_deref()),
+                        visible_rows,
+                    );
+                } else if let Some(text) = app.annotations_state.annotations.get(&key)
+                    && draft.as_ref().is_none_or(|d| d.key != key)
+                {
+                    let label = app.annotation_label(&key);
+                    let block_scroll = annotation_saved_block_scroll(app, &key);
+                    push_annotation_block(
+                        &mut lines,
+                        render_annotation_saved_block(text, width, theme, label.as_deref())
+                            .into_iter()
+                            .skip(block_scroll),
+                        visible_rows,
+                    );
+                }
             }
         }
     }
@@ -174,7 +160,6 @@ fn build_wrapped_viewport_lines(
     width: usize,
     visible_rows: usize,
 ) -> Vec<Line<'static>> {
-    let mouse_highlight = mouse_highlight_for_viewport(app);
     let theme = app.config.theme;
     let layout = app.viewport.layout;
     let draft = app.annotations_state.annotation_draft.clone();
@@ -200,27 +185,18 @@ fn build_wrapped_viewport_lines(
         {
             let mut line = line;
             let is_last_wrap = wrap_index + 1 == wrap_count.min(remaining);
-            let anchor_visual = app.annotation_anchor_visual_scroll(row_index);
-            if mouse_highlight.is_some_and(|(_, highlight_row)| highlight_row == visual_row)
-                && row_has_diff_code_content(row)
-                && draft.is_none()
-            {
-                line = highlighted_mouse_diff_content_line(line, layout, width, theme);
-                if visual_row == anchor_visual && row_has_annotation_target(app, row) {
-                    line = append_annotation_add_button(line, width, theme);
-                }
-            }
             if app.annotation_cursor_at_model_row(row_index) {
-                line = highlighted_mouse_diff_content_line(line, layout, width, theme);
+                line = highlighted_cursor_row(line, row, layout, width, theme);
             }
-            if let Some((hint, side, existing)) =
-                app.annotation_target_hint_at_visual_scroll(visual_row)
+            for (hint, scope, side, existing) in
+                app.annotation_target_hints_at_visual_scroll(visual_row)
             {
                 line = apply_annotation_target_hint(
                     line,
                     layout,
                     width,
                     AnnotationTargetHint {
+                        scope,
                         side,
                         hint,
                         existing_annotation: existing,
@@ -234,32 +210,31 @@ fn build_wrapped_viewport_lines(
             if lines.len() >= visible_rows {
                 break;
             }
-            if is_last_wrap
-                && has_annotation_blocks
-                && let Some(key) = AnnotationKey::from_ui_row(&app.document.changeset, row)
-            {
-                if let Some(draft) = draft
-                    .as_ref()
-                    .filter(|d| d.model_row_index == row_index && d.key == key)
-                {
-                    let label = app.annotation_label(&draft.key);
-                    push_annotation_block(
-                        &mut lines,
-                        render_annotation_compose_block(draft, width, theme, label.as_deref()),
-                        visible_rows,
-                    );
-                } else if let Some(text) = app.annotations_state.annotations.get(&key)
-                    && draft.as_ref().is_none_or(|d| d.key != key)
-                {
-                    let label = app.annotation_label(&key);
-                    let block_scroll = annotation_saved_block_scroll(app, &key);
-                    push_annotation_block(
-                        &mut lines,
-                        render_annotation_saved_block(text, width, theme, label.as_deref())
-                            .into_iter()
-                            .skip(block_scroll),
-                        visible_rows,
-                    );
+            if is_last_wrap && has_annotation_blocks {
+                for key in app.annotation_keys_at_model_row(row_index, row) {
+                    if let Some(draft) = draft
+                        .as_ref()
+                        .filter(|d| d.model_row_index == row_index && d.key == key)
+                    {
+                        let label = app.annotation_label(&draft.key);
+                        push_annotation_block(
+                            &mut lines,
+                            render_annotation_compose_block(draft, width, theme, label.as_deref()),
+                            visible_rows,
+                        );
+                    } else if let Some(text) = app.annotations_state.annotations.get(&key)
+                        && draft.as_ref().is_none_or(|d| d.key != key)
+                    {
+                        let label = app.annotation_label(&key);
+                        let block_scroll = annotation_saved_block_scroll(app, &key);
+                        push_annotation_block(
+                            &mut lines,
+                            render_annotation_saved_block(text, width, theme, label.as_deref())
+                                .into_iter()
+                                .skip(block_scroll),
+                            visible_rows,
+                        );
+                    }
                 }
             }
         }
@@ -268,6 +243,29 @@ fn build_wrapped_viewport_lines(
     }
     lines.truncate(visible_rows);
     lines
+}
+
+fn highlighted_cursor_row(
+    line: Line<'static>,
+    row: UiRow,
+    layout: crate::controls::DiffLayoutMode,
+    width: usize,
+    theme: crate::theme::DiffTheme,
+) -> Line<'static> {
+    match row {
+        UiRow::FileHeader(_) | UiRow::FileBodyNotice(_) => {
+            highlighted_cursor_full_line(line, width, theme)
+        }
+        UiRow::Collapsed { .. } | UiRow::ContextHide { .. } | UiRow::HunkHeader { .. } => {
+            highlighted_cursor_meta_line(line, width, theme)
+        }
+        UiRow::ContextLine { .. }
+        | UiRow::UnifiedLine { .. }
+        | UiRow::SplitLine { .. }
+        | UiRow::MetaLine { .. } => {
+            highlighted_cursor_diff_content_line(line, layout, width, theme)
+        }
+    }
 }
 
 fn annotation_saved_block_scroll(app: &DiffApp, key: &AnnotationKey) -> usize {
@@ -290,26 +288,6 @@ fn push_annotation_block(
         }
         lines.push(line);
     }
-}
-
-fn mouse_highlight_for_viewport(app: &DiffApp) -> Option<(u16, usize)> {
-    if app.diff_modal_blocks_mouse_hover() {
-        return None;
-    }
-    let (column, _) = app.viewport.mouse_hover?;
-    app.diff_mouse_highlight_visual_row()
-        .map(|visual_row| (column, visual_row))
-}
-
-fn row_has_annotation_target(app: &DiffApp, row: UiRow) -> bool {
-    AnnotationKey::from_ui_row(&app.document.changeset, row).is_some()
-}
-
-fn row_has_diff_code_content(row: UiRow) -> bool {
-    matches!(
-        row,
-        UiRow::UnifiedLine { .. } | UiRow::SplitLine { .. } | UiRow::ContextLine { .. }
-    )
 }
 
 pub(crate) fn render_row(
@@ -407,7 +385,6 @@ pub(crate) fn render_row_with_focus(
         .typed_hunk_key()
         .is_some_and(|hunk_key| Some(hunk_key) == focused_hunk);
     let mut line = match row {
-        UiRow::FileSeparator => file_separator_line(app.viewport.layout, width, theme),
         UiRow::FileHeader(file_index) => {
             let file = &app.document.changeset.files[file_index];
             file_header_line(file, width, theme)

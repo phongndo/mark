@@ -29,8 +29,13 @@ type MarkRunResult =
 
 type MarkAnnotation = {
   path: string;
+  scope?: "file" | "hunk";
   old_line?: number;
   new_line?: number;
+  old_start?: number;
+  old_count?: number;
+  new_start?: number;
+  new_count?: number;
   body: string;
 };
 
@@ -597,19 +602,55 @@ export function parseMarkAnnotations(value: unknown): MarkAnnotations {
       !isRecord(candidate) ||
       typeof candidate.path !== "string" ||
       candidate.path.length === 0 ||
-      typeof candidate.body !== "string" ||
-      !optionalPositiveInteger(candidate.old_line) ||
-      !optionalPositiveInteger(candidate.new_line) ||
-      (candidate.old_line === undefined && candidate.new_line === undefined)
+      typeof candidate.body !== "string"
     ) {
       throw new Error(`invalid annotation at index ${index}`);
     }
-    return {
-      path: candidate.path,
-      ...(candidate.old_line === undefined ? {} : { old_line: candidate.old_line as number }),
-      ...(candidate.new_line === undefined ? {} : { new_line: candidate.new_line as number }),
-      body: candidate.body,
-    };
+
+    const noLineCoordinates = candidate.old_line === undefined && candidate.new_line === undefined;
+    const noRangeCoordinates =
+      candidate.old_start === undefined &&
+      candidate.old_count === undefined &&
+      candidate.new_start === undefined &&
+      candidate.new_count === undefined;
+    const lineTarget =
+      candidate.scope === undefined &&
+      noRangeCoordinates &&
+      optionalPositiveInteger(candidate.old_line) &&
+      optionalPositiveInteger(candidate.new_line) &&
+      (candidate.old_line !== undefined || candidate.new_line !== undefined);
+    const fileTarget = candidate.scope === "file" && noLineCoordinates && noRangeCoordinates;
+    const hunkTarget =
+      candidate.scope === "hunk" &&
+      noLineCoordinates &&
+      nonnegativeInteger(candidate.old_start) &&
+      nonnegativeInteger(candidate.old_count) &&
+      nonnegativeInteger(candidate.new_start) &&
+      nonnegativeInteger(candidate.new_count);
+
+    if (lineTarget) {
+      return {
+        path: candidate.path,
+        ...(candidate.old_line === undefined ? {} : { old_line: candidate.old_line as number }),
+        ...(candidate.new_line === undefined ? {} : { new_line: candidate.new_line as number }),
+        body: candidate.body,
+      };
+    }
+    if (fileTarget) {
+      return { path: candidate.path, scope: "file", body: candidate.body };
+    }
+    if (hunkTarget) {
+      return {
+        path: candidate.path,
+        scope: "hunk",
+        old_start: candidate.old_start as number,
+        old_count: candidate.old_count as number,
+        new_start: candidate.new_start as number,
+        new_count: candidate.new_count as number,
+        body: candidate.body,
+      };
+    }
+    throw new Error(`invalid annotation at index ${index}`);
   });
 
   if (marks.length === 0) {
@@ -712,6 +753,12 @@ function renderAnnotationCard(
 }
 
 function annotationLocation(annotation: MarkAnnotation): string {
+  if (annotation.scope === "file") {
+    return `${annotation.path} (entire file)`;
+  }
+  if (annotation.scope === "hunk") {
+    return `${annotation.path} @@ -${annotation.old_start},${annotation.old_count} +${annotation.new_start},${annotation.new_count} @@`;
+  }
   if (annotation.new_line !== undefined) {
     return `${annotation.path}:${annotation.new_line}`;
   }
@@ -754,6 +801,10 @@ function isConsumedAnnotations(value: unknown): value is ConsumedAnnotations {
 
 function optionalPositiveInteger(value: unknown): boolean {
   return value === undefined || (Number.isSafeInteger(value) && (value as number) > 0);
+}
+
+function nonnegativeInteger(value: unknown): boolean {
+  return Number.isSafeInteger(value) && (value as number) >= 0;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

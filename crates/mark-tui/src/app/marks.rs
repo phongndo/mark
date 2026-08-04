@@ -1,5 +1,7 @@
-use super::{DiffApp, MarkExport, json_string};
-use crate::annotation::{AnnotationKey, AnnotationSide, paired_old_line_for_addition};
+use super::{DiffApp, MarkExport, MarkScope, json_string};
+use crate::annotation::{
+    AnnotationKey, AnnotationScope, AnnotationSide, paired_old_line_for_addition,
+};
 use crate::model::{UiModel, UiRow, line_after_hunk};
 use crate::syntax::{DiffSide, available_context_lines};
 use std::collections::{HashMap, HashSet};
@@ -29,11 +31,22 @@ impl DiffApp {
             return None;
         }
         marks.sort_by(|left, right| {
-            (&left.path, left.old_line, left.new_line).cmp(&(
-                &right.path,
-                right.old_line,
-                right.new_line,
-            ))
+            (
+                &left.path,
+                left.scope,
+                left.old_line,
+                left.new_line,
+                left.old_start,
+                left.new_start,
+            )
+                .cmp(&(
+                    &right.path,
+                    right.scope,
+                    right.old_line,
+                    right.new_line,
+                    right.old_start,
+                    right.new_start,
+                ))
         });
 
         let mut out = String::from("{\n  \"version\": 1,\n  \"marks\": [\n");
@@ -44,6 +57,13 @@ impl DiffApp {
             out.push_str("    {\n");
             out.push_str("      \"path\": ");
             out.push_str(&json_string(&mark.path));
+            if let Some(scope) = mark.scope {
+                out.push_str(",\n      \"scope\": ");
+                out.push_str(&json_string(match scope {
+                    MarkScope::File => "file",
+                    MarkScope::Hunk => "hunk",
+                }));
+            }
             if let Some(old_line) = mark.old_line {
                 out.push_str(",\n      \"old_line\": ");
                 out.push_str(&old_line.to_string());
@@ -51,6 +71,19 @@ impl DiffApp {
             if let Some(new_line) = mark.new_line {
                 out.push_str(",\n      \"new_line\": ");
                 out.push_str(&new_line.to_string());
+            }
+            for (name, value) in [
+                ("old_start", mark.old_start),
+                ("old_count", mark.old_count),
+                ("new_start", mark.new_start),
+                ("new_count", mark.new_count),
+            ] {
+                if let Some(value) = value {
+                    out.push_str(",\n      \"");
+                    out.push_str(name);
+                    out.push_str("\": ");
+                    out.push_str(&value.to_string());
+                }
             }
             out.push_str(",\n      \"body\": ");
             out.push_str(&json_string(&mark.body));
@@ -90,7 +123,7 @@ impl DiffApp {
     fn exportable_annotation_keys(&self, model: &UiModel) -> HashSet<AnnotationKey> {
         model
             .iter_rows()
-            .filter_map(|row| AnnotationKey::from_ui_row(&self.document.changeset, row))
+            .flat_map(|row| AnnotationKey::candidates_from_ui_row(&self.document.changeset, row))
             .collect()
     }
 
@@ -99,7 +132,7 @@ impl DiffApp {
         model: &UiModel,
         key: &AnnotationKey,
     ) -> bool {
-        if key.side != AnnotationSide::New {
+        if !key.is_line() || key.side != AnnotationSide::New {
             return false;
         }
 
@@ -127,6 +160,9 @@ impl DiffApp {
     }
 
     fn trailing_context_contains_annotation_key(&self, key: &AnnotationKey) -> bool {
+        if !key.is_line() {
+            return false;
+        }
         // The trailing control is discovered lazily for visible files. Keep a
         // source-derived fallback so marks export correctly before discovery.
         self.document
@@ -165,22 +201,40 @@ impl DiffApp {
     }
 
     fn export_mark(&self, key: &AnnotationKey, body: &str) -> Option<MarkExport> {
-        let (old_line, new_line) = self.annotation_key_lines(key)?;
-        Some(MarkExport {
+        let mut mark = MarkExport {
             path: key.path.clone(),
-            old_line,
-            new_line,
+            scope: None,
+            old_line: None,
+            new_line: None,
+            old_start: None,
+            old_count: None,
+            new_start: None,
+            new_count: None,
             body: body.to_owned(),
-        })
-    }
-
-    fn annotation_key_lines(&self, key: &AnnotationKey) -> Option<(Option<usize>, Option<usize>)> {
-        match key.side {
-            AnnotationSide::Old => Some((Some(key.line), None)),
-            AnnotationSide::New => {
-                Some((self.paired_old_line_for_new_annotation(key), Some(key.line)))
+        };
+        match key.scope {
+            AnnotationScope::File => mark.scope = Some(MarkScope::File),
+            AnnotationScope::Hunk {
+                old_start,
+                old_count,
+                new_start,
+                new_count,
+            } => {
+                mark.scope = Some(MarkScope::Hunk);
+                mark.old_start = Some(old_start);
+                mark.old_count = Some(old_count);
+                mark.new_start = Some(new_start);
+                mark.new_count = Some(new_count);
             }
+            AnnotationScope::Line => match key.side {
+                AnnotationSide::Old => mark.old_line = Some(key.line),
+                AnnotationSide::New => {
+                    mark.old_line = self.paired_old_line_for_new_annotation(key);
+                    mark.new_line = Some(key.line);
+                }
+            },
         }
+        Some(mark)
     }
 
     fn paired_old_line_for_new_annotation(&self, key: &AnnotationKey) -> Option<usize> {

@@ -153,7 +153,7 @@ impl DiffApp {
                 && stable_fallback.is_none()
             {
                 stable_fallback = Some(anchor);
-            } else if !matches!(row, UiRow::FileSeparator) && structural_fallback.is_none() {
+            } else if structural_fallback.is_none() {
                 structural_fallback = Some(anchor);
             }
         }
@@ -167,7 +167,6 @@ impl DiffApp {
 
     fn model_row_for_full_file_anchor(&self, anchor: FullFileViewportAnchor) -> Option<usize> {
         let row = match anchor.row {
-            UiRow::FileSeparator => return None,
             UiRow::FileHeader(file) => self.document.model.file_start_row(file.get()),
             UiRow::FileBodyNotice(file) => self
                 .document
@@ -427,6 +426,14 @@ impl DiffApp {
         else {
             return false;
         };
+        let cursor_viewport_row = self
+            .annotation_cursor_enabled()
+            .then(|| {
+                self.annotation_cursor_target()
+                    .filter(|target| target.model_row_index == row_index)
+                    .and_then(|_| self.annotation_cursor_viewport_row())
+            })
+            .flatten();
 
         let Some((side, source_lines)) = self.ensure_context_lines(file.get()) else {
             self.set_warning_notice("context unavailable for this diff");
@@ -462,24 +469,83 @@ impl DiffApp {
             .context_expansions
             .insert(ContextKey { file, hunk }, next);
         self.rebuild_model_after_context_visibility_change();
+        if let Some(viewport_row) = cursor_viewport_row {
+            self.restore_context_control_cursor(file, hunk, true, viewport_row);
+        }
         true
     }
 
     pub(crate) fn hide_context(&mut self, file: usize, hunk: usize) -> bool {
+        let file = FileIndex::new(file);
+        let hunk = HunkIndex::new(hunk);
+        let cursor_viewport_row = self
+            .annotation_cursor_enabled()
+            .then(|| {
+                self.annotation_cursor_target()
+                    .filter(|target| {
+                        matches!(
+                            self.document.model.row(target.model_row_index),
+                            Some(UiRow::ContextHide {
+                                file: row_file,
+                                hunk: row_hunk,
+                                ..
+                            }) if row_file == file && row_hunk == hunk
+                        )
+                    })
+                    .and_then(|_| self.annotation_cursor_viewport_row())
+            })
+            .flatten();
         if self
             .document
             .context_expansions
-            .remove(&ContextKey {
-                file: FileIndex::new(file),
-                hunk: HunkIndex::new(hunk),
-            })
+            .remove(&ContextKey { file, hunk })
             .is_none()
         {
             return false;
         }
 
         self.rebuild_model_after_context_visibility_change();
+        if let Some(viewport_row) = cursor_viewport_row {
+            self.restore_context_control_cursor(file, hunk, false, viewport_row);
+        }
         true
+    }
+
+    fn restore_context_control_cursor(
+        &mut self,
+        file: FileIndex,
+        hunk: HunkIndex,
+        expanded: bool,
+        viewport_row: usize,
+    ) {
+        let target_row = (0..self.document.model.len()).find(|row| {
+            if expanded {
+                matches!(
+                    self.document.model.row(*row),
+                    Some(UiRow::ContextHide {
+                        file: row_file,
+                        hunk: row_hunk,
+                        ..
+                    }) if row_file == file && row_hunk == hunk
+                )
+            } else {
+                matches!(
+                    self.document.model.row(*row),
+                    Some(UiRow::Collapsed {
+                        file: row_file,
+                        hunk: row_hunk,
+                        ..
+                    }) if row_file == file && row_hunk == hunk
+                )
+            }
+        });
+        let Some(target_row) = target_row else {
+            return;
+        };
+
+        self.select_annotation_cursor_model_row(target_row);
+        let scroll = self.scroll_for_model_row_offset_at_viewport_row(target_row, 0, viewport_row);
+        self.set_scroll_with_grep_sync(scroll, true, HunkFocusScrollBehavior::Preserve);
     }
 
     pub(crate) fn toggle_full_file(&mut self) {

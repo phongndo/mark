@@ -131,7 +131,6 @@ impl From<Option<DiffLineIndex>> for MaybeDiffLineIndex {
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum UiRow {
-    FileSeparator,
     FileHeader(FileIndex),
     FileBodyNotice(FileIndex),
     Collapsed {
@@ -181,8 +180,7 @@ impl UiRow {
             | Self::UnifiedLine { file, hunk, .. }
             | Self::SplitLine { file, hunk, .. }
             | Self::MetaLine { file, hunk, .. } => Some((file, hunk)),
-            Self::FileSeparator
-            | Self::FileHeader(_)
+            Self::FileHeader(_)
             | Self::FileBodyNotice(_)
             | Self::Collapsed { .. }
             | Self::ContextLine { .. }
@@ -722,7 +720,6 @@ struct RowSegment {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RowSegmentKind {
-    FileSeparator,
     FileHeader(FileIndex),
     FileBodyNotice(FileIndex),
     Collapsed {
@@ -797,7 +794,6 @@ impl RowSegmentKind {
     fn row_at(self, offset: usize) -> Option<UiRow> {
         let offset_u32 = u32::try_from(offset).ok()?;
         Some(match self {
-            Self::FileSeparator => UiRow::FileSeparator,
             Self::FileHeader(file) => UiRow::FileHeader(file),
             Self::FileBodyNotice(file) => UiRow::FileBodyNotice(file),
             Self::Collapsed {
@@ -1008,7 +1004,6 @@ impl UiModel {
             .iter()
             .filter(|file| file.is_binary() || file.has_no_textual_changes())
             .count();
-        let file_separator_rows = changeset.files.len().saturating_sub(1);
         let expanded_context_rows = context_expansions
             .values()
             .copied()
@@ -1024,7 +1019,6 @@ impl UiModel {
         let estimated_rows = changeset
             .files
             .len()
-            .saturating_add(file_separator_rows)
             .saturating_add(binary_or_empty_rows)
             .saturating_add(total_hunks.saturating_mul(2))
             .saturating_add(total_hunk_lines)
@@ -1059,13 +1053,10 @@ impl UiModel {
         let mut hunk_row_starts = Vec::with_capacity(total_hunks);
         let mut hunk_row_ends = Vec::with_capacity(total_hunks);
 
-        for (visible_index, file_index) in visible_files.iter().copied().enumerate() {
+        for file_index in visible_files.iter().copied() {
             let Some(file) = changeset.files.get(file_index.get()) else {
                 continue;
             };
-            if visible_index > 0 {
-                rows.push(UiRow::FileSeparator);
-            }
             file_start_rows[file_index] = Some(ModelRow::new(rows.len()));
             file_row_starts.push((file_index, ModelRow::new(rows.len())));
             rows.push(UiRow::FileHeader(file_index));
@@ -1278,18 +1269,10 @@ impl UiModel {
         let mut hunk_row_starts = Vec::with_capacity(total_hunks);
         let mut hunk_row_ends = Vec::with_capacity(total_hunks);
 
-        for (visible_index, file_index) in visible_files.iter().copied().enumerate() {
+        for file_index in visible_files.iter().copied() {
             let Some(file) = changeset.files.get(file_index.get()) else {
                 continue;
             };
-            if visible_index > 0 {
-                push_row_segment(
-                    &mut row_segments,
-                    &mut row_count,
-                    1,
-                    RowSegmentKind::FileSeparator,
-                );
-            }
             file_start_rows[file_index] = Some(ModelRow::new(row_count));
             file_row_starts.push((file_index, ModelRow::new(row_count)));
             push_row_segment(
@@ -1771,38 +1754,6 @@ impl UiModel {
         })
     }
 
-    pub(crate) fn annotation_candidate_navigation_is_bounded(&self, row: usize) -> bool {
-        if !self.rows.is_empty() {
-            return true;
-        }
-        let Some(segment_index) = self
-            .row_segments
-            .partition_point(|segment| segment.start.get() <= row)
-            .checked_sub(1)
-        else {
-            return true;
-        };
-        self.annotation_candidate_segment_is_bounded(segment_index)
-    }
-
-    pub(crate) fn annotation_candidate_navigation_range_is_bounded(
-        &self,
-        range: Range<usize>,
-    ) -> bool {
-        if !self.rows.is_empty() || range.is_empty() {
-            return true;
-        }
-        let first_segment = self
-            .row_segments
-            .partition_point(|segment| segment.end() <= range.start);
-        self.row_segments
-            .iter()
-            .enumerate()
-            .skip(first_segment)
-            .take_while(|(_, segment)| segment.start.get() < range.end)
-            .all(|(segment_index, _)| self.annotation_candidate_segment_is_bounded(segment_index))
-    }
-
     pub(crate) fn cache_key(&self) -> usize {
         if self.rows.is_empty() {
             self.row_segments.as_ptr() as usize
@@ -2051,8 +2002,7 @@ impl UiModel {
                     == Some(DiffLineIndex(line))
                     || right.get() == Some(DiffLineIndex(line)))
                 .then_some(segment.start.get()),
-                RowSegmentKind::FileSeparator
-                | RowSegmentKind::FileHeader(_)
+                RowSegmentKind::FileHeader(_)
                 | RowSegmentKind::FileBodyNotice(_)
                 | RowSegmentKind::Collapsed { .. }
                 | RowSegmentKind::ContextLines { .. }
@@ -2111,8 +2061,7 @@ fn row_contains_diff_line(
                 && row_hunk == hunk
                 && (left.get() == Some(line) || right.get() == Some(line))
         }
-        UiRow::FileSeparator
-        | UiRow::FileHeader(_)
+        UiRow::FileHeader(_)
         | UiRow::FileBodyNotice(_)
         | UiRow::Collapsed { .. }
         | UiRow::ContextLine { .. }
@@ -2226,8 +2175,7 @@ fn annotation_candidate_blocks_from_segments(
             {
                 push_annotation_candidate_range(&mut blocks, segment.start.get()..segment.end());
             }
-            RowSegmentKind::FileSeparator
-            | RowSegmentKind::FileHeader(_)
+            RowSegmentKind::FileHeader(_)
             | RowSegmentKind::FileBodyNotice(_)
             | RowSegmentKind::Collapsed { .. }
             | RowSegmentKind::ContextLines { .. }
@@ -2488,8 +2436,7 @@ fn direct_row_is_annotation_candidate(
                         .is_some_and(|first| line_index >= first)
                     }))
         }
-        UiRow::FileSeparator
-        | UiRow::FileHeader(_)
+        UiRow::FileHeader(_)
         | UiRow::FileBodyNotice(_)
         | UiRow::Collapsed { .. }
         | UiRow::ContextHide { .. }

@@ -230,6 +230,7 @@ fn full_file_editor_reload_preserves_wrapped_row_offset() {
     let changeset = changeset_with_hunk_at(repo.clone(), 50);
     let replacement = changeset_with_hunk_at(repo.clone(), 50);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.config.annotation_targeting = AnnotationTargeting::Hints;
     app.toggle_full_file();
     assert!(app.expand_trailing_context_for_key(0, 1));
     app.set_viewport_width(30);
@@ -789,18 +790,6 @@ fn debug_notifications_emit_terminal_event_toasts() {
         app.notifications.toasts.latest_text(),
         Some("event: resize 120x40")
     );
-}
-
-#[test]
-fn file_separator_line_draws_rule_across_full_width() {
-    let theme = DiffTheme::default();
-    let line = file_separator_line(DiffLayoutMode::Unified, 24, theme);
-    let text = line_text(&line);
-
-    assert_eq!(text.width(), 24);
-    assert_eq!(text, "────────────────────────");
-    assert_eq!(line.spans[0].style.bg, Some(base_bg(theme)));
-    assert_eq!(line.spans[0].style.fg, Some(theme.empty_diff));
 }
 
 #[test]
@@ -1908,7 +1897,41 @@ fn hunk_header_fits_emoji_sequences_with_terminal_width() {
 }
 
 #[test]
-fn hunk_header_line_matches_unified_gutter() {
+fn cursor_highlights_hunk_headers_with_the_code_cursor_background() {
+    let changeset = changeset_with_line_text("hello");
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_width(40);
+    app.set_viewport_rows(5);
+    let hunk_row = app
+        .document
+        .model
+        .iter_rows()
+        .position(|row| matches!(row, UiRow::HunkHeader { .. }))
+        .expect("hunk header row");
+    let cursor = app
+        .annotations_state
+        .annotation_cursor
+        .as_mut()
+        .expect("annotation cursor");
+    cursor.selected = cursor
+        .targets
+        .iter()
+        .position(|target| target.model_row_index == hunk_row)
+        .expect("hunk header cursor target");
+    app.viewport.scroll = hunk_row;
+
+    let rendered = build_diff_viewport_lines(&mut app, 40, 5);
+    assert!(
+        rendered[0]
+            .spans
+            .iter()
+            .skip(1)
+            .all(|span| span.style.bg == Some(app.config.theme.cursor_line_bg))
+    );
+}
+
+#[test]
+fn hunk_header_uses_code_background_outside_the_gutter() {
     let hunk = mark_diff::DiffHunk {
         header: "@@ -200,2 +211,3 @@ render_diff_hunk".to_owned(),
         ranges: HunkLineRanges::new(200, 2, 211, 3),
@@ -1948,10 +1971,15 @@ fn hunk_header_line_matches_unified_gutter() {
     assert_eq!(new_range.style.fg, Some(theme.addition_fg));
     assert_eq!(context.style.fg, Some(theme.foreground));
     assert_eq!(additions.style.fg, Some(theme.addition_fg));
+    assert_eq!(
+        line.spans.first().and_then(|span| span.style.bg),
+        Some(line_gutter_bg(DiffLineKind::Meta, theme))
+    );
     assert!(
         line.spans
             .iter()
-            .all(|span| span.style.bg == Some(line_gutter_bg(DiffLineKind::Meta, theme)))
+            .skip(1)
+            .all(|span| span.style.bg == Some(diff_base_bg(theme)))
     );
 }
 
@@ -2371,9 +2399,6 @@ fn minimal_decorations_use_plain_diff_chrome() {
     );
     assert_eq!(span_text(&spans), "            ");
 
-    let separator = file_separator_line(DiffLayoutMode::Split, 12, theme);
-    assert_eq!(line_text(&separator), "            ");
-
     let context = context_show_line(20, true, "", 32, theme);
     let context = line_text(&context);
     assert!(context.contains("show 20 more unchanged lines"));
@@ -2571,12 +2596,12 @@ fn diff_lines_start_with_change_indicator() {
 }
 
 #[test]
-fn highlighted_mouse_diff_content_line_highlights_only_code_columns() {
+fn highlighted_cursor_diff_content_line_highlights_only_code_columns() {
     let line = DiffLine::context(1, 1, "code".to_owned());
     let width = 24;
     let theme = DiffTheme::default();
     let rendered = render_unified_line_at_scroll(&line, None, &[], 0, width, theme, 0);
-    let highlighted = highlighted_mouse_diff_content_line(
+    let highlighted = highlighted_cursor_diff_content_line(
         rendered.clone(),
         DiffLayoutMode::Unified,
         width,
@@ -2600,7 +2625,7 @@ fn highlighted_mouse_diff_content_line_highlights_only_code_columns() {
 }
 
 #[test]
-fn annotation_add_button_opens_input_under_hovered_line() {
+fn mouse_click_selects_line_and_enter_opens_annotation_input() {
     use crate::annotation::AnnotationKey;
 
     let changeset = changeset_with_line_text("hello");
@@ -2623,13 +2648,16 @@ fn annotation_add_button_opens_input_under_hovered_line() {
         .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
         .expect("unified line");
     app.viewport.scroll = code_row;
-    app.update_diff_mouse_hover(38, 1);
 
-    let hover_lines = crate::render::diff::build_diff_viewport_lines(&mut app, 40, 3);
-    let button_span = hover_lines[0].spans.last().expect("add button span");
-    assert_eq!(button_span.style.bg, Some(app.config.theme.cursor_line_bg));
-
-    assert!(app.handle_diff_click(38, 1));
+    assert!(app.handle_diff_click(20, 1));
+    assert!(app.annotations_state.annotation_draft.is_none());
+    assert_eq!(
+        app.annotation_cursor_target()
+            .map(|target| target.model_row_index),
+        Some(code_row)
+    );
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("Enter should open an annotation at the mouse-selected cursor");
     assert!(app.annotations_state.annotation_draft.is_some());
 
     let lines = crate::render::diff::build_diff_viewport_lines(&mut app, 40, 6);
@@ -2706,13 +2734,40 @@ fn annotation_add_button_opens_input_under_hovered_line() {
         .iter()
         .position(|line| line_text(line).ends_with("[x]"))
         .expect("saved annotation close row");
-    app.update_diff_mouse_hover(38, diff_y.saturating_add(close_row as u16));
     assert!(app.handle_diff_click(38, diff_y.saturating_add(close_row as u16)));
     assert!(!app.annotations_state.annotations.contains_key(&key));
 }
 
 #[test]
-fn split_annotation_add_button_uses_current_side_for_paired_row() {
+fn enter_annotates_removed_line_in_replacement_block() {
+    use crate::annotation::AnnotationSide;
+
+    let changeset = changeset_with_replacement_pair();
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_width(80);
+    app.set_viewport_rows(8);
+    let deletion_row = app
+        .document
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { line: LINE_0, .. }))
+        .expect("deletion line");
+    app.select_annotation_cursor_model_row(deletion_row);
+
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("Enter should annotate the removed line");
+    let draft = app
+        .annotations_state
+        .annotation_draft
+        .as_ref()
+        .expect("removed-line draft");
+    assert_eq!(draft.key.side, AnnotationSide::Old);
+    assert_eq!(draft.key.line, 1);
+}
+
+#[test]
+fn mouse_click_selects_current_side_for_paired_split_row() {
     use crate::annotation::{AnnotationKey, AnnotationSide};
 
     let changeset = changeset_with_replacement_pair();
@@ -2736,30 +2791,43 @@ fn split_annotation_add_button_uses_current_side_for_paired_row() {
 
     let row = app.document.model.row(split_row).expect("row");
     let keys = AnnotationKey::candidates_from_ui_row(&app.document.changeset, row);
-    assert_eq!(keys.len(), 1);
-    let key = keys[0].clone();
+    assert_eq!(keys.len(), 2);
+    let old_key = keys
+        .iter()
+        .find(|key| key.side == AnnotationSide::Old)
+        .cloned()
+        .expect("old-side key");
+    let key = AnnotationKey::from_ui_row(&app.document.changeset, row).expect("default key");
     assert_eq!(key.side, AnnotationSide::New);
     let left_width = app.viewport.viewport_width / 2;
-    let old_button_column = (left_width - 1) as u16;
-    app.update_diff_mouse_hover(old_button_column, 1);
-
-    let hover_lines = crate::render::diff::build_diff_viewport_lines(&mut app, 60, 3);
-    let hover_text = line_text(&hover_lines[0]);
-    let (old_button_text, _) = skip_display_prefix(&hover_text, left_width - 4);
-    assert!(
-        !old_button_text.starts_with(" [+]"),
-        "paired row should not expose an old-side add button: {hover_text:?}"
-    );
-    assert!(hover_text.ends_with(" [+]"));
-    assert!(!app.handle_diff_click(old_button_column, 1));
+    let old_side_column = (left_width - 1) as u16;
+    assert!(app.handle_diff_click(old_side_column, 1));
     assert!(app.annotations_state.annotation_draft.is_none());
+    assert_eq!(
+        app.annotation_cursor_target().map(|target| &target.key),
+        Some(&old_key)
+    );
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("Enter should annotate the selected old side");
+    assert_eq!(
+        app.annotations_state
+            .annotation_draft
+            .as_ref()
+            .map(|draft| &draft.key),
+        Some(&old_key)
+    );
+    app.handle_annotation_input_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+    app.viewport.scroll = split_row;
 
-    let new_button_column = (app.viewport.viewport_width - 1) as u16;
-    app.update_diff_mouse_hover(new_button_column, 1);
-    let hover_lines = crate::render::diff::build_diff_viewport_lines(&mut app, 60, 3);
-    assert!(line_text(&hover_lines[0]).ends_with(" [+]"));
-
-    assert!(app.handle_diff_click(new_button_column, 1));
+    let new_side_column = (app.viewport.viewport_width - 1) as u16;
+    assert!(app.handle_diff_click(new_side_column, 1));
+    assert!(app.annotations_state.annotation_draft.is_none());
+    assert_eq!(
+        app.annotation_cursor_target().map(|target| &target.key),
+        Some(&key)
+    );
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("Enter should annotate the selected split row");
     let draft = app
         .annotations_state
         .annotation_draft
@@ -2788,7 +2856,86 @@ fn split_annotation_add_button_uses_current_side_for_paired_row() {
 }
 
 #[test]
-fn annotation_pairing_spans_no_newline_meta_line() {
+fn annotation_navigation_preserves_the_explicit_side_of_a_paired_split_row() {
+    use crate::annotation::{AnnotationKey, AnnotationSide};
+
+    for context_lines in [0usize, 300] {
+        let mut changeset = changeset_with_replacement_pair();
+        if context_lines > 0 {
+            let hunk = &mut changeset.files[0].hunks_mut()[0];
+            hunk.header = format!("@@ -1,{} +1,{} @@", context_lines + 1, context_lines + 1);
+            hunk.ranges = HunkLineRanges::new(1, context_lines + 1, 1, context_lines + 1);
+            hunk.lines.extend(
+                (2..=context_lines + 1)
+                    .map(|line| DiffLine::context(line, line, format!("context {line}"))),
+            );
+        }
+
+        let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Split);
+        app.set_viewport_width(60);
+        app.set_viewport_rows(8);
+        let split_row = app
+            .document
+            .model
+            .iter_rows()
+            .position(|row| matches!(row, UiRow::SplitLine { .. }))
+            .expect("split line");
+        let row = app.document.model.row(split_row).expect("row");
+        let keys = AnnotationKey::candidates_from_ui_row(&app.document.changeset, row);
+        let old_key = keys
+            .iter()
+            .find(|key| key.side == AnnotationSide::Old)
+            .cloned()
+            .expect("old-side key");
+        let new_key = keys
+            .into_iter()
+            .find(|key| key.side == AnnotationSide::New)
+            .expect("new-side key");
+        app.annotations_state
+            .annotations
+            .insert(old_key.clone(), "old note".to_owned());
+
+        app.move_annotation(1);
+
+        assert_eq!(
+            app.annotations_state
+                .annotation_cursor
+                .as_ref()
+                .map(|cursor| cursor.lazy),
+            Some(context_lines > 0)
+        );
+        assert_eq!(
+            app.annotation_cursor_target().map(|target| &target.key),
+            Some(&old_key)
+        );
+        app.annotations_state
+            .annotations
+            .insert(new_key, "new note".to_owned());
+        let other_row = if split_row + 1 < app.document.model.len() {
+            split_row + 1
+        } else {
+            split_row.saturating_sub(1)
+        };
+        app.select_annotation_cursor_model_row(other_row);
+        app.select_annotation_cursor_model_row(split_row);
+        assert_eq!(
+            app.annotation_cursor_target().map(|target| &target.key),
+            Some(&old_key)
+        );
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            .expect("Enter should edit the selected old-side annotation");
+        assert_eq!(
+            app.annotations_state
+                .annotation_draft
+                .as_ref()
+                .map(|draft| &draft.key),
+            Some(&old_key)
+        );
+    }
+}
+
+#[test]
+fn annotation_pairing_spans_meta_lines_without_disabling_removed_line_annotations() {
     use crate::annotation::{AnnotationKey, AnnotationSide};
 
     let mut changeset = changeset_with_replacement_pair();
@@ -2816,13 +2963,13 @@ fn annotation_pairing_spans_no_newline_meta_line() {
         .position(|row| matches!(row, UiRow::UnifiedLine { line: LINE_2, .. }))
         .expect("addition line");
 
-    assert_eq!(
-        AnnotationKey::from_ui_row(
-            &app.document.changeset,
-            app.document.model.row(deletion_row).expect("row")
-        ),
-        None
-    );
+    let deletion_key = AnnotationKey::from_ui_row(
+        &app.document.changeset,
+        app.document.model.row(deletion_row).expect("row"),
+    )
+    .expect("removed-line key");
+    assert_eq!(deletion_key.side, AnnotationSide::Old);
+    assert_eq!(deletion_key.line, 1);
     let key = AnnotationKey::from_ui_row(
         &app.document.changeset,
         app.document.model.row(addition_row).expect("row"),
@@ -2853,21 +3000,21 @@ fn annotation_pairing_spans_no_newline_meta_line() {
             )
         })
         .expect("split deletion row");
-    assert_eq!(
-        AnnotationKey::from_ui_row(
-            &split_app.document.changeset,
-            split_app
-                .document
-                .model
-                .row(split_deletion_row)
-                .expect("row"),
-        ),
-        None
-    );
+    let split_deletion_key = AnnotationKey::from_ui_row(
+        &split_app.document.changeset,
+        split_app
+            .document
+            .model
+            .row(split_deletion_row)
+            .expect("row"),
+    )
+    .expect("split removed-line key");
+    assert_eq!(split_deletion_key.side, AnnotationSide::Old);
+    assert_eq!(split_deletion_key.line, 1);
 }
 
 #[test]
-fn split_annotation_add_button_uses_right_edge_for_deletion_only_row() {
+fn mouse_click_selects_deletion_only_split_row() {
     use crate::annotation::{AnnotationKey, AnnotationSide};
 
     let mut changeset = changeset_with_replacement_pair();
@@ -2902,22 +3049,19 @@ fn split_annotation_add_button_uses_right_edge_for_deletion_only_row() {
     assert_eq!(key.side, AnnotationSide::Old);
 
     let left_width = app.viewport.viewport_width / 2;
-    let old_button_column = (left_width - 1) as u16;
-    app.update_diff_mouse_hover(old_button_column, 1);
-    let hover_lines = crate::render::diff::build_diff_viewport_lines(&mut app, 60, 3);
-    let hover_text = line_text(&hover_lines[0]);
-    let (old_button_text, _) = skip_display_prefix(&hover_text, left_width - 4);
-    assert!(
-        !old_button_text.starts_with(" [+]"),
-        "deletion-only row should not expose a left-side add button: {hover_text:?}"
-    );
-    assert!(hover_text.ends_with(" [+]"));
-    assert!(!app.handle_diff_click(old_button_column, 1));
+    let old_side_column = (left_width - 1) as u16;
+    assert!(app.handle_diff_click(old_side_column, 1));
     assert!(app.annotations_state.annotation_draft.is_none());
+    assert_eq!(
+        app.annotation_cursor_target().map(|target| &target.key),
+        Some(&key)
+    );
 
-    let new_button_column = (app.viewport.viewport_width - 1) as u16;
-    app.update_diff_mouse_hover(new_button_column, 1);
-    assert!(app.handle_diff_click(new_button_column, 1));
+    let new_side_column = (app.viewport.viewport_width - 1) as u16;
+    assert!(app.handle_diff_click(new_side_column, 1));
+    assert!(app.annotations_state.annotation_draft.is_none());
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("Enter should annotate the selected deletion row");
     let draft = app
         .annotations_state
         .annotation_draft
@@ -2984,7 +3128,7 @@ fn annotation_save_preserves_body_whitespace_but_deletes_blank_drafts() {
 }
 
 #[test]
-fn annotation_button_hit_tests_use_diff_relative_columns() {
+fn diff_click_uses_diff_relative_coordinates() {
     let changeset = changeset_with_line_text("hello");
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
     app.set_rendered_diff_area(Rect {
@@ -3003,13 +3147,15 @@ fn annotation_button_hit_tests_use_diff_relative_columns() {
         .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
         .expect("unified line");
     app.viewport.scroll = code_row;
-    app.update_diff_mouse_hover(48, 1);
 
-    assert!(!app.handle_diff_click(38, 1));
+    assert!(!app.handle_diff_click(8, 1));
+    assert!(app.handle_diff_click(38, 1));
     assert!(app.annotations_state.annotation_draft.is_none());
-
-    assert!(app.handle_diff_click(48, 1));
-    assert!(app.annotations_state.annotation_draft.is_some());
+    assert_eq!(
+        app.annotation_cursor_target()
+            .map(|target| target.model_row_index),
+        Some(code_row)
+    );
 }
 
 #[test]
@@ -3036,8 +3182,9 @@ fn annotation_draft_opened_on_last_row_scrolls_block_into_view() {
     let previous_scroll = app.viewport.scroll;
     let viewport_row = code_row.saturating_sub(app.viewport.scroll) as u16;
 
-    app.update_diff_mouse_hover(38, viewport_row.saturating_add(1));
-    assert!(app.handle_diff_click(38, viewport_row.saturating_add(1)));
+    assert!(app.handle_diff_click(20, viewport_row.saturating_add(1)));
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("Enter should open the selected last-row annotation");
 
     let draft_row = app
         .annotations_state
@@ -3082,8 +3229,9 @@ fn annotation_hidden_compose_footer_is_not_submit_target() {
         .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
         .expect("unified line");
     app.viewport.scroll = code_row;
-    app.update_diff_mouse_hover(38, 1);
-    assert!(app.handle_diff_click(38, 1));
+    assert!(app.handle_diff_click(20, 1));
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("Enter should open the selected annotation");
 
     let draft_row = app
         .annotations_state
@@ -3134,8 +3282,9 @@ fn annotation_input_scrolls_back_to_draft_above_viewport() {
         .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
         .expect("unified line");
     app.viewport.scroll = code_row;
-    app.update_diff_mouse_hover(38, 1);
-    assert!(app.handle_diff_click(38, 1));
+    assert!(app.handle_diff_click(20, 1));
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("Enter should open the selected annotation");
     let draft_row = app
         .annotations_state
         .annotation_draft
@@ -3182,8 +3331,9 @@ fn long_annotation_draft_stays_visible_when_footer_cannot_fit() {
         .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
         .expect("unified line");
     app.viewport.scroll = code_row;
-    app.update_diff_mouse_hover(38, 1);
-    assert!(app.handle_diff_click(38, 1));
+    assert!(app.handle_diff_click(20, 1));
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("Enter should open the selected annotation");
     let draft_row = app
         .annotations_state
         .annotation_draft
@@ -3211,7 +3361,7 @@ fn long_annotation_draft_stays_visible_when_footer_cannot_fit() {
 }
 
 #[test]
-fn filter_input_blocks_annotation_hover_drafts() {
+fn filter_input_blocks_mouse_cursor_selection() {
     use crate::annotation::AnnotationKey;
 
     let changeset = changeset_with_line_text("hello");
@@ -3232,11 +3382,8 @@ fn filter_input_blocks_annotation_hover_drafts() {
         .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
         .expect("unified line");
     app.viewport.scroll = code_row;
-    app.update_diff_mouse_hover(38, 1);
-    assert_eq!(app.viewport.mouse_hover, Some((38, 0)));
 
     app.open_filter_input(DiffFilterKind::File);
-    assert_eq!(app.viewport.mouse_hover, None);
     assert!(!app.handle_diff_click(38, 1));
 
     let key = AnnotationKey::from_ui_row(
@@ -3262,7 +3409,7 @@ fn filter_input_blocks_annotation_hover_drafts() {
 }
 
 #[test]
-fn diff_modals_suppress_stale_mouse_hover_highlight() {
+fn diff_modals_hide_the_annotation_cursor_highlight() {
     type ModalOpener = (&'static str, fn(&mut DiffApp));
     let modal_openers: [ModalOpener; 7] = [
         ("help menu", |app| app.toggle_help_menu()),
@@ -3305,31 +3452,30 @@ fn diff_modals_suppress_stale_mouse_hover_highlight() {
             .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
             .expect("unified line");
         app.viewport.scroll = code_row;
-        app.update_diff_mouse_hover(38, 1);
+        app.select_annotation_cursor_model_row(code_row);
 
-        let hovered_lines = crate::render::diff::build_diff_viewport_lines(&mut app, 40, 5);
+        let cursor_lines = crate::render::diff::build_diff_viewport_lines(&mut app, 40, 5);
         assert!(
-            line_text(&hovered_lines[0]).contains("[+]"),
-            "{label} baseline should show hover add button"
+            cursor_lines[0]
+                .spans
+                .iter()
+                .any(|span| span.style.bg == Some(app.config.theme.cursor_line_bg)),
+            "{label} baseline should show the annotation cursor"
         );
 
         open_modal(&mut app);
         assert!(
-            app.diff_modal_blocks_mouse_hover(),
-            "{label} should block diff mouse hover"
+            app.diff_modal_hides_annotation_cursor(),
+            "{label} should suppress the diff cursor"
         );
 
         let modal_lines = crate::render::diff::build_diff_viewport_lines(&mut app, 40, 5);
-        assert!(
-            !line_text(&modal_lines[0]).contains("[+]"),
-            "{label} should hide stale hover add button"
-        );
         assert!(
             !modal_lines[0]
                 .spans
                 .iter()
                 .any(|span| span.style.bg == Some(app.config.theme.cursor_line_bg)),
-            "{label} should hide stale hover highlight"
+            "{label} should hide the annotation cursor highlight"
         );
     }
 }
@@ -3352,7 +3498,7 @@ fn system_theme_preserves_terminal_base_and_uses_owned_diff_colors() {
     assert_eq!(theme.foreground, Color::Reset);
     assert_eq!(theme.background, Color::Reset);
     assert_eq!(theme.file, Color::Reset);
-    assert_eq!(theme.cursor, Color::Reset);
+    assert_eq!(theme.cursor, Color::White);
     assert_eq!(theme.cursor_line_bg, Color::Indexed(237));
     assert_ne!(theme.addition_fg, Color::Indexed(2));
     assert_ne!(theme.deletion_fg, Color::Indexed(1));
@@ -3384,6 +3530,11 @@ fn packaged_builtin_themes_are_available() {
         let name = color_scheme_label(*choice);
         let theme = builtin_diff_theme(Some(name)).expect("built-in theme should load");
 
+        assert_eq!(
+            theme.cursor,
+            Color::White,
+            "{name} should use a white caret"
+        );
         assert_ne!(theme.statusline_accent_bg, Color::Reset);
         assert_ne!(
             theme.gutter_bg, theme.background,
@@ -3434,7 +3585,7 @@ fn zenbones_tui_colors_match_the_pinned_upstream_theme() {
     let dark = builtin_diff_theme(Some("zenbones-dark")).expect("zenbones dark should load");
     assert_eq!(dark.background, Color::Rgb(0x1c, 0x19, 0x17));
     assert_eq!(dark.foreground, Color::Rgb(0xb4, 0xbd, 0xc3));
-    assert_eq!(dark.cursor, Color::Rgb(0xc4, 0xca, 0xcf));
+    assert_eq!(dark.cursor, Color::White);
     assert_eq!(dark.cursor_line_bg, Color::Rgb(0x25, 0x21, 0x1f));
     assert_eq!(dark.addition_fg, Color::Rgb(0x81, 0x9b, 0x69));
     assert_eq!(dark.addition_bg, Color::Rgb(0x23, 0x2d, 0x1a));
@@ -3447,6 +3598,35 @@ fn zenbones_tui_colors_match_the_pinned_upstream_theme() {
     assert_eq!(light.cursor_line_bg, Color::Rgb(0xe9, 0xe4, 0xe2));
     assert_eq!(light.addition_bg, Color::Rgb(0xcb, 0xe5, 0xb8));
     assert_eq!(light.deletion_bg, Color::Rgb(0xeb, 0xd8, 0xda));
+}
+
+#[test]
+fn palette_cursor_lines_match_upstream_theme_tokens() {
+    for (theme, cursor_line_bg) in [
+        (DiffTheme::catppuccin_latte(), Color::Rgb(0xcc, 0xd0, 0xda)),
+        (DiffTheme::catppuccin_frappe(), Color::Rgb(0x41, 0x45, 0x59)),
+        (
+            DiffTheme::catppuccin_macchiato(),
+            Color::Rgb(0x36, 0x3a, 0x4f),
+        ),
+        (DiffTheme::catppuccin_mocha(), Color::Rgb(0x31, 0x32, 0x44)),
+        (DiffTheme::gruvbox_dark(), Color::Rgb(0x3c, 0x38, 0x36)),
+        (DiffTheme::gruvbox_light(), Color::Rgb(0xeb, 0xdb, 0xb2)),
+        (DiffTheme::github_dark(), Color::Rgb(0x16, 0x1b, 0x22)),
+        (
+            DiffTheme::github_dark_high_contrast(),
+            Color::Rgb(0x27, 0x2b, 0x33),
+        ),
+        (DiffTheme::github_light(), Color::Rgb(0xf6, 0xf8, 0xfa)),
+        (
+            DiffTheme::github_light_high_contrast(),
+            Color::Rgb(0xf6, 0xf8, 0xfa),
+        ),
+        (DiffTheme::tokyonight(), Color::Rgb(0x1e, 0x20, 0x2e)),
+    ] {
+        assert_eq!(theme.cursor, Color::White);
+        assert_eq!(theme.cursor_line_bg, cursor_line_bg);
+    }
 }
 
 #[test]
@@ -3632,7 +3812,6 @@ fn transparent_background_only_resets_diff_base_background() {
     );
     let changeset = changeset_with_files(&["file.rs"]);
     let file_header = file_header_line(&changeset.files[0], 32, theme);
-    let file_separator = file_separator_line(DiffLayoutMode::Unified, 8, theme);
 
     assert_eq!(base_bg(theme), theme.background);
     assert_eq!(diff_base_bg(theme), Color::Reset);
@@ -3654,7 +3833,6 @@ fn transparent_background_only_resets_diff_base_background() {
             .iter()
             .all(|span| span.style.bg == Some(Color::Reset))
     );
-    assert_eq!(file_separator.spans[0].style.bg, Some(Color::Reset));
 }
 
 #[test]

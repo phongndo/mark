@@ -516,9 +516,6 @@ fn diff_theme_from_textmate(theme: BuiltinTextMateTheme, palette: Base16Scheme) 
             .map(|color| RgbColor::new(color.red, color.green, color.blue))
     };
     let mut result = DiffTheme::base16(palette).with_exact_syntax(theme);
-    if let Some(cursor) = color("editorCursor.foreground") {
-        result.cursor = cursor.color();
-    }
     if let Some(cursor_line) = color("editor.lineHighlightBackground") {
         result.cursor_line_bg = cursor_line.color();
     }
