@@ -41,7 +41,7 @@ use mark_diff::{
     HunkLineRanges, PatchSource,
 };
 use mark_syntax::{
-    ColorOverrides, DiffContextExpansion, HighlightedLine, LayoutSetting,
+    AnnotationTargeting, ColorOverrides, DiffContextExpansion, HighlightedLine, LayoutSetting,
     MAX_NOTIFICATION_TIMEOUT_MS, NotificationMode, NotificationSettings, SyntaxClass,
     SyntaxLanguageSet, SyntaxLimits, SyntaxSettings, SyntaxThemeConfig, ToastCorner,
 };
@@ -520,6 +520,7 @@ fn visible_hunk_keys(app: &DiffApp) -> Vec<(usize, usize)> {
 fn assert_key_pair_moves_hunk_focus_when_diff_fits_viewport(forward: KeyCode, backward: KeyCode) {
     let changeset = changeset_with_hunks_at(PathBuf::from("/repo"), &[1, 2, 3]);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.config.annotation_targeting = AnnotationTargeting::Hints;
     app.set_viewport_rows(20);
 
     assert_eq!(app.max_scroll(), 0);
@@ -554,6 +555,7 @@ fn assert_key_pair_scrolls_then_moves_hunk_focus_at_edges(
         "a.rs", "b.rs", "c.rs", "d.rs", "e.rs", "f.rs", "g.rs", "h.rs",
     ]);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.config.annotation_targeting = AnnotationTargeting::Hints;
     app.set_viewport_rows(6);
 
     assert!(app.max_scroll() >= scroll_delta);

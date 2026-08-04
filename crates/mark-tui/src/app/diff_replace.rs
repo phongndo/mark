@@ -213,13 +213,15 @@ impl DiffApp {
         } else {
             self.document.stats = self.document.total_stats.clone();
             self.document.max_line_width = max_line_width;
+            let build_annotation_candidates = self.annotation_cursor_enabled();
             self.document.model = if full_file_mode {
-                UiModel::new_with_trailing_context_and_controls(
+                UiModel::new_with_trailing_context_controls_and_annotation_candidates(
                     &self.document.changeset,
                     self.viewport.layout,
                     &self.document.context_expansions,
                     &self.document.trailing_context_lines,
                     false,
+                    build_annotation_candidates,
                 )
             } else {
                 match self.viewport.layout {
@@ -235,6 +237,7 @@ impl DiffApp {
             self.invalidate_wrapped_visual_layout();
             self.reanchor_annotation_draft();
             self.viewport.manual_hunk_focus = None;
+            self.rebuild_annotation_cursor();
             self.sidebar.selected_file = FileIndex::new(
                 selected_path
                     .and_then(|path| {
@@ -263,6 +266,7 @@ impl DiffApp {
             self.set_horizontal_scroll(self.viewport.horizontal_scroll);
             self.ensure_file_sidebar_selection_visible(self.visible_file_sidebar_rows());
             self.ensure_annotation_draft_visible();
+            self.sync_annotation_cursor_to_viewport();
             self.runtime.dirty = true;
         }
     }

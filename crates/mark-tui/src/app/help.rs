@@ -1,11 +1,14 @@
 use super::DiffApp;
 use crate::controls::branch_match_score;
-use crate::keymap::MenuAction;
+use crate::keymap::{GlobalAction, MenuAction};
 use crate::render::menus::{help_menu_key_label_for_theme, help_menu_list_visible_rows};
 use crate::text_input::{TextInputKeyResult, handle_text_input_key};
 use crate::theme::{HELP_MENU_ROWS, HelpMenuKey, HelpMenuRow};
 use crossterm::event::{KeyCode, KeyEvent};
 use mark_core::MarkResult;
+use mark_syntax::AnnotationTargeting;
+
+const CURSOR_ANNOTATION_HELP_KEYS: &[&str] = &["j/k / ↑/↓", "d/u / PgUp/PgDn", "g/G / Home/End"];
 
 impl DiffApp {
     fn help_menu_line_scroll_delta(&self, key: KeyEvent) -> Option<isize> {
@@ -104,26 +107,58 @@ impl DiffApp {
         }
     }
 
+    fn help_menu_rows(&self) -> Vec<HelpMenuRow> {
+        let mut rows = HELP_MENU_ROWS.to_vec();
+        if self.config.annotation_targeting != AnnotationTargeting::Hints {
+            return rows;
+        }
+        rows.retain(|row| {
+            !matches!(
+                row,
+                HelpMenuRow::Binding(HelpMenuKey::Static(key), _)
+                    if CURSOR_ANNOTATION_HELP_KEYS.contains(key)
+            )
+        });
+        let insert_at = rows
+            .iter()
+            .position(|row| {
+                matches!(
+                    row,
+                    HelpMenuRow::Binding(HelpMenuKey::Global(GlobalAction::AnnotateBatch), _)
+                )
+            })
+            .map(|index| index.saturating_add(1))
+            .unwrap_or(rows.len());
+        rows.insert(
+            insert_at,
+            HelpMenuRow::Binding(HelpMenuKey::Static("hint / Esc"), "select line / cancel"),
+        );
+        rows
+    }
+
+    pub(crate) fn help_menu_row_count(&self) -> usize {
+        self.help_menu_rows().len()
+    }
+
     pub(crate) fn filtered_help_menu_rows(&self) -> Vec<HelpMenuRow> {
+        let menu_rows = self.help_menu_rows();
         let query = self.overlays.help_menu_input.trim().to_ascii_lowercase();
         if query.is_empty() {
-            return HELP_MENU_ROWS.to_vec();
+            return menu_rows;
         }
 
         let mut rows = Vec::new();
         let mut index = 0;
-        while index < HELP_MENU_ROWS.len() {
-            let HelpMenuRow::Section(section) = HELP_MENU_ROWS[index] else {
+        while index < menu_rows.len() {
+            let HelpMenuRow::Section(section) = menu_rows[index] else {
                 index += 1;
                 continue;
             };
             index += 1;
 
             let mut section_rows = Vec::new();
-            while index < HELP_MENU_ROWS.len()
-                && !matches!(HELP_MENU_ROWS[index], HelpMenuRow::Section(_))
-            {
-                section_rows.push(HELP_MENU_ROWS[index]);
+            while index < menu_rows.len() && !matches!(menu_rows[index], HelpMenuRow::Section(_)) {
+                section_rows.push(menu_rows[index]);
                 index += 1;
             }
 

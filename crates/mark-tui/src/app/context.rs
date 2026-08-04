@@ -527,6 +527,7 @@ impl DiffApp {
             self.restore_hunk_focus_after_full_file_transition(focused_hunk);
         }
         self.sync_grep_match_selection_to_scroll();
+        self.sync_annotation_cursor_to_viewport();
     }
 
     pub(crate) fn collapse_all_context(&mut self) -> bool {
@@ -565,6 +566,7 @@ impl DiffApp {
         );
         self.sync_grep_match_selection_to_scroll();
         self.set_horizontal_scroll(self.viewport.horizontal_scroll);
+        self.sync_annotation_cursor_to_viewport();
         self.runtime.dirty = true;
     }
 }

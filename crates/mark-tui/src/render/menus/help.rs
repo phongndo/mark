@@ -21,8 +21,11 @@ use crate::{
         style::base_bg,
         text::{fit_padded, fit_with_ellipsis},
     },
-    theme::{DiffTheme, HELP_KEY_COLUMN_WIDTH, HELP_MENU_ROWS, HelpMenuKey, HelpMenuRow},
+    theme::{DiffTheme, HELP_KEY_COLUMN_WIDTH, HelpMenuKey, HelpMenuRow},
 };
+
+#[cfg(test)]
+use crate::theme::HELP_MENU_ROWS;
 
 const HELP_DESCRIPTION_MIN_WIDTH: usize = 24;
 
@@ -90,7 +93,7 @@ pub(crate) fn draw_help_menu(frame: &mut Frame<'_>, app: &DiffApp, area: Rect) {
                 input: &app.overlays.help_menu_input,
                 input_cursor: app.overlays.help_menu_input_cursor,
                 matched: rows.len(),
-                total: HELP_MENU_ROWS.len(),
+                total: app.help_menu_row_count(),
                 theme: app.config.theme,
             },
             inner,

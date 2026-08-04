@@ -736,7 +736,7 @@ fn help_menu_filter_matches_minimal_arrow_labels() {
     let rows = app.filtered_help_menu_rows();
     assert!(rows.contains(&HelpMenuRow::Binding(
         HelpMenuKey::Static("j/k, ↑/↓"),
-        "scroll"
+        "navigate vertically"
     )));
     assert!(rows.contains(&HelpMenuRow::Binding(
         HelpMenuKey::Static("↑/↓"),

@@ -144,7 +144,7 @@ pub(crate) fn render_context_line(
     let diff_line = DiffLine::context(
         old_line,
         new_line,
-        app.context_line_text(file, old_line, new_line),
+        app.rendered_context_line_text(file, old_line, new_line),
     );
 
     match app.viewport.layout {
@@ -188,7 +188,7 @@ pub(crate) fn render_context_line_wrapped(
     let diff_line = DiffLine::context(
         old_line,
         new_line,
-        app.context_line_text(file, old_line, new_line),
+        app.rendered_context_line_text(file, old_line, new_line),
     );
 
     match app.viewport.layout {

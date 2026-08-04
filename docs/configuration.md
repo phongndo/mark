@@ -52,6 +52,7 @@ inline_background = "strong"
 sign_style = "bold"
 
 [annotations]
+targeting = "cursor"
 hint_keys = "asdfghjklqwertyuiopzxcvbnm"
 uppercase_hints = false
 
@@ -234,8 +235,8 @@ terminal colors.
 `cursor` colors the block caret in all text inputs (filter bar, menus, review ID, and
 annotation compose). Built-in schemes usually set it to the palette foreground (often the
 scheme's white or brightest text), similar to Neovim's normal-mode cursor. Override with
-`cursor` in config or `[colors]`. `cursor_line_bg` colors the mouse-hover highlight on diff
-code columns (Neovim-style cursorline). With `theme = "system"`, `cursor` uses the
+`cursor` in config or `[colors]`. `cursor_line_bg` colors the annotation cursorline and
+mouse-hover highlight on diff code columns. With `theme = "system"`, `cursor` uses the
 terminal default foreground (`reset`) and `cursor_line_bg` uses ANSI palette index 237 so
 both follow the emulator theme unless overridden in `[colors]`.
 
@@ -336,17 +337,34 @@ interactive context expansion.
 
 ## Annotation targeting
 
-Annotation targeting uses a QWERTY-oriented sequence by default:
+Annotation targeting uses a highlighted row by default:
 
 ```toml
 [annotations]
+targeting = "cursor"
+```
+
+The row highlight is active whenever the diff has focus. Move it with `j` / `k`
+or Up / Down. `d` / `u` move half a viewport; Page Up / Page Down move a full
+viewport. `g` / `G` or Home / End jump
+to the first or last target. As with Vim's `scrolloff=8`, the selection stays
+eight rows from either viewport edge while scrolling, except near diff
+boundaries or in short viewports. Press `a` to open an annotation draft on the
+selected line; `A` annotates and advances after save.
+
+The previous label-jump workflow remains available:
+
+```toml
+[annotations]
+targeting = "hints"
 hint_keys = "asdfghjklqwertyuiopzxcvbnm"
 uppercase_hints = false
 ```
 
-Set `hint_keys` to a preferred keyboard layout. Provide at least two characters,
-each unique, printable, and one terminal cell wide. Set `uppercase_hints = true`
-to display ASCII letters in uppercase while continuing to accept either case.
+For hint targeting, set `hint_keys` to a preferred keyboard layout. Provide at
+least two characters, each unique, printable, and one terminal cell wide. Set
+`uppercase_hints = true` to display ASCII letters in uppercase while continuing
+to accept either case.
 
 ## Highlight limits
 

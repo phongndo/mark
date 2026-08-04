@@ -144,8 +144,10 @@ q / Ctrl-C     quit
 ?              help
 j / Down       scroll down or move focus
 k / Up         scroll up or move focus
-d / Ctrl-D / PgDn page down
-u / PageUp     page up
+d / Ctrl-D     half-page down
+u              half-page up
+PgDn           full-page down
+PgUp           full-page up
 g              top
 G              bottom
 ]              next hunk
@@ -160,8 +162,8 @@ n / p          next / previous grep match
 r              reload
 m              diff type selector
 o              settings menu
-a              annotate a visible line
-A              batch annotate visible lines
+a              annotate the cursor line
+A              annotate and advance
 n              annotation search menu
 b              file browser
 s              toggle split/unified layout
@@ -178,19 +180,19 @@ nano/pico, micro/vis, VS Code/Codium/Cursor, Sublime Text, and Zed. For another
 editor or a wrapper script, put `{file}`, `{line}`, and optionally `{column}` in
 the command, for example `EDITOR='my-editor --location {file}:{line}:{column}'`.
 
-Press `a` to label every annotatable line in the viewport, then type a displayed
-hint to open an inline annotation draft. Lines in the focused hunk receive the
-easier hints first. Hints temporarily replace the target-side line number while
-preserving the `+`/`-` sign. In split layout, replacement and context hints
-appear on the right/current side; deletion-only hints appear on the left/old
-side. After each typed character, matching labels show only their remaining
-suffix and nonmatching lines restore their line numbers. Existing annotations
-use an underlined annotation accent. Backspace removes a partial hint; Esc
-cancels targeting. Arrow and page keys cancel targeting and continue navigation.
+The annotation row highlight is active in the diff by default. Move it with
+`j` / `k` or Up / Down; `d` / `u` move half a viewport; Page Up / Page Down
+move a full viewport; `g` / `G` jump to the ends. Like Vim with `scrolloff=8`, the selection moves freely until it is
+eight rows from the top or bottom, then stays there while the viewport scrolls.
+The margin shrinks for short viewports and at diff boundaries. Press `a` to open
+an inline annotation draft on the selected line.
 
-Press `A` for sticky review mode. After selecting and saving an annotation, the
-hints reappear so another visible line can be selected. Press Esc while writing
-or targeting to leave the batch workflow.
+Press `A` to annotate and advance. After saving the draft, the selection moves to
+the next annotatable line. Press Esc while writing to cancel the draft.
+
+The previous label-jump targeting mode is still available with
+`annotations.targeting = "hints"`; see
+[configuration](configuration.md#annotation-targeting).
 
 Selector panes keep focus in the filter input: type to filter, Enter selects or
 toggles, Esc closes, and arrows, Tab / Shift-Tab, or Ctrl-N / Ctrl-P move the

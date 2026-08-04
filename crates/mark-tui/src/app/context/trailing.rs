@@ -243,6 +243,7 @@ impl DiffApp {
                 .saturating_add(relative_scroll);
             self.set_scroll_with_grep_sync(scroll, false, HunkFocusScrollBehavior::Preserve);
         }
+        self.sync_annotation_cursor_to_viewport();
         true
     }
 

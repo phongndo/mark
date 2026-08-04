@@ -326,6 +326,7 @@ impl DiffApp {
         }
 
         self.ensure_annotation_draft_visible();
+        self.sync_annotation_cursor_to_viewport();
         self.runtime.dirty = true;
     }
 
@@ -395,6 +396,7 @@ impl DiffApp {
 
         self.filters.selected_grep_match = Some(SearchMatchIndex::new(next));
         self.set_scroll_for_grep_navigation(self.filters.grep_matches[next]);
+        self.sync_annotation_cursor_to_viewport();
         self.runtime.dirty = true;
     }
 

@@ -1,10 +1,23 @@
-use std::{collections::HashMap, ops::Range, sync::Arc};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    ops::Range,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+};
 
 use mark_diff::{Changeset, DiffLine, DiffLineKind};
 
 use crate::{controls::DiffLayoutMode, syntax::DiffSide};
 
 const MAX_EAGER_UI_MODEL_ROWS: usize = 200_000;
+const SPARSE_ANNOTATION_CANDIDATE_CHUNK_ROWS: usize = 256;
+const MAX_SYNCHRONOUS_SPARSE_CANDIDATE_SEGMENT_ROWS: usize = 4_096;
+const SPARSE_ANNOTATION_CANDIDATE_WORDS: usize =
+    SPARSE_ANNOTATION_CANDIDATE_CHUNK_ROWS / u64::BITS as usize;
+static NEXT_UI_MODEL_IDENTITY: AtomicU64 = AtomicU64::new(1);
 
 macro_rules! typed_index {
     ($name:ident) => {
@@ -268,6 +281,7 @@ pub(crate) enum ContextSourceEntry {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct UiModel {
+    identity: UiModelIdentity,
     pub(crate) rows: Vec<UiRow>,
     row_count: usize,
     row_segments: Vec<RowSegment>,
@@ -277,6 +291,426 @@ pub(crate) struct UiModel {
     pub(crate) hunk_start_rows: Vec<ModelRow>,
     pub(crate) hunk_row_starts: Vec<((FileIndex, HunkIndex), ModelRow)>,
     hunk_row_ends: Vec<ModelRow>,
+    /// Compact content blocks let annotation navigation skip model chrome.
+    annotation_candidate_blocks: AnnotationCandidateIndex,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct UiModelIdentity(u64);
+
+impl UiModelIdentity {
+    fn new() -> Self {
+        Self(
+            NEXT_UI_MODEL_IDENTITY
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |identity| {
+                    identity.checked_add(1)
+                })
+                .expect("UI model identity space exhausted"),
+        )
+    }
+}
+
+impl PartialEq for UiModelIdentity {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for UiModelIdentity {}
+
+#[derive(Debug, Clone)]
+enum AnnotationCandidateIndexState {
+    Disabled,
+    Eager(Vec<AnnotationCandidateBlock>),
+    Sparse(HashMap<usize, Vec<AnnotationCandidateBlock>>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AnnotationCandidateSearchResult {
+    Candidate(usize),
+    // Traversal reached an intentionally unindexed segment; viewport discovery
+    // must take over rather than treating this as the end of the document.
+    Unindexed,
+    Exhausted,
+}
+
+#[derive(Debug)]
+struct AnnotationCandidateIndex(RefCell<AnnotationCandidateIndexState>);
+
+impl AnnotationCandidateIndex {
+    fn disabled() -> Self {
+        Self(RefCell::new(AnnotationCandidateIndexState::Disabled))
+    }
+
+    fn eager(blocks: Vec<AnnotationCandidateBlock>) -> Self {
+        Self(RefCell::new(AnnotationCandidateIndexState::Eager(blocks)))
+    }
+
+    fn sparse() -> Self {
+        Self(RefCell::new(AnnotationCandidateIndexState::Sparse(
+            HashMap::new(),
+        )))
+    }
+
+    fn len(&self) -> usize {
+        match &*self.0.borrow() {
+            AnnotationCandidateIndexState::Disabled => 0,
+            AnnotationCandidateIndexState::Eager(blocks) => blocks.len(),
+            AnnotationCandidateIndexState::Sparse(segments) => {
+                segments.values().map(Vec::len).sum()
+            }
+        }
+    }
+}
+
+impl Clone for AnnotationCandidateIndex {
+    fn clone(&self) -> Self {
+        Self(RefCell::new(self.0.borrow().clone()))
+    }
+}
+
+impl PartialEq for AnnotationCandidateIndex {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for AnnotationCandidateIndex {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum AnnotationCandidateBlock {
+    Range(Range<usize>),
+    UnifiedChange {
+        range: Range<usize>,
+        file: FileIndex,
+        hunk: HunkIndex,
+        line_start: u32,
+        first_addition: Option<u32>,
+        last_addition: Option<u32>,
+        first_unpaired_deletion: Option<u32>,
+        last_unpaired_deletion: Option<u32>,
+    },
+    SparseCandidates {
+        range: Range<usize>,
+        bits: [u64; SPARSE_ANNOTATION_CANDIDATE_WORDS],
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct UnifiedCandidateScan {
+    file: FileIndex,
+    hunk: HunkIndex,
+    line_start: usize,
+    block_start: usize,
+    block_end: usize,
+    first_unpaired_deletion: Option<usize>,
+}
+
+impl AnnotationCandidateBlock {
+    fn start(&self) -> usize {
+        match self {
+            Self::Range(range)
+            | Self::UnifiedChange { range, .. }
+            | Self::SparseCandidates { range, .. } => range.start,
+        }
+    }
+
+    fn end(&self) -> usize {
+        match self {
+            Self::Range(range)
+            | Self::UnifiedChange { range, .. }
+            | Self::SparseCandidates { range, .. } => range.end,
+        }
+    }
+
+    fn candidate_at_or_after(&self, changeset: &Changeset, row: usize) -> Option<usize> {
+        match self {
+            Self::Range(range) => {
+                let candidate = row.max(range.start);
+                (candidate < range.end).then_some(candidate)
+            }
+            Self::UnifiedChange {
+                range,
+                file,
+                hunk,
+                line_start,
+                first_addition,
+                last_addition,
+                first_unpaired_deletion,
+                last_unpaired_deletion,
+            } => {
+                let offset = row.max(range.start).checked_sub(range.start)?;
+                if offset >= range.len() {
+                    return None;
+                }
+                let lines = changeset
+                    .files
+                    .get(file.get())?
+                    .hunks()
+                    .get(hunk.get())?
+                    .lines
+                    .as_slice();
+                let addition = candidate_line_offset_at_or_after(
+                    lines,
+                    *line_start as usize,
+                    offset,
+                    *first_addition,
+                    *last_addition,
+                    DiffLineKind::Addition,
+                );
+                let deletion = candidate_line_offset_at_or_after(
+                    lines,
+                    *line_start as usize,
+                    offset,
+                    *first_unpaired_deletion,
+                    *last_unpaired_deletion,
+                    DiffLineKind::Deletion,
+                );
+                addition
+                    .into_iter()
+                    .chain(deletion)
+                    .min()
+                    .map(|offset| range.start.saturating_add(offset))
+            }
+            Self::SparseCandidates { range, bits } => {
+                sparse_candidate_at_or_after(range, bits, row)
+            }
+        }
+    }
+
+    fn candidate_at_or_before(&self, changeset: &Changeset, row: usize) -> Option<usize> {
+        match self {
+            Self::Range(range) => Some(row.min(range.end.saturating_sub(1)))
+                .filter(|candidate| *candidate >= range.start),
+            Self::UnifiedChange {
+                range,
+                file,
+                hunk,
+                line_start,
+                first_addition,
+                last_addition,
+                first_unpaired_deletion,
+                last_unpaired_deletion,
+            } => {
+                if row < range.start {
+                    return None;
+                }
+                let offset = row
+                    .min(range.end.saturating_sub(1))
+                    .saturating_sub(range.start);
+                let lines = changeset
+                    .files
+                    .get(file.get())?
+                    .hunks()
+                    .get(hunk.get())?
+                    .lines
+                    .as_slice();
+                let addition = candidate_line_offset_at_or_before(
+                    lines,
+                    *line_start as usize,
+                    offset,
+                    *first_addition,
+                    *last_addition,
+                    DiffLineKind::Addition,
+                );
+                let deletion = candidate_line_offset_at_or_before(
+                    lines,
+                    *line_start as usize,
+                    offset,
+                    *first_unpaired_deletion,
+                    *last_unpaired_deletion,
+                    DiffLineKind::Deletion,
+                );
+                addition
+                    .into_iter()
+                    .chain(deletion)
+                    .max()
+                    .map(|offset| range.start.saturating_add(offset))
+            }
+            Self::SparseCandidates { range, bits } => {
+                sparse_candidate_at_or_before(range, bits, row)
+            }
+        }
+    }
+}
+
+fn sparse_candidate_at_or_after(
+    range: &Range<usize>,
+    bits: &[u64; SPARSE_ANNOTATION_CANDIDATE_WORDS],
+    row: usize,
+) -> Option<usize> {
+    let offset = row.max(range.start).checked_sub(range.start)?;
+    if offset >= range.len() {
+        return None;
+    }
+    let first_word = offset / u64::BITS as usize;
+    for (word_index, word) in bits.iter().copied().enumerate().skip(first_word) {
+        let candidates = if word_index == first_word {
+            word & (u64::MAX << (offset % u64::BITS as usize))
+        } else {
+            word
+        };
+        if candidates != 0 {
+            let candidate = word_index
+                .saturating_mul(u64::BITS as usize)
+                .saturating_add(candidates.trailing_zeros() as usize);
+            return (candidate < range.len()).then_some(range.start.saturating_add(candidate));
+        }
+    }
+    None
+}
+
+fn sparse_candidate_at_or_before(
+    range: &Range<usize>,
+    bits: &[u64; SPARSE_ANNOTATION_CANDIDATE_WORDS],
+    row: usize,
+) -> Option<usize> {
+    if row < range.start || range.is_empty() {
+        return None;
+    }
+    let offset = row
+        .min(range.end.saturating_sub(1))
+        .saturating_sub(range.start);
+    let last_word = offset / u64::BITS as usize;
+    for word_index in (0..=last_word).rev() {
+        let word = bits[word_index];
+        let candidates = if word_index == last_word {
+            word & (u64::MAX >> (u64::BITS as usize - 1 - offset % u64::BITS as usize))
+        } else {
+            word
+        };
+        if candidates != 0 {
+            let candidate = word_index
+                .saturating_mul(u64::BITS as usize)
+                .saturating_add(u64::BITS as usize - 1 - candidates.leading_zeros() as usize);
+            return Some(range.start.saturating_add(candidate));
+        }
+    }
+    None
+}
+
+fn candidate_line_offset_at_or_after(
+    lines: &[DiffLine],
+    line_start: usize,
+    offset: usize,
+    first: Option<u32>,
+    last: Option<u32>,
+    kind: DiffLineKind,
+) -> Option<usize> {
+    let first = first? as usize;
+    let last = last? as usize;
+    if offset <= first {
+        return Some(first);
+    }
+    (offset..=last).find(|offset| {
+        lines
+            .get(line_start.saturating_add(*offset))
+            .is_some_and(|line| candidate_line_has_kind(line, kind))
+    })
+}
+
+fn candidate_line_offset_at_or_before(
+    lines: &[DiffLine],
+    line_start: usize,
+    offset: usize,
+    first: Option<u32>,
+    last: Option<u32>,
+    kind: DiffLineKind,
+) -> Option<usize> {
+    let first = first? as usize;
+    let last = last? as usize;
+    if offset >= last {
+        return Some(last);
+    }
+    if offset < first {
+        return None;
+    }
+    (first..=offset).rev().find(|offset| {
+        lines
+            .get(line_start.saturating_add(*offset))
+            .is_some_and(|line| candidate_line_has_kind(line, kind))
+    })
+}
+
+fn candidate_line_has_kind(line: &DiffLine, kind: DiffLineKind) -> bool {
+    line.kind() == kind
+        && match kind {
+            DiffLineKind::Addition => line.new_line().is_some(),
+            DiffLineKind::Deletion => line.old_line().is_some(),
+            DiffLineKind::Context | DiffLineKind::Meta => false,
+        }
+}
+
+fn unified_candidate_scan(
+    lines: &[DiffLine],
+    file: FileIndex,
+    hunk: HunkIndex,
+    line_start: usize,
+    line_end: usize,
+    index: usize,
+    cached_scan: &mut Option<UnifiedCandidateScan>,
+) -> UnifiedCandidateScan {
+    if let Some(scan) = cached_scan.as_ref().filter(|scan| {
+        scan.file == file
+            && scan.hunk == hunk
+            && scan.line_start == line_start
+            && index >= scan.block_start
+            && index < scan.block_end
+    }) {
+        return *scan;
+    }
+
+    let (block_start, block_end) = unified_change_block_bounds(lines, line_start, line_end, index);
+    let additions = lines[block_start..block_end]
+        .iter()
+        .filter(|line| line.kind() == DiffLineKind::Addition)
+        .count();
+    let mut deletion = 0usize;
+    let mut first_unpaired_deletion = None;
+    for (offset, line) in lines[block_start..block_end].iter().enumerate() {
+        if line.kind() != DiffLineKind::Deletion {
+            continue;
+        }
+        if deletion >= additions && first_unpaired_deletion.is_none() {
+            first_unpaired_deletion = Some(block_start.saturating_add(offset));
+        }
+        deletion = deletion.saturating_add(1);
+    }
+    let scan = UnifiedCandidateScan {
+        file,
+        hunk,
+        line_start,
+        block_start,
+        block_end,
+        first_unpaired_deletion,
+    };
+    *cached_scan = Some(scan);
+    scan
+}
+
+fn unified_change_block_bounds(
+    lines: &[DiffLine],
+    line_start: usize,
+    line_end: usize,
+    index: usize,
+) -> (usize, usize) {
+    let mut block_start = index;
+    while block_start > line_start
+        && lines
+            .get(block_start.saturating_sub(1))
+            .is_some_and(|line| line.kind() != DiffLineKind::Context)
+    {
+        block_start = block_start.saturating_sub(1);
+    }
+    let mut block_end = index.saturating_add(1);
+    while block_end < line_end
+        && lines
+            .get(block_end)
+            .is_some_and(|line| line.kind() != DiffLineKind::Context)
+    {
+        block_end = block_end.saturating_add(1);
+    }
+    (block_start, block_end)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -333,6 +767,7 @@ enum RowSegmentKind {
         hunk: HunkIndex,
         left_start: u32,
         left_len: u32,
+        left_candidate_start: u32,
         right_start: u32,
         right_len: u32,
     },
@@ -340,6 +775,7 @@ enum RowSegmentKind {
         file: FileIndex,
         hunk: HunkIndex,
         left: MaybeDiffLineIndex,
+        left_candidate: bool,
         right: MaybeDiffLineIndex,
     },
 }
@@ -430,6 +866,7 @@ impl RowSegmentKind {
                 hunk,
                 left_start,
                 left_len,
+                left_candidate_start: _,
                 right_start,
                 right_len,
             } => UiRow::SplitLine {
@@ -450,6 +887,7 @@ impl RowSegmentKind {
                 file,
                 hunk,
                 left,
+                left_candidate: _,
                 right,
             } => UiRow::SplitLine {
                 file,
@@ -462,6 +900,7 @@ impl RowSegmentKind {
 }
 
 impl UiModel {
+    #[cfg(test)]
     pub(crate) fn new(
         changeset: &Changeset,
         layout: DiffLayoutMode,
@@ -470,6 +909,7 @@ impl UiModel {
         Self::new_with_trailing_context(changeset, layout, context_expansions, &HashMap::new())
     }
 
+    #[cfg(test)]
     pub(crate) fn new_with_trailing_context(
         changeset: &Changeset,
         layout: DiffLayoutMode,
@@ -485,6 +925,7 @@ impl UiModel {
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn new_with_trailing_context_and_controls(
         changeset: &Changeset,
         layout: DiffLayoutMode,
@@ -492,17 +933,37 @@ impl UiModel {
         trailing_context_lines: &HashMap<ContextKey, usize>,
         show_context_controls: bool,
     ) -> Self {
+        Self::new_with_trailing_context_controls_and_annotation_candidates(
+            changeset,
+            layout,
+            context_expansions,
+            trailing_context_lines,
+            show_context_controls,
+            true,
+        )
+    }
+
+    pub(crate) fn new_with_trailing_context_controls_and_annotation_candidates(
+        changeset: &Changeset,
+        layout: DiffLayoutMode,
+        context_expansions: &HashMap<ContextKey, usize>,
+        trailing_context_lines: &HashMap<ContextKey, usize>,
+        show_context_controls: bool,
+        build_annotation_candidates: bool,
+    ) -> Self {
         let visible_files: Vec<_> = (0..changeset.files.len()).map(FileIndex::new).collect();
-        Self::new_filtered_with_trailing_context_and_controls(
+        Self::new_filtered_with_trailing_context_controls_and_annotation_candidates(
             changeset,
             layout,
             context_expansions,
             trailing_context_lines,
             &visible_files,
             show_context_controls,
+            build_annotation_candidates,
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn new_filtered_with_trailing_context_and_controls(
         changeset: &Changeset,
         layout: DiffLayoutMode,
@@ -510,6 +971,26 @@ impl UiModel {
         trailing_context_lines: &HashMap<ContextKey, usize>,
         visible_files: &[FileIndex],
         show_context_controls: bool,
+    ) -> Self {
+        Self::new_filtered_with_trailing_context_controls_and_annotation_candidates(
+            changeset,
+            layout,
+            context_expansions,
+            trailing_context_lines,
+            visible_files,
+            show_context_controls,
+            true,
+        )
+    }
+
+    pub(crate) fn new_filtered_with_trailing_context_controls_and_annotation_candidates(
+        changeset: &Changeset,
+        layout: DiffLayoutMode,
+        context_expansions: &HashMap<ContextKey, usize>,
+        trailing_context_lines: &HashMap<ContextKey, usize>,
+        visible_files: &[FileIndex],
+        show_context_controls: bool,
+        build_annotation_candidates: bool,
     ) -> Self {
         let total_hunks = changeset
             .files
@@ -556,7 +1037,7 @@ impl UiModel {
                     .count(),
             );
         if estimated_rows > MAX_EAGER_UI_MODEL_ROWS {
-            return Self::new_filtered_sparse(
+            let mut model = Self::new_filtered_sparse(
                 changeset,
                 layout,
                 context_expansions,
@@ -565,6 +1046,10 @@ impl UiModel {
                 total_hunks,
                 show_context_controls,
             );
+            if !build_annotation_candidates {
+                model.annotation_candidate_blocks = AnnotationCandidateIndex::disabled();
+            }
+            return model;
         }
 
         let mut rows = Vec::with_capacity(estimated_rows);
@@ -749,7 +1234,13 @@ impl UiModel {
             }
         }
 
+        let annotation_candidate_blocks = if build_annotation_candidates {
+            annotation_candidate_blocks_from_rows(changeset, &rows)
+        } else {
+            Vec::new()
+        };
         Self {
+            identity: UiModelIdentity::new(),
             row_count: rows.len(),
             rows,
             row_segments: Vec::new(),
@@ -759,6 +1250,9 @@ impl UiModel {
             hunk_start_rows,
             hunk_row_starts,
             hunk_row_ends,
+            annotation_candidate_blocks: AnnotationCandidateIndex::eager(
+                annotation_candidate_blocks,
+            ),
         }
     }
 
@@ -1023,6 +1517,7 @@ impl UiModel {
         }
 
         Self {
+            identity: UiModelIdentity::new(),
             rows: Vec::new(),
             row_count,
             row_segments,
@@ -1032,7 +1527,12 @@ impl UiModel {
             hunk_start_rows,
             hunk_row_starts,
             hunk_row_ends,
+            annotation_candidate_blocks: AnnotationCandidateIndex::sparse(),
         }
+    }
+
+    pub(crate) fn identity(&self) -> u64 {
+        self.identity.0
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -1078,6 +1578,11 @@ impl UiModel {
                     .len()
                     .saturating_mul(std::mem::size_of::<ModelRow>()),
             )
+            .saturating_add(
+                self.annotation_candidate_blocks
+                    .len()
+                    .saturating_mul(std::mem::size_of::<AnnotationCandidateBlock>()),
+            )
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -1102,6 +1607,202 @@ impl UiModel {
         (0..self.row_count).filter_map(|index| self.row(index))
     }
 
+    pub(crate) fn annotation_candidate_at_or_after(
+        &self,
+        changeset: &Changeset,
+        row: usize,
+    ) -> Option<usize> {
+        match self.annotation_candidate_search_at_or_after(changeset, row) {
+            AnnotationCandidateSearchResult::Candidate(candidate) => Some(candidate),
+            AnnotationCandidateSearchResult::Unindexed
+            | AnnotationCandidateSearchResult::Exhausted => None,
+        }
+    }
+
+    pub(crate) fn annotation_candidate_search_at_or_after(
+        &self,
+        changeset: &Changeset,
+        row: usize,
+    ) -> AnnotationCandidateSearchResult {
+        {
+            let index = self.annotation_candidate_blocks.0.borrow();
+            match &*index {
+                AnnotationCandidateIndexState::Disabled => {
+                    return AnnotationCandidateSearchResult::Exhausted;
+                }
+                AnnotationCandidateIndexState::Eager(blocks) => {
+                    let block_index = blocks.partition_point(|block| block.end() <= row);
+                    return blocks
+                        .iter()
+                        .skip(block_index)
+                        .find_map(|block| block.candidate_at_or_after(changeset, row))
+                        .map_or(
+                            AnnotationCandidateSearchResult::Exhausted,
+                            AnnotationCandidateSearchResult::Candidate,
+                        );
+                }
+                AnnotationCandidateIndexState::Sparse(_) => {}
+            }
+        }
+        let first_segment = self
+            .row_segments
+            .partition_point(|segment| segment.start.get() <= row)
+            .saturating_sub(1);
+        for segment_index in first_segment..self.row_segments.len() {
+            let candidate = self.candidate_in_sparse_segment(changeset, segment_index, row, false);
+            if let Some(candidate) = candidate {
+                return AnnotationCandidateSearchResult::Candidate(candidate);
+            }
+            if !self.annotation_candidate_segment_is_bounded(segment_index) {
+                return AnnotationCandidateSearchResult::Unindexed;
+            }
+        }
+        AnnotationCandidateSearchResult::Exhausted
+    }
+
+    pub(crate) fn annotation_candidate_at_or_before(
+        &self,
+        changeset: &Changeset,
+        row: usize,
+    ) -> Option<usize> {
+        match self.annotation_candidate_search_at_or_before(changeset, row) {
+            AnnotationCandidateSearchResult::Candidate(candidate) => Some(candidate),
+            AnnotationCandidateSearchResult::Unindexed
+            | AnnotationCandidateSearchResult::Exhausted => None,
+        }
+    }
+
+    pub(crate) fn annotation_candidate_search_at_or_before(
+        &self,
+        changeset: &Changeset,
+        row: usize,
+    ) -> AnnotationCandidateSearchResult {
+        {
+            let index = self.annotation_candidate_blocks.0.borrow();
+            match &*index {
+                AnnotationCandidateIndexState::Disabled => {
+                    return AnnotationCandidateSearchResult::Exhausted;
+                }
+                AnnotationCandidateIndexState::Eager(blocks) => {
+                    let block_index = blocks.partition_point(|block| block.start() <= row);
+                    return blocks[..block_index]
+                        .iter()
+                        .rev()
+                        .find_map(|block| block.candidate_at_or_before(changeset, row))
+                        .map_or(
+                            AnnotationCandidateSearchResult::Exhausted,
+                            AnnotationCandidateSearchResult::Candidate,
+                        );
+                }
+                AnnotationCandidateIndexState::Sparse(_) => {}
+            }
+        }
+        let Some(last_segment) = self
+            .row_segments
+            .partition_point(|segment| segment.start.get() <= row)
+            .checked_sub(1)
+        else {
+            return AnnotationCandidateSearchResult::Exhausted;
+        };
+        for segment_index in (0..=last_segment).rev() {
+            let candidate = self.candidate_in_sparse_segment(changeset, segment_index, row, true);
+            if let Some(candidate) = candidate {
+                return AnnotationCandidateSearchResult::Candidate(candidate);
+            }
+            if !self.annotation_candidate_segment_is_bounded(segment_index) {
+                return AnnotationCandidateSearchResult::Unindexed;
+            }
+        }
+        AnnotationCandidateSearchResult::Exhausted
+    }
+
+    fn candidate_in_sparse_segment(
+        &self,
+        changeset: &Changeset,
+        segment_index: usize,
+        row: usize,
+        before: bool,
+    ) -> Option<usize> {
+        let needs_index = match &*self.annotation_candidate_blocks.0.borrow() {
+            AnnotationCandidateIndexState::Sparse(segments) => {
+                !segments.contains_key(&segment_index)
+            }
+            AnnotationCandidateIndexState::Disabled | AnnotationCandidateIndexState::Eager(_) => {
+                return None;
+            }
+        };
+        if needs_index {
+            let segment = self.row_segments.get(segment_index)?;
+            if !self.annotation_candidate_segment_is_bounded(segment_index) {
+                return None;
+            }
+            let blocks =
+                annotation_candidate_blocks_from_segments(changeset, std::slice::from_ref(segment));
+            if let AnnotationCandidateIndexState::Sparse(segments) =
+                &mut *self.annotation_candidate_blocks.0.borrow_mut()
+            {
+                segments.insert(segment_index, blocks);
+            }
+        }
+        let index = self.annotation_candidate_blocks.0.borrow();
+        let AnnotationCandidateIndexState::Sparse(segments) = &*index else {
+            return None;
+        };
+        let blocks = segments.get(&segment_index)?;
+        if before {
+            blocks
+                .iter()
+                .rev()
+                .find_map(|block| block.candidate_at_or_before(changeset, row))
+        } else {
+            blocks
+                .iter()
+                .find_map(|block| block.candidate_at_or_after(changeset, row))
+        }
+    }
+
+    // Oversized unified segments are intentionally left unindexed so viewport
+    // synchronization can discover their visible targets without an O(hunk) scan.
+    // Candidate traversal must treat them as boundaries, not targetless segments.
+    fn annotation_candidate_segment_is_bounded(&self, segment_index: usize) -> bool {
+        self.row_segments.get(segment_index).is_none_or(|segment| {
+            !matches!(segment.kind, RowSegmentKind::UnifiedLines { .. })
+                || segment.len as usize <= MAX_SYNCHRONOUS_SPARSE_CANDIDATE_SEGMENT_ROWS
+        })
+    }
+
+    pub(crate) fn annotation_candidate_navigation_is_bounded(&self, row: usize) -> bool {
+        if !self.rows.is_empty() {
+            return true;
+        }
+        let Some(segment_index) = self
+            .row_segments
+            .partition_point(|segment| segment.start.get() <= row)
+            .checked_sub(1)
+        else {
+            return true;
+        };
+        self.annotation_candidate_segment_is_bounded(segment_index)
+    }
+
+    pub(crate) fn annotation_candidate_navigation_range_is_bounded(
+        &self,
+        range: Range<usize>,
+    ) -> bool {
+        if !self.rows.is_empty() || range.is_empty() {
+            return true;
+        }
+        let first_segment = self
+            .row_segments
+            .partition_point(|segment| segment.end() <= range.start);
+        self.row_segments
+            .iter()
+            .enumerate()
+            .skip(first_segment)
+            .take_while(|(_, segment)| segment.start.get() < range.end)
+            .all(|(segment_index, _)| self.annotation_candidate_segment_is_bounded(segment_index))
+    }
+
     pub(crate) fn cache_key(&self) -> usize {
         if self.rows.is_empty() {
             self.row_segments.as_ptr() as usize
@@ -1116,6 +1817,20 @@ impl UiModel {
             .copied()
             .flatten()
             .map(ModelRow::get)
+    }
+
+    pub(crate) fn file_row_range(&self, file: FileIndex) -> Option<Range<usize>> {
+        let position = self
+            .file_row_starts
+            .iter()
+            .position(|(candidate, _)| *candidate == file)?;
+        let start = self.file_row_starts.get(position)?.1.get();
+        let end = self
+            .file_row_starts
+            .get(position.saturating_add(1))
+            .map(|(_, row)| row.get())
+            .unwrap_or(self.row_count);
+        Some(start..end)
     }
 
     pub(crate) fn file_at_row(&self, row: usize) -> Option<usize> {
@@ -1204,19 +1919,33 @@ impl UiModel {
     }
 
     pub(crate) fn context_line_row(&self, file: FileIndex, new_line: usize) -> Option<ModelRow> {
+        self.context_line_row_for_side(file, DiffSide::New, new_line)
+    }
+
+    pub(crate) fn context_line_row_for_side(
+        &self,
+        file: FileIndex,
+        side: DiffSide,
+        line: usize,
+    ) -> Option<ModelRow> {
         if !self.rows.is_empty() {
             return self
                 .rows
                 .iter()
                 .position(|row| {
-                    matches!(
-                        row,
-                        UiRow::ContextLine {
-                            file: row_file,
-                            new_line: row_new_line,
-                            ..
-                        } if *row_file == file && *row_new_line == new_line
-                    )
+                    let UiRow::ContextLine {
+                        file: row_file,
+                        old_line,
+                        new_line,
+                    } = row
+                    else {
+                        return false;
+                    };
+                    let row_line = match side {
+                        DiffSide::Old => old_line,
+                        DiffSide::New => new_line,
+                    };
+                    *row_file == file && *row_line == line
                 })
                 .map(ModelRow::new);
         }
@@ -1224,8 +1953,8 @@ impl UiModel {
         self.row_segments.iter().find_map(|segment| {
             let RowSegmentKind::ContextLines {
                 file: row_file,
+                old_start,
                 new_start,
-                ..
             } = segment.kind
             else {
                 return None;
@@ -1233,7 +1962,11 @@ impl UiModel {
             if row_file != file {
                 return None;
             }
-            let offset = new_line.checked_sub(new_start as usize)?;
+            let start = match side {
+                DiffSide::Old => old_start,
+                DiffSide::New => new_start,
+            };
+            let offset = line.checked_sub(start as usize)?;
             (offset < segment.len as usize)
                 .then_some(ModelRow::new(segment.start.get().saturating_add(offset)))
         })
@@ -1294,6 +2027,7 @@ impl UiModel {
                     hunk: row_hunk,
                     left_start,
                     left_len,
+                    left_candidate_start: _,
                     right_start,
                     right_len,
                 } if row_file == file && row_hunk == hunk => {
@@ -1311,6 +2045,7 @@ impl UiModel {
                     file: row_file,
                     hunk: row_hunk,
                     left,
+                    left_candidate: _,
                     right,
                 } if row_file == file && row_hunk == hunk => (left.get()
                     == Some(DiffLineIndex(line))
@@ -1383,6 +2118,407 @@ fn row_contains_diff_line(
         | UiRow::ContextLine { .. }
         | UiRow::ContextHide { .. }
         | UiRow::HunkHeader { .. } => false,
+    }
+}
+
+fn annotation_candidate_blocks_from_rows(
+    changeset: &Changeset,
+    rows: &[UiRow],
+) -> Vec<AnnotationCandidateBlock> {
+    let mut blocks = Vec::new();
+    let mut split_scan = None;
+    let mut model_row = 0;
+    while let Some(row) = rows.get(model_row).copied() {
+        if let UiRow::UnifiedLine { file, hunk, line } = row {
+            let mut end = model_row.saturating_add(1);
+            while matches!(
+                rows.get(end),
+                Some(
+                    UiRow::UnifiedLine {
+                        file: row_file,
+                        hunk: row_hunk,
+                        line: row_line,
+                    }
+                    | UiRow::MetaLine {
+                        file: row_file,
+                        hunk: row_hunk,
+                        line: row_line,
+                    }
+                ) if *row_file == file
+                    && *row_hunk == hunk
+                    && row_line.get() == line.get().saturating_add(end - model_row)
+            ) {
+                end = end.saturating_add(1);
+            }
+            push_unified_annotation_candidate_blocks(
+                &mut blocks,
+                changeset,
+                file,
+                hunk,
+                model_row,
+                line.get(),
+                end.saturating_sub(model_row),
+            );
+            model_row = end;
+            continue;
+        }
+        if direct_row_is_annotation_candidate(changeset, row, &mut split_scan) {
+            push_annotation_candidate_range(&mut blocks, model_row..model_row.saturating_add(1));
+        }
+        model_row = model_row.saturating_add(1);
+    }
+    blocks
+}
+
+fn annotation_candidate_blocks_from_segments(
+    changeset: &Changeset,
+    segments: &[RowSegment],
+) -> Vec<AnnotationCandidateBlock> {
+    let mut blocks = Vec::new();
+    for segment in segments {
+        match segment.kind {
+            RowSegmentKind::UnifiedLines {
+                file,
+                hunk,
+                line_start,
+            } if diff_file_has_annotation_path(changeset, file) => {
+                push_sparse_unified_annotation_candidate_chunks(
+                    &mut blocks,
+                    changeset,
+                    file,
+                    hunk,
+                    segment.start.get(),
+                    line_start as usize,
+                    segment.len as usize,
+                );
+            }
+            RowSegmentKind::ContextLines { file, .. }
+            | RowSegmentKind::SplitContextLines { file, .. }
+                if diff_file_has_annotation_path(changeset, file) =>
+            {
+                push_annotation_candidate_range(&mut blocks, segment.start.get()..segment.end());
+            }
+            RowSegmentKind::SplitChangeRun {
+                file,
+                left_len,
+                left_candidate_start,
+                right_len,
+                ..
+            } if diff_file_has_annotation_path(changeset, file) => {
+                let start = segment.start.get();
+                push_annotation_candidate_range(
+                    &mut blocks,
+                    start..start.saturating_add(right_len as usize),
+                );
+                let left_start = left_candidate_start.max(right_len) as usize;
+                push_annotation_candidate_range(
+                    &mut blocks,
+                    start.saturating_add(left_start)..start.saturating_add(left_len as usize),
+                );
+            }
+            RowSegmentKind::SplitExplicit {
+                file,
+                left_candidate,
+                right,
+                ..
+            } if diff_file_has_annotation_path(changeset, file)
+                && (left_candidate || right.is_some()) =>
+            {
+                push_annotation_candidate_range(&mut blocks, segment.start.get()..segment.end());
+            }
+            RowSegmentKind::FileSeparator
+            | RowSegmentKind::FileHeader(_)
+            | RowSegmentKind::FileBodyNotice(_)
+            | RowSegmentKind::Collapsed { .. }
+            | RowSegmentKind::ContextLines { .. }
+            | RowSegmentKind::ContextHide { .. }
+            | RowSegmentKind::HunkHeader { .. }
+            | RowSegmentKind::UnifiedLines { .. }
+            | RowSegmentKind::SplitContextLines { .. }
+            | RowSegmentKind::SplitMetaLines { .. }
+            | RowSegmentKind::SplitChangeRun { .. }
+            | RowSegmentKind::SplitExplicit { .. } => {}
+        }
+    }
+    blocks
+}
+
+fn push_sparse_unified_annotation_candidate_chunks(
+    blocks: &mut Vec<AnnotationCandidateBlock>,
+    changeset: &Changeset,
+    file: FileIndex,
+    hunk: HunkIndex,
+    model_start: usize,
+    line_start: usize,
+    len: usize,
+) {
+    let Some(lines) = changeset
+        .files
+        .get(file.get())
+        .filter(|file| file.old_path().is_some() || file.new_path().is_some())
+        .and_then(|file| file.hunks().get(hunk.get()))
+        .map(|hunk| hunk.lines.as_slice())
+    else {
+        return;
+    };
+    let line_end = line_start.saturating_add(len).min(lines.len());
+    let model_end = model_start.saturating_add(line_end.saturating_sub(line_start));
+    let mut chunk_start = model_start;
+    let mut bits = [0u64; SPARSE_ANNOTATION_CANDIDATE_WORDS];
+    let mut index = line_start;
+    while index < line_end {
+        if lines[index].kind() == DiffLineKind::Context {
+            if lines[index].new_line().is_some() || lines[index].old_line().is_some() {
+                set_sparse_annotation_candidate(
+                    blocks,
+                    model_start,
+                    &mut chunk_start,
+                    &mut bits,
+                    model_start.saturating_add(index.saturating_sub(line_start)),
+                    model_end,
+                );
+            }
+            index = index.saturating_add(1);
+            continue;
+        }
+
+        let block_start = index;
+        while index < line_end && lines[index].kind() != DiffLineKind::Context {
+            index = index.saturating_add(1);
+        }
+        let additions = lines[block_start..index]
+            .iter()
+            .filter(|line| line.kind() == DiffLineKind::Addition)
+            .count();
+        let mut deletion = 0usize;
+        for (block_offset, line) in lines[block_start..index].iter().enumerate() {
+            let candidate = match line.kind() {
+                DiffLineKind::Addition => line.new_line().is_some(),
+                DiffLineKind::Deletion => {
+                    let unpaired = deletion >= additions;
+                    deletion = deletion.saturating_add(1);
+                    unpaired && line.old_line().is_some()
+                }
+                DiffLineKind::Context | DiffLineKind::Meta => false,
+            };
+            if candidate {
+                set_sparse_annotation_candidate(
+                    blocks,
+                    model_start,
+                    &mut chunk_start,
+                    &mut bits,
+                    model_start
+                        .saturating_add(block_start.saturating_sub(line_start))
+                        .saturating_add(block_offset),
+                    model_end,
+                );
+            }
+        }
+    }
+    push_sparse_annotation_candidate_chunk(blocks, chunk_start, model_end, bits);
+}
+
+fn set_sparse_annotation_candidate(
+    blocks: &mut Vec<AnnotationCandidateBlock>,
+    model_start: usize,
+    chunk_start: &mut usize,
+    bits: &mut [u64; SPARSE_ANNOTATION_CANDIDATE_WORDS],
+    model_row: usize,
+    model_end: usize,
+) {
+    let chunk_index =
+        model_row.saturating_sub(model_start) / SPARSE_ANNOTATION_CANDIDATE_CHUNK_ROWS;
+    let candidate_chunk_start = model_start
+        .saturating_add(chunk_index.saturating_mul(SPARSE_ANNOTATION_CANDIDATE_CHUNK_ROWS));
+    if candidate_chunk_start != *chunk_start {
+        push_sparse_annotation_candidate_chunk(blocks, *chunk_start, model_end, *bits);
+        bits.fill(0);
+        *chunk_start = candidate_chunk_start;
+    }
+    let offset = model_row.saturating_sub(candidate_chunk_start);
+    bits[offset / u64::BITS as usize] |= 1u64 << (offset % u64::BITS as usize);
+}
+
+fn push_sparse_annotation_candidate_chunk(
+    blocks: &mut Vec<AnnotationCandidateBlock>,
+    chunk_start: usize,
+    model_end: usize,
+    bits: [u64; SPARSE_ANNOTATION_CANDIDATE_WORDS],
+) {
+    if bits.iter().all(|word| *word == 0) {
+        return;
+    }
+    blocks.push(AnnotationCandidateBlock::SparseCandidates {
+        range: chunk_start
+            ..chunk_start
+                .saturating_add(SPARSE_ANNOTATION_CANDIDATE_CHUNK_ROWS)
+                .min(model_end),
+        bits,
+    });
+}
+
+fn push_unified_annotation_candidate_blocks(
+    blocks: &mut Vec<AnnotationCandidateBlock>,
+    changeset: &Changeset,
+    file: FileIndex,
+    hunk: HunkIndex,
+    model_start: usize,
+    line_start: usize,
+    len: usize,
+) {
+    let Some(file_diff) = changeset.files.get(file.get()) else {
+        return;
+    };
+    if file_diff.old_path().is_none() && file_diff.new_path().is_none() {
+        return;
+    }
+    let Some(lines) = file_diff.hunks().get(hunk.get()).map(|hunk| &hunk.lines) else {
+        return;
+    };
+    let line_end = line_start.saturating_add(len).min(lines.len());
+    let mut index = line_start;
+    while index < line_end {
+        if lines[index].kind() == DiffLineKind::Context {
+            let context_start = index;
+            while index < line_end && lines[index].kind() == DiffLineKind::Context {
+                index = index.saturating_add(1);
+            }
+            let row_start = model_start.saturating_add(context_start.saturating_sub(line_start));
+            push_annotation_candidate_range(
+                blocks,
+                row_start..row_start.saturating_add(index.saturating_sub(context_start)),
+            );
+            continue;
+        }
+
+        let block_start = index;
+        while index < line_end && lines[index].kind() != DiffLineKind::Context {
+            index = index.saturating_add(1);
+        }
+        let block_end = index;
+        let additions = lines[block_start..block_end]
+            .iter()
+            .filter(|line| line.kind() == DiffLineKind::Addition)
+            .count();
+        let mut deletion = 0;
+        let mut first_addition = None;
+        let mut last_addition = None;
+        let mut first_unpaired_deletion = None;
+        let mut last_unpaired_deletion = None;
+        for (offset, line) in lines[block_start..block_end].iter().enumerate() {
+            match line.kind() {
+                DiffLineKind::Addition if line.new_line().is_some() => {
+                    let offset = Some(row_count_u32(offset));
+                    first_addition = first_addition.or(offset);
+                    last_addition = offset;
+                }
+                DiffLineKind::Deletion => {
+                    let unpaired = deletion >= additions;
+                    deletion = deletion.saturating_add(1);
+                    if unpaired && line.old_line().is_some() {
+                        let offset = Some(row_count_u32(offset));
+                        first_unpaired_deletion = first_unpaired_deletion.or(offset);
+                        last_unpaired_deletion = offset;
+                    }
+                }
+                DiffLineKind::Context | DiffLineKind::Addition | DiffLineKind::Meta => {}
+            }
+        }
+        if first_addition.is_some() || first_unpaired_deletion.is_some() {
+            let row_start = model_start.saturating_add(block_start.saturating_sub(line_start));
+            blocks.push(AnnotationCandidateBlock::UnifiedChange {
+                range: row_start..row_start.saturating_add(block_end - block_start),
+                file,
+                hunk,
+                line_start: row_count_u32(block_start),
+                first_addition,
+                last_addition,
+                first_unpaired_deletion,
+                last_unpaired_deletion,
+            });
+        }
+    }
+}
+
+fn direct_row_is_annotation_candidate(
+    changeset: &Changeset,
+    row: UiRow,
+    split_scan: &mut Option<UnifiedCandidateScan>,
+) -> bool {
+    match row {
+        UiRow::ContextLine { file, .. } => diff_file_has_annotation_path(changeset, file),
+        UiRow::SplitLine {
+            file,
+            hunk,
+            left,
+            right,
+        } => {
+            let Some(file_diff) = changeset.files.get(file.get()) else {
+                return false;
+            };
+            if file_diff.old_path().is_none() && file_diff.new_path().is_none() {
+                return false;
+            }
+            let Some(lines) = file_diff.hunks().get(hunk.get()).map(|hunk| &hunk.lines) else {
+                return false;
+            };
+            right
+                .get()
+                .and_then(|line| lines.get(line.get()))
+                .is_some_and(|line| line.new_line().is_some())
+                || (right.get().is_none()
+                    && left.get().is_some_and(|line| {
+                        let line_index = line.get();
+                        if !lines
+                            .get(line_index)
+                            .is_some_and(|line| line.old_line().is_some())
+                        {
+                            return false;
+                        }
+                        unified_candidate_scan(
+                            lines,
+                            file,
+                            hunk,
+                            0,
+                            lines.len(),
+                            line_index,
+                            split_scan,
+                        )
+                        .first_unpaired_deletion
+                        .is_some_and(|first| line_index >= first)
+                    }))
+        }
+        UiRow::FileSeparator
+        | UiRow::FileHeader(_)
+        | UiRow::FileBodyNotice(_)
+        | UiRow::Collapsed { .. }
+        | UiRow::ContextHide { .. }
+        | UiRow::HunkHeader { .. }
+        | UiRow::UnifiedLine { .. }
+        | UiRow::MetaLine { .. } => false,
+    }
+}
+
+fn diff_file_has_annotation_path(changeset: &Changeset, file: FileIndex) -> bool {
+    changeset
+        .files
+        .get(file.get())
+        .is_some_and(|file| file.old_path().is_some() || file.new_path().is_some())
+}
+
+fn push_annotation_candidate_range(
+    blocks: &mut Vec<AnnotationCandidateBlock>,
+    range: Range<usize>,
+) {
+    if range.is_empty() {
+        return;
+    }
+    if let Some(AnnotationCandidateBlock::Range(previous)) = blocks.last_mut()
+        && previous.end == range.start
+    {
+        previous.end = range.end;
+    } else {
+        blocks.push(AnnotationCandidateBlock::Range(range));
     }
 }
 
@@ -1468,7 +2604,17 @@ fn push_split_hunk_segments(
     lines: &[DiffLine],
 ) {
     let mut index = 0;
+    let mut paired_deletions_remaining = 0usize;
     while index < lines.len() {
+        if lines[index].kind() != DiffLineKind::Context
+            && (index == 0 || lines[index - 1].kind() == DiffLineKind::Context)
+        {
+            paired_deletions_remaining = lines[index..]
+                .iter()
+                .take_while(|line| line.kind() != DiffLineKind::Context)
+                .filter(|line| line.kind() == DiffLineKind::Addition)
+                .count();
+        }
         match lines[index].kind() {
             DiffLineKind::Context => {
                 let start = index;
@@ -1519,6 +2665,10 @@ fn push_split_hunk_segments(
                     index += 1;
                 }
 
+                let left_candidate_start = paired_deletions_remaining.min(deletions.len());
+                paired_deletions_remaining =
+                    paired_deletions_remaining.saturating_sub(deletions.len());
+
                 if is_contiguous(&deletions) && is_contiguous(&additions) {
                     push_row_segment(
                         row_segments,
@@ -1529,6 +2679,7 @@ fn push_split_hunk_segments(
                             hunk: hunk_index,
                             left_start: row_count_u32(deletions.first().copied().unwrap_or(0)),
                             left_len: row_count_u32(deletions.len()),
+                            left_candidate_start: row_count_u32(left_candidate_start),
                             right_start: row_count_u32(additions.first().copied().unwrap_or(0)),
                             right_len: row_count_u32(additions.len()),
                         },
@@ -1547,6 +2698,8 @@ fn push_split_hunk_segments(
                                     .copied()
                                     .map(DiffLineIndex::new)
                                     .into(),
+                                left_candidate: pair_index >= left_candidate_start
+                                    && pair_index < deletions.len(),
                                 right: additions
                                     .get(pair_index)
                                     .copied()

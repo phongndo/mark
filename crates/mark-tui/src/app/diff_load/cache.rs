@@ -5,13 +5,36 @@ use mark_diff::{Changeset, DiffOptions};
 use super::super::{DiffApp, DiffCacheEntry, MAX_DIFF_CACHE_ENTRIES, cacheable_diff_options};
 use crate::{controls::DiffLayoutMode, model::UiModel, search::DiffSearchIndex};
 
+#[cfg(test)]
 pub(crate) fn diff_cache_entry(options: DiffOptions, changeset: Changeset) -> DiffCacheEntry {
+    diff_cache_entry_with_annotation_candidates(options, changeset, true)
+}
+
+pub(crate) fn diff_cache_entry_with_annotation_candidates(
+    options: DiffOptions,
+    changeset: Changeset,
+    build_annotation_candidates: bool,
+) -> DiffCacheEntry {
     let search_index = Arc::new(DiffSearchIndex::new(&changeset));
     let max_line_width = search_index.max_line_width();
     let total_stats = changeset.stats();
     let context_expansions = HashMap::new();
-    let unified_model = UiModel::new(&changeset, DiffLayoutMode::Unified, &context_expansions);
-    let split_model = UiModel::new(&changeset, DiffLayoutMode::Split, &context_expansions);
+    let unified_model = UiModel::new_with_trailing_context_controls_and_annotation_candidates(
+        &changeset,
+        DiffLayoutMode::Unified,
+        &context_expansions,
+        &HashMap::new(),
+        true,
+        build_annotation_candidates,
+    );
+    let split_model = UiModel::new_with_trailing_context_controls_and_annotation_candidates(
+        &changeset,
+        DiffLayoutMode::Split,
+        &context_expansions,
+        &HashMap::new(),
+        true,
+        build_annotation_candidates,
+    );
     DiffCacheEntry {
         options,
         changeset,
@@ -60,26 +83,31 @@ impl DiffApp {
         let context_expansions = HashMap::new();
         let trailing_context_lines = self.document.trailing_context_lines.clone();
         let trailing_context_sides = self.document.trailing_context_sides.clone();
+        let build_annotation_candidates = self.annotation_cursor_enabled();
         let unified_model =
             if can_reuse_current_model && self.viewport.layout == DiffLayoutMode::Unified {
                 self.document.model.clone()
             } else {
-                UiModel::new_with_trailing_context(
+                UiModel::new_with_trailing_context_controls_and_annotation_candidates(
                     &changeset,
                     DiffLayoutMode::Unified,
                     &context_expansions,
                     &trailing_context_lines,
+                    true,
+                    build_annotation_candidates,
                 )
             };
         let split_model =
             if can_reuse_current_model && self.viewport.layout == DiffLayoutMode::Split {
                 self.document.model.clone()
             } else {
-                UiModel::new_with_trailing_context(
+                UiModel::new_with_trailing_context_controls_and_annotation_candidates(
                     &changeset,
                     DiffLayoutMode::Split,
                     &context_expansions,
                     &trailing_context_lines,
+                    true,
+                    build_annotation_candidates,
                 )
             };
         self.jobs.diff_cache.insert(
@@ -107,9 +135,15 @@ impl DiffApp {
         self.jobs
             .diff_cache
             .retain(|entry| entry.options != options);
-        self.jobs
-            .diff_cache
-            .insert(0, diff_cache_entry(options, changeset));
+        let build_annotation_candidates = self.annotation_cursor_enabled();
+        self.jobs.diff_cache.insert(
+            0,
+            diff_cache_entry_with_annotation_candidates(
+                options,
+                changeset,
+                build_annotation_candidates,
+            ),
+        );
         self.jobs.diff_cache.truncate(MAX_DIFF_CACHE_ENTRIES);
     }
 

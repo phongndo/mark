@@ -62,11 +62,18 @@ impl AnnotationKey {
                 }
                 Self::unpaired_deletion_candidate(file, lines, left.get()?.get())
             }
-            UiRow::ContextLine { file, new_line, .. } => Self::for_file_line(
-                changeset.files.get(file.get())?,
-                AnnotationSide::New,
+            UiRow::ContextLine {
+                file,
+                old_line,
                 new_line,
-            ),
+            } => {
+                let file = changeset.files.get(file.get())?;
+                if file.new_path().is_none() {
+                    Self::for_file_line(file, AnnotationSide::Old, old_line)
+                } else {
+                    Self::for_file_line(file, AnnotationSide::New, new_line)
+                }
+            }
             _ => None,
         }
     }
@@ -207,8 +214,25 @@ pub(crate) struct AnnotationTarget {
     pub(crate) key: AnnotationKey,
     pub(crate) model_row_index: usize,
     pub(crate) visual_scroll: usize,
+    pub(crate) visual_height: usize,
     pub(crate) viewport_row: usize,
     pub(crate) hint: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AnnotationCursor {
+    /// Identity of the model whose row coordinates these targets use.
+    pub(crate) model_identity: u64,
+    /// Eager cursors use an empty list for a checked model with no targets;
+    /// lazy cursors use it until a target is discovered in or from the viewport.
+    pub(crate) targets: Vec<AnnotationTarget>,
+    pub(crate) selected: usize,
+    /// Large models keep only the selected target and discover adjacent targets
+    /// on demand instead of cloning every annotatable key up front.
+    pub(crate) lazy: bool,
+    /// A failed lazy move is cached until the selected target changes.
+    pub(crate) previous_exhausted: bool,
+    pub(crate) next_exhausted: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -228,22 +228,98 @@ fn arrow_keys_scroll_then_move_hunk_focus_at_edges_in_scrollable_diff() {
 
 #[test]
 fn page_keys_scroll_then_move_hunk_focus_at_edges_in_scrollable_diff() {
-    assert_key_pair_scrolls_then_moves_hunk_focus_at_edges(KeyCode::PageDown, KeyCode::PageUp, 20);
+    assert_key_pair_scrolls_then_moves_hunk_focus_at_edges(KeyCode::PageDown, KeyCode::PageUp, 4);
 }
 
 #[test]
-fn d_key_pages_down() {
+fn d_key_moves_the_cursor_down_half_a_viewport() {
     let changeset = changeset_with_files(&[
         "a.rs", "b.rs", "c.rs", "d.rs", "e.rs", "f.rs", "g.rs", "h.rs",
     ]);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
     app.set_viewport_rows(6);
 
+    let cursor = app
+        .annotations_state
+        .annotation_cursor
+        .as_ref()
+        .expect("default annotation cursor");
+    let initial = cursor.selected;
+    let desired_visual_scroll = cursor.targets[initial]
+        .visual_scroll
+        .saturating_add(app.vertical_page_delta(false) as usize);
+    let expected = cursor
+        .targets
+        .iter()
+        .enumerate()
+        .skip(initial.saturating_add(1))
+        .min_by_key(|(_, target)| target.visual_scroll.abs_diff(desired_visual_scroll))
+        .map(|(index, _)| index)
+        .unwrap_or(initial);
     app.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE))
-        .expect("d should page down");
+        .expect("d should page the cursor down");
 
-    assert_eq!(app.viewport.scroll, 20);
+    let cursor = app
+        .annotations_state
+        .annotation_cursor
+        .as_ref()
+        .expect("default annotation cursor");
+    assert_eq!(cursor.selected, expected);
+    assert!(app.annotation_cursor_at_visual_scroll(cursor.targets[cursor.selected].visual_scroll));
     assert!(app.input.key_prefix_pending.is_none());
+}
+
+#[test]
+fn flat_page_keys_move_the_annotation_cursor_by_viewport_relative_amounts() {
+    let lines = vec!["line"; 100];
+    let changeset = changeset_with_line_texts(&lines);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(10);
+
+    let initial = app
+        .annotations_state
+        .annotation_cursor
+        .as_ref()
+        .map(|cursor| cursor.selected)
+        .expect("default annotation cursor");
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE))
+        .expect("d should move down half a viewport");
+    assert_eq!(
+        app.annotations_state
+            .annotation_cursor
+            .as_ref()
+            .map(|cursor| cursor.selected),
+        Some(initial + 5)
+    );
+    app.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::NONE))
+        .expect("u should move up half a viewport");
+    assert_eq!(
+        app.annotations_state
+            .annotation_cursor
+            .as_ref()
+            .map(|cursor| cursor.selected),
+        Some(initial)
+    );
+
+    app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE))
+        .expect("Page Down should move down a full viewport");
+    assert_eq!(
+        app.annotations_state
+            .annotation_cursor
+            .as_ref()
+            .map(|cursor| cursor.selected),
+        Some(initial + 8)
+    );
+    app.handle_key(KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE))
+        .expect("Page Up should move up a full viewport");
+    assert_eq!(
+        app.annotations_state
+            .annotation_cursor
+            .as_ref()
+            .map(|cursor| cursor.selected),
+        Some(initial)
+    );
 }
 
 #[test]
@@ -252,6 +328,7 @@ fn j_and_k_scroll_then_move_hunk_focus_at_edges_in_scrollable_diff() {
         "a.rs", "b.rs", "c.rs", "d.rs", "e.rs", "f.rs", "g.rs", "h.rs",
     ]);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.config.annotation_targeting = AnnotationTargeting::Hints;
     app.set_viewport_rows(6);
 
     assert!(app.max_scroll() > 0);
@@ -450,6 +527,7 @@ fn bracket_hunk_navigation_focuses_visible_hunk_when_scroll_is_clamped() {
         "a.rs", "b.rs", "c.rs", "d.rs", "e.rs", "f.rs", "g.rs", "h.rs", "i.rs", "j.rs",
     ]);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.config.annotation_targeting = AnnotationTargeting::Hints;
     app.set_viewport_rows(20);
 
     assert!(app.max_scroll() > 0);
@@ -1978,10 +2056,21 @@ fn copy_error_log_key_falls_through_without_error_log() {
     )
     .expect("keymap should parse");
 
+    let initial = app
+        .annotations_state
+        .annotation_cursor
+        .as_ref()
+        .map(|cursor| cursor.selected)
+        .expect("default annotation cursor");
     app.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE))
         .expect("copy key without error log should fall through");
 
-    assert_eq!(app.viewport.scroll, 20);
+    let cursor = app
+        .annotations_state
+        .annotation_cursor
+        .as_ref()
+        .expect("default annotation cursor");
+    assert!(cursor.selected > initial);
     assert!(app.notifications.error_log.is_none());
     assert!(app.notifications.toasts.is_empty());
 }

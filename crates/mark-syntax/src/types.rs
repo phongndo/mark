@@ -252,6 +252,14 @@ pub(crate) struct StoredLanguageMapping {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+pub(crate) struct StoredAnnotationSettings {
+    #[serde(default)]
+    pub(crate) targeting: AnnotationTargeting,
+    #[serde(flatten)]
+    pub(crate) settings: AnnotationSettings,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 pub(crate) struct StoredSyntaxSettings {
     pub(crate) mode: Option<SyntaxMode>,
     pub(crate) colorscheme: Option<StoredSyntaxThemeConfig>,
@@ -277,10 +285,20 @@ pub(crate) struct StoredSyntaxSettings {
     #[serde(default)]
     pub(crate) notifications: StoredNotificationSettings,
     #[serde(default)]
-    pub(crate) annotations: AnnotationSettings,
+    pub(crate) annotations: StoredAnnotationSettings,
     #[serde(default)]
     pub(crate) limits: StoredSyntaxLimits,
 }
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnnotationTargeting {
+    #[default]
+    Cursor,
+    Hints,
+}
+
+pub type LoadedSyntaxSettings = (SyntaxSettings, AnnotationTargeting);
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct AnnotationSettings {

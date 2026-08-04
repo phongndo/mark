@@ -93,6 +93,9 @@ impl DiffApp {
                 "full-file context unavailable for {unavailable_files} file(s); the source may be missing or exceed configured full-file limits"
             ));
         }
+        if changed {
+            self.invalidate_wrapped_visual_layout();
+        }
         changed
     }
 
@@ -120,14 +123,10 @@ impl DiffApp {
                 continue;
             };
             let mut requests = Vec::new();
-            let mut has_lines = false;
             for side in self.context_side_order(file.get()) {
                 let key = ContextSourceKey { file, side };
                 match self.document.context_cache.get(&key) {
-                    Some(ContextSourceEntry::Lines(_)) => {
-                        has_lines = true;
-                        break;
-                    }
+                    Some(ContextSourceEntry::Lines(_)) => break,
                     Some(ContextSourceEntry::Loading | ContextSourceEntry::Unavailable) => {
                         continue;
                     }
@@ -142,7 +141,7 @@ impl DiffApp {
                     requests.push((key, source));
                 }
             }
-            if !has_lines && !requests.is_empty() {
+            if !requests.is_empty() {
                 request_groups.push(requests);
             }
         }
@@ -160,6 +159,8 @@ impl DiffApp {
                 .context_cache
                 .insert(*key, ContextSourceEntry::Loading);
         }
+        self.invalidate_wrapped_visual_layout();
+        self.sync_annotation_cursor_to_viewport();
 
         let generation = self.document.generation;
         let max_source_bytes = context_source_byte_limit();
@@ -294,6 +295,7 @@ impl DiffApp {
             self.set_scroll_with_grep_sync(scroll, false, HunkFocusScrollBehavior::Preserve);
             self.sync_grep_match_selection_to_scroll();
         }
+        self.sync_annotation_cursor_to_viewport();
         self.runtime.dirty = true;
         true
     }
@@ -418,6 +420,7 @@ impl DiffApp {
             }
             self.document.context_cache.insert(key, entry);
             self.invalidate_wrapped_visual_layout();
+            self.sync_annotation_cursor_to_viewport();
         }
 
         match self.document.context_cache.get(&key) {
@@ -442,6 +445,37 @@ impl DiffApp {
         split_context_source_lines(text).map(Arc::new)
     }
 
+    pub(in crate::app) fn context_line_fallback_text(&self, file: usize) -> &'static str {
+        let loading = self.context_side_order(file).into_iter().any(|side| {
+            let key = ContextSourceKey {
+                file: FileIndex::new(file),
+                side,
+            };
+            match self.document.context_cache.get(&key) {
+                Some(ContextSourceEntry::Loading) => true,
+                None => self.has_context_source(file, side),
+                Some(ContextSourceEntry::Lines(_) | ContextSourceEntry::Unavailable) => false,
+            }
+        });
+        if loading {
+            "loading context…"
+        } else {
+            "context unavailable"
+        }
+    }
+
+    pub(crate) fn rendered_context_line_text(
+        &self,
+        file: usize,
+        old_line: usize,
+        new_line: usize,
+    ) -> String {
+        self.cached_context_line_text(file, old_line, new_line)
+            .map(str::to_owned)
+            .unwrap_or_else(|| self.context_line_fallback_text(file).to_owned())
+    }
+
+    #[cfg(test)]
     pub(crate) fn context_line_text(
         &mut self,
         file: usize,
@@ -449,20 +483,7 @@ impl DiffApp {
         new_line: usize,
     ) -> String {
         let Some((side, source_lines)) = self.ensure_context_lines(file) else {
-            let loading = self.context_side_order(file).into_iter().any(|side| {
-                matches!(
-                    self.document.context_cache.get(&ContextSourceKey {
-                        file: FileIndex::new(file),
-                        side,
-                    }),
-                    Some(ContextSourceEntry::Loading)
-                )
-            });
-            return if loading {
-                "loading context…".to_owned()
-            } else {
-                "context unavailable".to_owned()
-            };
+            return self.context_line_fallback_text(file).to_owned();
         };
         let line_number = match side {
             DiffSide::Old => old_line,

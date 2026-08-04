@@ -115,6 +115,9 @@ pub(crate) fn build_diff_viewport_lines(
                 line = append_annotation_add_button(line, width, theme);
             }
         }
+        if app.annotation_cursor_at_visual_scroll(visual_row) {
+            line = highlighted_mouse_diff_content_line(line, layout, width, theme);
+        }
         if let Some((hint, side, existing)) =
             app.annotation_target_hint_at_visual_scroll(visual_row)
         {
@@ -150,9 +153,12 @@ pub(crate) fn build_diff_viewport_lines(
                 && draft.as_ref().is_none_or(|d| d.key != key)
             {
                 let label = app.annotation_label(&key);
+                let block_scroll = annotation_saved_block_scroll(app, &key);
                 push_annotation_block(
                     &mut lines,
-                    render_annotation_saved_block(text, width, theme, label.as_deref()),
+                    render_annotation_saved_block(text, width, theme, label.as_deref())
+                        .into_iter()
+                        .skip(block_scroll),
                     visible_rows,
                 );
             }
@@ -204,6 +210,9 @@ fn build_wrapped_viewport_lines(
                     line = append_annotation_add_button(line, width, theme);
                 }
             }
+            if app.annotation_cursor_at_model_row(row_index) {
+                line = highlighted_mouse_diff_content_line(line, layout, width, theme);
+            }
             if let Some((hint, side, existing)) =
                 app.annotation_target_hint_at_visual_scroll(visual_row)
             {
@@ -243,9 +252,12 @@ fn build_wrapped_viewport_lines(
                     && draft.as_ref().is_none_or(|d| d.key != key)
                 {
                     let label = app.annotation_label(&key);
+                    let block_scroll = annotation_saved_block_scroll(app, &key);
                     push_annotation_block(
                         &mut lines,
-                        render_annotation_saved_block(text, width, theme, label.as_deref()),
+                        render_annotation_saved_block(text, width, theme, label.as_deref())
+                            .into_iter()
+                            .skip(block_scroll),
                         visible_rows,
                     );
                 }
@@ -258,9 +270,18 @@ fn build_wrapped_viewport_lines(
     lines
 }
 
+fn annotation_saved_block_scroll(app: &DiffApp, key: &AnnotationKey) -> usize {
+    app.annotations_state
+        .annotation_block_scroll
+        .as_ref()
+        .filter(|(scroll_key, _)| scroll_key == key)
+        .map(|(_, offset)| *offset)
+        .unwrap_or_default()
+}
+
 fn push_annotation_block(
     lines: &mut Vec<Line<'static>>,
-    block: Vec<Line<'static>>,
+    block: impl IntoIterator<Item = Line<'static>>,
     visible_rows: usize,
 ) {
     for line in block {

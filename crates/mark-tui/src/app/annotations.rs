@@ -2,11 +2,13 @@ use super::{
     DiffApp, HunkFocusScrollBehavior, POST_EDITOR_QUIT_KEY_IGNORE, create_annotation_scratch_file,
     normalize_annotation_editor_contents, viewport_center_offset,
 };
-use crate::annotation::{AnnotationDraft, AnnotationKey};
+use crate::annotation::{AnnotationDraft, AnnotationKey, AnnotationSide};
 use crate::editor::{configured_editor, open_text_in_editor};
 use crate::keymap::{AnnotationMenuAction, GlobalAction, MenuAction};
+use crate::model::{DiffLineIndex, FileIndex, HunkIndex};
 use crate::render::viewport_plan::{ViewportSlotKind, plan_diff_viewport_rows_at_scroll};
 use crate::selector::{SelectorController, SelectorMovement};
+use crate::syntax::DiffSide;
 use crate::text_input::{TextInputKeyResult, handle_text_input_key};
 use crossterm::event::{KeyCode, KeyEvent};
 use mark_core::MarkResult;
@@ -194,21 +196,11 @@ impl DiffApp {
         let Some(item) = self.selected_annotation_menu_item() else {
             return;
         };
-        let text = self
-            .annotations_state
-            .annotations
-            .get(&item.key)
-            .cloned()
-            .unwrap_or_default();
         self.close_annotation_menu();
         self.jump_to_annotation(&item.key);
-        self.annotations_state.sticky_annotation_draft = false;
-        self.annotations_state.annotation_draft = Some(AnnotationDraft {
-            key: item.key,
-            model_row_index: item.model_row,
-            input: text.clone(),
-            cursor: text.len(),
-        });
+        if !self.open_annotation_draft_for_key(item.key, item.model_row) {
+            return;
+        }
         if mode == AnnotationEditMode::External {
             self.open_annotation_draft_in_editor();
         }
@@ -220,6 +212,7 @@ impl DiffApp {
             return;
         };
         self.annotations_state.annotations.remove(&item.key);
+        self.annotations_state.annotation_block_scroll = None;
         self.annotations_state
             .annotation_rows
             .borrow_mut()
@@ -233,6 +226,12 @@ impl DiffApp {
         if len == 0 {
             self.close_annotation_menu();
         }
+        self.set_scroll_with_grep_sync(
+            self.viewport.scroll,
+            false,
+            HunkFocusScrollBehavior::Preserve,
+        );
+        self.sync_annotation_cursor_to_viewport();
         self.runtime.dirty = true;
     }
 
@@ -294,20 +293,57 @@ impl DiffApp {
             return *model_row;
         }
 
-        let model_row = self
-            .document
-            .model
-            .iter_rows()
-            .enumerate()
-            .find_map(|(index, row)| {
-                (AnnotationKey::from_ui_row(&self.document.changeset, row).as_ref() == Some(key))
-                    .then_some(index)
-            });
+        let model_row = self.find_annotation_model_row(key);
         self.annotations_state
             .annotation_rows
             .borrow_mut()
             .insert(key.clone(), model_row);
         model_row
+    }
+
+    fn find_annotation_model_row(&self, key: &AnnotationKey) -> Option<usize> {
+        for (file_index, file) in self.document.changeset.files.iter().enumerate() {
+            if AnnotationKey::path_for_side(file, key.side) != Some(key.path.as_str()) {
+                continue;
+            }
+            let file_index = FileIndex::new(file_index);
+            for (hunk_index, hunk) in file.hunks().iter().enumerate() {
+                let line_index = hunk.lines.iter().position(|line| match key.side {
+                    AnnotationSide::Old => line.old_line() == Some(key.line),
+                    AnnotationSide::New => line.new_line() == Some(key.line),
+                });
+                let Some(line_index) = line_index else {
+                    continue;
+                };
+                let Some(model_row) = self.document.model.diff_line_row(
+                    file_index,
+                    HunkIndex::new(hunk_index),
+                    DiffLineIndex::new(line_index),
+                ) else {
+                    continue;
+                };
+                let Some(row) = self.document.model.row(model_row.get()) else {
+                    continue;
+                };
+                if AnnotationKey::from_ui_row(&self.document.changeset, row).as_ref() == Some(key) {
+                    return Some(model_row.get());
+                }
+            }
+            let side = match key.side {
+                AnnotationSide::Old => DiffSide::Old,
+                AnnotationSide::New => DiffSide::New,
+            };
+            if let Some(model_row) = self
+                .document
+                .model
+                .context_line_row_for_side(file_index, side, key.line)
+                && let Some(row) = self.document.model.row(model_row.get())
+                && AnnotationKey::from_ui_row(&self.document.changeset, row).as_ref() == Some(key)
+            {
+                return Some(model_row.get());
+            }
+        }
+        None
     }
 
     pub(crate) fn move_annotation(&mut self, delta: isize) {
@@ -320,11 +356,13 @@ impl DiffApp {
             .annotations_state
             .annotations
             .keys()
-            .filter_map(|key| self.annotation_model_row(key))
-            .map(|row| (self.annotation_anchor_visual_scroll(row), row))
+            .filter_map(|key| {
+                let row = self.annotation_model_row(key)?;
+                Some((self.annotation_anchor_visual_scroll(row), row, key.clone()))
+            })
             .collect::<Vec<_>>();
-        targets.sort_unstable();
-        targets.dedup();
+        targets.sort_unstable_by_key(|(anchor, row, _)| (*anchor, *row));
+        targets.dedup_by(|left, right| left.0 == right.0 && left.1 == right.1);
 
         if targets.is_empty() {
             self.set_notice("annotations are hidden");
@@ -336,21 +374,22 @@ impl DiffApp {
             targets
                 .iter()
                 .rev()
-                .copied()
-                .find(|(anchor, _)| *anchor < focus_scroll)
+                .find(|target| target.0 < focus_scroll)
+                .cloned()
                 .unwrap_or_else(|| {
-                    *targets
+                    targets
                         .last()
                         .expect("annotation targets should not be empty")
+                        .clone()
                 })
         } else {
             targets
                 .iter()
-                .copied()
-                .find(|(anchor, _)| *anchor > focus_scroll)
-                .unwrap_or_else(|| targets[0])
+                .find(|target| target.0 > focus_scroll)
+                .cloned()
+                .unwrap_or_else(|| targets[0].clone())
         };
-        let (target_anchor, target_model_row) = target;
+        let (target_anchor, target_model_row, target_key) = target;
         let target_scroll =
             target_anchor.saturating_sub(viewport_center_offset(self.viewport.viewport_rows));
         let target_scroll = self.scroll_with_model_row_rendered(target_scroll, target_model_row);
@@ -360,6 +399,9 @@ impl DiffApp {
             false,
             HunkFocusScrollBehavior::Preserve,
         );
+        if self.annotation_cursor_enabled() {
+            self.select_annotation_cursor(&target_key);
+        }
     }
 
     pub(super) fn annotation_navigation_focus_scroll(&self) -> usize {
@@ -417,12 +459,14 @@ impl DiffApp {
             .matches_single(GlobalAction::CancelMark, key)
         {
             self.annotations_state.annotation_draft = None;
+            self.annotations_state.annotation_block_scroll = None;
             self.annotations_state.sticky_annotation_draft = false;
             self.set_scroll_with_grep_sync(
                 self.viewport.scroll,
                 false,
                 HunkFocusScrollBehavior::Preserve,
             );
+            self.sync_annotation_cursor_to_viewport();
             self.runtime.dirty = true;
             return true;
         }
@@ -482,6 +526,8 @@ impl DiffApp {
     }
 
     pub(super) fn commit_annotation_draft(&mut self, draft: AnnotationDraft) {
+        let draft_key = draft.key.clone();
+        self.annotations_state.annotation_block_scroll = None;
         self.annotations_state
             .annotation_heights
             .borrow_mut()
@@ -501,15 +547,22 @@ impl DiffApp {
                 .annotations
                 .insert(draft.key, draft.input);
         }
+        let sticky = std::mem::take(&mut self.annotations_state.sticky_annotation_draft);
+        if sticky && self.annotation_cursor_enabled() {
+            // Advance from the draft's preserved cursor origin before viewport
+            // synchronization can choose a replacement for that off-screen row.
+            self.select_annotation_cursor(&draft_key);
+            self.move_annotation_cursor(1);
+        }
         self.set_scroll_with_grep_sync(
             self.viewport.scroll,
             false,
             HunkFocusScrollBehavior::Preserve,
         );
-        let sticky = std::mem::take(&mut self.annotations_state.sticky_annotation_draft);
-        if sticky {
+        if sticky && !self.annotation_cursor_enabled() {
             self.open_sticky_annotation_target_mode();
         }
+        self.sync_annotation_cursor_to_viewport();
         self.runtime.dirty = true;
     }
 

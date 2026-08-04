@@ -1,5 +1,56 @@
 use super::*;
 
+fn use_annotation_hints(app: &mut DiffApp) {
+    app.config.annotation_targeting = AnnotationTargeting::Hints;
+}
+
+fn annotation_cursor_viewport_row(app: &DiffApp) -> Option<usize> {
+    let target = app.annotation_cursor_target()?;
+    crate::render::viewport_plan::plan_diff_viewport_rows(app, app.viewport.viewport_rows)
+        .into_iter()
+        .position(|slot| {
+            matches!(
+                slot.kind,
+                crate::render::viewport_plan::ViewportSlotKind::DiffVisual {
+                    visual_scroll,
+                    model_row,
+                } if visual_scroll == target.visual_scroll
+                    && model_row == target.model_row_index
+            )
+        })
+}
+
+fn context_hunk(start: usize, len: usize) -> mark_diff::DiffHunk {
+    mark_diff::DiffHunk {
+        header: format!("@@ -{start},{len} +{start},{len} @@"),
+        ranges: HunkLineRanges::new(start, len, start, len),
+        lines: (start..start.saturating_add(len))
+            .map(|line| DiffLine::context(line, line, "line"))
+            .collect(),
+    }
+}
+
+fn install_sparse_annotation_test_model(app: &mut DiffApp) {
+    let trailing_key = ContextKey {
+        file: FILE_0,
+        hunk: HunkIndex::new(app.document.changeset.files[0].hunks().len()),
+    };
+    let context_expansions = HashMap::from([(trailing_key, 200_001)]);
+    let trailing_context_lines = context_expansions.clone();
+    app.document.model = UiModel::new_with_trailing_context_controls_and_annotation_candidates(
+        &app.document.changeset,
+        app.viewport.layout,
+        &context_expansions,
+        &trailing_context_lines,
+        true,
+        true,
+    );
+    app.document.context_expansions = context_expansions;
+    app.document.trailing_context_lines = trailing_context_lines;
+    app.annotations_state.annotation_cursor = None;
+    assert!(app.document.model.rows.is_empty(), "model should be sparse");
+}
+
 #[test]
 fn hunk_focus_uses_rendered_rows_when_annotations_hide_model_rows() {
     use crate::annotation::AnnotationKey;
@@ -139,6 +190,21 @@ fn hunk_navigation_scrolls_past_annotation_blocks_to_show_target_hunk() {
 }
 
 #[test]
+fn hunk_navigation_moves_the_annotation_cursor_into_the_requested_hunk() {
+    let changeset = changeset_with_hunks_at(PathBuf::from("/repo"), &[1, 2]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(20);
+
+    app.next_hunk();
+
+    let cursor_hunk = app
+        .annotation_cursor_target()
+        .and_then(|target| app.document.model.row(target.model_row_index))
+        .and_then(|row| row.typed_hunk_key());
+    assert_eq!(cursor_hunk, Some((FILE_0, HUNK_1)));
+}
+
+#[test]
 fn max_scroll_reaches_rows_hidden_by_saved_annotation() {
     use crate::annotation::AnnotationKey;
     use crate::render::viewport_plan::{ViewportSlotKind, plan_diff_viewport_rows};
@@ -258,14 +324,29 @@ fn annotation_navigation_centers_and_advances_from_centered_annotation() {
     app.handle_key(KeyEvent::new(KeyCode::Char('}'), KeyModifiers::NONE))
         .expect("next annotation should be handled");
     assert_eq!(app.viewport.scroll + center, first_anchor);
+    assert_eq!(
+        app.annotation_cursor_target()
+            .map(|target| target.model_row_index),
+        Some(first_row)
+    );
 
     app.handle_key(KeyEvent::new(KeyCode::Char('}'), KeyModifiers::NONE))
         .expect("next annotation should advance from centered annotation");
     assert_eq!(app.viewport.scroll + center, second_anchor);
+    assert_eq!(
+        app.annotation_cursor_target()
+            .map(|target| target.model_row_index),
+        Some(second_row)
+    );
 
     app.handle_key(KeyEvent::new(KeyCode::Char('{'), KeyModifiers::NONE))
         .expect("previous annotation should advance from centered annotation");
     assert_eq!(app.viewport.scroll + center, first_anchor);
+    assert_eq!(
+        app.annotation_cursor_target()
+            .map(|target| target.model_row_index),
+        Some(first_row)
+    );
 }
 
 #[test]
@@ -630,6 +711,7 @@ fn submit_marks_shortcut_preempts_sticky_annotation_target_mode() {
     app.annotations_state
         .annotations
         .insert(key, "send this note".to_owned());
+    use_annotation_hints(&mut app);
     app.open_sticky_annotation_target_mode();
     assert!(app.annotations_state.annotation_target_mode.is_some());
 
@@ -1267,6 +1349,7 @@ fn annotation_target_mode_labels_the_entire_viewport_and_selects_a_hint() {
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
     app.set_viewport_width(80);
     app.set_viewport_rows(app.document.model.len());
+    use_annotation_hints(&mut app);
 
     app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE))
         .expect("annotation target mode should open");
@@ -1330,6 +1413,7 @@ fn annotation_target_mode_filters_multi_key_hints_and_supports_backspace() {
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
     app.set_viewport_width(80);
     app.set_viewport_rows(app.document.model.len());
+    use_annotation_hints(&mut app);
 
     app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE))
         .expect("annotation target mode should open");
@@ -1387,6 +1471,7 @@ fn no_op_reload_preserves_in_progress_annotation_target_mode() {
     );
     app.set_viewport_width(80);
     app.set_viewport_rows(app.document.model.len());
+    use_annotation_hints(&mut app);
 
     app.handle_key(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT))
         .expect("sticky annotation target mode should open");
@@ -1422,6 +1507,7 @@ fn annotation_target_mode_shows_only_matching_hint_suffixes() {
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
     app.set_viewport_width(80);
     app.set_viewport_rows(app.document.model.len());
+    use_annotation_hints(&mut app);
 
     app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE))
         .expect("annotation target mode should open");
@@ -1487,6 +1573,7 @@ fn annotation_target_mode_uses_annotation_accent_for_existing_marks() {
     app.annotations_state
         .annotations
         .insert(key, "existing note".to_owned());
+    use_annotation_hints(&mut app);
 
     app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE))
         .expect("annotation target mode should open");
@@ -1515,6 +1602,7 @@ fn annotation_target_mode_uses_configured_keys_and_optional_uppercase_display() 
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
     app.set_viewport_width(40);
     app.set_viewport_rows(app.document.model.len());
+    app.config.annotation_targeting = AnnotationTargeting::Hints;
     app.config.syntax_settings.annotations.hint_keys = "arst".to_owned();
     app.config.syntax_settings.annotations.uppercase_hints = true;
 
@@ -1558,49 +1646,353 @@ fn annotation_target_mode_uses_configured_keys_and_optional_uppercase_display() 
 }
 
 #[test]
-fn annotation_target_navigation_keys_cancel_and_continue_navigation() {
+fn annotation_cursor_navigation_moves_selection_and_scrolls() {
     let lines = vec!["line"; 100];
     let changeset = changeset_with_line_texts(&lines);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
     app.set_viewport_rows(10);
 
-    app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE))
-        .expect("annotation target mode should open");
-    let scroll = app.viewport.scroll;
+    let initial = app
+        .annotation_cursor_target()
+        .map(|target| target.model_row_index)
+        .expect("selected annotation target");
+
     app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
-        .expect("down should navigate");
-    assert_eq!(app.viewport.scroll, scroll + 1);
+        .expect("down should move the annotation cursor");
+    assert!(
+        app.annotation_cursor_target()
+            .is_some_and(|target| target.model_row_index > initial)
+    );
     assert!(app.annotations_state.annotation_target_mode.is_none());
 
-    app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE))
-        .expect("annotation target mode should reopen");
-    let scroll = app.viewport.scroll;
-    app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE))
-        .expect("page down should navigate");
-    assert_eq!(app.viewport.scroll, scroll + 20);
-    assert!(app.annotations_state.annotation_target_mode.is_none());
+    app.handle_key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE))
+        .expect("end should move to the final target");
+    let cursor = app
+        .annotations_state
+        .annotation_cursor
+        .as_ref()
+        .expect("annotation cursor should always be available");
+    assert_eq!(cursor.selected, cursor.targets.len() - 1);
+    assert!(app.viewport.scroll > 0);
+    assert!(app.annotation_cursor_at_visual_scroll(cursor.targets[cursor.selected].visual_scroll));
+
+    let selected = cursor.selected;
+    app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+        .expect("Esc should not disable the default cursor");
+    assert_eq!(
+        app.annotations_state
+            .annotation_cursor
+            .as_ref()
+            .map(|cursor| cursor.selected),
+        Some(selected)
+    );
 }
 
 #[test]
-fn sticky_annotation_mode_reopens_targets_after_save_and_esc_exits() {
+fn lazy_annotation_cursor_reselects_a_visible_target_after_scroll() {
+    let lines = vec!["line"; 300];
+    let mut changeset = changeset_with_line_texts(&lines);
+    for (index, line) in changeset.files[0].hunks_mut()[0]
+        .lines
+        .iter_mut()
+        .enumerate()
+    {
+        if index != 99 && index != 109 {
+            *line = DiffLine::meta("metadata");
+        }
+    }
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(10);
+    let target_rows = app
+        .document
+        .model
+        .iter_rows()
+        .enumerate()
+        .filter_map(|(model_row, row)| {
+            crate::annotation::AnnotationKey::from_ui_row(&app.document.changeset, row)
+                .map(|_| model_row)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(target_rows.len(), 2);
+
+    app.set_scroll(target_rows[0].saturating_add(1));
+
+    assert_eq!(
+        app.annotation_cursor_target()
+            .map(|target| target.model_row_index),
+        Some(target_rows[1])
+    );
+    assert!(annotation_cursor_viewport_row(&app).is_some());
+}
+
+#[test]
+fn selecting_file_with_oversized_sparse_hunk_keeps_visible_annotation_target() {
+    let mut changeset = changeset_with_files(&["filler.rs", "large.rs"]);
+    changeset.files[1].body = mark_diff::DiffFileBody::Text {
+        hunks: vec![context_hunk(1, 4_097)],
+    };
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(6);
+    install_sparse_annotation_test_model(&mut app);
+
+    app.select_file(1);
+
+    let target = app
+        .annotation_cursor_target()
+        .expect("visible large-hunk line should remain selected");
+    assert_eq!(
+        app.document.model.file_at_row(target.model_row_index),
+        Some(FILE_1.get())
+    );
+    assert!(annotation_cursor_viewport_row(&app).is_some());
+    app.open_annotation_target_mode();
+    assert!(app.annotations_state.annotation_draft.is_some());
+}
+
+#[test]
+fn annotation_cursor_scrolls_into_oversized_sparse_hunk_instead_of_skipping_it() {
+    let mut changeset = changeset_with_files(&["filler.rs", "large.rs"]);
+    changeset.files[1].body = mark_diff::DiffFileBody::Text {
+        hunks: vec![
+            context_hunk(1, 1),
+            context_hunk(2, 4_097),
+            context_hunk(4_099, 1),
+        ],
+    };
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(3);
+    install_sparse_annotation_test_model(&mut app);
+    let before_row = app
+        .document
+        .model
+        .diff_line_row(FILE_1, HUNK_0, LINE_0)
+        .expect("target before large hunk")
+        .get();
+    app.set_scroll(before_row.saturating_sub(1));
+    assert_eq!(
+        app.annotation_cursor_target()
+            .map(|target| target.model_row_index),
+        Some(before_row)
+    );
+
+    let initial_scroll = app.viewport.scroll;
+    app.navigate_diff_vertically(1);
+
+    assert_eq!(app.viewport.scroll, initial_scroll.saturating_add(1));
+    assert_eq!(
+        app.annotation_cursor_target()
+            .map(|target| target.model_row_index),
+        Some(before_row)
+    );
+    assert!(
+        app.annotations_state
+            .annotation_cursor
+            .as_ref()
+            .is_some_and(|cursor| !cursor.next_exhausted)
+    );
+
+    app.navigate_diff_vertically(1);
+
+    let target = app
+        .annotation_cursor_target()
+        .expect("visible target inside large hunk");
+    assert_eq!(
+        app.document
+            .model
+            .row(target.model_row_index)
+            .and_then(UiRow::typed_hunk_key),
+        Some((FILE_1, HUNK_1))
+    );
+    assert!(annotation_cursor_viewport_row(&app).is_some());
+}
+
+#[test]
+fn unchanged_lazy_boundary_cursor_is_restored_and_cached() {
+    let lines = vec!["line"; 300];
+    let mut changeset = changeset_with_line_texts(&lines);
+    for (index, line) in changeset.files[0].hunks_mut()[0]
+        .lines
+        .iter_mut()
+        .enumerate()
+    {
+        if index != 99 {
+            *line = DiffLine::meta("metadata");
+        }
+    }
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(10);
+    let target_row = app
+        .annotation_cursor_target()
+        .map(|target| target.model_row_index)
+        .expect("lazy target");
+    app.set_scroll(target_row.saturating_add(20));
+    assert!(annotation_cursor_viewport_row(&app).is_none());
+
+    app.navigate_diff_to_boundary(false);
+
+    assert!(annotation_cursor_viewport_row(&app).is_some());
+    assert!(
+        app.annotations_state
+            .annotation_cursor
+            .as_ref()
+            .is_some_and(|cursor| cursor.previous_exhausted)
+    );
+    app.move_annotation_cursor(-1);
+    assert!(annotation_cursor_viewport_row(&app).is_some());
+}
+
+#[test]
+fn empty_lazy_annotation_cursor_is_cached_across_scrolls() {
+    let lines = vec!["line"; 300];
+    let mut changeset = changeset_with_line_texts(&lines);
+    for line in &mut changeset.files[0].hunks_mut()[0].lines {
+        *line = DiffLine::meta("metadata");
+    }
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(10);
+
+    assert!(
+        app.annotations_state
+            .annotation_cursor
+            .as_ref()
+            .is_some_and(|cursor| cursor.targets.is_empty())
+    );
+    app.set_scroll(100);
+    assert!(
+        app.annotations_state
+            .annotation_cursor
+            .as_ref()
+            .is_some_and(|cursor| cursor.targets.is_empty())
+    );
+}
+
+#[test]
+fn annotation_cursor_scrolls_with_vim_style_top_and_bottom_margins() {
+    let lines = vec!["line"; 100];
+    let changeset = changeset_with_line_texts(&lines);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(20);
+
+    while annotation_cursor_viewport_row(&app).is_some_and(|row| row < 11) {
+        app.move_annotation_cursor(1);
+    }
+    assert_eq!(annotation_cursor_viewport_row(&app), Some(11));
+
+    let scroll_at_bottom_margin = app.viewport.scroll;
+    app.move_annotation_cursor(1);
+    assert_eq!(annotation_cursor_viewport_row(&app), Some(11));
+    assert_eq!(app.viewport.scroll, scroll_at_bottom_margin + 1);
+
+    app.move_annotation_cursor(-1);
+    assert_eq!(annotation_cursor_viewport_row(&app), Some(10));
+    assert_eq!(app.viewport.scroll, scroll_at_bottom_margin + 1);
+
+    while annotation_cursor_viewport_row(&app).is_some_and(|row| row > 8) {
+        app.move_annotation_cursor(-1);
+    }
+    assert_eq!(annotation_cursor_viewport_row(&app), Some(8));
+
+    let scroll_at_top_margin = app.viewport.scroll;
+    app.move_annotation_cursor(-1);
+    assert_eq!(annotation_cursor_viewport_row(&app), Some(8));
+    assert_eq!(app.viewport.scroll, scroll_at_top_margin - 1);
+}
+
+#[test]
+fn wrapped_page_navigation_advances_through_a_tall_cursor_row() {
+    let long_line = "x".repeat(200);
+    let changeset = changeset_with_line_texts(&[long_line.as_str(), "next"]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.viewport.line_wrapping = true;
+    app.set_viewport_width(18);
+    app.set_viewport_rows(10);
+    app.navigate_diff_to_boundary(false);
+    let selected = app
+        .annotation_cursor_target()
+        .map(|target| target.key.clone())
+        .expect("first annotation target");
+    let initial_scroll = app.viewport.scroll;
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE))
+        .expect("d should move down by half a visual viewport");
+
+    assert_eq!(
+        app.annotation_cursor_target().map(|target| &target.key),
+        Some(&selected)
+    );
+    assert!(app.viewport.scroll > initial_scroll);
+}
+
+#[test]
+fn wrapped_resize_reselects_a_visible_annotation_cursor() {
+    let long_line = "x".repeat(100);
+    let changeset = changeset_with_line_texts(&[long_line.as_str(), "last"]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.viewport.line_wrapping = true;
+    app.set_viewport_width(80);
+    app.set_viewport_rows(5);
+    app.navigate_diff_to_boundary(true);
+    assert!(annotation_cursor_viewport_row(&app).is_some());
+
+    app.set_viewport_width(18);
+
+    assert!(annotation_cursor_viewport_row(&app).is_some());
+}
+
+#[test]
+fn annotation_cursor_preserves_line_numbers_and_highlights_the_selected_row() {
+    let mut changeset = changeset_with_line_text("hello");
+    changeset.files[0].hunks_mut()[0].lines[0] = DiffLine::addition(7, "hello");
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_width(40);
+    app.set_viewport_rows(5);
+    let code_row = app
+        .document
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
+        .expect("unified line");
+    app.viewport.scroll = code_row;
+
+    let rendered = build_diff_viewport_lines(&mut app, 40, 5);
+    let characters = line_text(&rendered[0]).chars().collect::<Vec<_>>();
+    assert_eq!(characters[11], '7');
+    assert!(
+        rendered[0]
+            .spans
+            .iter()
+            .any(|span| span.style.bg == Some(app.config.theme.cursor_line_bg))
+    );
+    let header = line_text(&statusline_header_line(&app, 80));
+    assert!(!header.contains("ANNOTATE"));
+
+    let selected_key = app
+        .annotation_cursor_target()
+        .map(|target| target.key.clone());
+    app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE))
+        .expect("a should annotate the current cursor line");
+    assert_eq!(
+        app.annotations_state
+            .annotation_draft
+            .as_ref()
+            .map(|draft| &draft.key),
+        selected_key.as_ref()
+    );
+}
+
+#[test]
+fn sticky_annotation_uses_the_persistent_cursor() {
     let changeset = changeset_with_line_texts(&["one", "two", "three"]);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
     app.set_viewport_rows(app.document.model.len());
 
-    app.handle_key(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT))
-        .expect("sticky annotation target mode should open");
     let target = app
-        .annotations_state
-        .annotation_target_mode
-        .as_ref()
-        .filter(|mode| mode.sticky)
-        .and_then(|mode| mode.targets.first())
+        .annotation_cursor_target()
         .cloned()
-        .expect("sticky target");
-    for character in target.hint.chars() {
-        app.handle_key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE))
-            .expect("hint should select a line");
-    }
+        .expect("sticky cursor target");
+    app.handle_key(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT))
+        .expect("A should annotate the current cursor line");
     assert!(app.annotations_state.sticky_annotation_draft);
 
     app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE))
@@ -1616,16 +2008,48 @@ fn sticky_annotation_mode_reopens_targets_after_save_and_esc_exits() {
         Some("n")
     );
     assert!(app.annotations_state.annotation_draft.is_none());
+    assert!(app.annotations_state.annotation_target_mode.is_none());
     assert!(
+        app.annotation_cursor_target()
+            .is_some_and(|cursor_target| cursor_target.model_row_index > target.model_row_index)
+    );
+}
+
+#[test]
+fn scrolling_during_a_sticky_draft_preserves_the_cursor_origin() {
+    let lines = vec!["line"; 100];
+    let changeset = changeset_with_line_texts(&lines);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(5);
+    let selected = app
+        .annotations_state
+        .annotation_cursor
+        .as_ref()
+        .map(|cursor| cursor.selected)
+        .expect("annotation cursor");
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT))
+        .expect("sticky draft should open");
+    app.set_scroll(app.max_scroll());
+    assert_eq!(
         app.annotations_state
-            .annotation_target_mode
+            .annotation_cursor
             .as_ref()
-            .is_some_and(|mode| mode.sticky)
+            .map(|cursor| cursor.selected),
+        Some(selected)
     );
 
-    app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
-        .expect("Esc should exit sticky targeting");
-    assert!(app.annotations_state.annotation_target_mode.is_none());
+    app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE))
+        .expect("draft text should be entered");
+    app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL))
+        .expect("draft should save");
+    assert_eq!(
+        app.annotations_state
+            .annotation_cursor
+            .as_ref()
+            .map(|cursor| cursor.selected),
+        Some(selected + 1)
+    );
 }
 
 #[test]
@@ -1634,6 +2058,7 @@ fn annotation_target_mode_blocks_modified_navigation_but_preserves_hard_quit() {
     let changeset = changeset_with_line_texts(&lines);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
     app.set_viewport_rows(10);
+    use_annotation_hints(&mut app);
 
     app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE))
         .expect("annotation target mode should open");
@@ -1661,6 +2086,7 @@ fn annotation_target_mode_labels_wrapped_logical_lines_once() {
     app.viewport.line_wrapping = true;
     app.set_viewport_width(18);
     app.set_viewport_rows(20);
+    use_annotation_hints(&mut app);
 
     app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE))
         .expect("annotation target mode should open");
@@ -1681,6 +2107,7 @@ fn unified_hint_replaces_the_line_number_and_preserves_the_diff_sign() {
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
     app.set_viewport_width(40);
     app.set_viewport_rows(5);
+    use_annotation_hints(&mut app);
     let code_row = app
         .document
         .model
@@ -1714,6 +2141,7 @@ fn split_replacement_hint_replaces_the_current_side_line_number() {
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Split);
     app.set_viewport_width(60);
     app.set_viewport_rows(8);
+    use_annotation_hints(&mut app);
     let split_row = app
         .document
         .model
@@ -1759,6 +2187,7 @@ fn split_deletion_only_hint_replaces_the_old_side_line_number() {
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Split);
     app.set_viewport_width(60);
     app.set_viewport_rows(8);
+    use_annotation_hints(&mut app);
     let split_row = app
         .document
         .model
@@ -2002,6 +2431,74 @@ fn annotation_height_cache_tracks_text_and_viewport_width() {
         .get(&key)
         .expect("resized annotation height");
     assert_eq!(resized.width, 20);
+}
+
+#[test]
+fn old_side_expanded_context_annotation_resolves_after_model_rebuild() {
+    use crate::annotation::{AnnotationKey, AnnotationSide};
+
+    let repo = temp_test_dir("old-side-context-annotation");
+    fs::create_dir_all(&repo).expect("repo directory should be created");
+    let mut changeset = changeset_with_hunks_at(repo.clone(), &[10, 50]);
+    set_test_file_deleted(&mut changeset.files[0]);
+    let hunks = changeset.files[0].hunks_mut();
+    hunks[0].ranges = HunkLineRanges::new(10, 1, 9, 0);
+    hunks[0].lines = vec![DiffLine::deletion(10, "deleted 10")];
+    hunks[1].ranges = HunkLineRanges::new(50, 1, 48, 0);
+    hunks[1].lines = vec![DiffLine::deletion(50, "deleted 50")];
+
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_full_file(true);
+    let context_row = app
+        .document
+        .model
+        .iter_rows()
+        .enumerate()
+        .find_map(|(row, model_row)| {
+            matches!(
+                model_row,
+                UiRow::ContextLine {
+                    old_line: 20,
+                    new_line: 19,
+                    ..
+                }
+            )
+            .then_some(row)
+        })
+        .expect("diverged old-side context row");
+    let key = AnnotationKey::from_ui_row(
+        &app.document.changeset,
+        app.document.model.row(context_row).expect("context row"),
+    )
+    .expect("old-side context key");
+    assert_eq!(key.side, AnnotationSide::Old);
+    assert_eq!(key.line, 20);
+    app.annotations_state
+        .annotations
+        .insert(key.clone(), "old context note".to_owned());
+    app.annotations_state
+        .annotation_rows
+        .borrow_mut()
+        .insert(key.clone(), Some(context_row));
+
+    app.set_layout(DiffLayoutMode::Split);
+
+    let rebuilt_row = app
+        .annotation_model_row(&key)
+        .expect("old-side context annotation should resolve");
+    assert_eq!(
+        AnnotationKey::from_ui_row(
+            &app.document.changeset,
+            app.document
+                .model
+                .row(rebuilt_row)
+                .expect("rebuilt context row"),
+        ),
+        Some(key.clone())
+    );
+    assert_eq!(app.annotation_menu_items()[0].key, key);
+
+    fs::remove_dir_all(repo).expect("repo directory should be removed");
 }
 
 #[test]

@@ -73,7 +73,9 @@ impl DiffApp {
             } => self
                 .cached_context_line_text(file.get(), old_line, new_line)
                 .map(|text| self.wrapped_visual_height_for_text(text))
-                .unwrap_or(1),
+                .unwrap_or_else(|| {
+                    self.wrapped_visual_height_for_text(self.context_line_fallback_text(file.get()))
+                }),
             UiRow::UnifiedLine { file, hunk, line } | UiRow::MetaLine { file, hunk, line } => {
                 let text =
                     self.document.changeset.files[file].hunks()[hunk].lines[line].text_lossy();

@@ -2,8 +2,10 @@ mod cache;
 mod prefetch;
 mod review;
 
+#[cfg(test)]
 pub(crate) use cache::diff_cache_entry;
 
+use self::cache::diff_cache_entry_with_annotation_candidates;
 use super::{
     AsyncJob, BranchMetadataPolicy, DiffApp, DiffLoadCachePolicy, PendingDiffLoad,
     cacheable_diff_options,
@@ -120,7 +122,11 @@ impl DiffApp {
         match outcome {
             Some(Ok(changeset)) => {
                 if cacheable_diff_options(&pending.options) {
-                    let cached = diff_cache_entry(pending.options.clone(), changeset);
+                    let cached = diff_cache_entry_with_annotation_candidates(
+                        pending.options.clone(),
+                        changeset,
+                        self.annotation_cursor_enabled(),
+                    );
                     self.replace_cached_diff(pending.options, cached, pending.branch_metadata);
                 } else {
                     self.replace_loaded_diff(pending.options, changeset);
