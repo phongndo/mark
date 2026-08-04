@@ -41,7 +41,7 @@ mark-git = { path = "crates/mark-git" }
 mark-runtime = { path = "crates/mark-runtime" }
 mark-syntax = { path = "crates/mark-syntax" }
 mark-tui = { path = "crates/mark-tui" }
-syntaxmate = { version = "0.1", default-features = false, features = ["bundled-grammars"] }
+syntaxmate = { version = "0.1.1", default-features = false, features = ["bundled-grammars"] }
 
 [profile.release]
 codegen-units = 1
