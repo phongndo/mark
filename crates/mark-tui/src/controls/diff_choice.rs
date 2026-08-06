@@ -20,7 +20,7 @@ impl DiffChoice {
             Self::Branch => "Branch",
             Self::Review => "Review",
             Self::Show => "Show",
-            Self::All => "All changes",
+            Self::All => "All Changes",
         }
     }
 }

@@ -272,7 +272,7 @@ pub(crate) fn diff_comparison_label_for_theme(options: &DiffOptions, theme: Diff
 fn diff_comparison_label_with_separator(options: &DiffOptions, separator: &str) -> String {
     match &options.source {
         DiffSource::Worktree => format!("HEAD{separator}working tree"),
-        DiffSource::Show(rev) => format!("show {rev}"),
+        DiffSource::Show(rev) => rev.to_string(),
         DiffSource::Base(base) => format!("HEAD{separator}{base}"),
         DiffSource::Branch { base, head } => format!("{head}{separator}{base}"),
         DiffSource::Range { left, right } => format!("{left}{separator}{right}"),

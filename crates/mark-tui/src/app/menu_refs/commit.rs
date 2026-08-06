@@ -20,7 +20,7 @@ impl DiffApp {
 
     pub(crate) fn toggle_commit_menu(&mut self) {
         if self.refs.comparison_commits.is_empty() {
-            self.set_warning_notice("commit list unavailable");
+            self.set_warning_notice("revision list unavailable");
             return;
         }
         if self.refs.commit_menu_is_open() {

@@ -1322,7 +1322,7 @@ fn diff_menu_draws_centered_floating_menu() {
     assert!(title.1 > 30 && title.1 < 48, "title column was {}", title.1);
     assert!(
         rows.iter()
-            .any(|row| row.contains("│  All changes") && !row.contains("1 │"))
+            .any(|row| row.contains("│  All Changes") && !row.contains("1 │"))
     );
     assert!(
         rows.iter()
@@ -2512,7 +2512,7 @@ fn selector_menus_do_not_render_footers() {
     );
     assert!(
         rows.iter()
-            .any(|row| row.contains("1") && row.contains("All changes"))
+            .any(|row| row.contains("1") && row.contains("All Changes"))
     );
     assert!(!rows.iter().any(|row| row.contains("d/u move")));
     assert!(!rows.iter().any(|row| row.contains("Enter apply")));
@@ -2877,7 +2877,7 @@ fn branch_menu_draws_centered_floating_filter() {
     let title = rows
         .iter()
         .enumerate()
-        .find_map(|(row, text)| text.find("base branch").map(|column| (row, column)))
+        .find_map(|(row, text)| text.find("Base Branch").map(|column| (row, column)))
         .expect("floating branch menu should render title");
 
     assert!(title.0 > 4 && title.0 < 12, "title row was {}", title.0);
