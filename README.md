@@ -86,10 +86,11 @@ mark patch changes.diff      # review an existing patch file
 git diff | mark pager        # use mark as a diff pager
 ```
 
-Plain `mark` is a shortcut for `mark diff`. While reviewing, move the cursor to
-a line, hunk header, or file header and press `Enter` to annotate that scope.
-Use `y` to copy annotations and `Shift-Q` to copy them and quit (`q` quits
-without submitting them).
+Plain `mark` is a shortcut for `mark diff`. While reviewing, move the cursor
+with Vim-style motions and counts such as `3j`. Press `v` or `V` for linewise
+Visual mode, select a range, and press `Enter` to annotate it; `Enter` also
+annotates a single line, hunk header, or file header. Use `y` to copy annotations and
+`Shift-Q` to copy them and quit (`q` quits without submitting them).
 
 ## Built for huge diffs
 

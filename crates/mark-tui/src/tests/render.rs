@@ -1555,19 +1555,26 @@ fn empty_diff_message_explains_filtered_results() {
 }
 
 #[test]
-fn statusline_header_right_aligns_current_file() {
-    let changeset = changeset_with_files(&["src/lib.rs", "README.md", "docs/guide.md"]);
+fn statusline_header_uses_lualine_sections_and_short_file_name() {
+    let changeset = changeset_with_files(&["src/lib.rs", "docs/README.md", "docs/guide.md"]);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
     app.set_viewport_rows(3);
     app.select_file(1);
 
+    let expected_right = format!(
+        " {}  README.md ",
+        progress_label(app.viewport.scroll, app.max_scroll())
+    );
     let line = statusline_header_line(&app, 80);
     let text = line_text(&line);
 
     assert_eq!(text.width(), 80);
-    assert!(text.starts_with(" All changes  HEAD → working tree"));
-    assert!(text.contains("README.md 2/3"));
-    assert!(text.ends_with("% "));
+    assert!(text.starts_with(" All changes  HEAD  +"));
+    assert!(!text.contains("working tree"));
+    assert!(!text.contains("docs/README.md"));
+    assert!(!text.contains("2/3"));
+    assert!(!text.contains("files"));
+    assert!(text.ends_with(&expected_right));
 
     let selector = line.spans.first().expect("selector block should render");
     assert_eq!(
@@ -1579,9 +1586,13 @@ fn statusline_header_right_aligns_current_file() {
         Some(app.config.theme.statusline_accent_bg)
     );
 
-    let file = line.spans.last().expect("file block should render");
-    assert_eq!(file.style.fg, Some(app.config.theme.statusline_info_fg));
-    assert_eq!(file.style.bg, Some(app.config.theme.statusline_info_bg));
+    let progress = &line.spans[line.spans.len() - 2];
+    assert_eq!(progress.style.fg, Some(app.config.theme.statusline_info_fg));
+    assert_eq!(progress.style.bg, Some(app.config.theme.statusline_info_bg));
+    let file = line.spans.last().expect("file section should render");
+    assert_eq!(file.content, " README.md ");
+    assert_eq!(file.style.fg, Some(app.config.theme.statusline_accent_fg));
+    assert_eq!(file.style.bg, Some(app.config.theme.statusline_accent_bg));
     assert!(file.style.add_modifier.contains(Modifier::BOLD));
 }
 
@@ -1619,12 +1630,15 @@ fn statusline_header_uses_theme_statusline_colors() {
 
     let line = statusline_header_line(&app, 80);
     let selector = line.spans.first().expect("selector block should render");
-    let file = line.spans.last().expect("file block should render");
+    let progress = &line.spans[line.spans.len() - 2];
+    let file = line.spans.last().expect("file section should render");
 
     assert_eq!(selector.style.fg, Some(Color::Rgb(1, 2, 3)));
     assert_eq!(selector.style.bg, Some(Color::Rgb(4, 5, 6)));
-    assert_eq!(file.style.fg, Some(Color::Rgb(7, 8, 9)));
-    assert_eq!(file.style.bg, Some(Color::Rgb(10, 11, 12)));
+    assert_eq!(progress.style.fg, Some(Color::Rgb(7, 8, 9)));
+    assert_eq!(progress.style.bg, Some(Color::Rgb(10, 11, 12)));
+    assert_eq!(file.style.fg, Some(Color::Rgb(1, 2, 3)));
+    assert_eq!(file.style.bg, Some(Color::Rgb(4, 5, 6)));
 }
 
 #[test]
@@ -2662,8 +2676,12 @@ fn mouse_click_selects_line_and_enter_opens_annotation_input() {
 
     let lines = crate::render::diff::build_diff_viewport_lines(&mut app, 40, 6);
     assert_eq!(lines.len(), 4);
-    assert!(line_text(&lines[1]).starts_with("file.rs R1 "));
-    assert!(line_text(&lines[1]).ends_with("[x]"));
+    assert!(
+        line_text(&lines[1])
+            .trim_start()
+            .starts_with("├─ Add note · +1")
+    );
+    assert!(line_text(&lines[1]).ends_with('┐'));
     assert!(
         lines[1]
             .spans
@@ -2672,12 +2690,12 @@ fn mouse_click_selects_line_and_enter_opens_annotation_input() {
     );
     assert!(line_text(&lines[2]).contains(INPUT_CURSOR));
     let footer = line_text(&lines[3]);
-    assert!(footer.starts_with("─"));
-    assert!(footer.ends_with("[✓]"));
-    assert_eq!(
-        lines[3].spans.last().and_then(|span| span.style.fg),
-        Some(app.config.theme.addition_fg)
-    );
+    assert!(footer.trim_start().starts_with('└'));
+    assert!(footer.contains("[✓]"));
+    assert!(footer.ends_with('┘'));
+    assert!(lines[3].spans.iter().any(|span| {
+        span.content.contains("[✓]") && span.style.fg == Some(app.config.theme.addition_fg)
+    }));
 
     app.handle_annotation_input_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
     app.handle_annotation_input_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE));
@@ -2699,7 +2717,7 @@ fn mouse_click_selects_line_and_enter_opens_annotation_input() {
     let lines = crate::render::diff::build_diff_viewport_lines(&mut app, 40, 6);
     let close_row = lines
         .iter()
-        .position(|line| line_text(line).ends_with("[x]"))
+        .position(|line| line_text(line).contains("[x]"))
         .expect("saved annotation close row");
     let body_row = lines
         .iter()
@@ -2707,14 +2725,13 @@ fn mouse_click_selects_line_and_enter_opens_annotation_input() {
         .expect("saved annotation body row");
     let edit_row = lines
         .iter()
-        .position(|line| line_text(line).ends_with("[↻]"))
+        .position(|line| line_text(line).contains("[↻]"))
         .expect("saved annotation edit row");
     assert!(close_row < body_row);
     assert!(body_row < edit_row);
-    assert_eq!(
-        lines[edit_row].spans.last().and_then(|span| span.style.fg),
-        Some(app.config.theme.search_match_bg)
-    );
+    assert!(lines[edit_row].spans.iter().any(|span| {
+        span.content.contains("[↻]") && span.style.fg == Some(app.config.theme.search_match_bg)
+    }));
 
     let diff_y = app.viewport.rendered_diff_area.expect("diff area").y;
     assert!(app.handle_diff_click(38, diff_y.saturating_add(edit_row as u16)));
@@ -2732,7 +2749,7 @@ fn mouse_click_selects_line_and_enter_opens_annotation_input() {
     let lines = crate::render::diff::build_diff_viewport_lines(&mut app, 40, 6);
     let close_row = lines
         .iter()
-        .position(|line| line_text(line).ends_with("[x]"))
+        .position(|line| line_text(line).contains("[x]"))
         .expect("saved annotation close row");
     assert!(app.handle_diff_click(38, diff_y.saturating_add(close_row as u16)));
     assert!(!app.annotations_state.annotations.contains_key(&key));
@@ -2807,8 +2824,11 @@ fn mouse_click_selects_current_side_for_paired_split_row() {
         app.annotation_cursor_target().map(|target| &target.key),
         Some(&old_key)
     );
+    app.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE))
+        .expect("v should select the old side");
+    assert!(app.annotation_visual_mode_active());
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
-        .expect("Enter should annotate the selected old side");
+        .expect("Enter should annotate the visually selected old side");
     assert_eq!(
         app.annotations_state
             .annotation_draft
@@ -3204,7 +3224,7 @@ fn annotation_draft_opened_on_last_row_scrolls_block_into_view() {
             .iter()
             .any(|line| line_text(line).contains(INPUT_CURSOR))
     );
-    assert!(rendered.iter().any(|line| line_text(line).ends_with("[✓]")));
+    assert!(rendered.iter().any(|line| line_text(line).contains("[✓]")));
 }
 
 #[test]
@@ -3251,8 +3271,9 @@ fn annotation_hidden_compose_footer_is_not_submit_target() {
     }
 
     let rendered = crate::render::diff::build_diff_viewport_lines(&mut app, 40, 2);
-    assert!(line_text(&rendered[1]).ends_with("[x]"));
-    assert!(!rendered.iter().any(|line| line_text(line).ends_with("[✓]")));
+    assert!(line_text(&rendered[1]).contains("[x]"));
+    assert!(line_text(&rendered[1]).ends_with('┐'));
+    assert!(!rendered.iter().any(|line| line_text(line).contains("[✓]")));
     assert!(app.handle_diff_click(38, 2));
 
     assert!(app.annotations_state.annotation_draft.is_none());
@@ -3500,6 +3521,7 @@ fn system_theme_preserves_terminal_base_and_uses_owned_diff_colors() {
     assert_eq!(theme.file, Color::Reset);
     assert_eq!(theme.cursor, Color::White);
     assert_eq!(theme.cursor_line_bg, Color::Indexed(237));
+    assert_eq!(theme.statusline_info_bg, Color::Indexed(237));
     assert_ne!(theme.addition_fg, Color::Indexed(2));
     assert_ne!(theme.deletion_fg, Color::Indexed(1));
     assert_eq!(row_bg(DiffLineKind::Addition, theme), theme.addition_bg);
@@ -3515,6 +3537,20 @@ fn system_theme_preserves_terminal_base_and_uses_owned_diff_colors() {
         theme.syntax.color(SyntaxClass::String),
         SyntaxPalette::ansi().color(SyntaxClass::String)
     );
+}
+
+#[test]
+fn github_statusline_info_uses_the_subtle_canvas() {
+    for (name, expected) in [
+        ("github-dark", Color::Rgb(0x16, 0x1b, 0x22)),
+        ("github-dark-high-contrast", Color::Rgb(0x27, 0x2b, 0x33)),
+        ("github-light", Color::Rgb(0xf6, 0xf8, 0xfa)),
+        ("github-light-high-contrast", Color::Rgb(0xf6, 0xf8, 0xfa)),
+    ] {
+        let theme = builtin_diff_theme(Some(name)).expect("GitHub theme should load");
+        assert_eq!(theme.statusline_info_bg, expected, "{name}");
+        assert_ne!(theme.statusline_info_bg, theme.empty_diff, "{name}");
+    }
 }
 
 #[test]

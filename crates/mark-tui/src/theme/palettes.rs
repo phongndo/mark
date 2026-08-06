@@ -710,7 +710,7 @@ impl DiffTheme {
             statusline_accent_fg: palette.canvas_default.color(),
             statusline_accent_bg: palette.accent_fg.color(),
             statusline_info_fg: palette.fg_default.color(),
-            statusline_info_bg: palette.canvas_inset.color(),
+            statusline_info_bg: palette.canvas_subtle.color(),
             addition_fg: palette.success_fg.color(),
             addition_gutter_bg: palette
                 .canvas_default

@@ -32,7 +32,7 @@ pub(crate) fn highlighted_cursor_full_line(
     highlighted_cursor_line_in_ranges(line, vec![(0, width)], theme)
 }
 
-fn highlighted_cursor_line_in_ranges(
+pub(crate) fn highlighted_cursor_line_in_ranges(
     line: Line<'static>,
     column_ranges: Vec<(usize, usize)>,
     theme: DiffTheme,

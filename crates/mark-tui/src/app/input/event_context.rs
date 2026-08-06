@@ -108,6 +108,7 @@ impl KeyEventContext for KeyEventCtx<'_> {
 
     fn begin_prefix_if_matches(&mut self, key: KeyEvent) -> bool {
         if self.app.config.keymap.is_prefix(key) {
+            self.app.input.clear_vim_motion();
             self.app.input.begin_key_prefix(KeyPress::from(key));
             self.app.runtime.dirty = true;
             return true;

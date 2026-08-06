@@ -47,6 +47,7 @@ impl Keymap {
         let commit_picker_configured = stored_global.commit_picker.is_some();
         let annotate_line_configured = stored_global.annotate_line.is_some();
         let annotate_batch_configured = stored_global.annotate_batch.is_some();
+        let visual_mode_configured = stored_global.visual_mode.is_some();
         let previous_file_configured = stored_global.previous_file.is_some();
         let next_file_configured = stored_global.next_file.is_some();
 
@@ -79,6 +80,9 @@ impl Keymap {
         }
         if !annotate_batch_configured {
             keymap.clear_default_on_conflict(GlobalAction::AnnotateBatch);
+        }
+        if !visual_mode_configured {
+            keymap.clear_default_on_conflict(GlobalAction::VisualMode);
         }
         // These defaults changed together. Keep explicit bindings from older
         // configs authoritative instead of rejecting the entire keymap when
@@ -273,6 +277,7 @@ struct StoredGlobalKeymap {
     annotation_menu: Option<KeySpec>,
     annotate_line: Option<KeySpec>,
     annotate_batch: Option<KeySpec>,
+    visual_mode: Option<KeySpec>,
     file_browser: Option<KeySpec>,
     #[serde(alias = "prev_file")]
     previous_file: Option<KeySpec>,
@@ -318,6 +323,7 @@ impl StoredGlobalKeymap {
             GlobalAction::AnnotationMenu => self.annotation_menu.take(),
             GlobalAction::AnnotateLine => self.annotate_line.take(),
             GlobalAction::AnnotateBatch => self.annotate_batch.take(),
+            GlobalAction::VisualMode => self.visual_mode.take(),
             GlobalAction::FileBrowser => self.file_browser.take(),
             GlobalAction::PreviousFile => self.previous_file.take(),
             GlobalAction::NextFile => self.next_file.take(),

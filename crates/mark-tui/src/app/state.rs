@@ -6,7 +6,8 @@ use super::{
     TRAILING_CONTEXT_WORKER_POLL, TrailingContextWorker, WrappedVisualLayout,
 };
 use crate::annotation::{
-    AnnotationCursor, AnnotationDraft, AnnotationKey, AnnotationStore, AnnotationTargetMode,
+    AnnotationCursor, AnnotationDraft, AnnotationKey, AnnotationKeyIndex, AnnotationSide,
+    AnnotationStore, AnnotationTargetMode,
 };
 use crate::controls::{BranchMenu, DiffFilterKind, DiffLayoutMode, GitCommit};
 use crate::keymap::{KeyPress, Keymap};
@@ -122,14 +123,25 @@ impl FileSidebarState {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct AnnotationVisualAnchor {
+    pub(crate) model_row: usize,
+    pub(crate) side: AnnotationSide,
+    pub(crate) first_model_row: usize,
+    pub(crate) last_model_row: usize,
+}
+
 #[derive(Debug)]
 pub(crate) struct AnnotationState {
     pub(crate) annotations: AnnotationStore,
     pub(crate) annotation_rows: RefCell<HashMap<AnnotationKey, Option<usize>>>,
-    pub(crate) annotation_keys_by_row: RefCell<Option<HashMap<usize, Vec<AnnotationKey>>>>,
+    pub(crate) annotation_keys_by_row: RefCell<Option<AnnotationKeyIndex>>,
     pub(crate) annotation_heights: RefCell<HashMap<AnnotationKey, AnnotationHeightCacheEntry>>,
     pub(crate) annotation_draft: Option<AnnotationDraft>,
     pub(crate) annotation_cursor: Option<AnnotationCursor>,
+    /// Model-row and split-pane side for Vim-style visual-line selection. The
+    /// head is the current annotation cursor, so extending is allocation-free.
+    pub(crate) visual_anchor: Option<AnnotationVisualAnchor>,
     pub(crate) annotation_block_scroll: Option<(AnnotationKey, usize)>,
     pub(crate) annotation_target_mode: Option<AnnotationTargetMode>,
     pub(crate) sticky_annotation_draft: bool,
@@ -697,6 +709,8 @@ impl NotificationState {
 #[derive(Debug)]
 pub(crate) struct InputState {
     pub(crate) key_prefix_pending: Option<KeyPress>,
+    /// Vim-style count entered before a built-in diff motion.
+    pub(in crate::app) vim_motion_count: Option<usize>,
     pub(crate) mouse_scroll: MouseScroll,
 }
 
@@ -711,6 +725,28 @@ impl InputState {
 
     pub(crate) fn take_key_prefix(&mut self) -> Option<KeyPress> {
         self.key_prefix_pending.take()
+    }
+
+    pub(crate) fn push_vim_motion_digit(&mut self, digit: u32) -> bool {
+        if digit > 9 || (digit == 0 && self.vim_motion_count.is_none()) {
+            return false;
+        }
+        let count = self
+            .vim_motion_count
+            .unwrap_or_default()
+            .saturating_mul(10)
+            .saturating_add(digit as usize)
+            .min(isize::MAX as usize);
+        self.vim_motion_count = Some(count);
+        true
+    }
+
+    pub(crate) fn take_vim_motion_count(&mut self) -> Option<usize> {
+        self.vim_motion_count.take()
+    }
+
+    pub(crate) fn clear_vim_motion(&mut self) -> bool {
+        self.vim_motion_count.take().is_some()
     }
 
     pub(crate) fn reset_mouse_scroll(&mut self) {

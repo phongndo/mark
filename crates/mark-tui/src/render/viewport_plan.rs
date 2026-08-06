@@ -1,7 +1,10 @@
 use crate::{
     annotation::{AnnotationDraft, AnnotationKey},
     app::DiffApp,
-    render::annotations::{annotation_compose_block_height, annotation_saved_block_height},
+    render::{
+        annotation_ranges::{annotation_block_body_width, annotation_block_geometry},
+        annotations::{annotation_compose_block_height, annotation_saved_block_height},
+    },
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,13 +86,12 @@ fn plan_unwrapped_viewport_rows(
 
         for key in app.annotation_keys_at_model_row(visual_row, row) {
             if let Some(draft) = draft.filter(|d| d.model_row_index == visual_row && d.key == key) {
-                push_compose_plan_slots(
-                    &mut plans,
-                    visual_row,
-                    draft,
+                let body_width = annotation_block_body_width(
+                    app.viewport.layout,
                     app.viewport.viewport_width,
-                    visible_rows,
+                    &draft.key,
                 );
+                push_compose_plan_slots(&mut plans, visual_row, draft, body_width, visible_rows);
             } else if let Some(text) = annotations.get(&key)
                 && draft.is_none_or(|d| d.key != key)
             {
@@ -100,12 +102,17 @@ fn plan_unwrapped_viewport_rows(
                     .filter(|(scroll_key, _)| scroll_key == &key)
                     .map(|(_, offset)| *offset)
                     .unwrap_or_default();
+                let body_width = annotation_block_body_width(
+                    app.viewport.layout,
+                    app.viewport.viewport_width,
+                    &key,
+                );
                 push_saved_plan_slots(
                     &mut plans,
                     visual_row,
                     key,
                     text,
-                    app.viewport.viewport_width,
+                    body_width,
                     block_scroll,
                     visible_rows,
                 );
@@ -162,13 +169,12 @@ fn plan_wrapped_viewport_rows(
                 if let Some(draft) =
                     draft.filter(|d| d.model_row_index == row_index && d.key == key)
                 {
-                    push_compose_plan_slots(
-                        &mut plans,
-                        row_index,
-                        draft,
+                    let body_width = annotation_block_body_width(
+                        app.viewport.layout,
                         app.viewport.viewport_width,
-                        visible_rows,
+                        &draft.key,
                     );
+                    push_compose_plan_slots(&mut plans, row_index, draft, body_width, visible_rows);
                 } else if let Some(text) = annotations.get(&key)
                     && draft.is_none_or(|d| d.key != key)
                 {
@@ -179,12 +185,17 @@ fn plan_wrapped_viewport_rows(
                         .filter(|(scroll_key, _)| scroll_key == &key)
                         .map(|(_, offset)| *offset)
                         .unwrap_or_default();
+                    let body_width = annotation_block_body_width(
+                        app.viewport.layout,
+                        app.viewport.viewport_width,
+                        &key,
+                    );
                     push_saved_plan_slots(
                         &mut plans,
                         row_index,
                         key,
                         text,
-                        app.viewport.viewport_width,
+                        body_width,
                         block_scroll,
                         visible_rows,
                     );
@@ -202,10 +213,10 @@ fn push_compose_plan_slots(
     plans: &mut Vec<ViewportSlot>,
     model_row: usize,
     draft: &AnnotationDraft,
-    width: usize,
+    body_width: usize,
     visible_rows: usize,
 ) {
-    let block_height = annotation_compose_block_height(draft, width);
+    let block_height = annotation_compose_block_height(draft, body_width);
     for block_row in 0..block_height {
         if plans.len() >= visible_rows {
             break;
@@ -225,11 +236,11 @@ fn push_saved_plan_slots(
     model_row: usize,
     key: AnnotationKey,
     text: &str,
-    width: usize,
+    body_width: usize,
     block_scroll: usize,
     visible_rows: usize,
 ) {
-    let block_rows = annotation_saved_block_height(text, width);
+    let block_rows = annotation_saved_block_height(text, body_width);
     let block_scroll = block_scroll.min(block_rows.saturating_sub(1));
     for block_row in block_scroll..block_rows {
         if plans.len() >= visible_rows {
@@ -263,6 +274,23 @@ pub(crate) fn model_row_for_viewport_row(app: &DiffApp, viewport_row: u16) -> Op
         ViewportSlotKind::AnnotationCompose { model_row, .. }
         | ViewportSlotKind::AnnotationSaved { model_row, .. } => Some(*model_row),
     }
+}
+
+pub(crate) fn annotation_block_columns_for_viewport_row(
+    app: &DiffApp,
+    viewport_row: u16,
+) -> Option<(usize, usize)> {
+    let plans = plan_diff_viewport_rows(app, app.viewport.viewport_rows.max(1));
+    let slot = plans.get(usize::from(viewport_row))?;
+    let key = match &slot.kind {
+        ViewportSlotKind::AnnotationCompose { .. } => {
+            &app.annotations_state.annotation_draft.as_ref()?.key
+        }
+        ViewportSlotKind::AnnotationSaved { key, .. } => key,
+        ViewportSlotKind::DiffVisual { .. } => return None,
+    };
+    let geometry = annotation_block_geometry(app.viewport.layout, app.viewport.viewport_width, key);
+    Some((geometry.start, geometry.end))
 }
 
 pub(crate) fn compose_block_top_viewport_row(app: &DiffApp, model_row: usize) -> Option<u16> {

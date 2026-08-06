@@ -321,7 +321,7 @@ impl DiffTheme {
             statusline_accent_fg: Color::Indexed(0),
             statusline_accent_bg: Color::Indexed(13),
             statusline_info_fg: Color::Reset,
-            statusline_info_bg: Color::Indexed(0),
+            statusline_info_bg: Color::Indexed(237),
             addition_fg: green.color(),
             addition_gutter_bg: base.blend(green, 0.12).color(),
             addition_bg: Color::Rgb(0x1f, 0x30, 0x25),

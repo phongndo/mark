@@ -7,6 +7,7 @@ use super::super::{
 };
 use crate::model::FileIndex;
 use crate::render::{
+    annotation_ranges::annotation_block_body_width,
     annotations::{annotation_compose_block_height, annotation_saved_block_height},
     viewport_plan::model_row_for_viewport_row,
 };
@@ -38,6 +39,10 @@ impl DiffApp {
         }
         if self.annotation_cursor_enabled() {
             self.ensure_annotation_cursor();
+            if self.annotation_visual_mode_active() {
+                self.move_annotation_cursor(delta);
+                return;
+            }
             if self.annotation_cursor_target_is_rendered() {
                 self.move_annotation_cursor(delta);
                 if self.annotation_cursor_target_is_rendered() {
@@ -54,6 +59,10 @@ impl DiffApp {
         }
         if self.annotation_cursor_enabled() {
             self.ensure_annotation_cursor();
+            if self.annotation_visual_mode_active() {
+                self.move_annotation_cursor_by_visual_delta(delta);
+                return;
+            }
             if self.annotation_cursor_target_is_rendered() {
                 self.move_annotation_cursor_by_visual_delta(delta);
                 if self.annotation_cursor_target_is_rendered() {
@@ -79,6 +88,35 @@ impl DiffApp {
             }
         }
         self.set_scroll(if last { self.max_scroll() } else { 0 });
+    }
+
+    pub(crate) fn navigate_diff_to_viewport_position(&mut self, position: i8, count: usize) {
+        if self.annotations_state.annotation_draft.is_some() {
+            return;
+        }
+        let rows = self.rendered_diff_rows_for_viewport(self.viewport.viewport_rows.max(1));
+        let offset = count.saturating_sub(1).min(rows.len().saturating_sub(1));
+        let Some(target) = (match position.cmp(&0) {
+            std::cmp::Ordering::Less => rows.get(offset),
+            std::cmp::Ordering::Equal => rows.get(rows.len().saturating_sub(1) / 2),
+            std::cmp::Ordering::Greater => {
+                rows.get(rows.len().saturating_sub(1).saturating_sub(offset))
+            }
+        }) else {
+            return;
+        };
+        if self.annotation_cursor_enabled() {
+            self.select_annotation_cursor_model_row(target.model_row);
+        }
+    }
+
+    pub(crate) fn navigate_horizontal_to_boundary(&mut self, last: bool) {
+        self.close_annotation_target_mode();
+        self.set_horizontal_scroll(if last {
+            self.max_horizontal_scroll()
+        } else {
+            0
+        });
     }
 
     pub(crate) fn scroll_or_focus_hunk(&mut self, delta: isize) {
@@ -402,7 +440,12 @@ impl DiffApp {
         }
         if let Some(draft) = self.annotations_state.annotation_draft.as_ref() {
             let anchor = self.annotation_anchor_visual_scroll(draft.model_row_index);
-            let height = annotation_compose_block_height(draft, self.viewport.viewport_width);
+            let body_width = annotation_block_body_width(
+                self.viewport.layout,
+                self.viewport.viewport_width,
+                &draft.key,
+            );
+            let height = annotation_compose_block_height(draft, body_width);
             blocks.push((anchor, height));
         }
         max_scroll_for_annotated_viewport(row_count, self.viewport.viewport_rows, blocks)
@@ -415,16 +458,17 @@ impl DiffApp {
     ) -> usize {
         let text_ptr = text.as_ptr() as usize;
         let text_len = text.len();
-        let width = self.viewport.viewport_width;
+        let body_width =
+            annotation_block_body_width(self.viewport.layout, self.viewport.viewport_width, key);
         if let Some(entry) = self.annotations_state.annotation_heights.borrow().get(key)
             && entry.text_ptr == text_ptr
             && entry.text_len == text_len
-            && entry.width == width
+            && entry.width == body_width
         {
             return entry.height;
         }
 
-        let height = annotation_saved_block_height(text, width);
+        let height = annotation_saved_block_height(text, body_width);
         self.annotations_state
             .annotation_heights
             .borrow_mut()
@@ -433,7 +477,7 @@ impl DiffApp {
                 AnnotationHeightCacheEntry {
                     text_ptr,
                     text_len,
-                    width,
+                    width: body_width,
                     height,
                 },
             );

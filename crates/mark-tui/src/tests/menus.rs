@@ -1004,6 +1004,9 @@ fn review_patch_source_uses_review_selector_label() {
     );
 
     assert_eq!(diff_selector_text(&options), " Review ");
+    let statusline = line_text(&statusline_header_line(&app, 100));
+    assert!(statusline.starts_with(" Review  owner/repo#123 "));
+    assert!(!statusline.contains("review owner/repo#123"));
     assert_eq!(app.current_diff_choice(), Some(DiffChoice::Review));
     assert_eq!(app.selected_diff_menu_choice(), None);
     assert!(app.diff_menu_choices().contains(&DiffChoice::Review));

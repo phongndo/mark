@@ -32,6 +32,7 @@ impl DiffApp {
 
         for action in NORMAL_GLOBAL_ACTIONS.iter().copied() {
             if self.config.keymap.matches_single(action, key) {
+                self.input.clear_vim_motion();
                 return self.perform_global_action(action);
             }
         }
@@ -45,6 +46,7 @@ impl DiffApp {
         key: KeyEvent,
     ) -> MarkResult<bool> {
         self.input.clear_key_prefix();
+        self.input.clear_vim_motion();
 
         if key.code == KeyCode::Esc {
             self.runtime.dirty = true;

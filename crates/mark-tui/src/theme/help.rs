@@ -25,10 +25,15 @@ pub(crate) const HELP_MENU_ROWS: &[HelpMenuRow] = &[
     HelpMenuRow::Binding(HelpMenuKey::Static("Esc"), "close"),
     HelpMenuRow::Section("Navigate"),
     HelpMenuRow::Binding(HelpMenuKey::Static("j/k, ↑/↓"), "navigate vertically"),
-    HelpMenuRow::Binding(HelpMenuKey::Static("d/u, Ctrl-D"), "half page"),
+    HelpMenuRow::Binding(HelpMenuKey::Static("[count] j/k/h/l"), "repeat motion"),
+    HelpMenuRow::Binding(HelpMenuKey::Static("d/u"), "half page"),
     HelpMenuRow::Binding(HelpMenuKey::Static("PgDn/PgUp"), "full page"),
     HelpMenuRow::Binding(HelpMenuKey::Static("g/G, Home/End"), "top / bottom"),
-    HelpMenuRow::Binding(HelpMenuKey::Static("h/l, ←/→"), "horizontal"),
+    HelpMenuRow::Binding(
+        HelpMenuKey::Static("H/M/L"),
+        "viewport top / middle / bottom",
+    ),
+    HelpMenuRow::Binding(HelpMenuKey::Static("h/l, ←/→, 0/$"), "horizontal"),
     HelpMenuRow::Binding(
         HelpMenuKey::GlobalPair(GlobalAction::PreviousFile, GlobalAction::NextFile),
         "file",
@@ -120,8 +125,12 @@ pub(crate) const HELP_MENU_ROWS: &[HelpMenuRow] = &[
     ),
     HelpMenuRow::Section("Annotations"),
     HelpMenuRow::Binding(
+        HelpMenuKey::Global(GlobalAction::VisualMode),
+        "select a line range (Visual mode)",
+    ),
+    HelpMenuRow::Binding(
         HelpMenuKey::Global(GlobalAction::AnnotateLine),
-        "annotate selected line, hunk, or file",
+        "annotate selected line, range, hunk, or file",
     ),
     HelpMenuRow::Binding(
         HelpMenuKey::Global(GlobalAction::AnnotateBatch),

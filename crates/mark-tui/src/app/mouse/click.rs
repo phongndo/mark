@@ -5,7 +5,10 @@ use crate::render::annotations::{
     annotation_close_hit_at_column, annotation_edit_hit_at_column, annotation_submit_hit_at_column,
 };
 use crate::render::menus::diff_selector_width;
-use crate::render::viewport_plan::{model_row_for_viewport_row, visual_scroll_for_viewport_row};
+use crate::render::viewport_plan::{
+    annotation_block_columns_for_viewport_row, model_row_for_viewport_row,
+    visual_scroll_for_viewport_row,
+};
 
 impl DiffApp {
     pub(crate) fn handle_click(&mut self, column: u16, row: u16) {
@@ -143,18 +146,19 @@ impl DiffApp {
         let Some((diff_column, viewport_row)) = self.diff_viewport_position(column, row) else {
             return false;
         };
-        let width = self.viewport.viewport_width;
-        if annotation_submit_hit_at_column(diff_column, width)
+        let annotation_columns = annotation_block_columns_for_viewport_row(self, viewport_row)
+            .unwrap_or((0, self.viewport.viewport_width));
+        if annotation_submit_hit_at_column(diff_column, annotation_columns)
             && self.handle_annotation_submit_click(viewport_row)
         {
             return true;
         }
-        if annotation_edit_hit_at_column(diff_column, width)
+        if annotation_edit_hit_at_column(diff_column, annotation_columns)
             && self.handle_annotation_edit_click(viewport_row)
         {
             return true;
         }
-        if annotation_close_hit_at_column(diff_column, width)
+        if annotation_close_hit_at_column(diff_column, annotation_columns)
             && self.handle_annotation_close_click(viewport_row)
         {
             return true;

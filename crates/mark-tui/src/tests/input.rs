@@ -270,6 +270,388 @@ fn d_key_moves_the_cursor_down_half_a_viewport() {
 }
 
 #[test]
+fn vim_counts_repeat_cursor_motions_and_single_g_keys_jump_to_boundaries() {
+    let lines = vec!["line"; 1_000];
+    let changeset = changeset_with_line_texts(&lines);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(10);
+
+    let initial = app
+        .annotation_cursor_target()
+        .expect("default cursor")
+        .model_row_index;
+    for key in [KeyCode::Char('3'), KeyCode::Char('j')] {
+        app.handle_key(KeyEvent::new(key, KeyModifiers::NONE))
+            .expect("counted motion");
+    }
+    assert_eq!(
+        app.annotation_cursor_target()
+            .expect("moved cursor")
+            .model_row_index,
+        initial + 3
+    );
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE))
+        .expect("g motion");
+    assert_eq!(
+        app.annotation_cursor_target()
+            .expect("first cursor")
+            .model_row_index,
+        0
+    );
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::NONE))
+        .expect("G motion");
+    assert_eq!(
+        app.annotation_cursor_target()
+            .expect("last cursor")
+            .model_row_index,
+        app.document.model.len() - 1
+    );
+}
+
+#[test]
+fn visual_mode_selects_and_annotates_a_line_range() {
+    use crate::annotation::AnnotationScope;
+
+    let lines = vec!["line"; 12];
+    let changeset = changeset_with_line_texts(&lines);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(8);
+    let first_line = app
+        .document
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
+        .expect("first line");
+    app.select_annotation_cursor_model_row(first_line);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE))
+        .expect("enter Visual mode");
+    for key in [KeyCode::Char('2'), KeyCode::Char('j')] {
+        app.handle_key(KeyEvent::new(key, KeyModifiers::NONE))
+            .expect("extend visual selection");
+    }
+    assert!(app.annotation_visual_mode_active());
+    let statusline = statusline_header_line(&app, 100);
+    let statusline_text = line_text(&statusline);
+    let visual = statusline.spans.first().expect("Visual mode status");
+    assert!(statusline_text.starts_with(" VISUAL "));
+    assert!(!statusline_text.contains("All changes"));
+    assert!(!statusline_text.contains("3 lines"));
+    assert_eq!(visual.style.fg, Some(app.config.theme.search_match_fg));
+    assert_eq!(visual.style.bg, Some(app.config.theme.search_match_bg));
+
+    let rendered = crate::render::diff::build_diff_viewport_lines(&mut app, 60, 8);
+    assert_eq!(
+        rendered
+            .iter()
+            .filter(|line| line
+                .spans
+                .iter()
+                .any(|span| span.style.bg == Some(app.config.theme.cursor_line_bg)))
+            .count(),
+        3
+    );
+    assert!(
+        rendered.iter().all(|line| {
+            !matches!(line_text(line).chars().nth(12), Some('┌' | '│' | '├'))
+        })
+    );
+
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("annotate visual selection");
+    let composing = crate::render::diff::build_diff_viewport_lines(&mut app, 60, 12);
+    let composing_text = composing.iter().map(line_text).collect::<Vec<_>>();
+    let card_top = composing_text
+        .iter()
+        .position(|line| line.contains("Add note · +1–3 · 3 lines"))
+        .expect("connected annotation card");
+    let connected_rows = composing_text[..card_top]
+        .iter()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            matches!(line.chars().nth(12), Some('┌' | '│')).then_some(index)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(connected_rows.len(), 3);
+    assert_eq!(card_top, connected_rows[2] + 1);
+    assert!(composing_text[card_top].trim_start().starts_with('├'));
+    assert!(composing_text[card_top].ends_with('┐'));
+    assert!(composing_text[card_top + 2].trim_start().starts_with('└'));
+    assert!(composing_text[card_top + 2].ends_with('┘'));
+    assert!(composing_text.iter().all(|line| {
+        !line
+            .chars()
+            .any(|character| matches!(character, '╭' | '╮' | '╰' | '╯'))
+    }));
+    assert!(!app.annotation_visual_mode_active());
+    assert!(matches!(
+        app.annotations_state
+            .annotation_draft
+            .as_ref()
+            .map(|draft| draft.key.scope),
+        Some(AnnotationScope::Range { new_count: 3, .. })
+    ));
+    for character in "range note".chars() {
+        app.handle_key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE))
+            .expect("type range note");
+    }
+    app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL))
+        .expect("save range note");
+
+    let range_key = app
+        .annotations_state
+        .annotations
+        .keys()
+        .next()
+        .expect("saved range")
+        .clone();
+    app.annotations_state.annotation_rows.borrow_mut().clear();
+    assert_eq!(app.annotation_model_row(&range_key), Some(first_line + 2));
+
+    let json = app.marks_clipboard_json().expect("range marks JSON");
+    assert!(json.contains("\"scope\": \"range\""));
+    assert!(json.contains("\"new_count\": 3"));
+    assert!(json.contains("\"body\": \"range note\""));
+}
+
+#[test]
+fn visual_mode_clamps_cursor_before_context_controls_and_other_files() {
+    let repo = temp_test_dir("visual-hunk-boundary");
+    fs::create_dir_all(&repo).expect("repo directory");
+    fs::write(
+        repo.join("file.rs"),
+        (1..=80)
+            .map(|line| format!("line {line}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .expect("context source");
+    let changeset = changeset_with_hunk_at(repo, 50);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(8);
+    let hunk_line = (0..app.document.model.len())
+        .find(|row| {
+            matches!(
+                app.document.model.row(*row),
+                Some(UiRow::UnifiedLine { .. })
+            )
+        })
+        .expect("hunk line");
+    assert!((0..hunk_line).any(|row| matches!(
+        app.document.model.row(row),
+        Some(UiRow::Collapsed { .. } | UiRow::ContextHide { .. })
+    )));
+    app.select_annotation_cursor_model_row(hunk_line);
+    app.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE))
+        .expect("enter Visual mode");
+
+    for key in [KeyCode::Char('g'), KeyCode::Up, KeyCode::PageUp] {
+        app.handle_key(KeyEvent::new(key, KeyModifiers::NONE))
+            .expect("clamped visual motion");
+        assert_eq!(
+            app.annotation_cursor_target()
+                .expect("hunk cursor")
+                .model_row_index,
+            hunk_line
+        );
+    }
+
+    let changeset = changeset_with_files(&["first.rs", "second.rs"]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(8);
+    let first_file_line = app
+        .document
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { file, .. } if *file == FILE_0))
+        .expect("first file line");
+    app.select_annotation_cursor_model_row(first_file_line);
+    app.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE))
+        .expect("enter Visual mode");
+    for key in [
+        KeyCode::Char('G'),
+        KeyCode::Down,
+        KeyCode::PageDown,
+        KeyCode::Tab,
+    ] {
+        app.handle_key(KeyEvent::new(key, KeyModifiers::NONE))
+            .expect("clamped visual motion");
+        let target = app.annotation_cursor_target().expect("first hunk cursor");
+        assert_eq!(target.model_row_index, first_file_line);
+        assert_eq!(
+            app.document.model.file_at_row(target.model_row_index),
+            Some(FILE_0.get())
+        );
+    }
+}
+
+#[test]
+fn replacement_range_uses_one_continuous_unified_connector() {
+    let changeset = changeset_with_replacement_pair();
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_width(60);
+    app.set_viewport_rows(10);
+    let deletion = app
+        .document
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { line: LINE_0, .. }))
+        .expect("deletion row");
+    let addition = app
+        .document
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { line: LINE_1, .. }))
+        .expect("addition row");
+    app.select_annotation_cursor_model_row(deletion);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE))
+        .expect("enter Visual mode");
+    app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE))
+        .expect("select the addition");
+    assert_eq!(
+        app.annotation_cursor_target()
+            .expect("addition cursor")
+            .model_row_index,
+        addition
+    );
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("annotate replacement range");
+
+    let rendered = crate::render::diff::build_diff_viewport_lines(&mut app, 60, 10)
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>();
+    let deletion_line = rendered
+        .iter()
+        .find(|line| line.contains("old"))
+        .expect("rendered deletion");
+    let addition_line = rendered
+        .iter()
+        .find(|line| line.contains("new"))
+        .expect("rendered addition");
+    let card = rendered
+        .iter()
+        .find(|line| line.contains("Add note · -1 → +1 · 2 lines"))
+        .expect("replacement annotation card");
+
+    assert_eq!(deletion_line.chars().nth(12), Some('┌'));
+    assert_eq!(deletion_line.chars().nth(13), Some('-'));
+    assert_eq!(addition_line.chars().nth(12), Some('│'));
+    assert_eq!(addition_line.chars().nth(13), Some('+'));
+    assert_eq!(card.chars().nth(12), Some('├'));
+    assert_ne!(deletion_line.chars().nth(6), Some('┌'));
+}
+
+#[test]
+fn replacement_range_connector_continues_across_metadata() {
+    let mut changeset = changeset_with_replacement_pair();
+    changeset.files[0].hunks_mut()[0]
+        .lines
+        .insert(1, DiffLine::meta("\\ No newline at end of file"));
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_width(60);
+    app.set_viewport_rows(10);
+    let deletion = app
+        .document
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { line: LINE_0, .. }))
+        .expect("deletion row");
+    app.select_annotation_cursor_model_row(deletion);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE))
+        .expect("enter Visual mode");
+    app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE))
+        .expect("select addition across metadata");
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("annotate replacement range");
+
+    let rendered = crate::render::diff::build_diff_viewport_lines(&mut app, 60, 10)
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>();
+    let addition_line = rendered
+        .iter()
+        .find(|line| line.chars().nth(13) == Some('+'))
+        .expect("rendered addition");
+    let meta_line = rendered
+        .iter()
+        .find(|line| line.contains("No newline at end of file"))
+        .expect("rendered metadata");
+    assert_eq!(addition_line.chars().nth(12), Some('│'));
+    assert_eq!(meta_line.chars().nth(12), Some('│'));
+}
+
+#[test]
+fn single_line_annotation_uses_a_connected_angular_card() {
+    let changeset = changeset_with_line_texts(&["line"; 6]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_width(60);
+    app.set_viewport_rows(10);
+    let first_line = app
+        .document
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
+        .expect("first line");
+    app.select_annotation_cursor_model_row(first_line);
+
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("annotate selected line");
+
+    let rendered = crate::render::diff::build_diff_viewport_lines(&mut app, 60, 10)
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>();
+    let target = rendered
+        .iter()
+        .position(|line| line.chars().nth(12) == Some('┌'))
+        .expect("single-line connector");
+    let card = rendered
+        .iter()
+        .position(|line| line.contains("Add note · +1"))
+        .expect("single-line annotation card");
+    assert_eq!(card, target + 1);
+    assert!(rendered[card].trim_start().starts_with('├'));
+    assert!(rendered[card].ends_with('┐'));
+    assert!(rendered[card + 2].trim_start().starts_with('└'));
+    assert!(rendered[card + 2].ends_with('┘'));
+}
+
+#[test]
+fn escape_leaves_visual_mode_without_moving_the_cursor() {
+    let changeset = changeset_with_line_texts(&["line"; 10]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_rows(8);
+    let row = app
+        .annotation_cursor_target()
+        .expect("default cursor")
+        .model_row_index;
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE))
+        .expect("enter Visual mode");
+    app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+        .expect("leave Visual mode");
+
+    assert!(!app.annotation_visual_mode_active());
+    assert_eq!(
+        app.annotation_cursor_target()
+            .expect("cursor remains")
+            .model_row_index,
+        row
+    );
+}
+
+#[test]
 fn flat_page_keys_move_the_annotation_cursor_by_viewport_relative_amounts() {
     let lines = vec!["line"; 100];
     let changeset = changeset_with_line_texts(&lines);
@@ -1690,7 +2072,6 @@ fn f_key_filters_files_and_escape_clears_filter() {
     assert_eq!(app.document.generation, generation_before_input);
     assert_eq!(app.filters.file_filter, "tui");
     assert_eq!(visible_paths(&app), vec!["mark-tui/src/lib.rs"]);
-    assert_eq!(statusline_file_count_label(&app), "1/3 files");
     assert!(line_text(&filter_bar_line(&app, 40)).starts_with("@tui"));
     assert!(!line_text(&statusline_header_line(&app, 120)).contains("f:tui"));
     assert!(app.filters.filter_input.is_none());
