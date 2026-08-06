@@ -2682,7 +2682,7 @@ fn file_sidebar_separator_drag_resizes_sidebar() {
 fn diff_header_labels_describe_selected_source() {
     let mut options = DiffOptions::default();
 
-    assert_eq!(diff_selector_text(&options), " All changes ");
+    assert_eq!(diff_selector_text(&options), " All Changes ");
     assert_eq!(diff_comparison_label(&options), "HEAD → working tree");
 
     options.source = DiffSource::Base("origin/main".into());

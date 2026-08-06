@@ -138,8 +138,8 @@ pub(crate) fn branch_menu_area(app: &DiffApp, area: Rect) -> Option<Rect> {
 pub(crate) fn branch_menu_block(theme: DiffTheme, menu: BranchMenu) -> Block<'static> {
     let bg = base_bg(theme);
     let title = match menu {
-        BranchMenu::Head => " head branch ",
-        BranchMenu::Base => " base branch ",
+        BranchMenu::Head => " Head Branch ",
+        BranchMenu::Base => " Base Branch ",
     };
     if !theme.decorations.show_borders() {
         return Block::default()
@@ -174,7 +174,7 @@ pub(crate) fn commit_menu_block(theme: DiffTheme) -> Block<'static> {
         .style(Style::default().bg(bg))
         .padding(Padding::horizontal(1))
         .title(Line::from(Span::styled(
-            " commit ",
+            " Show ",
             Style::default()
                 .fg(selector_title_color(theme))
                 .bg(bg)

@@ -357,7 +357,7 @@ fn default_review_actions_use_mnemonic_keys() {
     assert!(keymap.matches_prefix(
         GlobalAction::CommitPicker,
         m,
-        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE)
+        KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE)
     ));
     assert!(keymap.matches_prefix(
         GlobalAction::HeadBranch,
@@ -469,7 +469,7 @@ fn default_review_actions_use_mnemonic_keys() {
     assert_eq!(keymap.global_action_label(GlobalAction::BaseBranch), "m b");
     assert_eq!(
         keymap.global_action_label(GlobalAction::CommitPicker),
-        "m c"
+        "m s"
     );
     assert_eq!(
         keymap.global_action_label(GlobalAction::NextDiffType),

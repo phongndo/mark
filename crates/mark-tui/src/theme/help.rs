@@ -106,7 +106,7 @@ pub(crate) const HELP_MENU_ROWS: &[HelpMenuRow] = &[
     ),
     HelpMenuRow::Binding(
         HelpMenuKey::Global(GlobalAction::CommitPicker),
-        "select commit",
+        "select revision",
     ),
     HelpMenuRow::Binding(
         HelpMenuKey::Global(GlobalAction::OptionsMenu),

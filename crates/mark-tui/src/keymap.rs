@@ -158,7 +158,7 @@ const GLOBAL_ACTION_SPECS: &[GlobalActionSpec] = &[
     global_action_spec!(GlobalAction::ReviewTarget, "review_target", ["m r"]),
     global_action_spec!(GlobalAction::HeadBranch, "head_branch", ["m h"]),
     global_action_spec!(GlobalAction::BaseBranch, "base_branch", ["m b"]),
-    global_action_spec!(GlobalAction::CommitPicker, "commit_picker", ["m c"]),
+    global_action_spec!(GlobalAction::CommitPicker, "commit_picker", ["m s"]),
     global_action_spec!(GlobalAction::OptionsMenu, "options_menu", ["o"]),
     global_action_spec!(GlobalAction::AnnotationMenu, "annotation_menu", ["n"], 1),
     global_action_spec!(GlobalAction::AnnotateLine, "annotate_line", ["enter"], 1),

@@ -1569,7 +1569,7 @@ fn statusline_header_uses_lualine_sections_and_short_file_name() {
     let text = line_text(&line);
 
     assert_eq!(text.width(), 80);
-    assert!(text.starts_with(" All changes  HEAD  +"));
+    assert!(text.starts_with(" All Changes  HEAD  +"));
     assert!(!text.contains("working tree"));
     assert!(!text.contains("docs/README.md"));
     assert!(!text.contains("2/3"));
