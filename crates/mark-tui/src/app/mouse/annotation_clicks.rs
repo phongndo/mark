@@ -1,5 +1,6 @@
 use super::super::{DiffApp, HunkFocusScrollBehavior, annotation_scroll_for_block};
 use crate::annotation::{AnnotationDraft, AnnotationKey, AnnotationScope};
+use crate::render::annotation_ranges::annotation_block_body_width;
 use crate::render::annotations::annotation_compose_block_height;
 use crate::render::viewport_plan::{
     annotation_saved_key_at_bottom_border, annotation_saved_key_at_top_border,
@@ -32,6 +33,14 @@ impl DiffApp {
         }
     }
 
+    pub(crate) fn annotation_block_label(&self, key: &AnnotationKey, composing: bool) -> String {
+        format!(
+            "{} · {}",
+            if composing { "Add note" } else { "Note" },
+            key.target_label()
+        )
+    }
+
     pub(crate) fn annotation_label(&self, key: &AnnotationKey) -> Option<String> {
         let target = match key.scope {
             AnnotationScope::File => "file".to_owned(),
@@ -41,6 +50,21 @@ impl DiffApp {
                 new_start,
                 new_count,
             } => format!("@@ -{old_start},{old_count} +{new_start},{new_count} @@"),
+            AnnotationScope::Range {
+                old_start,
+                old_count,
+                new_start,
+                new_count,
+            } => {
+                let mut ranges = Vec::with_capacity(2);
+                if old_count > 0 {
+                    ranges.push(format!("-{old_start},{old_count}"));
+                }
+                if new_count > 0 {
+                    ranges.push(format!("+{new_start},{new_count}"));
+                }
+                format!("range {}", ranges.join(" "))
+            }
             AnnotationScope::Line => format!("{}{}", key.side.label(), key.line),
         };
         Some(format!("{} {target}", key.path))
@@ -161,7 +185,12 @@ impl DiffApp {
             .as_ref()
             .map(|draft| {
                 let anchor = self.annotation_anchor_visual_scroll(draft.model_row_index);
-                let height = annotation_compose_block_height(draft, self.viewport.viewport_width);
+                let body_width = annotation_block_body_width(
+                    self.viewport.layout,
+                    self.viewport.viewport_width,
+                    &draft.key,
+                );
+                let height = annotation_compose_block_height(draft, body_width);
                 (
                     draft.model_row_index,
                     anchor,

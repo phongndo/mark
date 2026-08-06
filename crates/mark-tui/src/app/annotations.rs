@@ -2,7 +2,10 @@ use super::{
     DiffApp, HunkFocusScrollBehavior, POST_EDITOR_QUIT_KEY_IGNORE, create_annotation_scratch_file,
     normalize_annotation_editor_contents, viewport_center_offset,
 };
-use crate::annotation::{AnnotationDraft, AnnotationKey, AnnotationScope, AnnotationSide};
+use crate::annotation::{
+    AnnotationConnectorInterval, AnnotationDraft, AnnotationKey, AnnotationKeyIndex,
+    AnnotationScope, AnnotationSide,
+};
 use crate::editor::{configured_editor, open_text_in_editor};
 use crate::keymap::{AnnotationMenuAction, GlobalAction, MenuAction};
 use crate::model::{DiffLineIndex, FileIndex, HunkIndex, UiRow};
@@ -284,10 +287,25 @@ impl DiffApp {
                 break;
             }
         }
-        found.extend(missing.into_iter().map(|key| {
-            let model_row = self.find_annotation_model_row(&key);
-            (key, model_row)
-        }));
+        if !missing.is_empty() {
+            let file_indices_by_side_path =
+                annotation_file_indices_by_side_path(&self.document.changeset);
+            found.extend(missing.into_iter().map(|key| {
+                let model_row = file_indices_by_side_path
+                    .get(&(key.side, key.path.as_str()))
+                    .and_then(|file_indices| {
+                        file_indices.iter().find_map(|file_index| {
+                            let file = self.document.changeset.files.get(*file_index)?;
+                            self.find_annotation_model_row_in_file(
+                                &key,
+                                FileIndex::new(*file_index),
+                                file,
+                            )
+                        })
+                    });
+                (key, model_row)
+            }));
+        }
         self.annotations_state
             .annotation_rows
             .borrow_mut()
@@ -305,14 +323,89 @@ impl DiffApp {
             return;
         }
         self.cache_annotation_model_rows();
+        let mut index = AnnotationKeyIndex::default();
+        if self.annotations_state.annotations.is_empty() {
+            *self.annotations_state.annotation_keys_by_row.borrow_mut() = Some(index);
+            return;
+        }
         let annotation_rows = self.annotations_state.annotation_rows.borrow();
-        let mut keys_by_row = HashMap::<usize, Vec<AnnotationKey>>::new();
+        let file_indices_by_side_path =
+            annotation_file_indices_by_side_path(&self.document.changeset);
         for key in self.annotations_state.annotations.keys() {
-            if let Some(model_row) = annotation_rows.get(key).copied().flatten() {
-                keys_by_row.entry(model_row).or_default().push(key.clone());
+            let Some(model_row) = annotation_rows.get(key).copied().flatten() else {
+                // Connectors without a current anchor would have no card.
+                continue;
+            };
+            index
+                .anchors_by_model_row
+                .entry(model_row)
+                .or_default()
+                .push(key.clone());
+            let Some(file_indices) = file_indices_by_side_path.get(&(key.side, key.path.as_str()))
+            else {
+                continue;
+            };
+            for &file_index in file_indices {
+                match key.scope {
+                    AnnotationScope::Line if key.is_line() => {
+                        index
+                            .line_connectors_by_coordinate
+                            .entry((file_index, key.side, key.line))
+                            .or_default()
+                            .push(key.clone());
+                    }
+                    AnnotationScope::Range {
+                        old_start,
+                        old_count,
+                        new_start,
+                        new_count,
+                    } => {
+                        for (side, start, count) in [
+                            (AnnotationSide::Old, old_start, old_count),
+                            (AnnotationSide::New, new_start, new_count),
+                        ] {
+                            if count == 0 {
+                                continue;
+                            }
+                            index
+                                .range_connectors_by_file_side
+                                .entry((file_index, side))
+                                .or_default()
+                                .entries
+                                .push(AnnotationConnectorInterval {
+                                    start,
+                                    end: start.saturating_add(count.saturating_sub(1)),
+                                    key: key.clone(),
+                                });
+                        }
+                    }
+                    AnnotationScope::File
+                    | AnnotationScope::Hunk { .. }
+                    | AnnotationScope::Line => {}
+                }
             }
         }
-        *self.annotations_state.annotation_keys_by_row.borrow_mut() = Some(keys_by_row);
+        for keys in index.anchors_by_model_row.values_mut() {
+            keys.sort_unstable();
+        }
+        for keys in index.line_connectors_by_coordinate.values_mut() {
+            keys.sort_unstable();
+        }
+        for intervals in index.range_connectors_by_file_side.values_mut() {
+            intervals.entries.sort_unstable_by(|left, right| {
+                (left.start, left.end, &left.key).cmp(&(right.start, right.end, &right.key))
+            });
+            let mut max_end = 0usize;
+            intervals.prefix_max_end = intervals
+                .entries
+                .iter()
+                .map(|interval| {
+                    max_end = max_end.max(interval.end);
+                    max_end
+                })
+                .collect();
+        }
+        *self.annotations_state.annotation_keys_by_row.borrow_mut() = Some(index);
     }
 
     pub(crate) fn annotation_keys_at_model_row(
@@ -336,7 +429,7 @@ impl DiffApp {
             .annotation_keys_by_row
             .borrow()
             .as_ref()
-            .and_then(|keys_by_row| keys_by_row.get(&model_row))
+            .and_then(|index| index.anchors_by_model_row.get(&model_row))
         {
             for key in anchored_keys {
                 if !keys.contains(key) {
@@ -344,6 +437,55 @@ impl DiffApp {
                 }
             }
         }
+        keys
+    }
+
+    pub(crate) fn annotation_connector_keys_at_model_row(
+        &self,
+        model_row: usize,
+        row: UiRow,
+    ) -> Vec<AnnotationKey> {
+        let Some(file_index) = self.document.model.file_at_row(model_row) else {
+            return Vec::new();
+        };
+        self.cache_annotation_keys_by_model_row();
+        let index = self.annotations_state.annotation_keys_by_row.borrow();
+        let Some(index) = index.as_ref() else {
+            return Vec::new();
+        };
+        let mut keys = Vec::new();
+        for preferred_side in [AnnotationSide::Old, AnnotationSide::New] {
+            let Some((side, line)) = AnnotationKey::line_coordinates_from_ui_row(
+                &self.document.changeset,
+                row,
+                preferred_side,
+            ) else {
+                continue;
+            };
+            if let Some(candidates) = index
+                .line_connectors_by_coordinate
+                .get(&(file_index, side, line))
+            {
+                keys.extend(candidates.iter().cloned());
+            }
+            if let Some(intervals) = index.range_connectors_by_file_side.get(&(file_index, side)) {
+                let mut interval_index = intervals
+                    .entries
+                    .partition_point(|interval| interval.start <= line);
+                while interval_index > 0 {
+                    interval_index -= 1;
+                    if intervals.prefix_max_end[interval_index] < line {
+                        break;
+                    }
+                    let interval = &intervals.entries[interval_index];
+                    if interval.end >= line {
+                        keys.push(interval.key.clone());
+                    }
+                }
+            }
+        }
+        keys.sort_unstable();
+        keys.dedup();
         keys
     }
 
@@ -362,82 +504,111 @@ impl DiffApp {
     }
 
     fn find_annotation_model_row(&self, key: &AnnotationKey) -> Option<usize> {
-        for (file_index, file) in self.document.changeset.files.iter().enumerate() {
-            if AnnotationKey::path_for_side(file, key.side) != Some(key.path.as_str()) {
+        self.document
+            .changeset
+            .files
+            .iter()
+            .enumerate()
+            .filter(|(_, file)| {
+                AnnotationKey::path_for_side(file, key.side) == Some(key.path.as_str())
+            })
+            .find_map(|(file_index, file)| {
+                self.find_annotation_model_row_in_file(key, FileIndex::new(file_index), file)
+            })
+    }
+
+    fn find_annotation_model_row_in_file(
+        &self,
+        key: &AnnotationKey,
+        file_index: FileIndex,
+        file: &mark_diff::DiffFile,
+    ) -> Option<usize> {
+        match key.scope {
+            AnnotationScope::File => return self.document.model.file_start_row(file_index.get()),
+            AnnotationScope::Hunk {
+                old_start,
+                old_count,
+                new_start,
+                new_count,
+            } => {
+                let hunk = file.hunks().iter().position(|hunk| {
+                    hunk.old_start() == old_start
+                        && hunk.old_count() == old_count
+                        && hunk.new_start() == new_start
+                        && hunk.new_count() == new_count
+                })?;
+                let hunk_index = HunkIndex::new(hunk);
+                return self
+                    .document
+                    .model
+                    .hunk_header_row(file_index, hunk_index)
+                    .map(crate::model::ModelRow::get)
+                    .or_else(|| {
+                        self.document
+                            .model
+                            .hunk_row_range(file_index.get(), hunk_index.get())
+                            .and_then(|range| (!range.is_empty()).then_some(range.start))
+                    });
+            }
+            AnnotationScope::Range {
+                old_start,
+                old_count,
+                new_start,
+                new_count,
+            } => {
+                return [
+                    (AnnotationSide::Old, old_start, old_count),
+                    (AnnotationSide::New, new_start, new_count),
+                ]
+                .into_iter()
+                .filter(|(_, _, count)| *count > 0)
+                .filter_map(|(side, start, count)| {
+                    let line = start.saturating_add(count.saturating_sub(1));
+                    self.model_row_for_source_coordinate(file_index, file, side, line)
+                })
+                .max();
+            }
+            AnnotationScope::Line => {}
+        }
+        let model_row =
+            self.model_row_for_source_coordinate(file_index, file, key.side, key.line)?;
+        let row = self.document.model.row(model_row)?;
+        AnnotationKey::candidates_from_ui_row(&self.document.changeset, row)
+            .contains(key)
+            .then_some(model_row)
+    }
+
+    fn model_row_for_source_coordinate(
+        &self,
+        file_index: FileIndex,
+        file: &mark_diff::DiffFile,
+        side: AnnotationSide,
+        line: usize,
+    ) -> Option<usize> {
+        for (hunk_index, hunk) in file.hunks().iter().enumerate() {
+            let line_index = hunk.lines.iter().position(|candidate| match side {
+                AnnotationSide::Old => candidate.old_line() == Some(line),
+                AnnotationSide::New => candidate.new_line() == Some(line),
+            });
+            let Some(line_index) = line_index else {
                 continue;
-            }
-            let file_index = FileIndex::new(file_index);
-            match key.scope {
-                AnnotationScope::File => {
-                    return self.document.model.file_start_row(file_index.get());
-                }
-                AnnotationScope::Hunk {
-                    old_start,
-                    old_count,
-                    new_start,
-                    new_count,
-                } => {
-                    let hunk = file.hunks().iter().position(|hunk| {
-                        hunk.old_start() == old_start
-                            && hunk.old_count() == old_count
-                            && hunk.new_start() == new_start
-                            && hunk.new_count() == new_count
-                    })?;
-                    let hunk_index = HunkIndex::new(hunk);
-                    return self
-                        .document
-                        .model
-                        .hunk_header_row(file_index, hunk_index)
-                        .map(crate::model::ModelRow::get)
-                        .or_else(|| {
-                            self.document
-                                .model
-                                .hunk_row_range(file_index.get(), hunk_index.get())
-                                .and_then(|range| (!range.is_empty()).then_some(range.start))
-                        });
-                }
-                AnnotationScope::Line => {}
-            }
-            for (hunk_index, hunk) in file.hunks().iter().enumerate() {
-                let line_index = hunk.lines.iter().position(|line| match key.side {
-                    AnnotationSide::Old => line.old_line() == Some(key.line),
-                    AnnotationSide::New => line.new_line() == Some(key.line),
-                });
-                let Some(line_index) = line_index else {
-                    continue;
-                };
-                let Some(model_row) = self.document.model.diff_line_row(
-                    file_index,
-                    HunkIndex::new(hunk_index),
-                    DiffLineIndex::new(line_index),
-                ) else {
-                    continue;
-                };
-                let Some(row) = self.document.model.row(model_row.get()) else {
-                    continue;
-                };
-                if AnnotationKey::candidates_from_ui_row(&self.document.changeset, row)
-                    .contains(key)
-                {
-                    return Some(model_row.get());
-                }
-            }
-            let side = match key.side {
-                AnnotationSide::Old => DiffSide::Old,
-                AnnotationSide::New => DiffSide::New,
             };
-            if let Some(model_row) = self
-                .document
-                .model
-                .context_line_row_for_side(file_index, side, key.line)
-                && let Some(row) = self.document.model.row(model_row.get())
-                && AnnotationKey::candidates_from_ui_row(&self.document.changeset, row)
-                    .contains(key)
-            {
+            if let Some(model_row) = self.document.model.diff_line_row(
+                file_index,
+                HunkIndex::new(hunk_index),
+                DiffLineIndex::new(line_index),
+            ) {
                 return Some(model_row.get());
             }
         }
-        None
+        let side = match side {
+            AnnotationSide::Old => DiffSide::Old,
+            AnnotationSide::New => DiffSide::New,
+        };
+        self.document
+            .model
+            .context_line_row_for_side(file_index, side, line)
+            .map(crate::model::ModelRow::get)
     }
 
     pub(crate) fn move_annotation(&mut self, delta: isize) {
@@ -718,4 +889,21 @@ impl DiffApp {
         }
         self.runtime.dirty = true;
     }
+}
+
+fn annotation_file_indices_by_side_path(
+    changeset: &mark_diff::Changeset,
+) -> HashMap<(AnnotationSide, &str), Vec<usize>> {
+    let mut file_indices: HashMap<(AnnotationSide, &str), Vec<usize>> = HashMap::new();
+    for (file_index, file) in changeset.files.iter().enumerate() {
+        for side in [AnnotationSide::Old, AnnotationSide::New] {
+            if let Some(path) = AnnotationKey::path_for_side(file, side) {
+                file_indices
+                    .entry((side, path))
+                    .or_default()
+                    .push(file_index);
+            }
+        }
+    }
+    file_indices
 }

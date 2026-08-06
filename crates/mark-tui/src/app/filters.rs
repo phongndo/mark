@@ -361,6 +361,10 @@ impl DiffApp {
     }
 
     pub(crate) fn move_grep_match(&mut self, delta: isize) {
+        if self.annotation_visual_mode_active() {
+            self.move_annotation_cursor(delta);
+            return;
+        }
         if self.filters.grep_filter.is_empty() {
             self.filters.selected_grep_match = None;
             return;

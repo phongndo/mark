@@ -80,6 +80,7 @@ options_menu = "o"
 annotation_menu = "n"
 annotate_line = "enter"
 annotate_batch = "A"
+visual_mode = ["v", "V"]
 file_browser = "b"
 previous_file = "shift-tab"
 next_file = "tab"
@@ -345,12 +346,23 @@ targeting = "cursor"
 ```
 
 The row highlight is active whenever the diff has focus. Move it with `j` / `k`
-or Up / Down. `d` / `u` move half a viewport; Page Up / Page Down move a full
-viewport. `g` / `G` or Home / End jump to the first or last target. As with
-Vim's `scrolloff=8`, the selection stays eight rows from either viewport edge
-while scrolling, except near diff boundaries or in short viewports. Press
-`Enter` on a code line, hunk header, or file header to annotate that line,
-entire hunk, or entire file; `A` annotates and advances after save.
+or Up / Down. Cursor motions accept Vim-style counts (`3j`, `5k`, `4l`). `d` /
+`u` move half a viewport, while Page Up / Page Down move a full viewport. `g` /
+`G` or Home / End jump to the first or last target. `H`, `M`, and `L` move to
+the top, middle, and bottom visible row, while `0` / `$` move to the horizontal
+boundaries.
+
+As with Vim's `scrolloff=8`, the selection stays eight rows from either viewport
+edge while scrolling, except near diff boundaries or in short viewports. Press
+`v` or `V` to enter linewise Visual mode, extend the selection with any cursor
+motion, and press `Enter` to annotate the selected range. Motions are clamped to
+the current hunk or contiguous full-file context block. The status line names
+the selected side and source lines. Visual mode shows only the selection tint;
+a square gutter rail and inline card appear after `Enter` creates the draft.
+Split-view cards remain in the selected pane. `Esc`, `v`, or `V` leaves Visual
+mode. Outside Visual mode, `Enter` on a code line, hunk header, or
+file header annotates that line, entire hunk, or entire file; `A` annotates and
+advances after save.
 
 The previous label-jump workflow remains available:
 
@@ -425,8 +437,8 @@ Global bindings can be one-key or two-key bindings. A one-key global binding
 cannot also be used as a two-key prefix. Menu bindings are single-key and apply
 to searchable menus. Printable menu bindings override text input, so prefer
 non-printing keys to keep type-to-filter behavior. `annotate_line`,
-`annotate_batch`, `edit_hunk`, `save_mark`, and `cancel_mark` must be single-key
-bindings.
+`annotate_batch`, `visual_mode`, `edit_hunk`, `save_mark`, and `cancel_mark` must
+be single-key bindings.
 
 Bindings can be a string or a list of strings:
 
@@ -442,6 +454,7 @@ commit_picker = "m c"
 full_file = "e"
 annotate_line = "enter"
 annotate_batch = "A"
+visual_mode = ["v", "V"]
 copy_marks = "y"
 save_mark = "ctrl-s"
 cancel_mark = "esc"

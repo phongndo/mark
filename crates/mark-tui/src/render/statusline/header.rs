@@ -1,3 +1,6 @@
+use std::path::Path;
+
+use mark_diff::{DiffSource, PatchSource};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -35,8 +38,8 @@ pub(crate) fn statusline_header_line(app: &DiffApp, width: usize) -> Line<'stati
     }
 
     let right_max_width = statusline_right_max_width(width);
-    let right = statusline_file_label(app, right_max_width);
-    let right_width = right.width();
+    let right = statusline_file_spans(app, right_max_width);
+    let right_width = right.iter().map(|span| span.content.width()).sum::<usize>();
     let mut left_width = width.saturating_sub(right_width);
     let mut spans = Vec::new();
 
@@ -49,15 +52,7 @@ pub(crate) fn statusline_header_line(app: &DiffApp, width: usize) -> Line<'stati
             Style::default().bg(statusline_bg(app.config.theme)),
         ));
     }
-    if right_width > 0 {
-        spans.push(Span::styled(
-            right,
-            Style::default()
-                .fg(app.config.theme.statusline_info_fg)
-                .bg(app.config.theme.statusline_info_bg)
-                .add_modifier(Modifier::BOLD),
-        ));
-    }
+    spans.extend(right);
 
     Line::from(spans)
 }
@@ -67,127 +62,73 @@ pub(crate) fn push_statusline_left_spans(
     app: &DiffApp,
     remaining: &mut usize,
 ) {
-    push_fitted_statusline_span(
-        spans,
-        diff_selector_text(&app.document.options),
-        Style::default()
-            .fg(app.config.theme.statusline_accent_fg)
-            .bg(app.config.theme.statusline_accent_bg)
-            .add_modifier(Modifier::BOLD),
-        remaining,
-    );
+    let visual_mode = app.annotation_visual_mode_active();
+    let selector_text = if visual_mode {
+        " VISUAL ".to_owned()
+    } else {
+        diff_selector_text(&app.document.options)
+    };
+    push_fitted_statusline_span(spans, selector_text, statusline_mode_style(app), remaining);
+    let info_bg = app.config.theme.statusline_info_bg;
     push_fitted_statusline_span(
         spans,
         STATUSLINE_SELECTOR_GAP,
-        Style::default().bg(statusline_bg(app.config.theme)),
+        Style::default().bg(info_bg),
         remaining,
     );
     if app.is_show_diff()
         && let Some(commit) = app.commit_selector_text()
     {
-        push_fitted_statusline_span(
-            spans,
-            commit,
-            Style::default()
-                .fg(app.config.theme.header)
-                .bg(statusline_bg(app.config.theme))
-                .add_modifier(Modifier::BOLD),
-            remaining,
-        );
+        push_fitted_statusline_span(spans, commit, statusline_info_style(app), remaining);
     } else if app.is_branch_diff()
         && let (Some(head), Some(base)) = (
             app.branch_selector_text(BranchMenu::Head),
             app.branch_selector_text(BranchMenu::Base),
         )
     {
-        push_fitted_statusline_span(
-            spans,
-            head,
-            Style::default()
-                .fg(app.config.theme.header)
-                .bg(statusline_bg(app.config.theme))
-                .add_modifier(Modifier::BOLD),
-            remaining,
-        );
+        push_fitted_statusline_span(spans, head, statusline_info_style(app), remaining);
         push_fitted_statusline_span(
             spans,
             app.config.theme.decorations.comparison_separator(),
-            Style::default()
-                .fg(app.config.theme.muted)
-                .bg(statusline_bg(app.config.theme)),
+            Style::default().fg(app.config.theme.muted).bg(info_bg),
             remaining,
         );
-        push_fitted_statusline_span(
-            spans,
-            base,
-            Style::default()
-                .fg(app.config.theme.header)
-                .bg(statusline_bg(app.config.theme))
-                .add_modifier(Modifier::BOLD),
-            remaining,
-        );
+        push_fitted_statusline_span(spans, base, statusline_info_style(app), remaining);
     } else {
-        push_fitted_statusline_span(
-            spans,
-            diff_comparison_label_for_theme(&app.document.options, app.config.theme),
-            Style::default()
-                .fg(app.config.theme.muted)
-                .bg(statusline_bg(app.config.theme)),
-            remaining,
-        );
+        let source = match &app.document.options.source {
+            DiffSource::Worktree => "HEAD".to_owned(),
+            DiffSource::Patch(PatchSource::Review { label, .. }) => label
+                .as_str()
+                .strip_prefix("review ")
+                .unwrap_or(label.as_str())
+                .to_owned(),
+            _ => diff_comparison_label_for_theme(&app.document.options, app.config.theme),
+        };
+        push_fitted_statusline_span(spans, source, statusline_info_style(app), remaining);
     }
-    push_fitted_statusline_span(
-        spans,
-        "  ",
-        Style::default().bg(statusline_bg(app.config.theme)),
-        remaining,
-    );
-    push_fitted_statusline_span(
-        spans,
-        statusline_file_count_label(app),
-        Style::default()
-            .fg(app.config.theme.foreground)
-            .bg(statusline_bg(app.config.theme)),
-        remaining,
-    );
-    push_fitted_statusline_span(
-        spans,
-        "  ",
-        Style::default().bg(statusline_bg(app.config.theme)),
-        remaining,
-    );
+    push_fitted_statusline_span(spans, "  ", Style::default().bg(info_bg), remaining);
     push_fitted_statusline_span(
         spans,
         format!("+{}", format_count(app.document.stats.additions)),
         Style::default()
             .fg(app.config.theme.addition_fg)
-            .bg(statusline_bg(app.config.theme))
+            .bg(info_bg)
             .add_modifier(Modifier::BOLD),
         remaining,
     );
-    push_fitted_statusline_span(
-        spans,
-        " ",
-        Style::default().bg(statusline_bg(app.config.theme)),
-        remaining,
-    );
+    push_fitted_statusline_span(spans, " ", Style::default().bg(info_bg), remaining);
     push_fitted_statusline_span(
         spans,
         format!("-{}", format_count(app.document.stats.deletions)),
         Style::default()
             .fg(app.config.theme.deletion_fg)
-            .bg(statusline_bg(app.config.theme))
+            .bg(info_bg)
             .add_modifier(Modifier::BOLD),
         remaining,
     );
     let annotation_count = app.annotations_state.annotations.len();
     if annotation_count > 0 {
-        push_fitted_statusline_span(
-            spans,
-            "  ",
-            Style::default().bg(statusline_bg(app.config.theme)),
-            remaining,
-        );
+        push_fitted_statusline_span(spans, "  ", Style::default().bg(info_bg), remaining);
         push_fitted_statusline_span(
             spans,
             format!(
@@ -201,23 +142,12 @@ pub(crate) fn push_statusline_left_spans(
             ),
             Style::default()
                 .fg(app.config.theme.notice)
-                .bg(statusline_bg(app.config.theme))
+                .bg(info_bg)
                 .add_modifier(Modifier::BOLD),
             remaining,
         );
     }
-}
-
-pub(crate) fn statusline_file_count_label(app: &DiffApp) -> String {
-    if app.filters.active() {
-        format!(
-            "{}/{} files",
-            format_count(app.document.stats.files),
-            format_count(app.document.total_stats.files)
-        )
-    } else {
-        format!("{} files", format_count(app.document.stats.files))
-    }
+    push_fitted_statusline_span(spans, " ", Style::default().bg(info_bg), remaining);
 }
 
 pub(crate) fn push_fitted_statusline_span(
@@ -247,40 +177,63 @@ pub(crate) fn statusline_right_max_width(width: usize) -> usize {
     }
 }
 
-pub(crate) fn statusline_file_label(app: &DiffApp, max_width: usize) -> String {
+fn statusline_mode_style(app: &DiffApp) -> Style {
+    let style = if app.annotation_visual_mode_active() {
+        Style::default()
+            .fg(app.config.theme.search_match_fg)
+            .bg(app.config.theme.search_match_bg)
+    } else {
+        Style::default()
+            .fg(app.config.theme.statusline_accent_fg)
+            .bg(app.config.theme.statusline_accent_bg)
+    };
+    style.add_modifier(Modifier::BOLD)
+}
+
+fn statusline_info_style(app: &DiffApp) -> Style {
+    Style::default()
+        .fg(app.config.theme.statusline_info_fg)
+        .bg(app.config.theme.statusline_info_bg)
+        .add_modifier(Modifier::BOLD)
+}
+
+fn statusline_file_spans(app: &DiffApp, max_width: usize) -> Vec<Span<'static>> {
     if max_width == 0 {
-        return String::new();
+        return Vec::new();
     }
 
-    let progress = progress_label(app.viewport.scroll, app.max_scroll());
-    let file_count = app.document.model.visible_files().len();
-    let file_number = app
-        .document
-        .model
-        .visible_file_position(app.sidebar.selected_file.get())
-        .map(|position| position + 1)
-        .unwrap_or_default();
-    let position = format!("{file_number}/{file_count} {progress}");
-    let fallback = "No file";
-    let path = app
+    let file_index = app
+        .annotation_cursor_target()
+        .and_then(|target| app.document.model.file_at_row(target.model_row_index))
+        .unwrap_or(app.sidebar.selected_file.get());
+    let file_name = app
         .document
         .changeset
         .files
-        .get(app.sidebar.selected_file.get())
+        .get(file_index)
         .map(|file| file.display_path())
-        .unwrap_or(fallback);
-
-    let compact = format!(" {position} ");
-    let compact_width = compact.width();
-    if max_width <= compact_width {
-        return fit(&compact, max_width);
-    }
-
-    let path_width = max_width.saturating_sub(position.width()).saturating_sub(3);
-    let label = format!(" {} {} ", fit_with_ellipsis(path, path_width), position);
-    if label.width() > max_width {
-        fit(&label, max_width)
+        .and_then(|path| Path::new(path).file_name().and_then(|name| name.to_str()))
+        .unwrap_or("No file");
+    let file = if max_width >= 2 {
+        format!(
+            " {} ",
+            fit_with_ellipsis(file_name, max_width.saturating_sub(2))
+        )
     } else {
-        label
+        fit(file_name, max_width)
+    };
+    let remaining = max_width.saturating_sub(file.width());
+    let progress = format!(
+        " {} ",
+        progress_label(app.viewport.scroll, app.max_scroll())
+    );
+
+    let mut spans = Vec::with_capacity(2);
+    if progress.width() <= remaining {
+        spans.push(Span::styled(progress, statusline_info_style(app)));
     }
+    if !file.is_empty() {
+        spans.push(Span::styled(file, statusline_mode_style(app)));
+    }
+    spans
 }

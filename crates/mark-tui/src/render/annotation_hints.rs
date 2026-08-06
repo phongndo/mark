@@ -77,7 +77,7 @@ fn annotation_target_hint_range_for_scope(
         AnnotationScope::Hunk { .. } => {
             return (hint_width > 0 && hint_width < width).then_some((1, hint_width));
         }
-        AnnotationScope::Line => {}
+        AnnotationScope::Range { .. } | AnnotationScope::Line => {}
     }
     let range = match layout {
         DiffLayoutMode::Unified => {
@@ -279,7 +279,7 @@ fn line_number_field_range(
     ))
 }
 
-fn overlay_line_cells(
+pub(crate) fn overlay_line_cells(
     line: Line<'static>,
     start: usize,
     width: usize,

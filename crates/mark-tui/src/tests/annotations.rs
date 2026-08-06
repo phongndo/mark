@@ -710,8 +710,8 @@ fn file_and_hunk_headers_accept_scoped_annotations() {
         .map(line_text)
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(rendered.contains("file.rs file"));
-    assert!(rendered.contains("file.rs @@ -1,1 +1,1 @@"));
+    assert!(rendered.contains("Note · file"));
+    assert!(rendered.contains("Note · hunk -1 → +1"));
     assert!(rendered.contains("file note"));
     assert!(rendered.contains("hunk note"));
 
@@ -1080,6 +1080,60 @@ fn copy_marks_omits_annotations_without_current_diff_line() {
             .get(&old_key)
             .map(String::as_str),
         Some("old note")
+    );
+}
+
+#[test]
+fn copy_marks_omits_a_range_when_only_its_anchor_line_survives() {
+    use crate::annotation::{AnnotationKey, AnnotationScope, AnnotationSide};
+
+    let changeset = changeset_with_line_texts(&["one", "two", "three"]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    let key = AnnotationKey {
+        path: "file.rs".into(),
+        side: AnnotationSide::New,
+        line: 1,
+        scope: AnnotationScope::Range {
+            old_start: 0,
+            old_count: 0,
+            new_start: 1,
+            new_count: 3,
+        },
+    };
+    app.annotations_state
+        .annotations
+        .insert(key.clone(), "range note".to_owned());
+    assert!(app.marks_clipboard_json().is_some());
+
+    app.replace_loaded_diff(DiffOptions::default(), changeset_with_line_text("one"));
+
+    assert_eq!(app.annotation_model_row(&key), None);
+    let surviving_row = app
+        .document
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
+        .expect("surviving range line");
+    let row = app
+        .document
+        .model
+        .row(surviving_row)
+        .expect("surviving row");
+    assert!(
+        app.annotation_connectors_at_model_row(surviving_row, row)
+            .into_iter()
+            .flatten()
+            .next()
+            .is_none()
+    );
+    assert_eq!(app.marks_clipboard_json(), None);
+    assert_eq!(
+        app.annotations_state
+            .annotations
+            .get(&key)
+            .map(String::as_str),
+        Some("range note")
     );
 }
 
@@ -2577,10 +2631,10 @@ fn old_side_annotation_renders_and_edits_on_deletion_only_split_row() {
     );
     let footer_row = rendered
         .iter()
-        .position(|line| line_text(line).ends_with("[↻]"))
+        .position(|line| line_text(line).contains("[↻]"))
         .expect("edit footer") as u16;
 
-    assert!(app.handle_diff_click(58, 1 + footer_row));
+    assert!(app.handle_diff_click(27, 1 + footer_row));
     let draft = app
         .annotations_state
         .annotation_draft
@@ -2743,7 +2797,7 @@ fn annotation_height_cache_tracks_text_and_viewport_width() {
         .borrow()
         .get(&key)
         .expect("cached annotation height");
-    assert_eq!(first.width, 8);
+    assert_eq!(first.width, 4);
 
     app.annotations_state
         .annotations
@@ -2766,7 +2820,7 @@ fn annotation_height_cache_tracks_text_and_viewport_width() {
         .borrow()
         .get(&key)
         .expect("resized annotation height");
-    assert_eq!(resized.width, 20);
+    assert_eq!(resized.width, 16);
 }
 
 #[test]
@@ -2864,6 +2918,46 @@ fn annotation_row_cache_is_invalidated_with_the_view_model() {
 
     assert_ne!(app.annotation_model_row(&key), Some(usize::MAX));
     assert!(app.annotation_model_row(&key).is_some());
+}
+
+#[test]
+fn mixed_range_cache_uses_the_last_rendered_side_endpoint() {
+    use crate::annotation::{AnnotationKey, AnnotationScope, AnnotationSide};
+
+    let mut changeset = changeset_with_replacement_pair();
+    changeset.files[0].hunks_mut()[0].lines.swap(0, 1);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    let deletion_row = app
+        .document
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { line: LINE_1, .. }))
+        .expect("trailing deletion row");
+    let key = AnnotationKey {
+        path: "file.rs".to_owned(),
+        side: AnnotationSide::New,
+        line: 1,
+        scope: AnnotationScope::Range {
+            old_start: 1,
+            old_count: 1,
+            new_start: 1,
+            new_count: 1,
+        },
+    };
+    app.annotations_state
+        .annotations
+        .insert(key.clone(), "mixed range".to_owned());
+    app.annotations_state
+        .annotation_rows
+        .borrow_mut()
+        .insert(key.clone(), Some(deletion_row));
+    assert_eq!(app.annotation_model_row(&key), Some(deletion_row));
+
+    app.annotations_state.annotation_rows.borrow_mut().clear();
+    *app.annotations_state.annotation_keys_by_row.borrow_mut() = None;
+
+    assert_eq!(app.annotation_model_row(&key), Some(deletion_row));
 }
 
 #[test]
@@ -2965,12 +3059,8 @@ fn annotation_input_wraps_words_and_ctrl_s_saves() {
 
     let lines = crate::render::diff::build_diff_viewport_lines(&mut app, 20, 8);
     let rendered: Vec<String> = lines.iter().map(line_text).collect();
-    assert!(
-        rendered
-            .iter()
-            .any(|line| line.contains("alpha beta gamma"))
-    );
-    assert!(rendered.iter().any(|line| line.contains("delta")));
+    assert!(rendered.iter().any(|line| line.contains("alpha beta")));
+    assert!(rendered.iter().any(|line| line.contains("gamma delta")));
     assert!(rendered.iter().all(|line| line.width() <= 20));
 
     app.handle_annotation_input_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -3026,62 +3116,61 @@ fn annotation_rendering_preserves_whitespace_while_wrapping() {
         .map(line_text)
         .collect();
 
-    assert!(rendered.iter().any(|line| line.starts_with("  indented  ")));
-    assert!(rendered.iter().any(|line| line.starts_with("code")));
-    assert!(rendered.iter().any(|line| line.contains("a        b")));
+    assert!(rendered.iter().any(|line| line == "│   indent │"));
+    assert!(rendered.iter().any(|line| line == "│ ed  code │"));
+    assert!(rendered.iter().any(|line| line == "│ a        │"));
+    assert!(rendered.iter().any(|line| line == "│  b       │"));
+}
+
+fn render_saved_annotation_with_body_width(
+    text: &str,
+    body_width: usize,
+) -> Vec<ratatui::prelude::Line<'static>> {
+    let width = body_width.saturating_add(4);
+    crate::render::annotations::render_annotation_saved_block(
+        text,
+        width,
+        crate::render::annotation_ranges::AnnotationBlockGeometry {
+            start: 0,
+            end: width,
+            connected: false,
+        },
+        DiffTheme::default(),
+        None,
+    )
 }
 
 #[test]
 fn annotation_rendering_wraps_expanded_tabs_without_panic() {
-    let lines = crate::render::annotations::render_annotation_saved_block(
-        "\tab",
-        4,
-        DiffTheme::default(),
-        None,
-    );
+    let lines = render_saved_annotation_with_body_width("\tab", 4);
 
     assert_eq!(
         lines.len(),
         crate::render::annotations::annotation_saved_block_height("\tab", 4)
     );
-    assert_eq!(line_text(&lines[1]), "    ");
-    assert_eq!(line_text(&lines[2]), "ab  ");
+    assert_eq!(line_text(&lines[1]), "│      │");
+    assert_eq!(line_text(&lines[2]), "│ ab   │");
 }
 
 #[test]
 fn annotation_rendering_preserves_partial_tabs_across_wraps() {
-    let lines = crate::render::annotations::render_annotation_saved_block(
-        "a\tb",
-        4,
-        DiffTheme::default(),
-        None,
-    );
+    let lines = render_saved_annotation_with_body_width("a\tb", 4);
 
-    assert_eq!(line_text(&lines[1]), "a   ");
-    assert_eq!(line_text(&lines[2]), " b  ");
+    assert_eq!(line_text(&lines[1]), "│ a    │");
+    assert_eq!(line_text(&lines[2]), "│  b   │");
 
-    let narrow_lines = crate::render::annotations::render_annotation_saved_block(
-        "\t",
-        2,
-        DiffTheme::default(),
-        None,
-    );
+    let narrow_lines = render_saved_annotation_with_body_width("\t", 2);
 
-    assert_eq!(line_text(&narrow_lines[1]), "  ");
-    assert_eq!(line_text(&narrow_lines[2]), "  ");
+    assert_eq!(line_text(&narrow_lines[1]), "│    │");
+    assert_eq!(line_text(&narrow_lines[2]), "│    │");
 }
 
 #[test]
 fn annotation_rendering_preserves_partial_control_escapes_across_wraps() {
-    let lines = crate::render::annotations::render_annotation_saved_block(
-        "x\u{1}y",
-        4,
-        DiffTheme::default(),
-        None,
-    );
+    let lines = render_saved_annotation_with_body_width("x\u{1}y", 4);
 
-    assert_eq!(line_text(&lines[1]), r"x\u{");
-    assert_eq!(line_text(&lines[2]), "1}y ");
+    assert_eq!(line_text(&lines[1]), r"│ x\u{ │");
+    assert_eq!(line_text(&lines[2]), "│ 1}y  │");
 }
 
 #[test]
@@ -3187,7 +3276,7 @@ fn annotation_save_and_cancel_use_configured_keybindings() {
     let rendered = build_diff_viewport_lines(&mut app, 40, 8);
     let edit_row = rendered
         .iter()
-        .position(|line| line_text(line).ends_with("[↻]"))
+        .position(|line| line_text(line).contains("[↻]"))
         .expect("saved annotation edit footer") as u16
         + app.viewport.rendered_diff_area.expect("diff area").y;
     assert!(app.handle_diff_click(38, edit_row));

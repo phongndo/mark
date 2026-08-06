@@ -129,6 +129,13 @@ test("parseMarkAnnotations validates structured mark output", () => {
           new_count: 4,
           body: "Review the entire hunk",
         },
+        {
+          path: "src/app.ts",
+          scope: "range",
+          new_start: 20,
+          new_count: 3,
+          body: "Review these lines",
+        },
       ],
     }),
     {
@@ -143,6 +150,13 @@ test("parseMarkAnnotations validates structured mark output", () => {
           new_start: 10,
           new_count: 4,
           body: "Review the entire hunk",
+        },
+        {
+          path: "src/app.ts",
+          scope: "range",
+          new_start: 20,
+          new_count: 3,
+          body: "Review these lines",
         },
       ],
     },
@@ -164,6 +178,7 @@ test("parseMarkAnnotations validates structured mark output", () => {
     },
     { path: "src/app.ts", scope: "file", old_start: 10, body: "mixed file target" },
     { path: "src/app.ts", new_line: 12, new_count: 1, body: "mixed line target" },
+    { path: "src/app.ts", scope: "range", new_start: 12, body: "partial range" },
   ]) {
     assert.throws(() => parseMarkAnnotations({ version: 1, marks: [mark] }), /invalid annotation/);
   }

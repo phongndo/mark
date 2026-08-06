@@ -30,6 +30,13 @@ pub(crate) enum AnnotationScope {
         new_start: usize,
         new_count: usize,
     },
+    /// A visual-line range. A zero count means that side is absent.
+    Range {
+        old_start: usize,
+        old_count: usize,
+        new_start: usize,
+        new_count: usize,
+    },
     Line,
 }
 
@@ -44,6 +51,13 @@ impl AnnotationSide {
         match self {
             Self::Old => 'L',
             Self::New => 'R',
+        }
+    }
+
+    pub(crate) fn sign(self) -> char {
+        match self {
+            Self::Old => '-',
+            Self::New => '+',
         }
     }
 }
@@ -90,6 +104,91 @@ impl AnnotationKey {
                     Self::for_file_line(file, AnnotationSide::Old, old_line)
                 } else {
                     Self::for_file_line(file, AnnotationSide::New, new_line)
+                }
+            }
+            _ => None,
+        }
+    }
+
+    pub(crate) fn line_coordinates_from_ui_row(
+        changeset: &Changeset,
+        row: UiRow,
+        preferred_side: AnnotationSide,
+    ) -> Option<(AnnotationSide, usize)> {
+        match row {
+            UiRow::UnifiedLine { file, hunk, line } | UiRow::MetaLine { file, hunk, line } => {
+                let line = changeset
+                    .files
+                    .get(file.get())?
+                    .hunks()
+                    .get(hunk.get())?
+                    .lines
+                    .get(line.get())?;
+                match line.kind() {
+                    DiffLineKind::Context => match preferred_side {
+                        AnnotationSide::Old => line
+                            .old_line()
+                            .map(|line| (AnnotationSide::Old, line))
+                            .or_else(|| line.new_line().map(|line| (AnnotationSide::New, line))),
+                        AnnotationSide::New => line
+                            .new_line()
+                            .map(|line| (AnnotationSide::New, line))
+                            .or_else(|| line.old_line().map(|line| (AnnotationSide::Old, line))),
+                    },
+                    DiffLineKind::Addition => {
+                        line.new_line().map(|line| (AnnotationSide::New, line))
+                    }
+                    DiffLineKind::Deletion => {
+                        line.old_line().map(|line| (AnnotationSide::Old, line))
+                    }
+                    DiffLineKind::Meta => None,
+                }
+            }
+            UiRow::SplitLine {
+                file,
+                hunk,
+                left,
+                right,
+            } => {
+                let lines = &changeset
+                    .files
+                    .get(file.get())?
+                    .hunks()
+                    .get(hunk.get())?
+                    .lines;
+                let old = || {
+                    left.get()
+                        .and_then(|index| lines.get(index.get()))
+                        .filter(|line| {
+                            matches!(line.kind(), DiffLineKind::Context | DiffLineKind::Deletion)
+                        })
+                        .and_then(DiffLine::old_line)
+                        .map(|line| (AnnotationSide::Old, line))
+                };
+                let new = || {
+                    right
+                        .get()
+                        .and_then(|index| lines.get(index.get()))
+                        .and_then(DiffLine::new_line)
+                        .map(|line| (AnnotationSide::New, line))
+                };
+                match preferred_side {
+                    AnnotationSide::Old => old().or_else(new),
+                    AnnotationSide::New => new().or_else(old),
+                }
+            }
+            UiRow::ContextLine {
+                file,
+                old_line,
+                new_line,
+            } => {
+                let file = changeset.files.get(file.get())?;
+                match preferred_side {
+                    AnnotationSide::Old if file.old_path().is_some() => {
+                        Some((AnnotationSide::Old, old_line))
+                    }
+                    _ if file.new_path().is_some() => Some((AnnotationSide::New, new_line)),
+                    _ => Some((AnnotationSide::Old, old_line)),
                 }
             }
             _ => None,
@@ -149,7 +248,11 @@ impl AnnotationKey {
         Self::for_file_line(file, AnnotationSide::Old, line.old_line()?)
     }
 
-    fn for_file_line(file: &DiffFile, side: AnnotationSide, line: usize) -> Option<Self> {
+    pub(crate) fn for_file_line(
+        file: &DiffFile,
+        side: AnnotationSide,
+        line: usize,
+    ) -> Option<Self> {
         Self::path_for_side(file, side)
             .map(|path| Self::new(path, side, line, AnnotationScope::Line))
     }
@@ -194,6 +297,29 @@ impl AnnotationKey {
         }
     }
 
+    pub(crate) fn for_range(
+        file: &DiffFile,
+        anchor_side: AnnotationSide,
+        anchor_line: usize,
+        old_start: usize,
+        old_count: usize,
+        new_start: usize,
+        new_count: usize,
+    ) -> Option<Self> {
+        let path = Self::path_for_side(file, anchor_side)?;
+        Some(Self::new(
+            path,
+            anchor_side,
+            anchor_line,
+            AnnotationScope::Range {
+                old_start,
+                old_count,
+                new_start,
+                new_count,
+            },
+        ))
+    }
+
     pub(crate) fn cursor_only(model_row: usize) -> Self {
         Self::new(
             Self::CURSOR_ONLY_PATH,
@@ -209,6 +335,97 @@ impl AnnotationKey {
 
     pub(crate) fn is_line(&self) -> bool {
         matches!(self.scope, AnnotationScope::Line) && !self.is_cursor_only()
+    }
+
+    pub(crate) fn is_range(&self) -> bool {
+        matches!(self.scope, AnnotationScope::Range { .. })
+    }
+
+    pub(crate) fn has_line_connector(&self) -> bool {
+        self.is_line() || self.is_range()
+    }
+
+    pub(crate) fn block_side(&self) -> AnnotationSide {
+        match self.scope {
+            AnnotationScope::Range { new_count, .. } if new_count > 0 => AnnotationSide::New,
+            AnnotationScope::Range { old_count, .. } if old_count > 0 => AnnotationSide::Old,
+            _ => self.side,
+        }
+    }
+
+    pub(crate) fn covers_coordinate(&self, side: AnnotationSide, line: usize) -> bool {
+        match self.scope {
+            AnnotationScope::Line => self.side == side && self.line == line,
+            AnnotationScope::Range {
+                old_start,
+                old_count,
+                new_start,
+                new_count,
+            } => match side {
+                AnnotationSide::Old => line_in_source_range(line, old_start, old_count),
+                AnnotationSide::New => line_in_source_range(line, new_start, new_count),
+            },
+            AnnotationScope::File | AnnotationScope::Hunk { .. } => false,
+        }
+    }
+
+    pub(crate) fn target_label(&self) -> String {
+        match self.scope {
+            AnnotationScope::File => "file".to_owned(),
+            AnnotationScope::Hunk {
+                old_start,
+                old_count,
+                new_start,
+                new_count,
+            } => format!(
+                "hunk {} → {}",
+                format_source_range(AnnotationSide::Old, old_start, old_count),
+                format_source_range(AnnotationSide::New, new_start, new_count)
+            ),
+            AnnotationScope::Range {
+                old_start,
+                old_count,
+                new_start,
+                new_count,
+            } => {
+                let mut ranges = Vec::with_capacity(2);
+                if old_count > 0 {
+                    ranges.push(format_source_range(
+                        AnnotationSide::Old,
+                        old_start,
+                        old_count,
+                    ));
+                }
+                if new_count > 0 {
+                    ranges.push(format_source_range(
+                        AnnotationSide::New,
+                        new_start,
+                        new_count,
+                    ));
+                }
+                let count = old_count.saturating_add(new_count);
+                if count > 1 {
+                    format!("{} · {count} lines", ranges.join(" → "))
+                } else {
+                    ranges.join(" → ")
+                }
+            }
+            AnnotationScope::Line => format!("{}{}", self.side.sign(), self.line),
+        }
+    }
+}
+
+fn line_in_source_range(line: usize, start: usize, count: usize) -> bool {
+    count > 0 && line >= start && line < start.saturating_add(count)
+}
+
+fn format_source_range(side: AnnotationSide, start: usize, count: usize) -> String {
+    let sign = side.sign();
+    if count <= 1 {
+        format!("{sign}{start}")
+    } else {
+        let end = start.saturating_add(count.saturating_sub(1));
+        format!("{sign}{start}–{end}")
     }
 }
 
@@ -279,6 +496,28 @@ pub(crate) struct AnnotationDraft {
 }
 
 pub(crate) type AnnotationStore = HashMap<AnnotationKey, String>;
+
+#[derive(Debug, Clone)]
+pub(crate) struct AnnotationConnectorInterval {
+    pub(crate) start: usize,
+    pub(crate) end: usize,
+    pub(crate) key: AnnotationKey,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct AnnotationConnectorIntervals {
+    pub(crate) entries: Vec<AnnotationConnectorInterval>,
+    pub(crate) prefix_max_end: Vec<usize>,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct AnnotationKeyIndex {
+    pub(crate) anchors_by_model_row: HashMap<usize, Vec<AnnotationKey>>,
+    pub(crate) line_connectors_by_coordinate:
+        HashMap<(usize, AnnotationSide, usize), Vec<AnnotationKey>>,
+    pub(crate) range_connectors_by_file_side:
+        HashMap<(usize, AnnotationSide), AnnotationConnectorIntervals>,
+}
 
 pub(crate) const ANNOTATION_HINT_ALPHABET: &str = mark_syntax::DEFAULT_ANNOTATION_HINT_KEYS;
 

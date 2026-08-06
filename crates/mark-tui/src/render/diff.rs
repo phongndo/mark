@@ -11,11 +11,11 @@ use crate::{
     model::{FileIndex, HunkIndex, UiRow},
     render::{
         annotation_hints::{AnnotationTargetHint, apply_annotation_target_hint},
-        annotations::{render_annotation_compose_block, render_annotation_saved_block},
-        grep::{
-            grep_highlight_targets_for_row, highlighted_cursor_diff_content_line,
-            highlighted_cursor_full_line, highlighted_cursor_meta_line, highlighted_grep_text_line,
+        annotation_ranges::{
+            annotation_block_geometry, apply_annotation_connector, highlighted_annotation_row,
         },
+        annotations::{render_annotation_compose_block, render_annotation_saved_block},
+        grep::{grep_highlight_targets_for_row, highlighted_grep_text_line},
         headers::{file_header_line, hunk_header_line, hunk_header_line_with_focus},
         style::diff_base_bg,
         text::fit_padded,
@@ -100,8 +100,9 @@ pub(crate) fn build_diff_viewport_lines(
             break;
         };
         let mut line = render_row_with_focus(app, visual_row, row, width, focused_hunk);
-        if app.annotation_cursor_at_visual_scroll(visual_row) {
-            line = highlighted_cursor_row(line, row, layout, width, theme);
+        let active_side = app.annotation_active_line_side(visual_row, row);
+        if app.annotation_cursor_at_visual_scroll(visual_row) || active_side.is_some() {
+            line = highlighted_annotation_row(line, row, layout, width, active_side, theme);
         }
         for (hint, scope, side, existing) in
             app.annotation_target_hints_at_visual_scroll(visual_row)
@@ -120,28 +121,42 @@ pub(crate) fn build_diff_viewport_lines(
                 theme,
             );
         }
+        for (side, starts_range) in app
+            .annotation_connectors_at_model_row(visual_row, row)
+            .into_iter()
+            .flatten()
+        {
+            line = apply_annotation_connector(line, layout, width, side, starts_range, theme);
+        }
         lines.push(line);
 
         if has_annotation_blocks {
             for key in app.annotation_keys_at_model_row(visual_row, row) {
+                let geometry = annotation_block_geometry(layout, width, &key);
                 if let Some(draft) = draft
                     .as_ref()
                     .filter(|d| d.model_row_index == visual_row && d.key == key)
                 {
-                    let label = app.annotation_label(&draft.key);
+                    let label = app.annotation_block_label(&draft.key, true);
                     push_annotation_block(
                         &mut lines,
-                        render_annotation_compose_block(draft, width, theme, label.as_deref()),
+                        render_annotation_compose_block(
+                            draft,
+                            width,
+                            geometry,
+                            theme,
+                            Some(&label),
+                        ),
                         visible_rows,
                     );
                 } else if let Some(text) = app.annotations_state.annotations.get(&key)
                     && draft.as_ref().is_none_or(|d| d.key != key)
                 {
-                    let label = app.annotation_label(&key);
+                    let label = app.annotation_block_label(&key, false);
                     let block_scroll = annotation_saved_block_scroll(app, &key);
                     push_annotation_block(
                         &mut lines,
-                        render_annotation_saved_block(text, width, theme, label.as_deref())
+                        render_annotation_saved_block(text, width, geometry, theme, Some(&label))
                             .into_iter()
                             .skip(block_scroll),
                         visible_rows,
@@ -185,8 +200,9 @@ fn build_wrapped_viewport_lines(
         {
             let mut line = line;
             let is_last_wrap = wrap_index + 1 == wrap_count.min(remaining);
-            if app.annotation_cursor_at_model_row(row_index) {
-                line = highlighted_cursor_row(line, row, layout, width, theme);
+            let active_side = app.annotation_active_line_side(row_index, row);
+            if app.annotation_cursor_at_model_row(row_index) || active_side.is_some() {
+                line = highlighted_annotation_row(line, row, layout, width, active_side, theme);
             }
             for (hint, scope, side, existing) in
                 app.annotation_target_hints_at_visual_scroll(visual_row)
@@ -205,6 +221,20 @@ fn build_wrapped_viewport_lines(
                     theme,
                 );
             }
+            for (side, starts_range) in app
+                .annotation_connectors_at_model_row(row_index, row)
+                .into_iter()
+                .flatten()
+            {
+                line = apply_annotation_connector(
+                    line,
+                    layout,
+                    width,
+                    side,
+                    starts_range && wrap_index == 0,
+                    theme,
+                );
+            }
             lines.push(line);
             visual_row = visual_row.saturating_add(1);
             if lines.len() >= visible_rows {
@@ -212,26 +242,39 @@ fn build_wrapped_viewport_lines(
             }
             if is_last_wrap && has_annotation_blocks {
                 for key in app.annotation_keys_at_model_row(row_index, row) {
+                    let geometry = annotation_block_geometry(layout, width, &key);
                     if let Some(draft) = draft
                         .as_ref()
                         .filter(|d| d.model_row_index == row_index && d.key == key)
                     {
-                        let label = app.annotation_label(&draft.key);
+                        let label = app.annotation_block_label(&draft.key, true);
                         push_annotation_block(
                             &mut lines,
-                            render_annotation_compose_block(draft, width, theme, label.as_deref()),
+                            render_annotation_compose_block(
+                                draft,
+                                width,
+                                geometry,
+                                theme,
+                                Some(&label),
+                            ),
                             visible_rows,
                         );
                     } else if let Some(text) = app.annotations_state.annotations.get(&key)
                         && draft.as_ref().is_none_or(|d| d.key != key)
                     {
-                        let label = app.annotation_label(&key);
+                        let label = app.annotation_block_label(&key, false);
                         let block_scroll = annotation_saved_block_scroll(app, &key);
                         push_annotation_block(
                             &mut lines,
-                            render_annotation_saved_block(text, width, theme, label.as_deref())
-                                .into_iter()
-                                .skip(block_scroll),
+                            render_annotation_saved_block(
+                                text,
+                                width,
+                                geometry,
+                                theme,
+                                Some(&label),
+                            )
+                            .into_iter()
+                            .skip(block_scroll),
                             visible_rows,
                         );
                     }
@@ -243,29 +286,6 @@ fn build_wrapped_viewport_lines(
     }
     lines.truncate(visible_rows);
     lines
-}
-
-fn highlighted_cursor_row(
-    line: Line<'static>,
-    row: UiRow,
-    layout: crate::controls::DiffLayoutMode,
-    width: usize,
-    theme: crate::theme::DiffTheme,
-) -> Line<'static> {
-    match row {
-        UiRow::FileHeader(_) | UiRow::FileBodyNotice(_) => {
-            highlighted_cursor_full_line(line, width, theme)
-        }
-        UiRow::Collapsed { .. } | UiRow::ContextHide { .. } | UiRow::HunkHeader { .. } => {
-            highlighted_cursor_meta_line(line, width, theme)
-        }
-        UiRow::ContextLine { .. }
-        | UiRow::UnifiedLine { .. }
-        | UiRow::SplitLine { .. }
-        | UiRow::MetaLine { .. } => {
-            highlighted_cursor_diff_content_line(line, layout, width, theme)
-        }
-    }
 }
 
 fn annotation_saved_block_scroll(app: &DiffApp, key: &AnnotationKey) -> usize {

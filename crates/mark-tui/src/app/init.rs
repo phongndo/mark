@@ -550,6 +550,7 @@ impl DiffApp {
                 annotation_heights: RefCell::new(HashMap::new()),
                 annotation_draft: None,
                 annotation_cursor: None,
+                visual_anchor: None,
                 annotation_block_scroll: None,
                 annotation_target_mode: None,
                 sticky_annotation_draft: false,
@@ -644,6 +645,7 @@ impl DiffApp {
             },
             input: InputState {
                 key_prefix_pending: None,
+                vim_motion_count: None,
                 mouse_scroll: MouseScroll::default(),
             },
             config: AppConfigState {

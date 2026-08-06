@@ -2032,6 +2032,43 @@ impl UiModel {
         let end = self.hunk_row_ends.get(index)?.get();
         Some(start..end)
     }
+
+    pub(crate) fn visual_line_block_at(&self, model_row: usize) -> Option<Range<usize>> {
+        let row = self.row(model_row)?;
+        if let Some((file, hunk)) = row.typed_hunk_key() {
+            return self.hunk_row_range(file.get(), hunk.get());
+        }
+        let UiRow::ContextLine { file, .. } = row else {
+            return None;
+        };
+        if !self.rows.is_empty() {
+            let same_context_file = |row| {
+                matches!(
+                    self.row(row),
+                    Some(UiRow::ContextLine {
+                        file: candidate,
+                        ..
+                    }) if candidate == file
+                )
+            };
+            let mut start = model_row;
+            while start > 0 && same_context_file(start - 1) {
+                start -= 1;
+            }
+            let mut end = model_row.saturating_add(1);
+            while end < self.len() && same_context_file(end) {
+                end += 1;
+            }
+            return Some(start..end);
+        }
+        let index = self
+            .row_segments
+            .partition_point(|segment| segment.start.get() <= model_row)
+            .checked_sub(1)?;
+        let segment = *self.row_segments.get(index)?;
+        matches!(segment.kind, RowSegmentKind::ContextLines { file: candidate, .. } if candidate == file)
+            .then_some(segment.start.get()..segment.end())
+    }
 }
 
 fn row_contains_diff_line(

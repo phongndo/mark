@@ -142,14 +142,15 @@ Common default controls:
 ```text
 q / Ctrl-C     quit
 ?              help
-j / Down       scroll down or move focus
-k / Up         scroll up or move focus
-d / Ctrl-D     half-page down
+j / Down       scroll down or move focus (accepts a count, e.g. 3j)
+k / Up         scroll up or move focus (accepts a count, e.g. 3k)
+d              half-page down
 u              half-page up
 PgDn           full-page down
 PgUp           full-page up
 g              top
 G              bottom
+H / M / L      viewport top / middle / bottom
 ]              next hunk
 [              previous hunk
 Shift-Tab/Tab  previous / next file
@@ -162,7 +163,8 @@ n / p          next / previous grep match
 r              reload
 m              diff type selector
 o              settings menu
-Enter          annotate the selected line, hunk, or file
+v / V          enter / leave linewise Visual mode
+Enter          annotate the selected line, range, hunk, or file
 A              annotate and advance
 n              annotation search menu
 b              file browser
@@ -181,12 +183,26 @@ editor or a wrapper script, put `{file}`, `{line}`, and optionally `{column}` in
 the command, for example `EDITOR='my-editor --location {file}:{line}:{column}'`.
 
 The annotation row highlight is active in the diff by default. Move it with
-`j` / `k` or Up / Down; `d` / `u` move half a viewport; Page Up / Page Down
-move a full viewport; `g` / `G` jump to the ends. Like Vim with `scrolloff=8`,
-the selection moves freely until it is eight rows from the top or bottom, then
-stays there while the viewport scrolls. The margin shrinks for short viewports
-and at diff boundaries. Press `Enter` on a code line, hunk header, or file
-header to annotate that line, entire hunk, or entire file.
+`j` / `k` or Up / Down; prefix cursor motions with a count to repeat them (`3j`,
+`5k`, `4l`). `d` / `u` move half a viewport, Page Up / Page Down move a full
+viewport, and `g` / `G` jump to the ends. Like Vim with `scrolloff=8`, the
+selection moves freely until it is eight rows from the top or bottom, then stays
+there while the viewport scrolls. The margin shrinks for short viewports and at diff boundaries.
+
+Press `v` or `V` for linewise Visual mode, extend the selection with the same
+motions, and press `Enter` to annotate the range. The selection is clamped to
+the current hunk (or contiguous full-file context block), so motions cannot land
+on context controls or another file. The status line shows the selected side and
+source lines, such as `VISUAL +121–123 · 3 lines`. `Esc`, `v`, or `V` cancels the
+selection.
+
+Visual mode shows only the selected-line tint. After `Enter` turns the selection
+into a draft, line and range notes use a square gutter rail connected to an
+inline card after the final target line. In split view, the highlight and card
+stay in the selected old or new pane.
+
+Outside Visual mode, press `Enter` on a code line, hunk header, or file header to
+annotate that line, entire hunk, or entire file.
 
 Press `A` to annotate and advance. After saving the draft, the selection moves
 to the next row. Press Esc while writing to cancel the draft.

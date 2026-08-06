@@ -145,6 +145,7 @@ impl DiffApp {
         &mut self,
         mouse: MouseEvent,
     ) -> MarkResult<ActionOutcome> {
+        self.input.clear_vim_motion();
         let mut outcome =
             ActionOutcome::from_component_event_result(route_mouse_through_layers(self, mouse)?);
         outcome.extend_effects(self.take_queued_effects());
@@ -156,6 +157,7 @@ impl DiffApp {
         mouse: MouseEvent,
         ticks: usize,
     ) -> MarkResult<ActionOutcome> {
+        self.input.clear_vim_motion();
         if ticks <= 1 || !is_scroll_kind(mouse.kind) {
             return self.handle_mouse_with_effects(mouse);
         }

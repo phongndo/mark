@@ -92,6 +92,8 @@ const QUIT_KEY_COMPONENT: KeyComponent = KeyComponent::Quit;
 const ANNOTATION_DRAFT_BINDINGS_KEY_COMPONENT: KeyComponent = KeyComponent::AnnotationDraftBindings;
 const ANNOTATION_TARGET_KEY_COMPONENT: KeyComponent = KeyComponent::AnnotationTarget;
 
+// The compositor traverses this list in reverse, so editable/modal layers near
+// the end preempt global actions and navigation near the beginning.
 const KEY_LAYERS: &[KeyLayer] = &[
     NAVIGATION_KEY_COMPONENT,
     ERROR_LOG_RESIZE_KEY_COMPONENT,

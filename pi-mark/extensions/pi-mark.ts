@@ -29,7 +29,7 @@ type MarkRunResult =
 
 type MarkAnnotation = {
   path: string;
-  scope?: "file" | "hunk";
+  scope?: "file" | "hunk" | "range";
   old_line?: number;
   new_line?: number;
   old_start?: number;
@@ -627,6 +627,26 @@ export function parseMarkAnnotations(value: unknown): MarkAnnotations {
       nonnegativeInteger(candidate.old_count) &&
       nonnegativeInteger(candidate.new_start) &&
       nonnegativeInteger(candidate.new_count);
+    const oldRange =
+      candidate.old_start === undefined && candidate.old_count === undefined
+        ? undefined
+        : optionalPositiveInteger(candidate.old_start) &&
+          candidate.old_start !== undefined &&
+          optionalPositiveInteger(candidate.old_count) &&
+          candidate.old_count !== undefined;
+    const newRange =
+      candidate.new_start === undefined && candidate.new_count === undefined
+        ? undefined
+        : optionalPositiveInteger(candidate.new_start) &&
+          candidate.new_start !== undefined &&
+          optionalPositiveInteger(candidate.new_count) &&
+          candidate.new_count !== undefined;
+    const rangeTarget =
+      candidate.scope === "range" &&
+      noLineCoordinates &&
+      oldRange !== false &&
+      newRange !== false &&
+      (oldRange === true || newRange === true);
 
     if (lineTarget) {
       return {
@@ -647,6 +667,25 @@ export function parseMarkAnnotations(value: unknown): MarkAnnotations {
         old_count: candidate.old_count as number,
         new_start: candidate.new_start as number,
         new_count: candidate.new_count as number,
+        body: candidate.body,
+      };
+    }
+    if (rangeTarget) {
+      return {
+        path: candidate.path,
+        scope: "range",
+        ...(oldRange === true
+          ? {
+              old_start: candidate.old_start as number,
+              old_count: candidate.old_count as number,
+            }
+          : {}),
+        ...(newRange === true
+          ? {
+              new_start: candidate.new_start as number,
+              new_count: candidate.new_count as number,
+            }
+          : {}),
         body: candidate.body,
       };
     }
@@ -758,6 +797,13 @@ function annotationLocation(annotation: MarkAnnotation): string {
   }
   if (annotation.scope === "hunk") {
     return `${annotation.path} @@ -${annotation.old_start},${annotation.old_count} +${annotation.new_start},${annotation.new_count} @@`;
+  }
+  if (annotation.scope === "range") {
+    const oldRange =
+      annotation.old_start === undefined ? "" : `-${annotation.old_start},${annotation.old_count}`;
+    const newRange =
+      annotation.new_start === undefined ? "" : `+${annotation.new_start},${annotation.new_count}`;
+    return `${annotation.path} (${[oldRange, newRange].filter(Boolean).join(" ")})`;
   }
   if (annotation.new_line !== undefined) {
     return `${annotation.path}:${annotation.new_line}`;

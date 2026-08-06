@@ -52,6 +52,7 @@ pub(crate) const NORMAL_GLOBAL_ACTIONS: &[GlobalAction] = &[
     GlobalAction::AnnotationMenu,
     GlobalAction::AnnotateLine,
     GlobalAction::AnnotateBatch,
+    GlobalAction::VisualMode,
     GlobalAction::FileBrowser,
     GlobalAction::PreviousFile,
     GlobalAction::NextFile,
@@ -247,6 +248,7 @@ impl std::fmt::Debug for FilterWorker {
 pub(crate) enum MarkScope {
     File,
     Hunk,
+    Range,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
