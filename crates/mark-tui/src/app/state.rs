@@ -126,9 +126,9 @@ impl FileSidebarState {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct AnnotationVisualAnchor {
     pub(crate) model_row: usize,
-    pub(crate) side: AnnotationSide,
     pub(crate) first_model_row: usize,
     pub(crate) last_model_row: usize,
+    pub(crate) side: AnnotationSide,
 }
 
 #[derive(Debug)]
@@ -139,8 +139,9 @@ pub(crate) struct AnnotationState {
     pub(crate) annotation_heights: RefCell<HashMap<AnnotationKey, AnnotationHeightCacheEntry>>,
     pub(crate) annotation_draft: Option<AnnotationDraft>,
     pub(crate) annotation_cursor: Option<AnnotationCursor>,
-    /// Model-row and split-pane side for Vim-style visual-line selection. The
-    /// head is the current annotation cursor, so extending is allocation-free.
+    /// Model-row anchor, initiating side, and bounds for Vim-style visual-line
+    /// selection. The head is the current annotation cursor, so extending is
+    /// allocation-free.
     pub(crate) visual_anchor: Option<AnnotationVisualAnchor>,
     pub(crate) annotation_block_scroll: Option<(AnnotationKey, usize)>,
     pub(crate) annotation_target_mode: Option<AnnotationTargetMode>,

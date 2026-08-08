@@ -418,6 +418,474 @@ fn visual_mode_selects_and_annotates_a_line_range() {
 }
 
 #[test]
+fn unified_visual_selection_keeps_context_on_deletion_side() {
+    use crate::annotation::{AnnotationScope, AnnotationSide};
+
+    let mut changeset = changeset_with_context_lines(1);
+    let file = &mut changeset.files[0];
+    file.deletions = 1;
+    let hunk = &mut file.hunks_mut()[0];
+    hunk.header = "@@ -1,2 +1 @@".to_owned();
+    hunk.ranges = HunkLineRanges::new(1, 2, 1, 1);
+    hunk.lines = vec![
+        DiffLine::deletion(1, "removed"),
+        DiffLine::context(2, 1, "following context"),
+    ];
+
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_width(60);
+    app.set_viewport_rows(10);
+    let deletion = app
+        .document
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { line: LINE_0, .. }))
+        .expect("deletion row");
+    let context = app
+        .document
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { line: LINE_1, .. }))
+        .expect("context row");
+    app.select_annotation_cursor_model_row(deletion);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE))
+        .expect("enter Visual mode");
+    app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE))
+        .expect("select following context");
+    assert_eq!(
+        app.annotation_active_line_side(
+            context,
+            app.document.model.row(context).expect("context row"),
+        ),
+        Some(AnnotationSide::Old)
+    );
+
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("annotate visual selection");
+    let key = &app
+        .annotations_state
+        .annotation_draft
+        .as_ref()
+        .expect("range draft")
+        .key;
+    assert_eq!(key.side, AnnotationSide::Old);
+    assert_eq!(key.line, 1);
+    assert_eq!(
+        key.scope,
+        AnnotationScope::Range {
+            old_start: 1,
+            old_count: 2,
+            new_start: 0,
+            new_count: 0,
+        }
+    );
+    let key = key.clone();
+
+    let assert_split_old_range = |app: &mut DiffApp, draft_active: bool| {
+        let rows = [LINE_0, LINE_1].map(|line| {
+            app.document
+                .model
+                .diff_line_row(FILE_0, HUNK_0, line)
+                .expect("split range row")
+                .get()
+        });
+        for (offset, model_row) in rows.into_iter().enumerate() {
+            let row = app.document.model.row(model_row).expect("split range row");
+            assert_eq!(
+                app.annotation_active_line_side(model_row, row),
+                draft_active.then_some(AnnotationSide::Old)
+            );
+            assert_eq!(
+                app.annotation_connectors_at_model_row(model_row, row)
+                    .into_iter()
+                    .flatten()
+                    .next(),
+                Some((AnnotationSide::Old, offset == 0))
+            );
+        }
+
+        let visible_rows = app.document.model.len().saturating_add(4);
+        let rendered = crate::render::diff::build_diff_viewport_lines(app, 60, visible_rows);
+        for (offset, model_row) in rows.into_iter().enumerate() {
+            let viewport_row = model_row.saturating_sub(app.viewport.scroll);
+            let expected = if offset == 0 { '┌' } else { '│' };
+            assert_eq!(
+                rendered
+                    .get(viewport_row)
+                    .map(line_text)
+                    .and_then(|line| line.chars().nth(6)),
+                Some(expected)
+            );
+        }
+    };
+
+    app.toggle_layout();
+    assert_split_old_range(&mut app, true);
+    app.toggle_layout();
+    for character in "old range".chars() {
+        app.handle_key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE))
+            .expect("type old-side range note");
+    }
+    app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL))
+        .expect("save old-side range note");
+    assert!(app.annotations_state.annotations.contains_key(&key));
+
+    app.toggle_layout();
+    assert_split_old_range(&mut app, false);
+}
+
+#[test]
+fn split_full_file_visual_selection_prefers_new_side_for_context_rows() {
+    use crate::annotation::{AnnotationKey, AnnotationScope, AnnotationSide};
+
+    let repo = temp_test_dir("split-full-file-visual-context");
+    fs::create_dir_all(&repo).expect("repo directory");
+    fs::write(
+        repo.join("file.rs"),
+        (1..=40)
+            .map(|line| format!("line {line}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+    .expect("context source");
+    let changeset = changeset_with_hunk_at(repo.clone(), 20);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Split);
+    app.set_viewport_rows(8);
+    app.toggle_full_file();
+    let context_rows = app
+        .document
+        .model
+        .rows
+        .iter()
+        .enumerate()
+        .filter_map(|(model_row, row)| {
+            matches!(row, UiRow::ContextLine { .. }).then_some(model_row)
+        })
+        .take(2)
+        .collect::<Vec<_>>();
+    assert_eq!(context_rows.len(), 2);
+    app.select_annotation_cursor_model_row(context_rows[0]);
+
+    let old_key =
+        AnnotationKey::for_file_line(&app.document.changeset.files[0], AnnotationSide::Old, 1)
+            .expect("old-side context key");
+    let cursor = app
+        .annotations_state
+        .annotation_cursor
+        .as_mut()
+        .expect("annotation cursor");
+    let selected = cursor.selected;
+    cursor.targets[selected].key = old_key;
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE))
+        .expect("enter Visual mode from the old side");
+    app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE))
+        .expect("select following context");
+    for model_row in &context_rows {
+        assert_eq!(
+            app.annotation_active_line_side(
+                *model_row,
+                app.document.model.row(*model_row).expect("context row"),
+            ),
+            Some(AnnotationSide::New)
+        );
+    }
+
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("annotate split context selection");
+    let key = &app
+        .annotations_state
+        .annotation_draft
+        .as_ref()
+        .expect("range draft")
+        .key;
+    assert_eq!(key.side, AnnotationSide::New);
+    assert_eq!(key.line, 1);
+    assert_eq!(
+        key.scope,
+        AnnotationScope::Range {
+            old_start: 0,
+            old_count: 0,
+            new_start: 1,
+            new_count: 2,
+        }
+    );
+
+    fs::remove_dir_all(repo).expect("repo directory should be removed");
+}
+
+#[test]
+fn split_visual_selection_rejects_disjoint_source_ranges() {
+    use crate::annotation::AnnotationSide;
+
+    let mut changeset = changeset_with_context_lines(1);
+    let file = &mut changeset.files[0];
+    file.additions = 1;
+    file.deletions = 3;
+    let hunk = &mut file.hunks_mut()[0];
+    hunk.header = "@@ -1,5 +1,3 @@".to_owned();
+    hunk.ranges = HunkLineRanges::new(1, 5, 1, 3);
+    hunk.lines = vec![
+        DiffLine::deletion(1, "removed first"),
+        DiffLine::context(2, 1, "before"),
+        DiffLine::deletion(3, "old"),
+        DiffLine::addition(2, "new"),
+        DiffLine::context(4, 3, "after"),
+        DiffLine::deletion(5, "removed last"),
+    ];
+
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Split);
+    app.set_viewport_rows(10);
+    let split_rows = app
+        .document
+        .model
+        .rows
+        .iter()
+        .enumerate()
+        .filter_map(|(model_row, row)| matches!(row, UiRow::SplitLine { .. }).then_some(model_row))
+        .collect::<Vec<_>>();
+    assert_eq!(split_rows.len(), 5);
+    app.select_annotation_cursor_model_row(split_rows[0]);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE))
+        .expect("enter Visual mode");
+    app.move_annotation_cursor_by_visual_delta((split_rows[4] - split_rows[0]) as isize);
+    for (model_row, expected) in split_rows.iter().zip([
+        AnnotationSide::Old,
+        AnnotationSide::New,
+        AnnotationSide::New,
+        AnnotationSide::New,
+        AnnotationSide::Old,
+    ]) {
+        assert_eq!(
+            app.annotation_active_line_side(
+                *model_row,
+                app.document.model.row(*model_row).expect("split row"),
+            ),
+            Some(expected)
+        );
+    }
+
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("reject disjoint visual selection");
+    assert!(app.annotations_state.annotation_draft.is_none());
+    assert!(app.annotation_visual_mode_active());
+    assert_eq!(
+        app.notifications.toasts.latest_text(),
+        Some("visual selection has disjoint source lines")
+    );
+}
+
+#[test]
+fn split_visual_selection_is_deterministic_in_both_directions() {
+    use crate::annotation::{AnnotationScope, AnnotationSide};
+
+    let mut changeset = changeset_with_context_lines(1);
+    let file = &mut changeset.files[0];
+    file.additions = 2;
+    file.deletions = 2;
+    let hunk = &mut file.hunks_mut()[0];
+    hunk.header = "@@ -1,4 +1,4 @@".to_owned();
+    hunk.ranges = HunkLineRanges::new(1, 4, 1, 4);
+    hunk.lines = vec![
+        DiffLine::deletion(1, "removed only"),
+        DiffLine::context(2, 1, "before"),
+        DiffLine::deletion(3, "old"),
+        DiffLine::addition(2, "new"),
+        DiffLine::context(4, 3, "after"),
+        DiffLine::addition(4, "added only"),
+    ];
+
+    let app = DiffApp::new(
+        DiffOptions::default(),
+        changeset.clone(),
+        DiffLayoutMode::Split,
+    );
+    let split_rows = app
+        .document
+        .model
+        .rows
+        .iter()
+        .enumerate()
+        .filter_map(|(model_row, row)| matches!(row, UiRow::SplitLine { .. }).then_some(model_row))
+        .collect::<Vec<_>>();
+    assert_eq!(split_rows.len(), 5);
+    let old_only = split_rows[0];
+    let paired = split_rows[2];
+    let new_only = split_rows[4];
+    let mut keys = Vec::new();
+
+    for (anchor, head) in [(old_only, new_only), (new_only, old_only)] {
+        let mut app = DiffApp::new(
+            DiffOptions::default(),
+            changeset.clone(),
+            DiffLayoutMode::Split,
+        );
+        app.set_viewport_width(60);
+        app.set_viewport_rows(10);
+        app.select_annotation_cursor_model_row(anchor);
+        app.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE))
+            .expect("enter Visual mode");
+        let delta = if head >= anchor {
+            (head - anchor) as isize
+        } else {
+            -((anchor - head) as isize)
+        };
+        app.move_annotation_cursor_by_visual_delta(delta);
+        assert_eq!(
+            app.annotation_cursor_target()
+                .expect("visual selection head")
+                .model_row_index,
+            head
+        );
+
+        for model_row in &split_rows {
+            let row = app.document.model.row(*model_row).expect("split row");
+            let UiRow::SplitLine { right, .. } = row else {
+                unreachable!("collected split rows only");
+            };
+            let expected = if right.get().is_some() {
+                AnnotationSide::New
+            } else {
+                AnnotationSide::Old
+            };
+            assert_eq!(
+                app.annotation_active_line_side(*model_row, row),
+                Some(expected),
+                "row {model_row} should not depend on selection direction"
+            );
+        }
+        assert_eq!(
+            app.annotation_active_line_side(
+                paired,
+                app.document.model.row(paired).expect("paired row"),
+            ),
+            Some(AnnotationSide::New)
+        );
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            .expect("annotate visual selection");
+        let key = app
+            .annotations_state
+            .annotation_draft
+            .as_ref()
+            .expect("range draft")
+            .key
+            .clone();
+        keys.push(key.clone());
+
+        for model_row in &split_rows {
+            let row = app.document.model.row(*model_row).expect("split row");
+            let UiRow::SplitLine { right, .. } = row else {
+                unreachable!("collected split rows only");
+            };
+            let expected = if right.get().is_some() {
+                AnnotationSide::New
+            } else {
+                AnnotationSide::Old
+            };
+            assert_eq!(
+                app.annotation_active_line_side(*model_row, row),
+                Some(expected),
+                "draft row {model_row} should match the Visual selection"
+            );
+        }
+
+        let assert_continuous_connector = |app: &mut DiffApp| {
+            for (offset, model_row) in split_rows.iter().enumerate() {
+                let row = app.document.model.row(*model_row).expect("split row");
+                assert_eq!(
+                    app.annotation_connectors_at_model_row(*model_row, row)
+                        .into_iter()
+                        .flatten()
+                        .next(),
+                    Some((AnnotationSide::New, offset == 0)),
+                    "row {model_row} should keep the range connector continuous"
+                );
+            }
+
+            let visible_rows = app.document.model.len().saturating_add(4);
+            let rendered = crate::render::diff::build_diff_viewport_lines(app, 60, visible_rows);
+            let connector_column = 60 / 2 + 6;
+            for (offset, model_row) in split_rows.iter().enumerate() {
+                let viewport_row = model_row.saturating_sub(app.viewport.scroll);
+                let expected = if offset == 0 { '┌' } else { '│' };
+                assert_eq!(
+                    rendered
+                        .get(viewport_row)
+                        .map(line_text)
+                        .and_then(|line| line.chars().nth(connector_column)),
+                    Some(expected),
+                    "rendered row {model_row} should contain the range rail"
+                );
+            }
+        };
+        assert_continuous_connector(&mut app);
+
+        for character in "range note".chars() {
+            app.handle_key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE))
+                .expect("type range note");
+        }
+        app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL))
+            .expect("save range note");
+        assert!(app.annotations_state.annotations.contains_key(&key));
+        assert_continuous_connector(&mut app);
+
+        app.toggle_layout();
+        let unified_context_rows = [DiffLineIndex::new(1), DiffLineIndex::new(4)].map(|line| {
+            app.document
+                .model
+                .diff_line_row(FILE_0, HUNK_0, line)
+                .expect("unified context row")
+                .get()
+        });
+        for model_row in unified_context_rows {
+            let row = app
+                .document
+                .model
+                .row(model_row)
+                .expect("unified context row");
+            assert!(
+                app.annotation_connectors_at_model_row(model_row, row)
+                    .into_iter()
+                    .flatten()
+                    .any(|(side, _)| side == AnnotationSide::New),
+                "saved split range should cover unified context row {model_row}"
+            );
+        }
+        let visible_rows = app.document.model.len().saturating_add(4);
+        let rendered = crate::render::diff::build_diff_viewport_lines(&mut app, 60, visible_rows);
+        for model_row in unified_context_rows {
+            let viewport_row = model_row.saturating_sub(app.viewport.scroll);
+            assert!(
+                rendered
+                    .get(viewport_row)
+                    .map(line_text)
+                    .and_then(|line| line.chars().nth(12))
+                    .is_some_and(|glyph| matches!(glyph, '┌' | '│')),
+                "saved split range should render on unified context row {model_row}"
+            );
+        }
+    }
+
+    assert_eq!(keys[0], keys[1]);
+    assert_eq!(keys[0].side, AnnotationSide::Old);
+    assert_eq!(keys[0].line, 1);
+    assert_eq!(
+        keys[0].scope,
+        AnnotationScope::Range {
+            old_start: 1,
+            old_count: 1,
+            new_start: 1,
+            new_count: 4,
+        }
+    );
+}
+
+#[test]
 fn visual_mode_clamps_cursor_before_context_controls_and_other_files() {
     let repo = temp_test_dir("visual-hunk-boundary");
     fs::create_dir_all(&repo).expect("repo directory");

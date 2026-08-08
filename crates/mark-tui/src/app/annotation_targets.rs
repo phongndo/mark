@@ -9,6 +9,7 @@ use crate::{
         AnnotationKey, AnnotationSide, AnnotationTarget, AnnotationTargetMode,
         annotation_hint_codes,
     },
+    controls::DiffLayoutMode,
     model::{FileIndex, HunkIndex},
     render::{
         annotation_ranges::annotation_block_body_width,
@@ -88,17 +89,18 @@ impl DiffApp {
             self.set_notice("no cursor line");
             return;
         };
+        let anchor_side = target.key.side;
         let Some((first_model_row, last_model_row)) =
-            self.annotation_visual_line_bounds(target.model_row_index, target.key.side)
+            self.annotation_visual_line_bounds(target.model_row_index, anchor_side)
         else {
             self.set_notice("Visual mode requires a code line");
             return;
         };
         self.annotations_state.visual_anchor = Some(AnnotationVisualAnchor {
             model_row: target.model_row_index,
-            side: target.key.side,
             first_model_row,
             last_model_row,
+            side: anchor_side,
         });
         self.runtime.dirty = true;
     }
@@ -118,19 +120,17 @@ impl DiffApp {
     fn annotation_visual_line_bounds(
         &self,
         model_row: usize,
-        side: AnnotationSide,
+        anchor_side: AnnotationSide,
     ) -> Option<(usize, usize)> {
         let row = self.document.model.row(model_row)?;
-        AnnotationKey::line_coordinates_from_ui_row(&self.document.changeset, row, side)?;
+        self.annotation_visual_line_coordinate_for_side(row, anchor_side)?;
         let mut range = self.document.model.visual_line_block_at(model_row)?;
         while range.start < range.end
             && self
                 .document
                 .model
                 .row(range.start)
-                .and_then(|row| {
-                    AnnotationKey::line_coordinates_from_ui_row(&self.document.changeset, row, side)
-                })
+                .and_then(|row| self.annotation_visual_line_coordinate_for_side(row, anchor_side))
                 .is_none()
         {
             range.start += 1;
@@ -140,9 +140,7 @@ impl DiffApp {
                 .document
                 .model
                 .row(range.end - 1)
-                .and_then(|row| {
-                    AnnotationKey::line_coordinates_from_ui_row(&self.document.changeset, row, side)
-                })
+                .and_then(|row| self.annotation_visual_line_coordinate_for_side(row, anchor_side))
                 .is_none()
         {
             range.end -= 1;
@@ -302,20 +300,62 @@ impl DiffApp {
         {
             return None;
         }
-        let (side, line) =
+        if key.is_range() {
+            return self.annotation_range_covered_coordinate(key, row);
+        }
+        let coordinate =
             AnnotationKey::line_coordinates_from_ui_row(&self.document.changeset, row, key.side)?;
-        key.covers_coordinate(side, line).then_some((side, line))
+        key.covers_coordinate(coordinate.0, coordinate.1)
+            .then_some(coordinate)
+    }
+
+    fn annotation_range_covered_coordinate(
+        &self,
+        key: &AnnotationKey,
+        row: crate::model::UiRow,
+    ) -> Option<(AnnotationSide, usize)> {
+        // A saved range can outlive the layout that created it. Prefer the
+        // current layout's display side, but fall back to any coordinate the
+        // persisted source ranges actually cover.
+        let preferred_side = if self.viewport.layout == DiffLayoutMode::Split {
+            AnnotationSide::New
+        } else {
+            key.side
+        };
+        let alternate_side = match preferred_side {
+            AnnotationSide::Old => AnnotationSide::New,
+            AnnotationSide::New => AnnotationSide::Old,
+        };
+        [preferred_side, alternate_side]
+            .into_iter()
+            .filter_map(|side| {
+                AnnotationKey::line_coordinates_from_ui_row(&self.document.changeset, row, side)
+            })
+            .find(|(side, line)| key.covers_coordinate(*side, *line))
     }
 
     fn annotation_visual_line_coordinate(
         &self,
         row: crate::model::UiRow,
     ) -> Option<(AnnotationSide, usize)> {
-        AnnotationKey::line_coordinates_from_ui_row(
-            &self.document.changeset,
-            row,
-            self.annotations_state.visual_anchor?.side,
-        )
+        let anchor_side = self.annotations_state.visual_anchor?.side;
+        self.annotation_visual_line_coordinate_for_side(row, anchor_side)
+    }
+
+    fn annotation_visual_line_coordinate_for_side(
+        &self,
+        row: crate::model::UiRow,
+        anchor_side: AnnotationSide,
+    ) -> Option<(AnnotationSide, usize)> {
+        // Split selection is row-deterministic: old-only rows use the left
+        // side, while rows with new-side content use the right side. Unified
+        // context remains on the side that initiated the selection.
+        let preferred_side = if self.viewport.layout == DiffLayoutMode::Split {
+            AnnotationSide::New
+        } else {
+            anchor_side
+        };
+        AnnotationKey::line_coordinates_from_ui_row(&self.document.changeset, row, preferred_side)
     }
 
     fn visual_annotation_target(&self) -> Result<(AnnotationKey, usize), &'static str> {
@@ -330,6 +370,8 @@ impl DiffApp {
         let mut first = None;
         let mut last_model_row = None;
         let mut line_targets = 0usize;
+        let mut old_line_targets = 0usize;
+        let mut new_line_targets = 0usize;
         let mut old_min = usize::MAX;
         let mut old_max = 0usize;
         let mut new_min = usize::MAX;
@@ -363,10 +405,12 @@ impl DiffApp {
             line_targets = line_targets.saturating_add(1);
             match side {
                 AnnotationSide::Old => {
+                    old_line_targets = old_line_targets.saturating_add(1);
                     old_min = old_min.min(line);
                     old_max = old_max.max(line);
                 }
                 AnnotationSide::New => {
+                    new_line_targets = new_line_targets.saturating_add(1);
                     new_min = new_min.min(line);
                     new_max = new_max.max(line);
                 }
@@ -384,6 +428,9 @@ impl DiffApp {
         };
         let (old_start, old_count) = source_range(old_min, old_max);
         let (new_start, new_count) = source_range(new_min, new_max);
+        if old_count != old_line_targets || new_count != new_line_targets {
+            return Err("visual selection has disjoint source lines");
+        }
         let key = AnnotationKey::for_range(
             file,
             anchor.side,
@@ -1403,12 +1450,7 @@ impl DiffApp {
 
     fn annotation_visual_target_for_model_row(&self, model_row: usize) -> Option<AnnotationTarget> {
         let row = self.document.model.row(model_row)?;
-        let preferred_side = self.annotations_state.visual_anchor?.side;
-        let (side, line) = AnnotationKey::line_coordinates_from_ui_row(
-            &self.document.changeset,
-            row,
-            preferred_side,
-        )?;
+        let (side, line) = self.annotation_visual_line_coordinate(row)?;
         let file = self
             .document
             .model

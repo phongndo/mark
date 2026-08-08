@@ -2784,7 +2784,7 @@ fn enter_annotates_removed_line_in_replacement_block() {
 }
 
 #[test]
-fn mouse_click_selects_current_side_for_paired_split_row() {
+fn mouse_click_selects_split_side_and_visual_mode_uses_right_side() {
     use crate::annotation::{AnnotationKey, AnnotationSide};
 
     let changeset = changeset_with_replacement_pair();
@@ -2825,16 +2825,20 @@ fn mouse_click_selects_current_side_for_paired_split_row() {
         Some(&old_key)
     );
     app.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE))
-        .expect("v should select the old side");
+        .expect("v should enter Visual mode");
     assert!(app.annotation_visual_mode_active());
+    assert_eq!(
+        app.annotation_active_line_side(split_row, row),
+        Some(AnnotationSide::New)
+    );
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
-        .expect("Enter should annotate the visually selected old side");
+        .expect("Enter should annotate the deterministic right side");
     assert_eq!(
         app.annotations_state
             .annotation_draft
             .as_ref()
             .map(|draft| &draft.key),
-        Some(&old_key)
+        Some(&key)
     );
     app.handle_annotation_input_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
     app.viewport.scroll = split_row;
