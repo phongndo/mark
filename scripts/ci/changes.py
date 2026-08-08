@@ -9,7 +9,7 @@ import subprocess
 import sys
 from typing import Iterable
 
-LANES = ("rust", "generated", "performance", "pi", "workflows")
+LANES = ("rust", "generated", "performance", "workflows")
 ZERO_SHA = "0" * 40
 
 
@@ -31,9 +31,6 @@ def classify_paths(paths: Iterable[str]) -> dict[str, bool]:
             or path.startswith("scripts/ci/")
         ):
             return {lane: True for lane in LANES}
-
-        if path.startswith("pi-mark/"):
-            result["pi"] = True
 
         if path.startswith("crates/"):
             result["rust"] = True

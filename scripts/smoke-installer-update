@@ -198,7 +198,7 @@ chmod +x "$tmp_dir/bin/curl"
 MARK_INSTALLER= \
 MARK_INSTALLER_URL="https://raw.githubusercontent.com/$repo/main/scripts/install.sh" \
 MARK_REPO="$repo" \
-MARK_SMOKE_LATEST_TAG="pi-mark-v0.1.1" \
+MARK_SMOKE_LATEST_TAG="other-tool-v0.1.1" \
 MARK_SMOKE_INSTALLER="$repo_dir/scripts/install.sh" \
 MARK_SMOKE_RELEASE_DIR="$release_dir" \
 MARK_SMOKE_REPO="$repo" \
@@ -207,7 +207,7 @@ PATH="$tmp_dir/bin:$PATH" \
   "$repo_dir/scripts/smoke-curl-install" "$version"
 
 MARK_REPO="$repo" \
-MARK_SMOKE_LATEST_TAG="pi-mark-v0.1.1" \
+MARK_SMOKE_LATEST_TAG="other-tool-v0.1.1" \
 MARK_SMOKE_RELEASE_DIR="$release_dir" \
 MARK_SMOKE_REPO="$repo" \
 MARK_SMOKE_TAG="$tag" \

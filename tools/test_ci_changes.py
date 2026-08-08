@@ -38,13 +38,6 @@ class CiChangesTests(unittest.TestCase):
             {"generated", "performance"},
         )
 
-    def test_pi_change_is_isolated(self):
-        result = changes.classify_paths(["pi-mark/extensions/pi-mark.ts"])
-        self.assertEqual(
-            {lane for lane, selected in result.items() if selected},
-            {"pi"},
-        )
-
     def test_syntax_adapter_change_selects_rust_and_performance(self):
         result = changes.classify_paths(["crates/mark-syntax/src/lib.rs"])
         self.assertEqual(

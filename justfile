@@ -4,9 +4,9 @@ setup:
     cargo build -p mark-cli --locked
 
 check:
-    HK_PROFILE=full,pi mise x -- hk check --all --check
+    HK_PROFILE=full mise x -- hk check --all --check
 
-ci-check: ci-rust ci-generated ci-performance pi-check ci-workflows
+ci-check: ci-rust ci-generated ci-performance ci-workflows
 
 ci-rust:
     scripts/ci/rust
@@ -37,10 +37,3 @@ build:
 
 hooks:
     @set -eu; profile_bin="$HOME/.nix-profile/bin"; if [ -d "$profile_bin" ]; then PATH="$profile_bin:$PATH"; fi; export PATH; mise trust --yes mise.toml; git config --unset core.hooksPath || true; mise_path="$(command -v mise)"; "$mise_path" x hk -- hk install --global --mise
-
-pi-check:
-    cd pi-mark && pnpm run check
-
-pi-dev:
-    cargo build -p mark-cli --locked
-    PI_MARK_BIN="$PWD/target/debug/mark" pi --no-extensions -e ./pi-mark/extensions/pi-mark.ts

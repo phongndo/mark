@@ -12,8 +12,7 @@ Classify changes
   ├─ Rust correctness
   ├─ MSRV
   ├─ Vendored theme contracts
-  ├─ Deterministic performance smoke
-  └─ pi-mark package quality
+  └─ Deterministic performance smoke
           ↓
        CI gate
 ```
@@ -42,8 +41,6 @@ required workflow pending indefinitely.
 - **Release** accepts only a version-matching commit reachable from `main` with
   a successful CI push run, then builds distribution assets without repeating
   the test matrix.
-- **Publish pi-mark** accepts only the current CI-qualified `main` tip before
-  contacting npm.
 
 Nightly and Release call the same reusable distribution workflow and package
 assets through `scripts/ci/package-dist`. Publish jobs alone receive
@@ -70,7 +67,6 @@ Run the same suites used by Actions:
 just ci-rust
 just ci-generated
 just ci-performance
-just pi-check
 just ci-workflows
 ```
 
