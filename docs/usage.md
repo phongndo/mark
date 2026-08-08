@@ -198,8 +198,10 @@ selection.
 
 Visual mode shows only the selected-line tint. After `Enter` turns the selection
 into a draft, line and range notes use a square gutter rail connected to an
-inline card after the final target line. In split view, the highlight and card
-stay in the selected old or new pane.
+inline card after the final target line. In split view, targeting is
+row-deterministic rather than tied to the initiating pane: rows use the new/right
+side when present and otherwise the old/left side. A selection that would form
+disjoint source ranges cannot be stored as one note and must be shortened.
 
 Outside Visual mode, press `Enter` on a code line, hunk header, or file header to
 annotate that line, entire hunk, or entire file.

@@ -359,10 +359,12 @@ motion, and press `Enter` to annotate the selected range. Motions are clamped to
 the current hunk or contiguous full-file context block. The status line names
 the selected side and source lines. Visual mode shows only the selection tint;
 a square gutter rail and inline card appear after `Enter` creates the draft.
-Split-view cards remain in the selected pane. `Esc`, `v`, or `V` leaves Visual
-mode. Outside Visual mode, `Enter` on a code line, hunk header, or
-file header annotates that line, entire hunk, or entire file; `A` annotates and
-advances after save.
+In split view, targeting is row-deterministic rather than tied to the initiating
+pane: rows use the new/right side when present and otherwise the old/left side.
+A selection that would form disjoint source ranges cannot be stored as one note
+and must be shortened. `Esc`, `v`, or `V` leaves Visual mode. Outside Visual mode,
+`Enter` on a code line, hunk header, or file header annotates that line, entire
+hunk, or entire file; `A` annotates and advances after save.
 
 The previous label-jump workflow remains available:
 
