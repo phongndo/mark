@@ -4,7 +4,6 @@ import "package://github.com/jdx/hk/releases/download/v1.49.0/hk@1.49.0#/Builtin
 exclude = List(
   "target",
   "dist",
-  "pi-mark/node_modules",
 )
 
 local architectureGlobs = List(
@@ -20,16 +19,6 @@ local rustImpactGlobs = List(
   "Cargo.lock",
   "crates/*/Cargo.toml",
   "rust-toolchain.toml",
-)
-
-local piImpactGlobs = List(
-  "pi-mark/extensions/**/*.ts",
-  "pi-mark/tests/**/*.mjs",
-  "pi-mark/package.json",
-  "pi-mark/tsconfig.json",
-  "pi-mark/.oxlintrc.json",
-  "pi-mark/.oxfmtrc.json",
-  "pi-mark/pnpm-lock.yaml",
 )
 
 local hygiene = new Mapping<String, Step | Group> {
@@ -99,12 +88,6 @@ local full = new Mapping<String, Step | Group> {
     check = "mise x -- cargo clippy --workspace --all-targets --all-features --locked -- -D warnings"
     exclusive = true
   }
-
-  ["pi-check"] {
-    profiles = List("pi")
-    glob = piImpactGlobs
-    check = "mise x -- sh -lc 'cd pi-mark && pnpm run check'"
-  }
 }
 
 local ci = new Mapping<String, Step | Group> {
@@ -143,7 +126,6 @@ local prePush = new Mapping<String, Step | Group> {
   ...fast
   ["rust-analyzer"] = (full["rust-analyzer"]) { profiles = List() }
   ["cargo-clippy"] = (full["cargo-clippy"]) { profiles = List() }
-  ["pi-check"] = (full["pi-check"]) { profiles = List() }
 }
 
 hooks {

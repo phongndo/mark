@@ -239,11 +239,3 @@ mark syntax path
 
 `mark syntax available --installed` prints the bundled catalog and
 `mark syntax doctor` validates grammar readiness and custom mappings.
-
-## Pi package
-
-The `pi-mark` package adds a `/mark` slash command to Pi. It shells out to
-`mark`, so install the CLI first and keep it on `PATH`, or set `PI_MARK_BIN` to
-the executable path.
-
-See [`../pi-mark/README.md`](../pi-mark/README.md).

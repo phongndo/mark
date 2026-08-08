@@ -43,7 +43,6 @@ Update docs with user-visible changes to:
 - Config keys and accepted aliases.
 - Installer environment variables.
 - Release process or asset naming.
-- `pi-mark` slash command and package behavior.
 
 Keep the README as the product entry point. Put detailed command, config, and
-development material in `docs/` or `pi-mark/README.md`.
+development material in `docs/`.

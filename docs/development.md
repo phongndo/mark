@@ -10,7 +10,7 @@ make the smallest safe diff, and document user-visible behavior changes.
 - `curl`, `tar`, and `install` for installer smoke tests
 - `just` for repository recipes
 - `mise` for hk hook/tool provisioning
-- Node.js 24 and pnpm 11 for `pi-mark`
+- Node.js 24 and npm for vendored theme checks
 - Nix, optional but preferred for a complete local shell
 
 Do not install global tools just to work in the repo when `nix develop` or the
@@ -41,8 +41,7 @@ just hooks
 hk's global hooks require Git 2.54 or newer. The Nix development shell provides
 a new enough Git. The hook command is a no-op in repositories without `hk.pkl`.
 This repository's pre-commit hook runs fast staged-file checks and safe fixers;
-pre-push directly requires the slower Clippy, rust-analyzer, and affected
-`pi-mark` package checks.
+pre-push directly requires the slower Clippy and rust-analyzer checks.
 
 ## Common commands
 
@@ -64,20 +63,6 @@ the matching `just ci-*` recipes. `just ci-check` runs the complete local CI
 suite. Pull requests classify changed paths and run only affected suites, then
 join them behind the single `CI gate` check. See [Continuous
 integration](ci.md) for the workflow graph and required repository settings.
-
-For the Pi package:
-
-```sh
-cd pi-mark
-pnpm install
-pnpm run check
-```
-
-Run the local extension from the repository root with:
-
-```sh
-pi -e ./pi-mark/extensions/pi-mark.ts
-```
 
 ## Verification ladder
 
@@ -171,15 +156,3 @@ updates do not accidentally install nightly.
 
 Nightly builds set `MARK_BUILD_CHANNEL=nightly`, so `mark --version` includes
 the channel and source commit.
-
-## pi-mark release flow
-
-`pi-mark` is published separately to npm.
-
-1. Update `pi-mark/package.json` version.
-2. Merge the change and wait for the exact `main` commit to pass `CI gate`.
-3. Run the `Publish pi-mark` workflow from `main`.
-
-The workflow requires the current CI-qualified `main` tip, validates the
-package, publishes with npm provenance, and can create a `pi-mark-vX.Y.Z`
-GitHub release.

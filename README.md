@@ -156,30 +156,13 @@ git config --global diff.tool mark
 git config --global difftool.mark.cmd 'mark difftool -- "$LOCAL" "$REMOTE" "$MERGED"'
 ```
 
-## Pi extension
-
-This repository includes a separate `pi-mark` Pi package. It adds a `/mark`
-command to Pi and shells out to an already-installed `mark` binary. It does not
-bundle the CLI.
-
-```sh
-pi install npm:pi-mark
-```
-
-The slash command moved from `/diff`, `/show`, and `/patch` to `/mark` with
-subcommands (`/mark diff`, `/mark show`, `/mark patch`). `PI_DX_BIN` is now
-`PI_MARK_BIN`.
-
-See [`pi-mark/README.md`](pi-mark/README.md) for package usage and development.
-
 ## Documentation
 
 - [Usage](docs/usage.md) - commands, diff sources, pager, difftool, and GitHub
   reviews.
 - [Configuration](docs/configuration.md) - config paths, syntax settings,
   colors, diff rendering, and keybindings.
-- [Development](docs/development.md) - setup, checks, release flow, and local
-  Pi package work.
+- [Development](docs/development.md) - setup, checks, and release flow.
 - [Contributing](CONTRIBUTING.md) - repository standard and PR expectations.
 
 ## Development
@@ -212,7 +195,6 @@ crates/mark-diff      diff loading, parsing, and plain rendering
 crates/mark-syntax    thin Mark settings/rendering adapter over syntaxmate
 crates/mark-tui       ratatui/crossterm diff review UI
 crates/mark-bench     local benchmark fixture generation
-pi-mark               Pi extension package published to npm
 ```
 
 ## License
