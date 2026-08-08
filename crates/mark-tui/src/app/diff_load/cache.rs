@@ -2,12 +2,23 @@ use std::{collections::HashMap, sync::Arc};
 
 use mark_diff::{Changeset, DiffOptions};
 
-use super::super::{DiffApp, DiffCacheEntry, MAX_DIFF_CACHE_ENTRIES, cacheable_diff_options};
-use crate::{controls::DiffLayoutMode, model::UiModel, search::DiffSearchIndex};
+use super::super::{
+    DiffApp, DiffCacheEntry, MAX_DIFF_CACHE_ENTRIES, cacheable_diff_options,
+    show_context_expansion_controls,
+};
+use crate::{
+    controls::DiffLayoutMode,
+    model::{UiModel, UiModelBuildOptions},
+    search::DiffSearchIndex,
+};
 
 #[cfg(test)]
 pub(crate) fn diff_cache_entry(options: DiffOptions, changeset: Changeset) -> DiffCacheEntry {
     diff_cache_entry_with_annotation_candidates(options, changeset, true)
+}
+
+fn cache_model_options(options: &DiffOptions, annotations: bool) -> UiModelBuildOptions {
+    UiModelBuildOptions::new(true, show_context_expansion_controls(options), annotations)
 }
 
 pub(crate) fn diff_cache_entry_with_annotation_candidates(
@@ -24,16 +35,14 @@ pub(crate) fn diff_cache_entry_with_annotation_candidates(
         DiffLayoutMode::Unified,
         &context_expansions,
         &HashMap::new(),
-        true,
-        build_annotation_candidates,
+        cache_model_options(&options, build_annotation_candidates),
     );
     let split_model = UiModel::new_with_trailing_context_controls_and_annotation_candidates(
         &changeset,
         DiffLayoutMode::Split,
         &context_expansions,
         &HashMap::new(),
-        true,
-        build_annotation_candidates,
+        cache_model_options(&options, build_annotation_candidates),
     );
     DiffCacheEntry {
         options,
@@ -93,8 +102,7 @@ impl DiffApp {
                     DiffLayoutMode::Unified,
                     &context_expansions,
                     &trailing_context_lines,
-                    true,
-                    build_annotation_candidates,
+                    cache_model_options(&options, build_annotation_candidates),
                 )
             };
         let split_model =
@@ -106,8 +114,7 @@ impl DiffApp {
                     DiffLayoutMode::Split,
                     &context_expansions,
                     &trailing_context_lines,
-                    true,
-                    build_annotation_candidates,
+                    cache_model_options(&options, build_annotation_candidates),
                 )
             };
         self.jobs.diff_cache.insert(

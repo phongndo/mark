@@ -396,6 +396,28 @@ fn focused_hunk_editor_target_skips_show_sources() {
 }
 
 #[test]
+fn show_sources_omit_context_expansion_controls() {
+    let changeset = changeset_with_hunk_at(PathBuf::from("/repo"), 20);
+    let app = DiffApp::new(
+        DiffOptions {
+            source: DiffSource::Show("HEAD~1".into()),
+            ..DiffOptions::default()
+        },
+        changeset,
+        DiffLayoutMode::Unified,
+    );
+
+    assert!(
+        (0..app.document.model.len())
+            .all(|row| !matches!(app.document.model.row(row), Some(UiRow::Collapsed { .. })))
+    );
+    assert!(
+        (0..app.document.model.len())
+            .any(|row| matches!(app.document.model.row(row), Some(UiRow::HunkHeader { .. })))
+    );
+}
+
+#[test]
 fn editor_reload_behavior_supports_worktree_backed_diffs() {
     let changeset = changeset_with_hunk_at(PathBuf::from("/repo"), 20);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);

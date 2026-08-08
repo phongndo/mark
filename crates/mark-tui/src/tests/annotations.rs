@@ -42,8 +42,7 @@ fn install_sparse_annotation_test_model(app: &mut DiffApp) {
         app.viewport.layout,
         &context_expansions,
         &trailing_context_lines,
-        true,
-        true,
+        UiModelBuildOptions::new(true, true, true),
     );
     app.document.context_expansions = context_expansions;
     app.document.trailing_context_lines = trailing_context_lines;

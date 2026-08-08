@@ -4,7 +4,7 @@ use super::{
     LiveUpdatesState, MouseScroll, NotificationState, OptionsDraft, OverlayState, ReferenceState,
     RuntimeState, SyntaxStartupMode, ViewportState, color_scheme_from_config,
     full_file_context_expansions, full_file_mode_available, layout_override_from_setting,
-    layout_setting_from_override, show_rev_from_options,
+    layout_setting_from_override, show_context_expansion_controls, show_rev_from_options,
 };
 use crate::annotation::AnnotationStore;
 use crate::controls::{
@@ -13,8 +13,8 @@ use crate::controls::{
 };
 use crate::keymap::Keymap;
 use crate::model::{
-    ContextKey, ContextSourceEntry, ContextSourceKey, FileIndex, HunkIndex, UiModel, UiRow,
-    line_after_hunk,
+    ContextKey, ContextSourceEntry, ContextSourceKey, FileIndex, HunkIndex, UiModel,
+    UiModelBuildOptions, UiRow, line_after_hunk,
 };
 use crate::render::{snapshot::HitMap, text::display_width};
 use crate::search::DiffSearchIndex;
@@ -409,8 +409,11 @@ impl DiffApp {
             layout,
             &context_expansions,
             &trailing_context_lines,
-            !full_file_mode,
-            build_search_index && annotation_targeting == AnnotationTargeting::Cursor,
+            UiModelBuildOptions::new(
+                !full_file_mode,
+                show_context_expansion_controls(&options),
+                build_search_index && annotation_targeting == AnnotationTargeting::Cursor,
+            ),
         );
         let search_index = Arc::new(if build_search_index {
             DiffSearchIndex::new(&changeset)

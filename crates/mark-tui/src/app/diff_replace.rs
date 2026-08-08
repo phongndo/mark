@@ -12,7 +12,7 @@ use crate::{
         DiffLayoutMode, branch_base_from_options, branch_head_from_options, comparison_branches,
         comparison_commits, current_head_label, default_branch_base,
     },
-    model::{ContextKey, FileIndex, HunkIndex, UiModel},
+    model::{ContextKey, FileIndex, HunkIndex, UiModel, UiModelBuildOptions},
     search::DiffSearchIndex,
     syntax::invalidate_range_operand_revision_cache,
 };
@@ -220,8 +220,7 @@ impl DiffApp {
                     self.viewport.layout,
                     &self.document.context_expansions,
                     &self.document.trailing_context_lines,
-                    false,
-                    build_annotation_candidates,
+                    UiModelBuildOptions::new(false, false, build_annotation_candidates),
                 )
             } else {
                 match self.viewport.layout {

@@ -1,9 +1,10 @@
 use super::super::{
     DiffApp, HunkFocusModelBehavior, HunkFocusSearch, RenderedDiffRow,
-    find_rendered_diff_row_outward, max_scroll_for_viewport, viewport_focus_offset,
+    find_rendered_diff_row_outward, max_scroll_for_viewport, show_context_expansion_controls,
+    viewport_focus_offset,
 };
 use crate::{
-    model::{FileIndex, HunkIndex, UiModel, UiRow},
+    model::{FileIndex, HunkIndex, UiModel, UiModelBuildOptions, UiRow},
     render::viewport_plan::{ViewportSlotKind, plan_diff_viewport_rows_at_scroll},
 };
 
@@ -32,8 +33,11 @@ impl DiffApp {
                 &self.document.context_expansions,
                 &self.document.trailing_context_lines,
                 visible_files,
-                !full_file_mode,
-                build_annotation_candidates,
+                UiModelBuildOptions::new(
+                    !full_file_mode,
+                    show_context_expansion_controls(&self.document.options),
+                    build_annotation_candidates,
+                ),
             );
         self.annotations_state.annotation_rows.borrow_mut().clear();
         *self.annotations_state.annotation_keys_by_row.borrow_mut() = None;

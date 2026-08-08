@@ -2,7 +2,7 @@ use super::{DiffApp, MarkExport, MarkScope, json_string};
 use crate::annotation::{
     AnnotationKey, AnnotationScope, AnnotationSide, paired_old_line_for_addition,
 };
-use crate::model::{UiModel, UiRow, line_after_hunk};
+use crate::model::{UiModel, UiModelBuildOptions, UiRow, line_after_hunk};
 use crate::syntax::{DiffSide, available_context_lines};
 use std::collections::{HashMap, HashSet};
 
@@ -103,8 +103,7 @@ impl DiffApp {
             self.viewport.layout,
             &self.document.context_expansions,
             &HashMap::new(),
-            true,
-            false,
+            UiModelBuildOptions::new(true, true, false),
         );
         let exportable_keys = self.exportable_annotation_keys(&export_model);
         let exportable_range_coordinates = self.exportable_range_coordinates(&export_model);

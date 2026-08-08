@@ -1982,7 +1982,7 @@ fn full_file_toggle_preserves_the_focused_hunk_and_viewport_in_both_modes() {
 }
 
 #[test]
-fn unsupported_diff_source_keeps_hunk_view_when_full_file_is_enabled() {
+fn unsupported_diff_source_keeps_hunk_view_without_context_controls() {
     let repo = temp_test_dir("unsupported-full-file-source");
     fs::create_dir_all(&repo).expect("repo directory should be created");
     let changeset = changeset_with_hunk_at(repo, 20);
@@ -2010,7 +2010,7 @@ fn unsupported_diff_source_keeps_hunk_view_when_full_file_is_enabled() {
     assert!(app.document.context_expansions.is_empty());
     assert!(
         (0..app.document.model.len())
-            .any(|row| matches!(app.document.model.row(row), Some(UiRow::Collapsed { .. })))
+            .all(|row| !matches!(app.document.model.row(row), Some(UiRow::Collapsed { .. })))
     );
     assert!(
         (0..app.document.model.len())

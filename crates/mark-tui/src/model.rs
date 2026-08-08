@@ -294,6 +294,27 @@ pub(crate) struct UiModel {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub(crate) struct UiModelBuildOptions {
+    show_context_controls: bool,
+    show_context_expansion_controls: bool,
+    build_annotation_candidates: bool,
+}
+
+impl UiModelBuildOptions {
+    pub(crate) const fn new(
+        show_context_controls: bool,
+        show_context_expansion_controls: bool,
+        build_annotation_candidates: bool,
+    ) -> Self {
+        Self {
+            show_context_controls,
+            show_context_expansion_controls,
+            build_annotation_candidates,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 struct UiModelIdentity(u64);
 
 impl UiModelIdentity {
@@ -934,8 +955,7 @@ impl UiModel {
             layout,
             context_expansions,
             trailing_context_lines,
-            show_context_controls,
-            true,
+            UiModelBuildOptions::new(show_context_controls, true, true),
         )
     }
 
@@ -944,8 +964,7 @@ impl UiModel {
         layout: DiffLayoutMode,
         context_expansions: &HashMap<ContextKey, usize>,
         trailing_context_lines: &HashMap<ContextKey, usize>,
-        show_context_controls: bool,
-        build_annotation_candidates: bool,
+        options: UiModelBuildOptions,
     ) -> Self {
         let visible_files: Vec<_> = (0..changeset.files.len()).map(FileIndex::new).collect();
         Self::new_filtered_with_trailing_context_controls_and_annotation_candidates(
@@ -954,8 +973,7 @@ impl UiModel {
             context_expansions,
             trailing_context_lines,
             &visible_files,
-            show_context_controls,
-            build_annotation_candidates,
+            options,
         )
     }
 
@@ -974,8 +992,7 @@ impl UiModel {
             context_expansions,
             trailing_context_lines,
             visible_files,
-            show_context_controls,
-            true,
+            UiModelBuildOptions::new(show_context_controls, true, true),
         )
     }
 
@@ -985,9 +1002,13 @@ impl UiModel {
         context_expansions: &HashMap<ContextKey, usize>,
         trailing_context_lines: &HashMap<ContextKey, usize>,
         visible_files: &[FileIndex],
-        show_context_controls: bool,
-        build_annotation_candidates: bool,
+        options: UiModelBuildOptions,
     ) -> Self {
+        let UiModelBuildOptions {
+            show_context_controls,
+            show_context_expansion_controls,
+            build_annotation_candidates,
+        } = options;
         let total_hunks = changeset
             .files
             .iter()
@@ -1038,7 +1059,7 @@ impl UiModel {
                 trailing_context_lines,
                 visible_files,
                 total_hunks,
-                show_context_controls,
+                options,
             );
             if !build_annotation_candidates {
                 model.annotation_candidate_blocks = AnnotationCandidateIndex::disabled();
@@ -1088,7 +1109,7 @@ impl UiModel {
                     let remaining = collapsed_lines.saturating_sub(expanded);
 
                     if context_expands_up(hunk_index) {
-                        if remaining > 0 {
+                        if remaining > 0 && show_context_expansion_controls {
                             rows.push(UiRow::Collapsed {
                                 file: file_index,
                                 hunk: hunk_index,
@@ -1135,7 +1156,7 @@ impl UiModel {
                             }
                         }
 
-                        if remaining > 0 {
+                        if remaining > 0 && show_context_expansion_controls {
                             rows.push(UiRow::Collapsed {
                                 file: file_index,
                                 hunk: hunk_index,
@@ -1213,7 +1234,7 @@ impl UiModel {
                 }
             }
             let remaining = available.saturating_sub(expanded);
-            if remaining > 0 {
+            if remaining > 0 && show_context_expansion_controls {
                 rows.push(UiRow::Collapsed {
                     file: file_index,
                     hunk: trailing_context_key.hunk,
@@ -1254,8 +1275,13 @@ impl UiModel {
         trailing_context_lines: &HashMap<ContextKey, usize>,
         visible_files: &[FileIndex],
         total_hunks: usize,
-        show_context_controls: bool,
+        options: UiModelBuildOptions,
     ) -> Self {
+        let UiModelBuildOptions {
+            show_context_controls,
+            show_context_expansion_controls,
+            ..
+        } = options;
         let mut row_count = 0usize;
         let mut row_segments = Vec::with_capacity(
             changeset
@@ -1314,7 +1340,7 @@ impl UiModel {
                     let remaining = collapsed_lines.saturating_sub(expanded);
 
                     if context_expands_up(hunk_index) {
-                        if remaining > 0 {
+                        if remaining > 0 && show_context_expansion_controls {
                             push_row_segment(
                                 &mut row_segments,
                                 &mut row_count,
@@ -1382,7 +1408,7 @@ impl UiModel {
                             );
                         }
 
-                        if remaining > 0 {
+                        if remaining > 0 && show_context_expansion_controls {
                             push_row_segment(
                                 &mut row_segments,
                                 &mut row_count,
@@ -1482,7 +1508,7 @@ impl UiModel {
                 );
             }
             let remaining = available.saturating_sub(expanded);
-            if remaining > 0 {
+            if remaining > 0 && show_context_expansion_controls {
                 push_row_segment(
                     &mut row_segments,
                     &mut row_count,
@@ -2759,7 +2785,7 @@ mod tests {
                     &trailing,
                     &visible,
                     2,
-                    show_context_controls,
+                    UiModelBuildOptions::new(show_context_controls, true, true),
                 );
                 assert_eq!(sparse.len(), eager.len());
                 for row in 0..eager.len() {
