@@ -292,7 +292,7 @@ pub(crate) fn show_rev_from_options(options: &DiffOptions) -> Option<String> {
 }
 
 pub(crate) fn show_context_expansion_controls(options: &DiffOptions) -> bool {
-    !matches!(options.source, DiffSource::Show(_))
+    !matches!(options.source, DiffSource::Show(_)) && !is_review_options(options)
 }
 
 pub(crate) fn diff_choice_for_options(options: &DiffOptions) -> Option<DiffChoice> {
