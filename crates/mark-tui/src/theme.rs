@@ -21,7 +21,8 @@ mod help;
 mod palettes;
 
 pub use benchmark::{
-    DiffBenchmarkOptions, DiffBenchmarkReport, SyntaxBenchmarkReport, SyntaxLatencyBucket,
+    AllocationBenchmarkStage, DiffBenchmarkOptions, DiffBenchmarkReport, SyntaxBenchmarkReport,
+    SyntaxLatencyBucket,
 };
 pub(crate) use colorscheme::{Base16Scheme, RgbColor, config_color, diff_theme_from_config};
 #[cfg(test)]

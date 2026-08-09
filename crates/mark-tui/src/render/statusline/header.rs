@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{borrow::Cow, path::Path};
 
 use mark_diff::{DiffSource, PatchSource};
 use ratatui::{
@@ -16,7 +16,10 @@ use crate::{
     render::{
         menus::{diff_comparison_label_for_theme, diff_selector_text},
         style::statusline_bg,
-        text::{fit, fit_with_ellipsis, format_count, progress_label},
+        text::{
+            display_char_supports_partial_render, display_width, fit, fit_with_ellipsis,
+            format_count, progress_label,
+        },
     },
     theme::STATUSLINE_SELECTOR_GAP,
 };
@@ -64,9 +67,9 @@ pub(crate) fn push_statusline_left_spans(
 ) {
     let visual_mode = app.annotation_visual_mode_active();
     let selector_text = if visual_mode {
-        " VISUAL ".to_owned()
+        Cow::Borrowed(" VISUAL ")
     } else {
-        diff_selector_text(&app.document.options)
+        Cow::Owned(diff_selector_text(&app.document.options))
     };
     push_fitted_statusline_span(spans, selector_text, statusline_mode_style(app), remaining);
     let info_bg = app.config.theme.statusline_info_bg;
@@ -96,13 +99,18 @@ pub(crate) fn push_statusline_left_spans(
         push_fitted_statusline_span(spans, base, statusline_info_style(app), remaining);
     } else {
         let source = match &app.document.options.source {
-            DiffSource::Worktree => "HEAD".to_owned(),
-            DiffSource::Patch(PatchSource::Review { label, .. }) => label
-                .as_str()
-                .strip_prefix("review ")
-                .unwrap_or(label.as_str())
-                .to_owned(),
-            _ => diff_comparison_label_for_theme(&app.document.options, app.config.theme),
+            DiffSource::Worktree => Cow::Borrowed("HEAD"),
+            DiffSource::Patch(PatchSource::Review { label, .. }) => Cow::Owned(
+                label
+                    .as_str()
+                    .strip_prefix("review ")
+                    .unwrap_or(label.as_str())
+                    .to_owned(),
+            ),
+            _ => Cow::Owned(diff_comparison_label_for_theme(
+                &app.document.options,
+                app.config.theme,
+            )),
         };
         push_fitted_statusline_span(spans, source, statusline_info_style(app), remaining);
     }
@@ -152,7 +160,7 @@ pub(crate) fn push_statusline_left_spans(
 
 pub(crate) fn push_fitted_statusline_span(
     spans: &mut Vec<Span<'static>>,
-    text: impl AsRef<str>,
+    text: impl Into<Cow<'static, str>>,
     style: Style,
     remaining: &mut usize,
 ) {
@@ -160,13 +168,21 @@ pub(crate) fn push_fitted_statusline_span(
         return;
     }
 
-    let text = fit(text.as_ref(), *remaining);
-    if text.is_empty() {
+    let text = text.into();
+    let text_width = display_width(text.as_ref());
+    if text_width <= *remaining && !text.chars().any(display_char_supports_partial_render) {
+        *remaining -= text_width;
+        if !text.is_empty() {
+            spans.push(Span::styled(text, style));
+        }
         return;
     }
 
-    *remaining = (*remaining).saturating_sub(text.width());
-    spans.push(Span::styled(text, style));
+    let text = fit(text.as_ref(), *remaining);
+    if !text.is_empty() {
+        *remaining = (*remaining).saturating_sub(text.width());
+        spans.push(Span::styled(text, style));
+    }
 }
 
 pub(crate) fn statusline_right_max_width(width: usize) -> usize {

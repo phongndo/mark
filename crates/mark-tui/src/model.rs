@@ -1283,12 +1283,22 @@ impl UiModel {
             ..
         } = options;
         let mut row_count = 0usize;
-        let mut row_segments = Vec::with_capacity(
-            changeset
-                .files
-                .len()
-                .saturating_add(total_hunks.saturating_mul(4)),
-        );
+        let base_segment_capacity = changeset
+            .files
+            .len()
+            .saturating_add(total_hunks.saturating_mul(4));
+        let split_segment_capacity = if layout == DiffLayoutMode::Split {
+            visible_files
+                .iter()
+                .filter_map(|file| changeset.files.get(file.get()))
+                .flat_map(|file| file.hunks())
+                .map(|hunk| split_hunk_segment_count(&hunk.lines))
+                .fold(0usize, usize::saturating_add)
+        } else {
+            0
+        };
+        let mut row_segments =
+            Vec::with_capacity(base_segment_capacity.saturating_add(split_segment_capacity));
         let mut file_start_rows = vec![None; changeset.files.len()];
         let mut file_row_starts = Vec::with_capacity(visible_files.len());
         let mut hunk_start_rows = Vec::with_capacity(total_hunks);
@@ -2576,30 +2586,44 @@ pub(crate) fn push_split_hunk_rows(
                 index += 1;
             }
             DiffLineKind::Deletion | DiffLineKind::Addition => {
-                let mut deletions = Vec::new();
-                let mut additions = Vec::new();
+                let change_start = index;
                 while index < lines.len()
                     && matches!(
                         lines[index].kind(),
                         DiffLineKind::Deletion | DiffLineKind::Addition
                     )
                 {
-                    match lines[index].kind() {
-                        DiffLineKind::Deletion => deletions.push(DiffLineIndex::new(index)),
-                        DiffLineKind::Addition => additions.push(DiffLineIndex::new(index)),
-                        DiffLineKind::Context | DiffLineKind::Meta => {}
-                    }
                     index += 1;
                 }
 
-                let paired_rows = deletions.len().max(additions.len());
-                for pair_index in 0..paired_rows {
-                    rows.push(UiRow::SplitLine {
-                        file: file_index,
-                        hunk: hunk_index,
-                        left: deletions.get(pair_index).copied().into(),
-                        right: additions.get(pair_index).copied().into(),
-                    });
+                let shape = change_run_shape(lines, change_start..index);
+                let paired_rows = shape.deletion_count.max(shape.addition_count);
+                if shape.deletions_contiguous && shape.additions_contiguous {
+                    for pair_index in 0..paired_rows {
+                        rows.push(UiRow::SplitLine {
+                            file: file_index,
+                            hunk: hunk_index,
+                            left: (pair_index < shape.deletion_count)
+                                .then(|| DiffLineIndex::new(shape.deletion_start + pair_index))
+                                .into(),
+                            right: (pair_index < shape.addition_count)
+                                .then(|| DiffLineIndex::new(shape.addition_start + pair_index))
+                                .into(),
+                        });
+                    }
+                } else {
+                    let mut deletions = (change_start..index)
+                        .filter(|line| lines[*line].kind() == DiffLineKind::Deletion);
+                    let mut additions = (change_start..index)
+                        .filter(|line| lines[*line].kind() == DiffLineKind::Addition);
+                    for _ in 0..paired_rows {
+                        rows.push(UiRow::SplitLine {
+                            file: file_index,
+                            hunk: hunk_index,
+                            left: deletions.next().map(DiffLineIndex::new).into(),
+                            right: additions.next().map(DiffLineIndex::new).into(),
+                        });
+                    }
                 }
             }
         }
@@ -2659,43 +2683,43 @@ fn push_split_hunk_segments(
                 );
             }
             DiffLineKind::Deletion | DiffLineKind::Addition => {
-                let mut deletions = Vec::new();
-                let mut additions = Vec::new();
+                let change_start = index;
                 while index < lines.len()
                     && matches!(
                         lines[index].kind(),
                         DiffLineKind::Deletion | DiffLineKind::Addition
                     )
                 {
-                    match lines[index].kind() {
-                        DiffLineKind::Deletion => deletions.push(index),
-                        DiffLineKind::Addition => additions.push(index),
-                        DiffLineKind::Context | DiffLineKind::Meta => {}
-                    }
                     index += 1;
                 }
 
-                let left_candidate_start = paired_deletions_remaining.min(deletions.len());
+                let shape = change_run_shape(lines, change_start..index);
+                let left_candidate_start = paired_deletions_remaining.min(shape.deletion_count);
                 paired_deletions_remaining =
-                    paired_deletions_remaining.saturating_sub(deletions.len());
+                    paired_deletions_remaining.saturating_sub(shape.deletion_count);
+                let paired_rows = shape.deletion_count.max(shape.addition_count);
 
-                if is_contiguous(&deletions) && is_contiguous(&additions) {
+                if shape.deletions_contiguous && shape.additions_contiguous {
                     push_row_segment(
                         row_segments,
                         row_count,
-                        deletions.len().max(additions.len()),
+                        paired_rows,
                         RowSegmentKind::SplitChangeRun {
                             file: file_index,
                             hunk: hunk_index,
-                            left_start: row_count_u32(deletions.first().copied().unwrap_or(0)),
-                            left_len: row_count_u32(deletions.len()),
+                            left_start: row_count_u32(shape.deletion_start),
+                            left_len: row_count_u32(shape.deletion_count),
                             left_candidate_start: row_count_u32(left_candidate_start),
-                            right_start: row_count_u32(additions.first().copied().unwrap_or(0)),
-                            right_len: row_count_u32(additions.len()),
+                            right_start: row_count_u32(shape.addition_start),
+                            right_len: row_count_u32(shape.addition_count),
                         },
                     );
                 } else {
-                    for pair_index in 0..deletions.len().max(additions.len()) {
+                    let mut deletions = (change_start..index)
+                        .filter(|line| lines[*line].kind() == DiffLineKind::Deletion);
+                    let mut additions = (change_start..index)
+                        .filter(|line| lines[*line].kind() == DiffLineKind::Addition);
+                    for pair_index in 0..paired_rows {
                         push_row_segment(
                             row_segments,
                             row_count,
@@ -2703,18 +2727,10 @@ fn push_split_hunk_segments(
                             RowSegmentKind::SplitExplicit {
                                 file: file_index,
                                 hunk: hunk_index,
-                                left: deletions
-                                    .get(pair_index)
-                                    .copied()
-                                    .map(DiffLineIndex::new)
-                                    .into(),
+                                left: deletions.next().map(DiffLineIndex::new).into(),
                                 left_candidate: pair_index >= left_candidate_start
-                                    && pair_index < deletions.len(),
-                                right: additions
-                                    .get(pair_index)
-                                    .copied()
-                                    .map(DiffLineIndex::new)
-                                    .into(),
+                                    && pair_index < shape.deletion_count,
+                                right: additions.next().map(DiffLineIndex::new).into(),
                             },
                         );
                     }
@@ -2724,10 +2740,97 @@ fn push_split_hunk_segments(
     }
 }
 
-fn is_contiguous(indexes: &[usize]) -> bool {
-    indexes
-        .windows(2)
-        .all(|window| window[1] == window[0].saturating_add(1))
+fn split_hunk_segment_count(lines: &[DiffLine]) -> usize {
+    let mut segments = 0usize;
+    let mut index = 0usize;
+    while index < lines.len() {
+        match lines[index].kind() {
+            DiffLineKind::Context => {
+                while index < lines.len() && lines[index].kind() == DiffLineKind::Context {
+                    index += 1;
+                }
+                segments += 1;
+            }
+            DiffLineKind::Meta => {
+                while index < lines.len() && lines[index].kind() == DiffLineKind::Meta {
+                    index += 1;
+                }
+                segments += 1;
+            }
+            DiffLineKind::Deletion | DiffLineKind::Addition => {
+                let change_start = index;
+                while index < lines.len()
+                    && matches!(
+                        lines[index].kind(),
+                        DiffLineKind::Deletion | DiffLineKind::Addition
+                    )
+                {
+                    index += 1;
+                }
+                let shape = change_run_shape(lines, change_start..index);
+                segments = segments.saturating_add(
+                    if shape.deletions_contiguous && shape.additions_contiguous {
+                        1
+                    } else {
+                        shape.deletion_count.max(shape.addition_count)
+                    },
+                );
+            }
+        }
+    }
+    segments
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ChangeRunShape {
+    deletion_start: usize,
+    deletion_count: usize,
+    deletions_contiguous: bool,
+    addition_start: usize,
+    addition_count: usize,
+    additions_contiguous: bool,
+}
+
+fn change_run_shape(lines: &[DiffLine], range: Range<usize>) -> ChangeRunShape {
+    let mut deletion_start = None;
+    let mut previous_deletion = None;
+    let mut deletion_count = 0usize;
+    let mut deletions_contiguous = true;
+    let mut addition_start = None;
+    let mut previous_addition = None;
+    let mut addition_count = 0usize;
+    let mut additions_contiguous = true;
+
+    for index in range {
+        match lines[index].kind() {
+            DiffLineKind::Deletion => {
+                deletion_start.get_or_insert(index);
+                if previous_deletion.is_some_and(|previous| index != previous + 1) {
+                    deletions_contiguous = false;
+                }
+                previous_deletion = Some(index);
+                deletion_count += 1;
+            }
+            DiffLineKind::Addition => {
+                addition_start.get_or_insert(index);
+                if previous_addition.is_some_and(|previous| index != previous + 1) {
+                    additions_contiguous = false;
+                }
+                previous_addition = Some(index);
+                addition_count += 1;
+            }
+            DiffLineKind::Context | DiffLineKind::Meta => {}
+        }
+    }
+
+    ChangeRunShape {
+        deletion_start: deletion_start.unwrap_or(0),
+        deletion_count,
+        deletions_contiguous,
+        addition_start: addition_start.unwrap_or(0),
+        addition_count,
+        additions_contiguous,
+    }
 }
 
 #[cfg(test)]
@@ -2747,6 +2850,52 @@ mod tests {
         assert_eq!(lines.iter().collect::<Vec<_>>(), ["one", "two", "three"]);
         assert!(ContextLines::new("one\ntwo\nthree\n".to_owned(), 2, 5).is_none());
         assert!(ContextLines::new("oversized".to_owned(), 1, 5).is_none());
+    }
+
+    #[test]
+    fn split_change_runs_pair_interleaved_deletions_and_additions_without_staging() {
+        let lines = vec![
+            DiffLine::deletion(1, "old one"),
+            DiffLine::addition(1, "new one"),
+            DiffLine::deletion(2, "old two"),
+            DiffLine::addition(2, "new two"),
+        ];
+        assert_eq!(split_hunk_segment_count(&lines), 2);
+
+        let file = FileIndex::new(0);
+        let hunk = HunkIndex::new(0);
+        let mut eager = Vec::new();
+        push_split_hunk_rows(&mut eager, file, hunk, &lines);
+
+        assert_eq!(
+            eager,
+            vec![
+                UiRow::SplitLine {
+                    file,
+                    hunk,
+                    left: MaybeDiffLineIndex::some(DiffLineIndex::new(0)),
+                    right: MaybeDiffLineIndex::some(DiffLineIndex::new(1)),
+                },
+                UiRow::SplitLine {
+                    file,
+                    hunk,
+                    left: MaybeDiffLineIndex::some(DiffLineIndex::new(2)),
+                    right: MaybeDiffLineIndex::some(DiffLineIndex::new(3)),
+                },
+            ]
+        );
+
+        let mut segments = Vec::new();
+        let mut row_count = 0;
+        push_split_hunk_segments(&mut segments, &mut row_count, file, hunk, &lines);
+        let sparse = segments
+            .iter()
+            .flat_map(|segment| {
+                let start = segment.start.get();
+                (start..start + segment.len as usize).filter_map(|row| segment.row_at(row))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(sparse, eager);
     }
 
     #[test]

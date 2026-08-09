@@ -97,6 +97,22 @@ scripts/test-diff-error-pane
 
 The interactive smoke test must run in a terminal.
 
+## Allocation profiling
+
+`mark-bench` has an opt-in counting allocator that reports allocation calls,
+reallocations, byte churn, retained-byte deltas, and peak live-byte growth for
+loading, model construction, filtering, rendering, and scroll passes:
+
+```sh
+cargo run -p mark-bench --release --features allocation-profile -- \
+  measure-patch path/to/change.diff --max-scroll-steps 100 --json
+```
+
+The JSON report adds `allocation_profile` to each run. The human report prints
+the same totals and per-stage breakdown. Keep this feature out of latency runs:
+its atomic counters intentionally perturb timings. Use a normal release
+`mark-bench` build for before/after latency and RSS measurements.
+
 ## Profile-guided builds
 
 `scripts/build-pgo` produces a profile-guided release `mark` binary:

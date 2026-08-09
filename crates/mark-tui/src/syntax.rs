@@ -11,7 +11,7 @@ mod types;
 pub(crate) use inline::{
     InlineCharClass, compute_hunk_inline_emphasis, inline_ascii_class, inline_tokens,
 };
-pub(crate) use inline::{InlineHunkEmphasisCache, InlineHunkKey, InlineRange};
+pub(crate) use inline::{InlineHunkEmphasisCache, InlineHunkKey, InlineRange, InlineRanges};
 pub(crate) use lru::LruCache;
 pub(crate) use queue::{SyntaxPriority, SyntaxQueueError, SyntaxWorkerQueue};
 pub(crate) use runtime::SyntaxRuntime;

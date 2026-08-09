@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Deref, sync::Arc};
 
 use mark_diff::{DiffLine, DiffLineKind};
 
@@ -21,8 +21,29 @@ pub(crate) struct InlineRange {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct InlineRanges(Option<Arc<[InlineRange]>>);
+
+impl From<Vec<InlineRange>> for InlineRanges {
+    fn from(ranges: Vec<InlineRange>) -> Self {
+        if ranges.is_empty() {
+            Self::default()
+        } else {
+            Self(Some(Arc::from(ranges)))
+        }
+    }
+}
+
+impl Deref for InlineRanges {
+    type Target = [InlineRange];
+
+    fn deref(&self) -> &Self::Target {
+        self.0.as_deref().unwrap_or_default()
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct InlineLineEmphasis {
-    pub(crate) ranges: Vec<InlineRange>,
+    pub(crate) ranges: InlineRanges,
 }
 
 #[derive(Debug)]
@@ -93,7 +114,7 @@ impl InlineHunkEmphasisCache {
         }
     }
 
-    pub(crate) fn ranges_for_line(&mut self, lines: &[DiffLine], line: usize) -> Vec<InlineRange> {
+    pub(crate) fn ranges_for_line(&mut self, lines: &[DiffLine], line: usize) -> InlineRanges {
         if let Some(emphasis) = self.lines.get(&line) {
             return emphasis.ranges.clone();
         }
@@ -169,7 +190,12 @@ impl InlineHunkEmphasisCache {
 
     pub(crate) fn set_emphasis(&mut self, line: usize, ranges: Vec<InlineRange>) {
         if line < self.line_count {
-            self.lines.insert(line, InlineLineEmphasis { ranges });
+            self.lines.insert(
+                line,
+                InlineLineEmphasis {
+                    ranges: ranges.into(),
+                },
+            );
         }
     }
 }
@@ -276,14 +302,14 @@ pub(crate) fn compute_changed_block_inline_emphasis(
                 let old_text = lines[*deletion].text_lossy();
                 let new_text = lines[*addition].text_lossy();
                 let (old_ranges, new_ranges) = changed_token_ranges(&old_text, &new_text);
-                emphasis[*deletion].ranges = old_ranges;
-                emphasis[*addition].ranges = new_ranges;
+                emphasis[*deletion].ranges = old_ranges.into();
+                emphasis[*addition].ranges = new_ranges.into();
             }
             (Some(deletion), None) => {
-                emphasis[*deletion].ranges = Vec::new();
+                emphasis[*deletion].ranges = InlineRanges::default();
             }
             (None, Some(addition)) => {
-                emphasis[*addition].ranges = Vec::new();
+                emphasis[*addition].ranges = InlineRanges::default();
             }
             (None, None) => {}
         }
@@ -513,6 +539,22 @@ mod tests {
             cache.lines.len() <= 2,
             "cache should remain viewport-line sparse"
         );
+    }
+
+    #[test]
+    fn inline_cache_reuses_nonempty_range_storage() {
+        let lines = vec![
+            DiffLine::deletion(1, "let value = old_name;"),
+            DiffLine::addition(1, "let value = new_name;"),
+        ];
+        let mut cache = InlineHunkEmphasisCache::new(&lines);
+
+        let first = cache.ranges_for_line(&lines, 0);
+        let second = cache.ranges_for_line(&lines, 0);
+        let (Some(first), Some(second)) = (&first.0, &second.0) else {
+            panic!("changed pair should have shared ranges");
+        };
+        assert!(Arc::ptr_eq(first, second));
     }
 
     #[test]

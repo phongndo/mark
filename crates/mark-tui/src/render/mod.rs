@@ -67,7 +67,7 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &mut DiffApp) {
     };
     app.apply_render_plan(render_plan);
 
-    let mut compositor = Compositor::<AppRenderCtx<'_>>::new();
+    let mut compositor = Compositor::new();
     compositor.push(RectComponent::new(ComponentId::Header, layout.header));
     if let Some(sidebar_area) = layout.sidebar {
         compositor.push(RectComponent::new(ComponentId::FileSidebar, sidebar_area));
@@ -137,12 +137,20 @@ impl RenderContext for AppRenderCtx<'_> {
 }
 
 fn build_render_state_plan(app: &DiffApp, layout: &ScreenLayout, root: Rect) -> RenderStatePlan {
-    let option_items = app.filtered_options_menu_items();
-    let options_menu_visible_rows = options_menu_area(app, root, &option_items).map(|area| {
-        let inner = options_menu_block(app.config.theme).inner(area);
-        selector_menu_list_rows(inner.height, 0)
-    });
-    let annotation_menu_visible_rows = annotation_menu_list_visible_rows(app, root);
+    let options_menu_visible_rows = if app.overlays.options_menu_is_open() {
+        let option_items = app.filtered_options_menu_items();
+        options_menu_area(app, root, &option_items).map(|area| {
+            let inner = options_menu_block(app.config.theme).inner(area);
+            selector_menu_list_rows(inner.height, 0)
+        })
+    } else {
+        None
+    };
+    let annotation_menu_visible_rows = app
+        .overlays
+        .annotation_menu_is_open()
+        .then(|| annotation_menu_list_visible_rows(app, root))
+        .flatten();
 
     RenderStatePlan {
         terminal_area: root,
@@ -160,16 +168,31 @@ fn build_render_state_plan(app: &DiffApp, layout: &ScreenLayout, root: Rect) -> 
 }
 
 fn build_hit_map(app: &DiffApp, layout: &ScreenLayout, root: Rect) -> HitMap {
-    let diff_choices = app.filtered_diff_choices();
-    let option_items = app.filtered_options_menu_items();
-    let annotation_items = app.filtered_annotation_menu_items();
+    let diff_menu_area = if app.overlays.diff_menu_is_open() {
+        let choices = app.filtered_diff_choices();
+        diff_menu_area(app, root, &choices)
+    } else {
+        None
+    };
+    let options_menu_area = if app.overlays.options_menu_is_open() {
+        let items = app.filtered_options_menu_items();
+        options_menu_area(app, root, &items)
+    } else {
+        None
+    };
+    let annotation_menu_area = if app.overlays.annotation_menu_is_open() {
+        let items = app.filtered_annotation_menu_items();
+        annotation_menu_area(app, root, &items)
+    } else {
+        None
+    };
     HitMap {
         diff_area: Some(layout.diff),
-        diff_menu_area: diff_menu_area(app, root, &diff_choices),
+        diff_menu_area,
         branch_menu_area: branch_menu_area(app, root),
         commit_menu_area: commit_menu_area(app, root),
-        options_menu_area: options_menu_area(app, root, &option_items),
-        annotation_menu_area: annotation_menu_area(app, root, &annotation_items),
+        options_menu_area,
+        annotation_menu_area,
         review_input_area: review_input_area(app, root),
         color_scheme_picker_area: color_scheme_picker_area(app, root),
         error_log_separator_row: layout.error_log.map(|area| area.y),

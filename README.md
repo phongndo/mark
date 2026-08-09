@@ -103,12 +103,12 @@ diff fixture as follows:
 
 | Diff | Load | Open | Grep | Random-scroll max | RSS increase |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 1,000,000 rows / 74.0 MB | 20.6 ms | 20.8 ms | 68.0 ms | 87 µs | 112 MB |
+| 1,000,000 rows / 74.0 MB | 6.4 ms | 11.9 ms | 3.2 ms | 274 µs | 59 MB |
 
 These are reference-machine benchmark results, not latency promises for every
-machine or repository. The fixture, commands, memory accounting, and 10-million-
-row local run are documented in the
-[mega-diff performance report](docs/performance-reports/2026-07-11-mega-diff-memory.md).
+machine or repository. The fixture, commands, allocation accounting, and
+10-million-row local run are documented in the
+[allocation performance report](docs/performance-reports/2026-08-08-allocation-profile.md).
 
 ## How it compares
 

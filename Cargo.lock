@@ -873,6 +873,7 @@ version = "0.10.6"
 dependencies = [
  "clap",
  "mark-diff",
+ "mark-runtime",
  "mark-syntax",
  "mark-tui",
  "mimalloc",

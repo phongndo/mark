@@ -13,6 +13,21 @@ impl DiffApp {
         self.viewport.manual_hunk_focus = None;
     }
 
+    pub(in crate::app) fn replace_filter_model(
+        &mut self,
+        visible_files: &[FileIndex],
+        hunk_focus_behavior: HunkFocusModelBehavior,
+    ) {
+        if !self.full_file_mode_active() && self.document.model.visible_files() == visible_files {
+            self.close_annotation_target_mode();
+            if hunk_focus_behavior == HunkFocusModelBehavior::Clear {
+                self.clear_manual_hunk_focus();
+            }
+            return;
+        }
+        self.replace_model(visible_files, hunk_focus_behavior);
+    }
+
     pub(in crate::app) fn replace_model(
         &mut self,
         visible_files: &[FileIndex],

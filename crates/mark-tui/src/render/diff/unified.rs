@@ -6,8 +6,8 @@ use crate::{
     app::{unified_content_width, wrapped_line_start_columns},
     render::{
         diff::{
-            content_spans_at_scroll, diff_indicator_span_for_focus, gutter_spans,
-            unified_gutter_text,
+            ContentSpanRender, append_content_spans_at_scroll, append_gutter_spans,
+            content_span_capacity, diff_indicator_span_for_focus, unified_gutter_text,
         },
         grep::{
             diff_line_grep_highlight_text, grep_highlight_target_for_columns,
@@ -146,29 +146,27 @@ fn render_unified_line_segment_with_focus(
     } else {
         unified_gutter_text(line.old_line(), line.new_line())
     };
-    let mut spans = Vec::new();
+    let mut spans =
+        Vec::with_capacity(3usize.saturating_add(content_span_capacity(syntax, inline.len())));
     if indicator_width > 0 {
         spans.push(diff_indicator_span_for_focus(line.kind(), theme, focused));
     }
     if gutter_width > 0 {
-        spans.extend(gutter_spans(
-            &gutter,
-            sign,
-            gutter_width,
-            line.kind(),
-            theme,
-        ));
+        append_gutter_spans(&mut spans, gutter, sign, gutter_width, line.kind(), theme);
     }
     let text = line.text_lossy();
-    spans.extend(content_spans_at_scroll(
+    append_content_spans_at_scroll(
+        &mut spans,
         &text,
-        syntax,
-        inline,
-        line.kind(),
-        content_width,
-        theme,
-        horizontal_scroll,
-    ));
+        ContentSpanRender {
+            syntax,
+            inline,
+            kind: line.kind(),
+            width: content_width,
+            theme,
+            horizontal_scroll,
+        },
+    );
     Line::from(spans)
 }
 

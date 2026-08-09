@@ -72,29 +72,24 @@ pub(crate) trait RenderContext {
     fn render_rect_component(&mut self, frame: &mut Frame<'_>, id: ComponentId, area: Rect);
 }
 
-pub(crate) trait UiComponent<Ctx: ?Sized> {
-    fn id(&self) -> ComponentId;
-
-    fn render(&mut self, _frame: &mut Frame<'_>, _ctx: &mut Ctx) {}
+pub(crate) struct Compositor {
+    layers: Vec<RectComponent>,
 }
 
-pub(crate) struct Compositor<'a, Ctx: ?Sized> {
-    layers: Vec<Box<dyn UiComponent<Ctx> + 'a>>,
-}
-
-impl<'a, Ctx: ?Sized> Compositor<'a, Ctx> {
+impl Compositor {
     pub(crate) fn new() -> Self {
-        Self { layers: Vec::new() }
+        Self {
+            layers: Vec::with_capacity(8),
+        }
     }
 
-    pub(crate) fn push(&mut self, layer: impl UiComponent<Ctx> + 'a) {
-        self.layers.push(Box::new(layer));
+    pub(crate) fn push(&mut self, layer: RectComponent) {
+        self.layers.push(layer);
     }
 
-    pub(crate) fn render(&mut self, frame: &mut Frame<'_>, ctx: &mut Ctx) {
-        for layer in &mut self.layers {
-            let _component_id = layer.id();
-            layer.render(frame, ctx);
+    pub(crate) fn render(&self, frame: &mut Frame<'_>, ctx: &mut impl RenderContext) {
+        for layer in &self.layers {
+            ctx.render_rect_component(frame, layer.id, layer.area);
         }
     }
 }
@@ -107,15 +102,5 @@ pub(crate) struct RectComponent {
 impl RectComponent {
     pub(crate) fn new(id: ComponentId, area: Rect) -> Self {
         Self { id, area }
-    }
-}
-
-impl<Ctx: RenderContext + ?Sized> UiComponent<Ctx> for RectComponent {
-    fn id(&self) -> ComponentId {
-        self.id
-    }
-
-    fn render(&mut self, frame: &mut Frame<'_>, ctx: &mut Ctx) {
-        ctx.render_rect_component(frame, self.id, self.area);
     }
 }

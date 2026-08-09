@@ -14,8 +14,8 @@ use crate::{
 };
 
 use super::{
-    content_spans_at_scroll, diff_indicator_span_for_focus, empty_diff_fill_from, gutter_spans,
-    split_gutter_text,
+    ContentSpanRender, append_content_spans_at_scroll, append_gutter_spans, content_span_capacity,
+    diff_indicator_span_for_focus, empty_diff_fill_from, split_gutter_text,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -62,32 +62,54 @@ pub(crate) fn render_split_line_with_focus(
     let lines = &app.document.changeset.files[file].hunks()[hunk].lines;
     let left_line = left.and_then(|index| lines.get(index));
     let right_line = right.and_then(|index| lines.get(index));
-    let mut spans = split_cell_spans_at_scroll_with_focus(
+    let mut spans = Vec::with_capacity(
+        split_cell_span_capacity(
+            left_line,
+            left_syntax.as_deref(),
+            left_inline.len(),
+            left_width,
+        )
+        .saturating_add(split_cell_span_capacity(
+            right_line,
+            right_syntax.as_deref(),
+            right_inline.len(),
+            right_width,
+        )),
+    );
+    append_split_cell_spans_at_scroll_with_focus_and_continuation(
+        &mut spans,
         left_line,
         left_syntax.as_deref(),
         &left_inline,
-        SplitCellRender {
-            side: SplitSide::Old,
-            row_index,
-            width: left_width,
-            theme,
+        SplitCellSpanRender {
+            cell: SplitCellRender {
+                side: SplitSide::Old,
+                row_index,
+                width: left_width,
+                theme,
+            },
+            horizontal_scroll,
+            focused,
+            continuation: false,
         },
-        horizontal_scroll,
-        focused,
     );
-    spans.extend(split_cell_spans_at_scroll_with_focus(
+    append_split_cell_spans_at_scroll_with_focus_and_continuation(
+        &mut spans,
         right_line,
         right_syntax.as_deref(),
         &right_inline,
-        SplitCellRender {
-            side: SplitSide::New,
-            row_index,
-            width: right_width,
-            theme,
+        SplitCellSpanRender {
+            cell: SplitCellRender {
+                side: SplitSide::New,
+                row_index,
+                width: right_width,
+                theme,
+            },
+            horizontal_scroll,
+            focused,
+            continuation: false,
         },
-        horizontal_scroll,
-        focused,
-    ));
+    );
     Line::from(spans)
 }
 
@@ -150,34 +172,54 @@ pub(crate) fn render_split_line_wrapped_with_focus(
         let left_scroll = wrapped_segment_scroll(&left_scrolls, left_text_width, wrap_index);
         let right_scroll = wrapped_segment_scroll(&right_scrolls, right_text_width, wrap_index);
         let visual_row = visual_row_start.saturating_add(wrap_index);
-        let mut spans = split_cell_spans_at_scroll_with_focus_and_continuation(
+        let mut spans = Vec::with_capacity(
+            split_cell_span_capacity(
+                left_line,
+                left_syntax.as_deref(),
+                left_inline.len(),
+                left_width,
+            )
+            .saturating_add(split_cell_span_capacity(
+                right_line,
+                right_syntax.as_deref(),
+                right_inline.len(),
+                right_width,
+            )),
+        );
+        append_split_cell_spans_at_scroll_with_focus_and_continuation(
+            &mut spans,
             left_line,
             left_syntax.as_deref(),
             &left_inline,
-            SplitCellRender {
-                side: SplitSide::Old,
-                row_index: visual_row,
-                width: left_width,
-                theme,
+            SplitCellSpanRender {
+                cell: SplitCellRender {
+                    side: SplitSide::Old,
+                    row_index: visual_row,
+                    width: left_width,
+                    theme,
+                },
+                horizontal_scroll: left_scroll,
+                focused,
+                continuation: wrap_index > 0,
             },
-            left_scroll,
-            focused,
-            wrap_index > 0,
         );
-        spans.extend(split_cell_spans_at_scroll_with_focus_and_continuation(
+        append_split_cell_spans_at_scroll_with_focus_and_continuation(
+            &mut spans,
             right_line,
             right_syntax.as_deref(),
             &right_inline,
-            SplitCellRender {
-                side: SplitSide::New,
-                row_index: visual_row,
-                width: right_width,
-                theme,
+            SplitCellSpanRender {
+                cell: SplitCellRender {
+                    side: SplitSide::New,
+                    row_index: visual_row,
+                    width: right_width,
+                    theme,
+                },
+                horizontal_scroll: right_scroll,
+                focused,
+                continuation: wrap_index > 0,
             },
-            right_scroll,
-            focused,
-            wrap_index > 0,
-        ));
+        );
         let line = Line::from(spans);
         rendered_lines.push(highlight_wrapped_split_grep_line(
             line,
@@ -253,6 +295,21 @@ pub(super) fn highlight_wrapped_split_grep_line(
     highlighted_grep_text_line(rendered, query, targets, theme)
 }
 
+fn split_cell_span_capacity(
+    line: Option<&DiffLine>,
+    syntax: Option<&HighlightedLine>,
+    inline_range_count: usize,
+    width: usize,
+) -> usize {
+    if width == 0 {
+        0
+    } else if line.is_some() {
+        3usize.saturating_add(content_span_capacity(syntax, inline_range_count))
+    } else {
+        3
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum SplitSide {
     Old,
@@ -265,6 +322,14 @@ pub(crate) struct SplitCellRender {
     pub(crate) row_index: usize,
     pub(crate) width: usize,
     pub(crate) theme: DiffTheme,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SplitCellSpanRender {
+    cell: SplitCellRender,
+    horizontal_scroll: usize,
+    focused: bool,
+    continuation: bool,
 }
 
 pub(crate) fn split_cell_spans_at_scroll(
@@ -305,15 +370,44 @@ pub(super) fn split_cell_spans_at_scroll_with_focus_and_continuation(
     focused: bool,
     continuation: bool,
 ) -> Vec<Span<'static>> {
+    let mut spans = Vec::with_capacity(6);
+    append_split_cell_spans_at_scroll_with_focus_and_continuation(
+        &mut spans,
+        line,
+        syntax,
+        inline,
+        SplitCellSpanRender {
+            cell: render,
+            horizontal_scroll,
+            focused,
+            continuation,
+        },
+    );
+    spans
+}
+
+fn append_split_cell_spans_at_scroll_with_focus_and_continuation(
+    spans: &mut Vec<Span<'static>>,
+    line: Option<&DiffLine>,
+    syntax: Option<&HighlightedLine>,
+    inline: &[InlineRange],
+    render: SplitCellSpanRender,
+) {
+    let SplitCellSpanRender {
+        cell,
+        horizontal_scroll,
+        focused,
+        continuation,
+    } = render;
     let SplitCellRender {
         side,
         row_index,
         width,
         theme,
-    } = render;
+    } = cell;
 
     if width == 0 {
-        return Vec::new();
+        return;
     }
 
     let Some(line) = line else {
@@ -321,7 +415,6 @@ pub(super) fn split_cell_spans_at_scroll_with_focus_and_continuation(
         let indicator_width = 1.min(width);
         let gutter_width = GUTTER_WIDTH.min(width.saturating_sub(indicator_width));
         let content_width = split_cell_content_width(width);
-        let mut spans = Vec::new();
         if indicator_width > 0 {
             spans.push(diff_indicator_span_for_focus(empty_kind, theme, focused));
         }
@@ -344,7 +437,7 @@ pub(super) fn split_cell_spans_at_scroll_with_focus_and_continuation(
                     .bg(diff_base_bg(theme)),
             ));
         }
-        return spans;
+        return;
     };
 
     let indicator_width = 1.min(width);
@@ -368,28 +461,30 @@ pub(super) fn split_cell_spans_at_scroll_with_focus_and_continuation(
         }
     };
 
-    let mut spans = Vec::new();
     if indicator_width > 0 {
         spans.push(diff_indicator_span_for_focus(line.kind(), theme, focused));
     }
     if gutter_width > 0 {
-        spans.extend(gutter_spans(
-            &split_gutter_text(line_number),
+        append_gutter_spans(
+            spans,
+            split_gutter_text(line_number, sign.trim().is_empty()),
             sign,
             gutter_width,
             line.kind(),
             theme,
-        ));
+        );
     }
     let text = line.text_lossy();
-    spans.extend(content_spans_at_scroll(
+    append_content_spans_at_scroll(
+        spans,
         &text,
-        syntax,
-        inline,
-        line.kind(),
-        content_width,
-        theme,
-        horizontal_scroll,
-    ));
-    spans
+        ContentSpanRender {
+            syntax,
+            inline,
+            kind: line.kind(),
+            width: content_width,
+            theme,
+            horizontal_scroll,
+        },
+    );
 }

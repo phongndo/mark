@@ -6,10 +6,14 @@ license.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 
+[features]
+allocation-profile = []
+
 [dependencies]
 mimalloc.workspace = true
 clap.workspace = true
 mark-diff.workspace = true
+mark-runtime.workspace = true
 mark-syntax = { workspace = true, features = ["diagnostics"] }
 mark-tui.workspace = true
 serde.workspace = true

@@ -76,6 +76,18 @@ pub(crate) fn fit_padded_from(text: &str, horizontal_scroll: usize, width: usize
     if width == 0 {
         return String::new();
     }
+    let display_end = horizontal_scroll.saturating_add(width);
+    let ascii_prefix = single_width_ascii_prefix_len(text, display_end);
+    if ascii_prefix == text.len()
+        || (ascii_prefix == display_end && next_byte_is_single_width_ascii(text, ascii_prefix))
+    {
+        let start = horizontal_scroll.min(text.len());
+        let end = display_end.min(text.len());
+        let mut out = String::with_capacity(width);
+        out.push_str(&text[start..end]);
+        out.extend(std::iter::repeat_n(' ', width - (end - start)));
+        return out;
+    }
 
     let (mut out, _, len, _) = fit_with_width_from(text, horizontal_scroll, width);
     if len < width {
