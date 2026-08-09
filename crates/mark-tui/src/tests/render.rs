@@ -1597,6 +1597,32 @@ fn statusline_header_uses_lualine_sections_and_short_file_name() {
 }
 
 #[test]
+fn statusline_header_escapes_controls_in_fitting_commit_subject() {
+    let sha = "abcdef0123456789";
+    let options = DiffOptions {
+        source: DiffSource::Show(sha.into()),
+        ..DiffOptions::default()
+    };
+    let mut app = DiffApp::new(
+        options,
+        changeset_with_files(&["src/lib.rs"]),
+        DiffLayoutMode::Unified,
+    );
+    app.refs.show_rev = Some(sha.to_owned());
+    app.refs.comparison_commits = vec![GitCommit {
+        sha: sha.into(),
+        subject: "copy\t\u{1b}]52;c;payload\u{7}".to_owned(),
+    }];
+
+    let text = line_text(&statusline_header_line(&app, 160));
+
+    assert!(text.contains("copy    \\u{1b}]52;c;payload\\u{7}"));
+    assert!(!text.contains('\t'));
+    assert!(!text.contains('\u{1b}'));
+    assert!(!text.contains('\u{7}'));
+}
+
+#[test]
 fn statusline_header_shows_saved_annotation_count() {
     use crate::annotation::AnnotationKey;
 

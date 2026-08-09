@@ -18,6 +18,17 @@ impl Default for DiffBenchmarkOptions {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AllocationBenchmarkStage {
+    pub stage: &'static str,
+    pub allocation_calls: u64,
+    pub reallocation_calls: u64,
+    pub deallocation_calls: u64,
+    pub allocated_bytes: u64,
+    pub deallocated_bytes: u64,
+    pub live_bytes_delta: i128,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiffBenchmarkReport {
     pub syntax_enabled: bool,
     pub row_count: usize,
@@ -57,6 +68,7 @@ pub struct DiffBenchmarkReport {
     pub warm_theme_cache_hits: u64,
     pub warm_theme_cache_misses: u64,
     pub channel_send_timeouts: u64,
+    pub allocation_stages: Vec<AllocationBenchmarkStage>,
     pub syntax: SyntaxBenchmarkReport,
 }
 

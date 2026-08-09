@@ -1,6 +1,14 @@
-// Match the shipped `mark` binary's allocator so measurements stay honest.
+// Match the shipped `mark` binary's allocator so normal measurements stay
+// honest. Allocation profiling is a separate build because its atomic counters
+// deliberately perturb latency.
+#[cfg(not(feature = "allocation-profile"))]
 #[global_allocator]
 static GLOBAL_ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
+#[cfg(feature = "allocation-profile")]
+#[global_allocator]
+static GLOBAL_ALLOCATOR: mark_runtime::ProfilingAllocator<mimalloc::MiMalloc> =
+    mark_runtime::ProfilingAllocator::new(mimalloc::MiMalloc);
 
 use std::{
     collections::{BTreeSet, HashSet},
@@ -474,6 +482,9 @@ enum SourceVariant {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    #[cfg(feature = "allocation-profile")]
+    GLOBAL_ALLOCATOR.enable();
+
     let cli = Cli::parse();
     match cli.command {
         BenchCommand::Fixtures(args) => generate_fixtures(args)?,
@@ -552,6 +563,8 @@ struct MeasureRunReport {
     rss_delta_bytes: Option<i128>,
     peak_thread_count: Option<usize>,
     stage_timings: Vec<StageTimingReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    allocation_profile: Option<AllocationProfileReport>,
     tui: TuiMeasureReport,
     #[serde(skip_serializing_if = "Option::is_none")]
     samples: Option<MeasureSampleStats>,
@@ -561,6 +574,29 @@ struct MeasureRunReport {
 struct StageTimingReport {
     stage: String,
     micros: u128,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AllocationProfileReport {
+    allocation_calls: u64,
+    reallocation_calls: u64,
+    deallocation_calls: u64,
+    allocated_bytes: u64,
+    deallocated_bytes: u64,
+    live_bytes_delta: i128,
+    peak_live_bytes_increase: u64,
+    stages: Vec<AllocationStageReport>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AllocationStageReport {
+    stage: String,
+    allocation_calls: u64,
+    reallocation_calls: u64,
+    deallocation_calls: u64,
+    allocated_bytes: u64,
+    deallocated_bytes: u64,
+    live_bytes_delta: i128,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -626,6 +662,8 @@ struct TuiMeasureReport {
     warm_theme_cache_misses: u64,
     warm_theme_cache_hit_rate: Option<f64>,
     channel_send_timeouts: u64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    allocation_stages: Vec<AllocationStageReport>,
     syntax: SyntaxMeasureReport,
 }
 
@@ -1721,19 +1759,30 @@ fn measure_diff_options_run(
     options: mark_tui::DiffBenchmarkOptions,
 ) -> BenchResult<MeasureRunReport> {
     let thread_sampler = PeakThreadSampler::start();
+    let allocation_start = if mark_runtime::allocation_profiler_active() {
+        Some(mark_runtime::reset_allocation_peak())
+    } else {
+        None
+    };
+    let load_allocation_start = allocation_start;
     let load_start = Instant::now();
     let (changeset, patch_bytes) = load_benchmark_changeset(diff_options, patch_bytes_hint)?;
     let load_micros = load_start.elapsed().as_micros();
+    let load_allocation_end = allocation_start.map(|_| mark_runtime::allocation_snapshot());
 
     let rss_before = current_rss_bytes();
-    let tui = tui_report(mark_tui::benchmark_diff_view(
-        changeset,
-        syntax_languages,
-        options,
-    ));
+    let tui_benchmark = mark_tui::benchmark_diff_view(changeset, syntax_languages, options);
+    let allocation_end = allocation_start.map(|_| mark_runtime::allocation_snapshot());
+    let tui = tui_report(tui_benchmark);
     let rss_after = current_rss_bytes();
     let peak_thread_count = thread_sampler.finish();
     let stage_timings = stage_timings(load_micros, &tui);
+    let allocation_profile = allocation_profile(
+        allocation_start,
+        allocation_end,
+        load_allocation_start.zip(load_allocation_end),
+        &tui.allocation_stages,
+    );
 
     Ok(MeasureRunReport {
         scenario,
@@ -1747,9 +1796,56 @@ fn measure_diff_options_run(
             .map(|(before, after)| after as i128 - before as i128),
         peak_thread_count,
         stage_timings,
+        allocation_profile,
         tui,
         samples: None,
     })
+}
+
+fn allocation_profile(
+    start: Option<mark_runtime::AllocationSnapshot>,
+    end: Option<mark_runtime::AllocationSnapshot>,
+    load: Option<(
+        mark_runtime::AllocationSnapshot,
+        mark_runtime::AllocationSnapshot,
+    )>,
+    tui_stages: &[AllocationStageReport],
+) -> Option<AllocationProfileReport> {
+    let (start, end) = start.zip(end)?;
+    let total = end.delta_since(start);
+    let mut stages = Vec::with_capacity(tui_stages.len().saturating_add(1));
+    if let Some((load_start, load_end)) = load {
+        stages.push(allocation_stage_report(
+            "git_read_parse",
+            load_end.delta_since(load_start),
+        ));
+    }
+    stages.extend_from_slice(tui_stages);
+    Some(AllocationProfileReport {
+        allocation_calls: total.allocation_calls,
+        reallocation_calls: total.reallocation_calls,
+        deallocation_calls: total.deallocation_calls,
+        allocated_bytes: total.allocated_bytes,
+        deallocated_bytes: total.deallocated_bytes,
+        live_bytes_delta: total.live_bytes_delta,
+        peak_live_bytes_increase: end.peak_live_bytes.saturating_sub(start.live_bytes),
+        stages,
+    })
+}
+
+fn allocation_stage_report(
+    stage: &str,
+    delta: mark_runtime::AllocationDelta,
+) -> AllocationStageReport {
+    AllocationStageReport {
+        stage: stage.to_owned(),
+        allocation_calls: delta.allocation_calls,
+        reallocation_calls: delta.reallocation_calls,
+        deallocation_calls: delta.deallocation_calls,
+        allocated_bytes: delta.allocated_bytes,
+        deallocated_bytes: delta.deallocated_bytes,
+        live_bytes_delta: delta.live_bytes_delta,
+    }
 }
 
 fn stage_timings(load_micros: u128, tui: &TuiMeasureReport) -> Vec<StageTimingReport> {
@@ -1913,6 +2009,19 @@ fn tui_report(report: mark_tui::DiffBenchmarkReport) -> TuiMeasureReport {
         warm_theme_cache_hit_rate: (warm_theme_cache_total > 0)
             .then(|| report.warm_theme_cache_hits as f64 / warm_theme_cache_total as f64),
         channel_send_timeouts: report.channel_send_timeouts,
+        allocation_stages: report
+            .allocation_stages
+            .into_iter()
+            .map(|stage| AllocationStageReport {
+                stage: stage.stage.to_owned(),
+                allocation_calls: stage.allocation_calls,
+                reallocation_calls: stage.reallocation_calls,
+                deallocation_calls: stage.deallocation_calls,
+                allocated_bytes: stage.allocated_bytes,
+                deallocated_bytes: stage.deallocated_bytes,
+                live_bytes_delta: stage.live_bytes_delta,
+            })
+            .collect(),
         syntax: syntax_report(report.syntax),
     }
 }
@@ -2043,6 +2152,27 @@ fn print_measure_report(report: &MeasureSuiteReport) {
                 .map(|threads| threads.to_string())
                 .unwrap_or_else(|| "n/a".to_owned())
         );
+        if let Some(profile) = &run.allocation_profile {
+            println!(
+                "  allocations: {} alloc + {} realloc, {} churn, {} retained, {} peak increase",
+                profile.allocation_calls,
+                profile.reallocation_calls,
+                human_bytes(profile.allocated_bytes),
+                human_signed_bytes(profile.live_bytes_delta),
+                human_bytes(profile.peak_live_bytes_increase),
+            );
+            for stage in &profile.stages {
+                println!(
+                    "    {:<28} {:>9} ops {:>9} churn {:>9} retained",
+                    stage.stage,
+                    stage
+                        .allocation_calls
+                        .saturating_add(stage.reallocation_calls),
+                    human_bytes(stage.allocated_bytes),
+                    human_signed_bytes(stage.live_bytes_delta),
+                );
+            }
+        }
     }
 }
 

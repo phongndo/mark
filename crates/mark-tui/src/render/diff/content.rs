@@ -2,6 +2,7 @@ use mark_diff::DiffLineKind;
 use mark_syntax::{DiffBackground, HighlightedLine, SyntaxClass, SyntaxSegment};
 use ratatui::prelude::{Color, Modifier, Span, Style};
 use std::{
+    borrow::Cow,
     collections::HashSet,
     sync::{Mutex, OnceLock},
 };
@@ -10,7 +11,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use crate::{
     render::{
         style::{diff_indicator_span, diff_sign_style, focused_diff_indicator_span},
-        text::{fit, fit_padded, fit_padded_from, fit_with_width_from, spaces},
+        text::{fit_padded_from, fit_with_width_from, spaces},
     },
     syntax::InlineRange,
     theme::{
@@ -43,8 +44,12 @@ pub(super) fn unified_gutter_text(old_line: Option<usize>, new_line: Option<usiz
     gutter
 }
 
-pub(super) fn split_gutter_text(line: Option<usize>) -> String {
-    let mut gutter = String::with_capacity(GUTTER_WIDTH.saturating_sub(1));
+pub(super) fn split_gutter_text(line: Option<usize>, reserve_sign: bool) -> String {
+    let mut gutter = String::with_capacity(
+        GUTTER_WIDTH
+            .saturating_sub(1)
+            .saturating_add(usize::from(reserve_sign)),
+    );
     push_right_aligned_number(&mut gutter, line, 5);
     gutter.push(' ');
     gutter
@@ -75,33 +80,38 @@ fn push_right_aligned_number(out: &mut String, line: Option<usize>, width: usize
     }
 }
 
-pub(crate) fn gutter_spans(
-    body: &str,
-    sign: &str,
+pub(crate) fn append_gutter_spans(
+    spans: &mut Vec<Span<'static>>,
+    mut body: String,
+    sign: &'static str,
     width: usize,
     kind: DiffLineKind,
     theme: DiffTheme,
-) -> Vec<Span<'static>> {
+) {
     if width == 0 {
-        return Vec::new();
+        return;
     }
 
     let body_style = Style::default()
         .fg(line_gutter_fg(kind, theme))
         .bg(line_gutter_bg(kind, theme));
     if sign.trim().is_empty() || width == 1 {
-        return vec![Span::styled(
-            fit_padded(&format!("{body}{sign}"), width),
-            body_style,
-        )];
+        body.push_str(sign);
+        fit_owned_ascii_padded(&mut body, width);
+        spans.push(Span::styled(body, body_style));
+        return;
     }
 
-    let sign_width = 1;
-    let body_width = width.saturating_sub(sign_width);
-    vec![
-        Span::styled(fit_padded(body, body_width), body_style),
-        Span::styled(fit(sign, sign_width), diff_sign_style(kind, theme)),
-    ]
+    let body_width = width.saturating_sub(1);
+    fit_owned_ascii_padded(&mut body, body_width);
+    spans.push(Span::styled(body, body_style));
+    spans.push(Span::styled(sign, diff_sign_style(kind, theme)));
+}
+
+fn fit_owned_ascii_padded(text: &mut String, width: usize) {
+    debug_assert!(text.is_ascii());
+    text.truncate(width);
+    text.extend(std::iter::repeat_n(' ', width.saturating_sub(text.len())));
 }
 
 pub(crate) fn empty_diff_fill_from(
@@ -127,6 +137,17 @@ pub(crate) fn empty_diff_fill_from(
     fill
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ContentSpanRender<'a> {
+    pub(crate) syntax: Option<&'a HighlightedLine>,
+    pub(crate) inline: &'a [InlineRange],
+    pub(crate) kind: DiffLineKind,
+    pub(crate) width: usize,
+    pub(crate) theme: DiffTheme,
+    pub(crate) horizontal_scroll: usize,
+}
+
+#[cfg(test)]
 pub(crate) fn content_spans_at_scroll(
     text: &str,
     syntax: Option<&HighlightedLine>,
@@ -136,8 +157,37 @@ pub(crate) fn content_spans_at_scroll(
     theme: DiffTheme,
     horizontal_scroll: usize,
 ) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    append_content_spans_at_scroll(
+        &mut spans,
+        text,
+        ContentSpanRender {
+            syntax,
+            inline,
+            kind,
+            width,
+            theme,
+            horizontal_scroll,
+        },
+    );
+    spans
+}
+
+pub(crate) fn append_content_spans_at_scroll(
+    spans: &mut Vec<Span<'static>>,
+    text: &str,
+    render: ContentSpanRender<'_>,
+) {
+    let ContentSpanRender {
+        syntax,
+        inline,
+        kind,
+        width,
+        theme,
+        horizontal_scroll,
+    } = render;
     if width == 0 {
-        return Vec::new();
+        return;
     }
 
     let valid_inline;
@@ -145,19 +195,27 @@ pub(crate) fn content_spans_at_scroll(
         &[][..]
     } else {
         valid_inline = valid_inline_ranges(text, inline);
-        valid_inline.as_slice()
+        valid_inline.as_ref()
     };
     let syntax = syntax.filter(|syntax| syntax_line_matches_text(syntax, text));
     if syntax.is_none() && inline.is_empty() {
-        return vec![Span::styled(
+        spans.push(Span::styled(
             fit_padded_from(text, horizontal_scroll, width),
             line_style(kind, theme),
-        )];
+        ));
+        return;
     }
 
-    let span_capacity = syntax.map_or(1, |syntax| syntax.segments.len()) + inline.len() * 2 + 1;
-    let mut writer =
-        ContentSpanWriter::new(inline, kind, width, theme, horizontal_scroll, span_capacity);
+    let span_capacity = content_span_capacity(syntax, inline.len());
+    let mut writer = ContentSpanWriter::new(
+        spans,
+        inline,
+        kind,
+        width,
+        theme,
+        horizontal_scroll,
+        span_capacity,
+    );
 
     if let Some(syntax) = syntax {
         for segment in &syntax.segments {
@@ -177,12 +235,28 @@ pub(crate) fn content_spans_at_scroll(
         writer.push_segment(text, 0, line_style(kind, theme));
     }
 
-    writer.finish()
+    writer.finish();
 }
 
-pub(crate) fn valid_inline_ranges(text: &str, ranges: &[InlineRange]) -> Vec<InlineRange> {
+pub(crate) fn content_span_capacity(
+    syntax: Option<&HighlightedLine>,
+    inline_range_count: usize,
+) -> usize {
+    syntax
+        .map_or(1, |syntax| syntax.segments.len())
+        .saturating_add(inline_range_count.saturating_mul(2))
+        .saturating_add(1)
+}
+
+pub(crate) fn valid_inline_ranges<'a>(
+    text: &str,
+    ranges: &'a [InlineRange],
+) -> Cow<'a, [InlineRange]> {
     if ranges.is_empty() {
-        return Vec::new();
+        return Cow::Borrowed(ranges);
+    }
+    if inline_ranges_are_sorted_and_valid(text, ranges) {
+        return Cow::Borrowed(ranges);
     }
 
     let grapheme_boundaries = (!text.is_ascii()).then(|| grapheme_boundary_indices(text));
@@ -208,12 +282,49 @@ pub(crate) fn valid_inline_ranges(text: &str, ranges: &[InlineRange]) -> Vec<Inl
         valid.sort_by_key(|range| (range.byte_start, range.byte_end));
     }
 
-    merge_inline_ranges(valid)
+    Cow::Owned(merge_inline_ranges(valid))
 }
 
-pub(crate) struct ContentSpanWriter<'a> {
-    spans: Vec<Span<'static>>,
-    inline: &'a [InlineRange],
+fn inline_ranges_are_sorted_and_valid(text: &str, ranges: &[InlineRange]) -> bool {
+    let mut previous_end = None;
+    for range in ranges {
+        if range.byte_start >= range.byte_end || range.byte_end > text.len() {
+            return false;
+        }
+        if previous_end.is_some_and(|end| range.byte_start <= end) {
+            return false;
+        }
+        previous_end = Some(range.byte_end);
+    }
+    if text.is_ascii() {
+        return true;
+    }
+
+    let mut boundaries = text
+        .grapheme_indices(true)
+        .map(|(index, _)| index)
+        .chain(std::iter::once(text.len()));
+    let mut boundary = boundaries.next().unwrap_or_default();
+    for endpoint in ranges
+        .iter()
+        .flat_map(|range| [range.byte_start, range.byte_end])
+    {
+        while boundary < endpoint {
+            let Some(next) = boundaries.next() else {
+                return false;
+            };
+            boundary = next;
+        }
+        if boundary != endpoint {
+            return false;
+        }
+    }
+    true
+}
+
+struct ContentSpanWriter<'spans, 'inline> {
+    spans: &'spans mut Vec<Span<'static>>,
+    inline: &'inline [InlineRange],
     kind: DiffLineKind,
     width: usize,
     skip: usize,
@@ -221,17 +332,19 @@ pub(crate) struct ContentSpanWriter<'a> {
     theme: DiffTheme,
 }
 
-impl<'a> ContentSpanWriter<'a> {
-    pub(crate) fn new(
-        inline: &'a [InlineRange],
+impl<'spans, 'inline> ContentSpanWriter<'spans, 'inline> {
+    fn new(
+        spans: &'spans mut Vec<Span<'static>>,
+        inline: &'inline [InlineRange],
         kind: DiffLineKind,
         width: usize,
         theme: DiffTheme,
         horizontal_scroll: usize,
         span_capacity: usize,
     ) -> Self {
+        spans.reserve(span_capacity);
         Self {
-            spans: Vec::with_capacity(span_capacity),
+            spans,
             inline,
             kind,
             width,
@@ -320,14 +433,13 @@ impl<'a> ContentSpanWriter<'a> {
         complete
     }
 
-    pub(crate) fn finish(mut self) -> Vec<Span<'static>> {
+    fn finish(self) {
         if self.used < self.width {
             self.spans.push(Span::styled(
                 spaces(self.width - self.used),
                 line_style(self.kind, self.theme),
             ));
         }
-        self.spans
     }
 }
 
@@ -407,18 +519,22 @@ fn next_grapheme_boundary(boundaries: &[usize], index: usize) -> usize {
     }
 }
 
-fn merge_inline_ranges(ranges: Vec<InlineRange>) -> Vec<InlineRange> {
-    let mut merged: Vec<InlineRange> = Vec::with_capacity(ranges.len());
-    for range in ranges {
-        if let Some(last) = merged.last_mut()
-            && range.byte_start <= last.byte_end
-        {
-            last.byte_end = last.byte_end.max(range.byte_end);
-            continue;
-        }
-        merged.push(range);
+fn merge_inline_ranges(mut ranges: Vec<InlineRange>) -> Vec<InlineRange> {
+    if ranges.len() < 2 {
+        return ranges;
     }
-    merged
+
+    let mut write = 0usize;
+    for read in 1..ranges.len() {
+        if ranges[read].byte_start <= ranges[write].byte_end {
+            ranges[write].byte_end = ranges[write].byte_end.max(ranges[read].byte_end);
+        } else {
+            write += 1;
+            ranges[write] = ranges[read];
+        }
+    }
+    ranges.truncate(write + 1);
+    ranges
 }
 
 pub(crate) fn syntax_style(
@@ -624,4 +740,65 @@ pub(crate) fn inline_bg(kind: DiffLineKind, theme: DiffTheme) -> Color {
 
 pub(crate) fn syntax_fg(class: SyntaxClass, theme: DiffTheme) -> Option<Color> {
     theme.syntax.color(class)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn valid_ascii_inline_ranges_are_borrowed() {
+        let ranges = [
+            InlineRange {
+                byte_start: 1,
+                byte_end: 3,
+            },
+            InlineRange {
+                byte_start: 4,
+                byte_end: 6,
+            },
+        ];
+
+        assert!(matches!(
+            valid_inline_ranges("abcdef", &ranges),
+            Cow::Borrowed(_)
+        ));
+    }
+
+    #[test]
+    fn valid_unicode_inline_ranges_are_borrowed() {
+        let ranges = [InlineRange {
+            byte_start: 1,
+            byte_end: 4,
+        }];
+
+        assert!(matches!(
+            valid_inline_ranges("ae\u{301}z", &ranges),
+            Cow::Borrowed(_)
+        ));
+    }
+
+    #[test]
+    fn overlapping_inline_ranges_use_normalized_owned_storage() {
+        let ranges = [
+            InlineRange {
+                byte_start: 1,
+                byte_end: 4,
+            },
+            InlineRange {
+                byte_start: 3,
+                byte_end: 9,
+            },
+        ];
+
+        let normalized = valid_inline_ranges("abcdef", &ranges);
+        assert!(matches!(normalized, Cow::Owned(_)));
+        assert_eq!(
+            normalized.as_ref(),
+            &[InlineRange {
+                byte_start: 1,
+                byte_end: 6,
+            }]
+        );
+    }
 }

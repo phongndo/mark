@@ -27,7 +27,9 @@ use crate::{
     runtime,
     syntax::SyntaxRuntime,
     terminal_input::disable_mouse_capture_and_discard_reports,
-    theme::{DecorationPreference, DiffBenchmarkOptions, DiffBenchmarkReport},
+    theme::{
+        AllocationBenchmarkStage, DecorationPreference, DiffBenchmarkOptions, DiffBenchmarkReport,
+    },
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -151,7 +153,9 @@ pub fn benchmark_diff_view(
     let syntax_mode = syntax_languages
         .map(SyntaxStartupMode::Languages)
         .unwrap_or(SyntaxStartupMode::Disabled);
+    let mut allocation_profiler = AllocationStageProfiler::new();
 
+    let open_allocations = allocation_profiler.start();
     let open_start = Instant::now();
     let mut app = DiffApp::new_with_syntax(
         DiffOptions::default(),
@@ -166,23 +170,29 @@ pub fn benchmark_diff_view(
         app.config.theme.exact_syntax = Some(theme.get());
     }
     let open_micros = open_start.elapsed().as_micros();
+    allocation_profiler.finish("open_model", open_allocations);
     let row_count = app.document.model.len();
     let syntax_enabled = app.config.syntax.is_some();
     let changeset_estimated_memory_bytes = app.document.changeset.estimated_model_bytes();
     let ui_model_estimated_memory_bytes = app.document.model.estimated_memory_bytes();
     let search_index_estimated_memory_bytes = app.document.search_index.estimated_memory_bytes();
 
+    let file_filter_allocations = allocation_profiler.start();
     let file_filter_start = Instant::now();
     let _ = app
         .document
         .search_index
         .search(&app.document.changeset, "src", "");
     let file_filter_micros = file_filter_start.elapsed().as_micros();
+    allocation_profiler.finish("file_filter_search", file_filter_allocations);
 
+    let legacy_file_filter_allocations = allocation_profiler.start();
     let legacy_file_filter_start = Instant::now();
     let _ = filtered_file_indices(&app.document.changeset, "src", "");
     let legacy_file_filter_micros = legacy_file_filter_start.elapsed().as_micros();
+    allocation_profiler.finish("legacy_file_filter_search", legacy_file_filter_allocations);
 
+    let grep_filter_allocations = allocation_profiler.start();
     let grep_filter_start = Instant::now();
     let _ = app.document.search_index.search_with_grep_match_limit(
         &app.document.changeset,
@@ -191,47 +201,70 @@ pub fn benchmark_diff_view(
         MAX_LIVE_GREP_MATCHES,
     );
     let grep_filter_micros = grep_filter_start.elapsed().as_micros();
+    allocation_profiler.finish("grep_filter_search", grep_filter_allocations);
 
+    let legacy_grep_filter_allocations = allocation_profiler.start();
     let legacy_grep_filter_start = Instant::now();
     let _ = filtered_file_indices(&app.document.changeset, "", "line");
     let legacy_grep_filter_micros = legacy_grep_filter_start.elapsed().as_micros();
+    allocation_profiler.finish("legacy_grep_filter_search", legacy_grep_filter_allocations);
 
+    let file_filter_apply_allocations = allocation_profiler.start();
     let file_filter_apply_start = Instant::now();
     app.filters.file_filter = "src".to_owned();
     app.apply_filters(PostFilterNavigation::Preserve);
     let file_filter_apply_micros = file_filter_apply_start.elapsed().as_micros();
+    allocation_profiler.finish("file_filter_apply", file_filter_apply_allocations);
 
+    let file_filter_reset_allocations = allocation_profiler.start();
     app.filters.file_filter.clear();
     app.apply_filters(PostFilterNavigation::Preserve);
+    allocation_profiler.finish("file_filter_reset", file_filter_reset_allocations);
 
+    let grep_filter_apply_allocations = allocation_profiler.start();
     let grep_filter_apply_start = Instant::now();
     app.filters.grep_filter = "line".to_owned();
     app.apply_filters(PostFilterNavigation::JumpToGrep);
     let grep_filter_apply_micros = grep_filter_apply_start.elapsed().as_micros();
+    allocation_profiler.finish("grep_filter_apply", grep_filter_apply_allocations);
 
+    let grep_filter_reset_allocations = allocation_profiler.start();
     app.filters.grep_filter.clear();
     app.apply_filters(PostFilterNavigation::Preserve);
+    allocation_profiler.finish("grep_filter_reset", grep_filter_reset_allocations);
 
+    let hunk_navigation_allocations = allocation_profiler.start();
     let (hunk_navigation_steps, hunk_navigation_total_micros, hunk_navigation_max_micros) =
         benchmark_hunk_navigation(&app.document.model);
+    allocation_profiler.finish("hunk_navigation", hunk_navigation_allocations);
 
+    let terminal_allocations = allocation_profiler.start();
     let mut terminal = benchmark_terminal(options.width, options.viewport_rows);
+    allocation_profiler.finish("benchmark_terminal", terminal_allocations);
 
+    let initial_render_allocations = allocation_profiler.start();
     let initial_render_start = Instant::now();
     render_viewport_for_benchmark(&mut terminal, &mut app);
     let initial_render_micros = initial_render_start.elapsed().as_micros();
+    allocation_profiler.finish("initial_render", initial_render_allocations);
 
+    let positions_allocations = allocation_profiler.start();
     let positions = benchmark_scroll_positions(
         app.document.model.len(),
         options.viewport_rows,
         options.scroll_step,
         options.max_scroll_steps,
     );
+    allocation_profiler.finish("scroll_positions", positions_allocations);
+    let cold_scroll_allocations = allocation_profiler.start();
     let (cold_scroll_total_micros, cold_scroll_max_micros) =
         benchmark_scroll_pass(&mut terminal, &mut app, &positions);
+    allocation_profiler.finish("cold_scroll", cold_scroll_allocations);
 
+    let syntax_settle_allocations = allocation_profiler.start();
     let syntax_settle_micros =
         settle_syntax_for_benchmark(&mut app).map(|duration| duration.as_micros());
+    allocation_profiler.finish("syntax_settle", syntax_settle_allocations);
 
     let before_warm_stats = app.syntax_stats();
     let before_theme_stats = app
@@ -240,15 +273,21 @@ pub fn benchmark_diff_view(
         .as_ref()
         .map(SyntaxRuntime::scope_table_stats)
         .unwrap_or_default();
+    let warm_scroll_allocations = allocation_profiler.start();
     let (warm_scroll_total_micros, warm_scroll_max_micros) =
         benchmark_scroll_pass(&mut terminal, &mut app, &positions);
+    allocation_profiler.finish("warm_scroll", warm_scroll_allocations);
+    let random_positions_allocations = allocation_profiler.start();
     let random_positions = benchmark_random_scroll_positions(
         app.document.model.len(),
         options.viewport_rows,
         options.max_scroll_steps,
     );
+    allocation_profiler.finish("random_scroll_positions", random_positions_allocations);
+    let random_scroll_allocations = allocation_profiler.start();
     let (random_scroll_total_micros, random_scroll_max_micros) =
         benchmark_scroll_pass(&mut terminal, &mut app, &random_positions);
+    allocation_profiler.finish("random_scroll", random_scroll_allocations);
     let after_warm_stats = app.syntax_stats();
     let syntax_cache_estimated_memory_bytes = app
         .config
@@ -306,7 +345,51 @@ pub fn benchmark_diff_view(
         warm_theme_cache_hits: after_theme_stats.2.saturating_sub(before_theme_stats.2),
         warm_theme_cache_misses: after_theme_stats.3.saturating_sub(before_theme_stats.3),
         channel_send_timeouts: runtime::channel_send_timeout_count(),
+        allocation_stages: allocation_profiler.into_stages(),
         syntax: after_warm_stats,
+    }
+}
+
+struct AllocationStageProfiler {
+    enabled: bool,
+    stages: Vec<AllocationBenchmarkStage>,
+}
+
+impl AllocationStageProfiler {
+    fn new() -> Self {
+        let enabled = mark_runtime::allocation_profiler_active();
+        Self {
+            enabled,
+            stages: if enabled {
+                Vec::with_capacity(20)
+            } else {
+                Vec::new()
+            },
+        }
+    }
+
+    fn start(&self) -> Option<mark_runtime::AllocationSnapshot> {
+        self.enabled.then(mark_runtime::allocation_snapshot)
+    }
+
+    fn finish(&mut self, stage: &'static str, start: Option<mark_runtime::AllocationSnapshot>) {
+        let Some(start) = start else {
+            return;
+        };
+        let delta = mark_runtime::allocation_snapshot().delta_since(start);
+        self.stages.push(AllocationBenchmarkStage {
+            stage,
+            allocation_calls: delta.allocation_calls,
+            reallocation_calls: delta.reallocation_calls,
+            deallocation_calls: delta.deallocation_calls,
+            allocated_bytes: delta.allocated_bytes,
+            deallocated_bytes: delta.deallocated_bytes,
+            live_bytes_delta: delta.live_bytes_delta,
+        });
+    }
+
+    fn into_stages(self) -> Vec<AllocationBenchmarkStage> {
+        self.stages
     }
 }
 

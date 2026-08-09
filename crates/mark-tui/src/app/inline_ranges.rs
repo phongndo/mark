@@ -1,30 +1,13 @@
 use super::DiffApp;
-use crate::syntax::{InlineHunkEmphasisCache, InlineHunkKey, InlineRange};
+use crate::syntax::{InlineHunkEmphasisCache, InlineHunkKey, InlineRanges};
 
 impl DiffApp {
-    pub(crate) fn inline_ranges(
-        &mut self,
-        file: usize,
-        hunk: usize,
-        line: usize,
-    ) -> Vec<InlineRange> {
+    pub(crate) fn inline_ranges(&mut self, file: usize, hunk: usize, line: usize) -> InlineRanges {
         let key = InlineHunkKey {
             generation: self.document.generation,
             file,
             hunk,
         };
-        if !self.document.inline_cache.contains_key(&key) {
-            let cache = self
-                .document
-                .changeset
-                .files
-                .get(file)
-                .and_then(|file_diff| file_diff.hunks().get(hunk))
-                .map(|hunk_diff| InlineHunkEmphasisCache::new(&hunk_diff.lines))
-                .unwrap_or_else(|| InlineHunkEmphasisCache::new(&[]));
-            self.document.inline_cache.insert(key, cache);
-        }
-
         let Some(lines) = self
             .document
             .changeset
@@ -33,9 +16,16 @@ impl DiffApp {
             .and_then(|file_diff| file_diff.hunks().get(hunk))
             .map(|hunk_diff| hunk_diff.lines.as_slice())
         else {
-            return Vec::new();
+            return InlineRanges::default();
         };
 
+        if let Some(hunk_emphasis) = self.document.inline_cache.get_mut(&key) {
+            return hunk_emphasis.ranges_for_line(lines, line);
+        }
+
+        self.document
+            .inline_cache
+            .insert(key, InlineHunkEmphasisCache::new(lines));
         self.document
             .inline_cache
             .get_mut(&key)

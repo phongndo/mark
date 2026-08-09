@@ -29,5 +29,6 @@ pub use static_pager::{
     render_static_changeset_to_writer, render_static_pager,
 };
 pub use theme::{
-    DecorationPreference, DiffBenchmarkOptions, DiffBenchmarkReport, SyntaxBenchmarkReport,
+    AllocationBenchmarkStage, DecorationPreference, DiffBenchmarkOptions, DiffBenchmarkReport,
+    SyntaxBenchmarkReport,
 };

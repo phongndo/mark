@@ -1,3 +1,10 @@
+mod allocation_profile;
+
+pub use allocation_profile::{
+    AllocationDelta, AllocationSnapshot, ProfilingAllocator, allocation_profiler_active,
+    allocation_snapshot, reset_allocation_peak,
+};
+
 use std::{
     panic::{AssertUnwindSafe, catch_unwind, resume_unwind},
     sync::OnceLock,

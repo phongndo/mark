@@ -29,10 +29,11 @@ mod empty;
 mod split;
 mod unified;
 pub(crate) use content::{
-    content_spans_at_scroll, diff_indicator_span_for_focus, empty_diff_fill_from, gutter_spans,
+    ContentSpanRender, append_content_spans_at_scroll, append_gutter_spans, content_span_capacity,
+    diff_indicator_span_for_focus, empty_diff_fill_from,
 };
 #[cfg(test)]
-pub(crate) use content::{inline_bg, syntax_fg};
+pub(crate) use content::{content_spans_at_scroll, inline_bg, syntax_fg};
 use content::{split_gutter_text, unified_gutter_text};
 #[cfg(test)]
 pub(crate) use context::render_split_context_line_wrapped;

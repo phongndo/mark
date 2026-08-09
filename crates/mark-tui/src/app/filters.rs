@@ -112,7 +112,7 @@ impl DiffApp {
             &self.filters.grep_filter,
             MAX_LIVE_GREP_MATCHES,
         );
-        self.replace_visible_files(
+        self.replace_visible_files_for_filter(
             search_result,
             selected_path,
             relative_scroll,
@@ -253,12 +253,30 @@ impl DiffApp {
         let relative_scroll =
             self.relative_scroll_from_file_start(self.sidebar.selected_file.get());
 
-        self.replace_visible_files(
+        self.replace_visible_files_for_filter(
             search_result,
             selected_path,
             relative_scroll,
             navigation,
             HunkFocusModelBehavior::PreserveIfValid,
+        );
+    }
+
+    fn replace_visible_files_for_filter(
+        &mut self,
+        search_result: DiffSearchResult,
+        selected_path: Option<String>,
+        relative_scroll: usize,
+        navigation: PostFilterNavigation,
+        hunk_focus_behavior: HunkFocusModelBehavior,
+    ) {
+        self.replace_visible_files_inner(
+            search_result,
+            selected_path,
+            relative_scroll,
+            navigation,
+            hunk_focus_behavior,
+            true,
         );
     }
 
@@ -269,6 +287,25 @@ impl DiffApp {
         relative_scroll: usize,
         navigation: PostFilterNavigation,
         hunk_focus_behavior: HunkFocusModelBehavior,
+    ) {
+        self.replace_visible_files_inner(
+            search_result,
+            selected_path,
+            relative_scroll,
+            navigation,
+            hunk_focus_behavior,
+            false,
+        );
+    }
+
+    fn replace_visible_files_inner(
+        &mut self,
+        search_result: DiffSearchResult,
+        selected_path: Option<String>,
+        relative_scroll: usize,
+        navigation: PostFilterNavigation,
+        hunk_focus_behavior: HunkFocusModelBehavior,
+        reuse_unchanged_model: bool,
     ) {
         let DiffSearchResult {
             visible_files,
@@ -294,7 +331,11 @@ impl DiffApp {
             .document
             .search_index
             .max_line_width_for_files(&visible_files);
-        self.replace_model(&visible_files, hunk_focus_behavior);
+        if reuse_unchanged_model {
+            self.replace_filter_model(&visible_files, hunk_focus_behavior);
+        } else {
+            self.replace_model(&visible_files, hunk_focus_behavior);
+        }
         self.sidebar.selected_file = selected_file;
         self.filters.grep_matches = grep_match_rows(&self.document.model, &grep_matches);
         self.filters.grep_matches_truncated = grep_matches_truncated;

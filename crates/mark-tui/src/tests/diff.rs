@@ -1288,6 +1288,19 @@ fn explicit_diff_load_returns_before_replacing_changeset() {
 }
 
 #[test]
+fn filters_reuse_model_when_the_visible_file_set_is_unchanged() {
+    let changeset = changeset_with_files(&["a.rs", "b.rs", "c.rs"]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    let model_identity = app.document.model.identity();
+
+    app.filters.file_filter = "rs".to_owned();
+    app.apply_filters(PostFilterNavigation::Preserve);
+
+    assert_eq!(app.document.model.identity(), model_identity);
+    assert_eq!(visible_paths(&app), vec!["a.rs", "b.rs", "c.rs"]);
+}
+
+#[test]
 fn file_filter_edit_with_active_grep_preserves_current_grep_match() {
     let changeset = changeset_with_files(&["a.rs", "b.rs", "c.rs"]);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
