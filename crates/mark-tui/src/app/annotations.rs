@@ -10,7 +10,7 @@ use crate::editor::{configured_editor, open_text_in_editor};
 use crate::keymap::{AnnotationMenuAction, GlobalAction, MenuAction};
 use crate::model::{DiffLineIndex, FileIndex, HunkIndex, UiRow};
 use crate::render::viewport_plan::{ViewportSlotKind, plan_diff_viewport_rows_at_scroll};
-use crate::review::{FindingDisposition, persistence::human_comment_persistence_budget};
+use crate::review::FindingDisposition;
 use crate::selector::{SelectorController, SelectorMovement};
 use crate::syntax::DiffSide;
 use crate::text_input::{TextInputKeyResult, handle_text_input_key};
@@ -906,27 +906,16 @@ impl DiffApp {
                     .remove(&draft.key);
             }
         } else {
-            let canonical_anchor = self
+            let error = self
                 .annotations_state
                 .annotations
-                .canonical_anchor(&draft.key);
-            let persistence_check =
-                human_comment_persistence_budget(self, &canonical_anchor, &draft.input);
-            let error = match persistence_check {
-                Ok(Some(budget)) => self
-                    .annotations_state
-                    .annotations
-                    .insert_human_with_budget(
-                        draft.key.clone(),
-                        draft.input.clone(),
-                        self.document.generation,
-                        budget,
-                    )
-                    .err()
-                    .map(|_| "comment exceeds the live review limits".to_owned()),
-                Ok(None) => Some("comment exceeds the persisted review byte limit".to_owned()),
-                Err(error) => Some(format!("could not size persisted comment: {error}")),
-            };
+                .insert_human(
+                    draft.key.clone(),
+                    draft.input.clone(),
+                    self.document.generation,
+                )
+                .err()
+                .map(|_| "comment exceeds the live review limits".to_owned());
             if let Some(error) = error {
                 self.annotations_state.annotation_draft = Some(draft);
                 self.ensure_annotation_draft_visible();

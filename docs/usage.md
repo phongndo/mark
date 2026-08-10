@@ -169,12 +169,13 @@ mark session reload --repo . --json -- diff -- src/lib.rs
 Session selection is deterministic: use an ID, `--repo`, or rely on implicit
 selection only when exactly one live session exists. Sessions use a private
 Unix socket and disappear when the TUI closes. They do not run a daemon or
-contact a network service. Comments, reviewed file/hunk progress, pass
-fingerprints, dispositions, and the final verdict are saved automatically under
-the user's private state directory. On a later pass, Mark reports changed files,
-retains progress for unchanged files, and re-anchors comments only when their
-saved evidence has one unambiguous match. Unmatched comments remain recorded as
-`stale` or `cleared`; relocated comments are marked `moved`.
+contact a network service. Comments, reviewed file/hunk progress, dispositions,
+and the final verdict remain in memory only while the TUI is open and are
+discarded when it closes. Reloading the same source compares per-file
+fingerprints and can start another pass: Mark reports changed files, retains
+progress for unchanged files, and re-anchors comments only when their evidence
+has one unambiguous match. Unmatched comments remain recorded as `stale` or `cleared`; relocated
+comments are marked `moved`. Loading a different source starts a fresh review.
 
 Humans can manage lifecycle state from the open TUI or with explicit session
 commands:
@@ -186,12 +187,11 @@ mark session verdict set --repo . --kind approve --destination local --json
 mark session verdict clear --repo . --json
 ```
 
-A `local` verdict remains in the persisted review. A `stdout` verdict is emitted
-as one JSON object after the TUI closes and is then consumed. Advancing to a
-changed pass clears the
-previous verdict. Agents should report findings but leave dispositions and the
-final verdict to the human. `mark skill show` prints the exact bundled,
-version-matched agent workflow. A plain process transcript is available in
+A `local` verdict remains in the current live review until Mark closes. A
+`stdout` verdict is emitted as one JSON object after the TUI closes. Advancing
+to a changed pass clears the previous verdict. Agents should report findings
+but leave dispositions and the final verdict to the human. `mark skill show`
+prints the exact bundled, version-matched agent workflow. A plain process transcript is available in
 [the live review demonstration](live-agent-review-demo.md).
 
 ## Interactive controls

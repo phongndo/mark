@@ -16,9 +16,7 @@ use crate::model::{
     ContextKey, ContextSourceEntry, ContextSourceKey, FileIndex, HunkIndex, ModelRow, UiModel,
 };
 use crate::render::snapshot::HitMap;
-use crate::review::{
-    ReviewCommentStore, ReviewLifecycleState, persistence::ReviewPersistenceSession,
-};
+use crate::review::{ReviewCommentStore, ReviewLifecycleState};
 use crate::search::{DiffSearchIndex, SearchMatchIndex};
 use crate::selector::SelectorState;
 use crate::syntax::{InlineHunkEmphasisCache, InlineHunkKey, LruCache, SyntaxRuntime};
@@ -138,7 +136,6 @@ pub(crate) struct AnnotationVisualAnchor {
 pub(crate) struct AnnotationState {
     pub(crate) annotations: ReviewCommentStore,
     pub(crate) lifecycle: ReviewLifecycleState,
-    pub(crate) persistence: Option<ReviewPersistenceSession>,
     pub(crate) annotation_rows: RefCell<HashMap<AnnotationKey, Option<usize>>>,
     pub(crate) annotation_keys_by_row: RefCell<Option<AnnotationKeyIndex>>,
     pub(crate) annotation_heights: RefCell<HashMap<AnnotationKey, AnnotationHeightCacheEntry>>,

@@ -17,7 +17,7 @@ use crate::{
         comparison_commits, current_head_label, default_branch_base,
     },
     model::{ContextKey, FileIndex, HunkIndex, UiModel, UiModelBuildOptions},
-    review::persistence::ReviewTransition,
+    review::{ReviewTransition, reset_review},
     search::DiffSearchIndex,
     syntax::invalidate_range_operand_revision_cache,
 };
@@ -124,21 +124,12 @@ impl DiffApp {
         cached: DiffCacheEntry,
         branch_metadata: BranchMetadataPolicy,
     ) {
-        let persistence_transition = if self.document.options != options {
-            match self.prepare_review_persistence_source_change() {
-                Ok(active) => active,
-                Err(error) => {
-                    self.set_error_log(format!(
-                        "could not save review before source change: {error}"
-                    ));
-                    return;
-                }
-            }
-        } else {
-            false
-        };
-        let review_transition = (!persistence_transition).then(|| ReviewTransition::capture(self));
+        let options_changed = self.document.options != options;
+        let review_transition = (!options_changed).then(|| ReviewTransition::capture(self));
         self.close_annotation_target_mode();
+        if options_changed {
+            reset_review(self);
+        }
         let DiffCacheEntry {
             changeset,
             search_index,
@@ -319,8 +310,6 @@ impl DiffApp {
         }
         if let Some(review_transition) = review_transition {
             review_transition.apply(self);
-        } else {
-            self.finish_review_persistence_source_change();
         }
     }
 
@@ -338,21 +327,11 @@ impl DiffApp {
             self.runtime.dirty = true;
             return;
         }
-        let persistence_transition = if options_changed {
-            match self.prepare_review_persistence_source_change() {
-                Ok(active) => active,
-                Err(error) => {
-                    self.set_error_log(format!(
-                        "could not save review before source change: {error}"
-                    ));
-                    return;
-                }
-            }
-        } else {
-            false
-        };
-        let review_transition = (!persistence_transition).then(|| ReviewTransition::capture(self));
+        let review_transition = (!options_changed).then(|| ReviewTransition::capture(self));
         self.close_annotation_target_mode();
+        if options_changed {
+            reset_review(self);
+        }
 
         // Keep only the current full-file anchor hot across a reload, and
         // recompute its source line count below. DiffFile equality says nothing
@@ -459,8 +438,6 @@ impl DiffApp {
         );
         if let Some(review_transition) = review_transition {
             review_transition.apply(self);
-        } else {
-            self.finish_review_persistence_source_change();
         }
         self.runtime.dirty = true;
     }

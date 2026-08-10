@@ -6,6 +6,9 @@ use super::comment::{
     CommentLifecycle, CommentOrigin, FindingDisposition, NewAgentComment, ReviewComment,
 };
 
+const MAX_LIVE_REVIEW_BYTES: usize = 2 * 1024 * 1024;
+const COMMENT_OVERHEAD_BYTES: usize = 256;
+
 #[derive(Debug, Default)]
 pub(crate) struct ReviewCommentStore {
     next_id: u64,
@@ -29,6 +32,12 @@ impl ReviewCommentStore {
 
     pub(crate) fn is_empty(&self) -> bool {
         self.comment_count == 0
+    }
+
+    fn live_review_bytes(&self) -> usize {
+        self.comments()
+            .map(review_comment_bytes)
+            .fold(0usize, usize::saturating_add)
     }
 
     #[cfg(test)]
@@ -88,27 +97,7 @@ impl ReviewCommentStore {
             .expect("test annotation should fit store limits")
     }
 
-    #[cfg(test)]
     pub(crate) fn insert_human(
-        &mut self,
-        anchor: AnnotationKey,
-        text: String,
-        generation: u64,
-    ) -> Result<Option<String>, StoreLimitError> {
-        self.insert_human_inner(anchor, text, generation)
-    }
-
-    pub(crate) fn insert_human_with_budget(
-        &mut self,
-        anchor: AnnotationKey,
-        text: String,
-        generation: u64,
-        _budget: HumanCommentPersistenceBudget,
-    ) -> Result<Option<String>, StoreLimitError> {
-        self.insert_human_inner(anchor, text, generation)
-    }
-
-    fn insert_human_inner(
         &mut self,
         anchor: AnnotationKey,
         text: String,
@@ -123,6 +112,16 @@ impl ReviewCommentStore {
         let anchor = self.canonical_anchor(&anchor);
         if let Some(index) = self.human_index(&anchor) {
             let comment = self.comments[index]
+                .as_ref()
+                .expect("indexed comment should exist");
+            let next_bytes = self
+                .live_review_bytes()
+                .saturating_sub(review_comment_bytes(comment))
+                .saturating_add(review_comment_bytes_with_summary(comment, &text));
+            if next_bytes > MAX_LIVE_REVIEW_BYTES {
+                return Err(StoreLimitError);
+            }
+            let comment = self.comments[index]
                 .as_mut()
                 .expect("indexed comment should exist");
             let previous = std::mem::replace(&mut comment.summary, text);
@@ -130,7 +129,13 @@ impl ReviewCommentStore {
             self.rebuild_anchor(&anchor);
             return Ok(Some(previous));
         }
-        if self.comment_count >= mark_session::MAX_LIVE_COMMENTS {
+        let id = self.prospective_comment_id("human", 1);
+        if self.comment_count >= mark_session::MAX_LIVE_COMMENTS
+            || self
+                .live_review_bytes()
+                .saturating_add(new_comment_bytes(&id, &anchor, &text, None, None))
+                > MAX_LIVE_REVIEW_BYTES
+        {
             return Err(StoreLimitError);
         }
         let id = self.next_comment_id("human");
@@ -144,7 +149,7 @@ impl ReviewCommentStore {
             lifecycle: CommentLifecycle::Open,
             disposition: FindingDisposition::Open,
             document_generation: generation,
-            evidence: None,
+            original_anchor_evidence: None,
         });
         Ok(None)
     }
@@ -153,7 +158,9 @@ impl ReviewCommentStore {
         &mut self,
         comments: Vec<ReviewComment>,
     ) -> Result<(), StoreLimitError> {
-        if comments.len() > mark_session::MAX_LIVE_COMMENTS {
+        if comments.len() > mark_session::MAX_LIVE_COMMENTS
+            || comments.iter().map(review_comment_bytes).sum::<usize>() > MAX_LIVE_REVIEW_BYTES
+        {
             return Err(StoreLimitError);
         }
         let mut ids = HashSet::with_capacity(comments.len());
@@ -220,6 +227,22 @@ impl ReviewCommentStore {
                         .as_ref()
                         .is_some_and(|text| text.len() > mark_session::MAX_AUTHOR_BYTES)
             })
+            || self.live_review_bytes().saturating_add(
+                comments
+                    .iter()
+                    .enumerate()
+                    .map(|(index, comment)| {
+                        let id = self.prospective_comment_id("agent", index.saturating_add(1));
+                        new_comment_bytes(
+                            &id,
+                            &comment.anchor,
+                            &comment.summary,
+                            comment.rationale.as_deref(),
+                            comment.author.as_deref(),
+                        )
+                    })
+                    .sum::<usize>(),
+            ) > MAX_LIVE_REVIEW_BYTES
         {
             return Err(StoreLimitError);
         }
@@ -238,7 +261,7 @@ impl ReviewCommentStore {
                 lifecycle: CommentLifecycle::Open,
                 disposition: FindingDisposition::Open,
                 document_generation: generation,
-                evidence: None,
+                original_anchor_evidence: None,
             });
         }
         Ok(ids)
@@ -412,9 +435,15 @@ impl ReviewCommentStore {
         removed
     }
 
+    fn prospective_comment_id(&self, prefix: &str, offset: usize) -> String {
+        let offset = u64::try_from(offset).unwrap_or(u64::MAX);
+        comment_id(prefix, self.next_id.saturating_add(offset))
+    }
+
     fn next_comment_id(&mut self, prefix: &str) -> String {
+        let id = self.prospective_comment_id(prefix, 1);
         self.next_id = self.next_id.saturating_add(1);
-        format!("{prefix}-{}", self.next_id)
+        id
     }
 
     fn rebuild_all_anchors(&mut self) {
@@ -454,12 +483,37 @@ impl ReviewCommentStore {
     }
 }
 
-pub(crate) struct HumanCommentPersistenceBudget(());
+fn comment_id(prefix: &str, sequence: u64) -> String {
+    format!("{prefix}-{sequence}")
+}
 
-impl HumanCommentPersistenceBudget {
-    pub(super) fn verified() -> Self {
-        Self(())
-    }
+fn new_comment_bytes(
+    id: &str,
+    anchor: &AnnotationKey,
+    summary: &str,
+    rationale: Option<&str>,
+    author: Option<&str>,
+) -> usize {
+    COMMENT_OVERHEAD_BYTES
+        .saturating_add(id.len())
+        .saturating_add(anchor.path.len())
+        .saturating_add(summary.len())
+        .saturating_add(rationale.map_or(0, str::len))
+        .saturating_add(author.map_or(0, str::len))
+}
+
+fn review_comment_bytes(comment: &ReviewComment) -> usize {
+    review_comment_bytes_with_summary(comment, &comment.summary)
+}
+
+fn review_comment_bytes_with_summary(comment: &ReviewComment, summary: &str) -> usize {
+    new_comment_bytes(
+        &comment.id,
+        &comment.anchor,
+        summary,
+        comment.rationale.as_deref(),
+        comment.author.as_deref(),
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -638,6 +692,15 @@ mod tests {
         }
     }
 
+    fn fill_with_max_human_comments(store: &mut ReviewCommentStore, count: usize) {
+        let text = "x".repeat(mark_session::MAX_RATIONALE_BYTES);
+        for line in 1..=count {
+            let mut anchor = anchor();
+            anchor.line = line;
+            store.insert_human(anchor, text.clone(), 1).unwrap();
+        }
+    }
+
     #[test]
     fn multiple_comments_share_an_anchor_with_stable_ids() {
         let mut store = ReviewCommentStore::default();
@@ -793,6 +856,92 @@ mod tests {
         assert!(store.is_human_only(&anchor));
         assert!(store.remove(&anchor).is_some());
         assert!(!store.contains_key(&anchor));
+    }
+
+    #[test]
+    fn human_comment_at_byte_limit_survives_restore() {
+        let mut store = ReviewCommentStore::default();
+        fill_with_max_human_comments(&mut store, 63);
+        let baseline = store.comments().cloned().collect::<Vec<_>>();
+        let mut final_anchor = anchor();
+        final_anchor.line = 64;
+        let final_id = store.prospective_comment_id("human", 1);
+        let fixed_bytes = new_comment_bytes(&final_id, &final_anchor, "", None, None);
+        let remaining = MAX_LIVE_REVIEW_BYTES - store.live_review_bytes();
+        assert!(remaining > fixed_bytes);
+        let text = "x".repeat(remaining - fixed_bytes);
+        assert!(text.len() < mark_session::MAX_RATIONALE_BYTES);
+
+        let mut oversized = ReviewCommentStore::default();
+        oversized.restore_comments(baseline).unwrap();
+        assert_eq!(
+            oversized.insert_human(final_anchor.clone(), format!("{text}x"), 1),
+            Err(StoreLimitError)
+        );
+
+        store.insert_human(final_anchor, text, 1).unwrap();
+        assert_eq!(store.live_review_bytes(), MAX_LIVE_REVIEW_BYTES);
+        let comments = store.comments().cloned().collect();
+        let mut restored = ReviewCommentStore::default();
+        restored.restore_comments(comments).unwrap();
+        assert_eq!(restored.live_review_bytes(), MAX_LIVE_REVIEW_BYTES);
+    }
+
+    #[test]
+    fn agent_batch_at_byte_limit_accounts_for_every_id_and_survives_restore() {
+        let mut store = ReviewCommentStore::default();
+        fill_with_max_human_comments(&mut store, 62);
+        let baseline = store.comments().cloned().collect::<Vec<_>>();
+        let remaining = MAX_LIVE_REVIEW_BYTES - store.live_review_bytes();
+        let first_id = store.prospective_comment_id("agent", 1);
+        let second_id = store.prospective_comment_id("agent", 2);
+        let mut first_anchor = anchor();
+        first_anchor.line = 63;
+        let first = NewAgentComment {
+            anchor: first_anchor,
+            summary: "s".repeat(mark_session::MAX_SUMMARY_BYTES),
+            rationale: Some("r".repeat(mark_session::MAX_RATIONALE_BYTES)),
+            author: Some("a".repeat(mark_session::MAX_AUTHOR_BYTES)),
+        };
+        let mut second_anchor = anchor();
+        second_anchor.line = 64;
+        let second_fixed_bytes = new_comment_bytes(&second_id, &second_anchor, "", None, None);
+        let first_bytes = new_comment_bytes(
+            &first_id,
+            &first.anchor,
+            &first.summary,
+            first.rationale.as_deref(),
+            first.author.as_deref(),
+        );
+        assert!(remaining > first_bytes.saturating_add(second_fixed_bytes));
+        let second_summary = "s".repeat(remaining - first_bytes.saturating_add(second_fixed_bytes));
+        assert!(second_summary.len() < mark_session::MAX_SUMMARY_BYTES);
+        let comments = vec![
+            first,
+            NewAgentComment {
+                anchor: second_anchor,
+                summary: second_summary,
+                rationale: None,
+                author: None,
+            },
+        ];
+
+        let mut oversized = ReviewCommentStore::default();
+        oversized.restore_comments(baseline).unwrap();
+        let mut oversized_comments = comments.clone();
+        oversized_comments[1].summary.push('x');
+        assert_eq!(
+            oversized.insert_agent_batch(oversized_comments, 1),
+            Err(StoreLimitError)
+        );
+
+        let ids = store.insert_agent_batch(comments, 1).unwrap();
+        assert_eq!(ids, vec![first_id, second_id]);
+        assert_eq!(store.live_review_bytes(), MAX_LIVE_REVIEW_BYTES);
+        let comments = store.comments().cloned().collect();
+        let mut restored = ReviewCommentStore::default();
+        restored.restore_comments(comments).unwrap();
+        assert_eq!(restored.live_review_bytes(), MAX_LIVE_REVIEW_BYTES);
     }
 
     #[test]

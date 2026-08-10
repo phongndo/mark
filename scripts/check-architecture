@@ -28,12 +28,14 @@ check_absent '\.(par_iter|par_iter_mut|into_par_iter)\(' crates -g '*.rs' -g '!*
 check_absent 'syntaxmate::(engine|grammars)' crates/mark-syntax/src -g '*.rs'
 check_absent 'mark[_-]tui|ratatui' crates/mark-session
 check_absent '\bDiffApp\b|\bUiRow\b' crates/mark-session/src
+check_absent 'ReviewPersistence|MARK_STATE_HOME|mark/reviews' crates/mark-tui/src crates/mark-cli/src
 
 for removed_path in \
   assets/grammars \
   crates/mark-syntax/src/engine \
   crates/mark-syntax/src/grammars \
   crates/mark-syntax/tests/fixtures \
+  crates/mark-tui/src/review/persistence.rs \
   tools/golden-oracle
 do
   if [ -e "$removed_path" ]; then

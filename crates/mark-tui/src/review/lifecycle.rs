@@ -1,10 +1,10 @@
 use std::collections::BTreeSet;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::app::DiffApp;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum VerdictKind {
     Approve,
@@ -12,21 +12,21 @@ pub(crate) enum VerdictKind {
     Comment,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum VerdictDestination {
     Local,
     Stdout,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct FinalVerdict {
     pub(crate) kind: VerdictKind,
     pub(crate) summary: Option<String>,
     pub(crate) destination: VerdictDestination,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ReviewLifecycleState {
     pub(crate) pass: u64,
     pub(crate) reviewed_files: BTreeSet<String>,

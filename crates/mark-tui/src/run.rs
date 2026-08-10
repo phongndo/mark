@@ -162,10 +162,6 @@ async fn run_diff_with_options_async(
     terminal.draw(|frame| draw(frame, &mut app))?;
     app.runtime.dirty = true;
 
-    if session_enabled {
-        app.initialize_review_persistence();
-    }
-
     let mut live_diff = None;
     sync_live_diff(&mut live_diff, &mut app, run_options.live_updates);
     let mut session = if session_enabled {
@@ -210,12 +206,7 @@ async fn run_diff_with_options_async(
             Err(error) => shutdown_result = Err(error),
         }
     }
-    let persistence_result = if session_enabled {
-        app.save_review_persistence().map_err(MarkError::Io)
-    } else {
-        Ok(())
-    };
-    shutdown_result.and(persistence_result)
+    shutdown_result
 }
 
 pub fn benchmark_diff_view(
