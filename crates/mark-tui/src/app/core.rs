@@ -73,6 +73,11 @@ pub(crate) const NORMAL_GLOBAL_ACTIONS: &[GlobalAction] = &[
     GlobalAction::PreviousDiffType,
     GlobalAction::NextAnnotation,
     GlobalAction::PreviousAnnotation,
+    GlobalAction::ToggleReviewed,
+    GlobalAction::ApproveReview,
+    GlobalAction::RequestChanges,
+    GlobalAction::CommentVerdict,
+    GlobalAction::ClearVerdict,
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -352,6 +357,8 @@ pub(crate) struct PendingDiffLoad {
     pub(crate) options: DiffOptions,
     pub(crate) error_prefix: String,
     pub(crate) branch_metadata: BranchMetadataPolicy,
+    pub(crate) scoped_paths: Option<Vec<PathBuf>>,
+    pub(crate) completion: Option<oneshot::Sender<Result<u64, String>>>,
     pub(crate) job: AsyncJob<MarkResult<Changeset>>,
 }
 

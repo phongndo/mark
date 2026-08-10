@@ -34,11 +34,15 @@ impl DiffApp {
     }
 
     pub(crate) fn annotation_block_label(&self, key: &AnnotationKey, composing: bool) -> String {
-        format!(
-            "{} · {}",
-            if composing { "Add note" } else { "Note" },
-            key.target_label()
-        )
+        let label = if composing {
+            "Add note"
+        } else {
+            self.annotations_state
+                .annotations
+                .label(key)
+                .unwrap_or("Comment")
+        };
+        format!("{label} · {}", key.target_label())
     }
 
     pub(crate) fn annotation_label(&self, key: &AnnotationKey) -> Option<String> {
@@ -94,6 +98,9 @@ impl DiffApp {
         else {
             return false;
         };
+        if !self.annotations_state.annotations.is_human_only(&key) {
+            return false;
+        }
         self.open_annotation_draft_for_key(key, model_row)
     }
 
@@ -122,27 +129,38 @@ impl DiffApp {
         let Some((_model_row, key)) = annotation_saved_key_at_top_border(self, viewport_row) else {
             return false;
         };
-        if self.annotations_state.annotations.remove(&key).is_some() {
-            self.annotations_state.annotation_block_scroll = None;
+        let removed = if self.annotations_state.annotations.has_agent(&key) {
+            self.annotations_state.annotations.remove_agents_at(&key) > 0
+        } else {
+            self.annotations_state
+                .annotations
+                .remove_human(&key)
+                .is_some()
+        };
+        if !removed {
+            return false;
+        }
+
+        self.annotations_state.annotation_block_scroll = None;
+        if !self.annotations_state.annotations.contains_key(&key) {
             self.annotations_state
                 .annotation_rows
                 .borrow_mut()
                 .remove(&key);
             *self.annotations_state.annotation_keys_by_row.borrow_mut() = None;
-            self.annotations_state
-                .annotation_heights
-                .borrow_mut()
-                .remove(&key);
-            self.set_scroll_with_grep_sync(
-                self.viewport.scroll,
-                false,
-                HunkFocusScrollBehavior::Preserve,
-            );
-            self.sync_annotation_cursor_to_viewport();
-            self.runtime.dirty = true;
-            return true;
         }
-        false
+        self.annotations_state
+            .annotation_heights
+            .borrow_mut()
+            .remove(&key);
+        self.set_scroll_with_grep_sync(
+            self.viewport.scroll,
+            false,
+            HunkFocusScrollBehavior::Preserve,
+        );
+        self.sync_annotation_cursor_to_viewport();
+        self.runtime.dirty = true;
+        true
     }
 
     pub(in crate::app) fn open_annotation_draft_for_key(
@@ -163,8 +181,8 @@ impl DiffApp {
         let existing = self
             .annotations_state
             .annotations
-            .get(&key)
-            .cloned()
+            .human_text(&key)
+            .map(str::to_owned)
             .unwrap_or_default();
         let cursor = existing.len();
         self.annotations_state.annotation_draft = Some(AnnotationDraft {

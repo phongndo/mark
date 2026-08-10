@@ -30,10 +30,12 @@ examples:
   mark patch changes.diff
   cat changes.diff | mark patch -
   git diff | mark pager
-  mark diff --no-watch
+  mark diff --watch
   mark diff --no-syntax
   mark diff --minimal
   mark diff --stat
+  mark session list --json
+  mark skill path
   mark config
   mark syntax add ruby elixir";
 
@@ -120,6 +122,16 @@ examples:
   cat changes.diff | mark patch -"
     )]
     Patch(PatchArgs),
+    #[command(about = "Inspect and control a live review session")]
+    Session {
+        #[command(subcommand)]
+        command: SessionSubcommand,
+    },
+    #[command(about = "Show the bundled agent review skill")]
+    Skill {
+        #[command(subcommand)]
+        command: SkillCommand,
+    },
     #[command(
         alias = "ts",
         about = "Inspect syntax configuration and backend status"
@@ -139,6 +151,343 @@ examples:
   mark update --install-dir ~/.local/bin"
     )]
     Update(UpdateArgs),
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum SkillCommand {
+    #[command(about = "Materialize the bundled skill and print its path")]
+    Path,
+    #[command(about = "Print the bundled skill")]
+    Show,
+}
+
+#[derive(Debug, Args, Default)]
+pub(crate) struct SessionSelectorArgs {
+    #[arg(value_name = "SESSION_ID", conflicts_with = "repo")]
+    pub(crate) session_id: Option<String>,
+    #[arg(long, value_name = "PATH", conflicts_with = "session_id")]
+    pub(crate) repo: Option<PathBuf>,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum SessionSubcommand {
+    #[command(visible_alias = "ls", about = "List live review sessions")]
+    List(SessionListArgs),
+    #[command(about = "Get live session metadata")]
+    Get(SessionGetArgs),
+    #[command(about = "Inspect live session context and focus")]
+    Context(SessionContextArgs),
+    #[command(about = "Inspect paginated changeset structure")]
+    Review(SessionReviewArgs),
+    #[command(about = "Retrieve a bounded file or hunk patch")]
+    Patch(SessionPatchArgs),
+    #[command(about = "Move the open review focus")]
+    Navigate(SessionNavigateArgs),
+    #[command(about = "Manage inline review comments")]
+    Comment {
+        #[command(subcommand)]
+        command: SessionCommentCommand,
+    },
+    #[command(about = "Set reviewed file or hunk progress")]
+    Progress(SessionProgressArgs),
+    #[command(about = "Manage the human-owned final verdict")]
+    Verdict {
+        #[command(subcommand)]
+        command: SessionVerdictCommand,
+    },
+    #[command(about = "Explicitly replace the review snapshot")]
+    Reload(SessionReloadArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct SessionListArgs {
+    #[arg(long, value_name = "PATH")]
+    pub(crate) repo: Option<PathBuf>,
+    #[arg(long)]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct SessionGetArgs {
+    #[command(flatten)]
+    pub(crate) selector: SessionSelectorArgs,
+    #[arg(long)]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct SessionContextArgs {
+    #[command(flatten)]
+    pub(crate) selector: SessionSelectorArgs,
+    #[arg(long)]
+    pub(crate) changed_files_cursor: Option<String>,
+    #[arg(long, value_name = "N")]
+    pub(crate) changed_files_limit: Option<usize>,
+    #[arg(long)]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct SessionReviewArgs {
+    #[command(flatten)]
+    pub(crate) selector: SessionSelectorArgs,
+    #[arg(long)]
+    pub(crate) cursor: Option<String>,
+    #[arg(long, value_name = "N")]
+    pub(crate) limit: Option<usize>,
+    #[arg(long)]
+    pub(crate) include_comments: bool,
+    #[arg(long, requires = "include_comments")]
+    pub(crate) comments_cursor: Option<String>,
+    #[arg(long, value_name = "N", requires = "include_comments")]
+    pub(crate) comments_limit: Option<usize>,
+    #[arg(
+        long,
+        help = "Only include files changed since the previous review pass"
+    )]
+    pub(crate) changed_only: bool,
+    #[arg(long)]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct SessionPatchArgs {
+    #[command(flatten)]
+    pub(crate) selector: SessionSelectorArgs,
+    #[arg(long, value_name = "PATH")]
+    pub(crate) file: String,
+    #[arg(long, value_name = "N", conflicts_with_all = ["old_line", "new_line"])]
+    pub(crate) hunk: Option<usize>,
+    #[arg(long, value_name = "N", conflicts_with_all = ["hunk", "new_line"])]
+    pub(crate) old_line: Option<usize>,
+    #[arg(long, value_name = "N", conflicts_with_all = ["hunk", "old_line"])]
+    pub(crate) new_line: Option<usize>,
+    #[arg(long, value_name = "N")]
+    pub(crate) context: Option<usize>,
+    #[arg(long, value_name = "N")]
+    pub(crate) max_bytes: Option<usize>,
+    #[arg(long)]
+    pub(crate) cursor: Option<String>,
+    #[arg(long)]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct SessionNavigateArgs {
+    #[command(flatten)]
+    pub(crate) selector: SessionSelectorArgs,
+    #[arg(long, value_name = "PATH")]
+    pub(crate) file: Option<String>,
+    #[arg(long, value_name = "N", group = "coordinate")]
+    pub(crate) hunk: Option<usize>,
+    #[arg(long, value_name = "N", group = "coordinate")]
+    pub(crate) old_line: Option<usize>,
+    #[arg(long, value_name = "N", group = "coordinate")]
+    pub(crate) new_line: Option<usize>,
+    #[arg(long, group = "coordinate")]
+    pub(crate) next_comment: bool,
+    #[arg(long, group = "coordinate")]
+    pub(crate) previous_comment: bool,
+    #[arg(long)]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum SessionCommentCommand {
+    #[command(about = "Add one agent comment")]
+    Add(SessionCommentAddArgs),
+    #[command(about = "Atomically apply agent comments from stdin")]
+    Apply(SessionCommentApplyArgs),
+    #[command(visible_alias = "ls", about = "List review comments")]
+    List(SessionCommentListArgs),
+    #[command(about = "Remove one agent comment")]
+    Rm(SessionCommentRemoveArgs),
+    #[command(about = "Clear agent comments")]
+    Clear(SessionCommentClearArgs),
+    #[command(about = "Accept, dismiss, or classify an agent finding")]
+    Disposition(SessionCommentDispositionArgs),
+}
+
+#[derive(Debug, Args, Default)]
+pub(crate) struct CommentTargetArgs {
+    #[arg(long, value_name = "N", conflicts_with_all = ["old_line", "new_line", "old_start", "new_start"])]
+    pub(crate) hunk: Option<usize>,
+    #[arg(long, value_name = "N", conflicts_with_all = ["hunk", "new_line", "old_start", "new_start"])]
+    pub(crate) old_line: Option<usize>,
+    #[arg(long, value_name = "N", conflicts_with_all = ["hunk", "old_line", "old_start", "new_start"])]
+    pub(crate) new_line: Option<usize>,
+    #[arg(long, value_name = "N", requires = "old_end", conflicts_with_all = ["hunk", "old_line", "new_line"])]
+    pub(crate) old_start: Option<usize>,
+    #[arg(long, value_name = "N", requires = "old_start")]
+    pub(crate) old_end: Option<usize>,
+    #[arg(long, value_name = "N", requires = "new_end", conflicts_with_all = ["hunk", "old_line", "new_line"])]
+    pub(crate) new_start: Option<usize>,
+    #[arg(long, value_name = "N", requires = "new_start")]
+    pub(crate) new_end: Option<usize>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct SessionCommentAddArgs {
+    #[command(flatten)]
+    pub(crate) selector: SessionSelectorArgs,
+    #[arg(long, value_name = "PATH")]
+    pub(crate) file: String,
+    #[command(flatten)]
+    pub(crate) target: CommentTargetArgs,
+    #[arg(long)]
+    pub(crate) summary: String,
+    #[arg(long)]
+    pub(crate) rationale: Option<String>,
+    #[arg(long)]
+    pub(crate) author: Option<String>,
+    #[arg(long)]
+    pub(crate) generation: Option<u64>,
+    #[arg(long)]
+    pub(crate) focus: bool,
+    #[arg(long)]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct SessionCommentApplyArgs {
+    #[command(flatten)]
+    pub(crate) selector: SessionSelectorArgs,
+    #[arg(long, required = true)]
+    pub(crate) stdin: bool,
+    #[arg(long)]
+    pub(crate) focus: bool,
+    #[arg(long)]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(crate) enum CommentOriginArg {
+    Agent,
+    Human,
+    All,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct SessionCommentListArgs {
+    #[command(flatten)]
+    pub(crate) selector: SessionSelectorArgs,
+    #[arg(long, value_name = "PATH")]
+    pub(crate) file: Option<String>,
+    #[arg(long, value_enum, default_value_t = CommentOriginArg::All)]
+    pub(crate) origin: CommentOriginArg,
+    #[arg(long)]
+    pub(crate) cursor: Option<String>,
+    #[arg(long, value_name = "N")]
+    pub(crate) limit: Option<usize>,
+    #[arg(long)]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct SessionCommentRemoveArgs {
+    #[command(flatten)]
+    pub(crate) selector: SessionSelectorArgs,
+    #[arg(long, value_name = "COMMENT_ID")]
+    pub(crate) comment_id: String,
+    #[arg(long)]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct SessionCommentClearArgs {
+    #[command(flatten)]
+    pub(crate) selector: SessionSelectorArgs,
+    #[arg(long, value_name = "PATH")]
+    pub(crate) file: Option<String>,
+    #[arg(long, required = true)]
+    pub(crate) yes: bool,
+    #[arg(long)]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(crate) enum FindingDispositionArg {
+    Open,
+    Accepted,
+    Dismissed,
+    Blocking,
+    NonBlocking,
+    Fixed,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct SessionCommentDispositionArgs {
+    #[command(flatten)]
+    pub(crate) selector: SessionSelectorArgs,
+    #[arg(long, value_name = "COMMENT_ID")]
+    pub(crate) comment_id: String,
+    #[arg(long, value_enum)]
+    pub(crate) disposition: FindingDispositionArg,
+    #[arg(long)]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct SessionProgressArgs {
+    #[command(flatten)]
+    pub(crate) selector: SessionSelectorArgs,
+    #[arg(long, value_name = "PATH")]
+    pub(crate) file: String,
+    #[arg(long, value_name = "N")]
+    pub(crate) hunk: Option<usize>,
+    #[arg(long, conflicts_with = "unreviewed")]
+    pub(crate) reviewed: bool,
+    #[arg(long, conflicts_with = "reviewed")]
+    pub(crate) unreviewed: bool,
+    #[arg(long)]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum SessionVerdictCommand {
+    Get(SessionGetArgs),
+    Set(SessionVerdictSetArgs),
+    Clear(SessionGetArgs),
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(crate) enum VerdictKindArg {
+    Approve,
+    RequestChanges,
+    Comment,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum, Default)]
+pub(crate) enum VerdictDestinationArg {
+    #[default]
+    Local,
+    Stdout,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct SessionVerdictSetArgs {
+    #[command(flatten)]
+    pub(crate) selector: SessionSelectorArgs,
+    #[arg(long, value_enum)]
+    pub(crate) kind: VerdictKindArg,
+    #[arg(long)]
+    pub(crate) summary: Option<String>,
+    #[arg(long, value_enum, default_value_t = VerdictDestinationArg::Local)]
+    pub(crate) destination: VerdictDestinationArg,
+    #[arg(long)]
+    pub(crate) json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct SessionReloadArgs {
+    #[command(flatten)]
+    pub(crate) selector: SessionSelectorArgs,
+    #[arg(last = true, required = true, num_args = 1.., value_name = "REQUEST")]
+    pub(crate) request: Vec<String>,
+    #[arg(long)]
+    pub(crate) generation: Option<u64>,
+    #[arg(long)]
+    pub(crate) json: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -281,8 +630,11 @@ pub(crate) struct EmptyDiffFillArgs {
 
 #[derive(Debug, Args, Default)]
 pub(crate) struct DiffWatchArgs {
-    /// Disable live reload in the interactive diff viewer.
-    #[arg(long = "no-watch")]
+    /// Auto-reload when the reviewed source changes.
+    #[arg(long)]
+    pub(crate) watch: bool,
+    /// Compatibility no-op; reviews are snapshots unless --watch is used.
+    #[arg(long = "no-watch", hide = true, conflicts_with = "watch")]
     pub(crate) no_watch: bool,
 }
 
@@ -584,6 +936,210 @@ mod tests {
                 if left.as_path() == std::path::Path::new("-foo.txt")
                     && right.as_path() == std::path::Path::new("--stat")
                     && path.as_path() == std::path::Path::new("--merged")
+        ));
+    }
+
+    #[test]
+    fn parses_live_session_commands_and_targets() {
+        let cli = parse(&[
+            "mark",
+            "session",
+            "review",
+            "session-1",
+            "--limit",
+            "20",
+            "--json",
+        ]);
+        assert!(matches!(
+            cli.command,
+            Some(Command::Session {
+                command: SessionSubcommand::Review(SessionReviewArgs {
+                    selector: SessionSelectorArgs { session_id: Some(id), .. },
+                    limit: Some(20),
+                    json: true,
+                    ..
+                })
+            }) if id == "session-1"
+        ));
+
+        let cli = parse(&[
+            "mark",
+            "session",
+            "context",
+            "--repo",
+            ".",
+            "--changed-files-cursor",
+            "20",
+            "--changed-files-limit",
+            "10",
+        ]);
+        assert!(matches!(
+            cli.command,
+            Some(Command::Session {
+                command: SessionSubcommand::Context(SessionContextArgs {
+                    changed_files_cursor: Some(cursor),
+                    changed_files_limit: Some(10),
+                    ..
+                })
+            }) if cursor == "20"
+        ));
+
+        let cli = parse(&[
+            "mark",
+            "session",
+            "navigate",
+            "session-1",
+            "--file",
+            "src/lib.rs",
+        ]);
+        assert!(matches!(
+            cli.command,
+            Some(Command::Session {
+                command: SessionSubcommand::Navigate(SessionNavigateArgs {
+                    file: Some(file),
+                    hunk: None,
+                    old_line: None,
+                    new_line: None,
+                    ..
+                })
+            }) if file == "src/lib.rs"
+        ));
+
+        let cli = parse(&[
+            "mark",
+            "session",
+            "comment",
+            "add",
+            "--repo",
+            ".",
+            "--file",
+            "src/lib.rs",
+            "--new-line",
+            "4",
+            "--summary",
+            "finding",
+        ]);
+        assert!(matches!(
+            cli.command,
+            Some(Command::Session {
+                command: SessionSubcommand::Comment {
+                    command: SessionCommentCommand::Add(SessionCommentAddArgs {
+                        target: CommentTargetArgs {
+                            new_line: Some(4),
+                            ..
+                        },
+                        ..
+                    })
+                }
+            })
+        ));
+
+        let cli = parse(&[
+            "mark",
+            "session",
+            "comment",
+            "disposition",
+            "--repo",
+            ".",
+            "--comment-id",
+            "agent-1",
+            "--disposition",
+            "blocking",
+        ]);
+        assert!(matches!(
+            cli.command,
+            Some(Command::Session {
+                command: SessionSubcommand::Comment {
+                    command: SessionCommentCommand::Disposition(SessionCommentDispositionArgs {
+                        disposition: FindingDispositionArg::Blocking,
+                        ..
+                    })
+                }
+            })
+        ));
+
+        let cli = parse(&[
+            "mark",
+            "session",
+            "comment",
+            "rm",
+            "--repo",
+            ".",
+            "--comment-id",
+            "agent-1",
+        ]);
+        assert!(matches!(
+            cli.command,
+            Some(Command::Session {
+                command: SessionSubcommand::Comment {
+                    command: SessionCommentCommand::Rm(SessionCommentRemoveArgs {
+                        selector: SessionSelectorArgs { repo: Some(_), .. },
+                        comment_id,
+                        ..
+                    })
+                }
+            }) if comment_id == "agent-1"
+        ));
+
+        let cli = parse(&[
+            "mark",
+            "session",
+            "verdict",
+            "set",
+            "--repo",
+            ".",
+            "--kind",
+            "approve",
+            "--destination",
+            "stdout",
+        ]);
+        assert!(matches!(
+            cli.command,
+            Some(Command::Session {
+                command: SessionSubcommand::Verdict {
+                    command: SessionVerdictCommand::Set(SessionVerdictSetArgs {
+                        kind: VerdictKindArg::Approve,
+                        destination: VerdictDestinationArg::Stdout,
+                        ..
+                    })
+                }
+            })
+        ));
+
+        parse_err(&[
+            "mark",
+            "session",
+            "patch",
+            "--file",
+            "src/lib.rs",
+            "--hunk",
+            "1",
+            "--new-line",
+            "4",
+        ]);
+        parse_err(&["mark", "session", "get", "session-1", "--repo", "."]);
+    }
+
+    #[test]
+    fn diff_watch_is_opt_in_and_no_watch_is_compatible() {
+        let cli = parse(&["mark", "diff", "--watch"]);
+        assert!(matches!(
+            cli.command,
+            Some(Command::Diff(DiffArgs {
+                watch: DiffWatchArgs { watch: true, .. },
+                ..
+            }))
+        ));
+        let cli = parse(&["mark", "diff", "--no-watch"]);
+        assert!(matches!(
+            cli.command,
+            Some(Command::Diff(DiffArgs {
+                watch: DiffWatchArgs {
+                    no_watch: true,
+                    watch: false
+                },
+                ..
+            }))
         ));
     }
 

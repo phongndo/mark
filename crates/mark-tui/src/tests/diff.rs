@@ -1007,9 +1007,12 @@ fn path_changeset_replaces_only_edited_file() {
     let changeset = changeset_with_files(&["a.rs", "b.rs", "c.rs"]);
     let replacement = changeset_with_files(&["b.rs"]);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.jobs.source_changed = true;
 
-    app.replace_path_changeset(Path::new("b.rs"), replacement);
+    app.replace_path_changeset(Path::new("b.rs"), replacement)
+        .unwrap();
 
+    assert!(app.jobs.source_changed);
     assert_eq!(visible_paths(&app), vec!["a.rs", "b.rs", "c.rs"]);
     assert_eq!(
         app.document.changeset.files[0].hunks()[0].lines[0].text(),
@@ -1032,7 +1035,8 @@ fn path_changeset_removes_file_when_diff_disappears() {
     replacement.repo = PathBuf::from("/repo").into();
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
 
-    app.replace_path_changeset(Path::new("b.rs"), replacement);
+    app.replace_path_changeset(Path::new("b.rs"), replacement)
+        .unwrap();
 
     assert_eq!(visible_paths(&app), vec!["a.rs", "c.rs"]);
 }
@@ -1231,6 +1235,13 @@ fn live_reload_invalidation_clears_cache_without_visible_pending_state() {
         ..DiffOptions::default()
     };
 
+    app.config.keymap = Keymap::parse(
+        r#"
+        [keymap.global]
+        reload = "ctrl-r"
+        "#,
+    )
+    .unwrap();
     app.cache_loaded_diff(options, changeset_with_files(&["cached.rs"]));
     assert!(!app.jobs.diff_cache.is_empty());
 
@@ -1242,8 +1253,10 @@ fn live_reload_invalidation_clears_cache_without_visible_pending_state() {
     );
     assert!(app.jobs.diff_cache.is_empty());
 
-    let line = statusline_header_line(&app, 80);
+    let line = statusline_header_line(&app, 160);
     assert!(!line_text(&line).contains("refreshing diff"));
+    assert!(line_text(&line).contains("source changed · Ctrl-R reload"));
+    assert!(!line_text(&line).contains("source changed · r reload"));
 }
 
 #[test]

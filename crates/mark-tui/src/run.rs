@@ -1,5 +1,6 @@
 use std::{
-    io, thread,
+    io::{self, Write},
+    thread,
     time::{Duration, Instant},
 };
 
@@ -24,7 +25,9 @@ use crate::{
     controls::{DiffLayoutMode, default_layout_for_width, filtered_file_indices},
     model::UiModel,
     render::draw,
+    review::VerdictDestination,
     runtime,
+    session::SessionRuntime,
     syntax::SyntaxRuntime,
     terminal_input::disable_mouse_capture_and_discard_reports,
     theme::{
@@ -43,7 +46,7 @@ pub struct DiffRunOptions {
 impl Default for DiffRunOptions {
     fn default() -> Self {
         Self {
-            live_updates: true,
+            live_updates: false,
             syntax_enabled: true,
             empty_diff_fill: None,
             decorations: None,
@@ -85,21 +88,47 @@ pub fn run_diff_with_live_updates_and_syntax(
 }
 
 pub fn run_diff_with_options(options: DiffOptions, run_options: DiffRunOptions) -> MarkResult<()> {
-    runtime::block_on(run_diff_with_options_async(options, run_options))?
+    run_diff_with_options_and_session(options, run_options, true)
+}
+
+pub fn run_pager_diff_with_options(
+    options: DiffOptions,
+    run_options: DiffRunOptions,
+) -> MarkResult<()> {
+    run_diff_with_options_and_session(options, run_options, false)
+}
+
+fn run_diff_with_options_and_session(
+    options: DiffOptions,
+    run_options: DiffRunOptions,
+    session_enabled: bool,
+) -> MarkResult<()> {
+    runtime::block_on(run_diff_with_options_async(
+        options,
+        run_options,
+        session_enabled,
+    ))?
 }
 
 async fn run_diff_with_options_async(
     options: DiffOptions,
     run_options: DiffRunOptions,
+    session_enabled: bool,
 ) -> MarkResult<()> {
     let load_options = options.clone();
-    let changeset = runtime::spawn_blocking(move || mark_diff::load_review_ref(&load_options))
-        .await
-        .map_err(|error| {
-            MarkError::Io(io::Error::other(format!(
-                "initial diff load worker stopped: {error}"
-            )))
-        })??;
+    let changeset = runtime::spawn_blocking(move || {
+        if session_enabled {
+            mark_diff::load_review_ref_with_raw_patch(&load_options)
+        } else {
+            mark_diff::load_review_ref(&load_options)
+        }
+    })
+    .await
+    .map_err(|error| {
+        MarkError::Io(io::Error::other(format!(
+            "initial diff load worker stopped: {error}"
+        )))
+    })??;
 
     let layout = default_layout_for_width(crossterm::terminal::size()?.0);
     let syntax_mode = if run_options.syntax_enabled {
@@ -116,8 +145,9 @@ async fn run_diff_with_options_async(
     }
     app.jobs.live_updates = LiveUpdatesState::from_allowed_and_enabled(
         run_options.live_updates,
-        run_options.live_updates && app.jobs.live_updates.enabled(),
+        run_options.live_updates,
     );
+    app.overlays.options_menu_draft.live_updates_enabled = run_options.live_updates;
 
     let mut cleanup = TerminalCleanup::install()?;
     let backend = CrosstermBackend::new(io::stdout());
@@ -126,20 +156,66 @@ async fn run_diff_with_options_async(
     if default_layout_for_width(terminal_width) != app.viewport.layout {
         app.apply_responsive_layout(terminal_width);
     }
+    // Paint the immutable initial document before starting optional filesystem
+    // and session services. Neither registration nor watcher setup can delay
+    // the first visible frame.
+    terminal.draw(|frame| draw(frame, &mut app))?;
+    app.runtime.dirty = true;
+
+    if session_enabled {
+        app.initialize_review_persistence();
+    }
+
     let mut live_diff = None;
     sync_live_diff(&mut live_diff, &mut app, run_options.live_updates);
+    let mut session = if session_enabled {
+        match SessionRuntime::start(&app) {
+            Ok(session) => Some(session),
+            Err(error) => {
+                app.set_error_log(format!("live session unavailable: {error}"));
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     let result = run_loop(
         &mut terminal,
         &mut app,
         run_options.live_updates,
         &mut live_diff,
+        session.as_mut(),
     )
     .await;
+    let verdict_output = app
+        .annotations_state
+        .lifecycle
+        .verdict
+        .as_ref()
+        .filter(|verdict| verdict.destination == VerdictDestination::Stdout)
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|error| MarkError::Io(io::Error::other(error)));
     let cleanup_result = cleanup.cleanup();
 
-    result?;
-    cleanup_result
+    let mut shutdown_result = result.and(cleanup_result);
+    if shutdown_result.is_ok() {
+        match verdict_output {
+            Ok(Some(verdict)) => match writeln!(io::stdout().lock(), "{verdict}") {
+                Ok(()) => app.annotations_state.lifecycle.verdict = None,
+                Err(error) => shutdown_result = Err(MarkError::Io(error)),
+            },
+            Ok(None) => {}
+            Err(error) => shutdown_result = Err(error),
+        }
+    }
+    let persistence_result = if session_enabled {
+        app.save_review_persistence().map_err(MarkError::Io)
+    } else {
+        Ok(())
+    };
+    shutdown_result.and(persistence_result)
 }
 
 pub fn benchmark_diff_view(

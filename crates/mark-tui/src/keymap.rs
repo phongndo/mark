@@ -45,6 +45,11 @@ pub(crate) enum GlobalAction {
     PreviousDiffType,
     NextAnnotation,
     PreviousAnnotation,
+    ToggleReviewed,
+    ApproveReview,
+    RequestChanges,
+    CommentVerdict,
+    ClearVerdict,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +57,11 @@ pub(crate) enum AnnotationMenuAction {
     Jump,
     EditExternal,
     Remove,
+    Accept,
+    Dismiss,
+    Blocking,
+    NonBlocking,
+    Fixed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -220,6 +230,21 @@ const GLOBAL_ACTION_SPECS: &[GlobalActionSpec] = &[
         "previous_annotation",
         ["{"]
     ),
+    global_action_spec!(GlobalAction::ToggleReviewed, "toggle_reviewed", ["R"], 1),
+    global_action_spec!(GlobalAction::ApproveReview, "approve_review", ["ctrl-a"], 1),
+    global_action_spec!(
+        GlobalAction::RequestChanges,
+        "request_changes",
+        ["ctrl-r"],
+        1
+    ),
+    global_action_spec!(
+        GlobalAction::CommentVerdict,
+        "comment_verdict",
+        ["ctrl-v"],
+        1
+    ),
+    global_action_spec!(GlobalAction::ClearVerdict, "clear_verdict", ["ctrl-d"], 1),
 ];
 
 const ANNOTATION_MENU_ACTION_SPECS: &[AnnotationMenuActionSpec] = &[
@@ -230,6 +255,15 @@ const ANNOTATION_MENU_ACTION_SPECS: &[AnnotationMenuActionSpec] = &[
         ["ctrl-g"]
     ),
     annotation_menu_action_spec!(AnnotationMenuAction::Remove, "remove", ["ctrl-x"]),
+    annotation_menu_action_spec!(AnnotationMenuAction::Accept, "accept", ["ctrl-a"]),
+    annotation_menu_action_spec!(AnnotationMenuAction::Dismiss, "dismiss", ["ctrl-d"]),
+    annotation_menu_action_spec!(AnnotationMenuAction::Blocking, "blocking", ["ctrl-b"]),
+    annotation_menu_action_spec!(
+        AnnotationMenuAction::NonBlocking,
+        "non_blocking",
+        ["ctrl-o"]
+    ),
+    annotation_menu_action_spec!(AnnotationMenuAction::Fixed, "fixed", ["ctrl-f"]),
 ];
 
 const MENU_ACTION_SPECS: &[MenuActionSpec] = &[

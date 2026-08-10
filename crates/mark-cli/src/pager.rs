@@ -21,6 +21,7 @@ use input::{
 use plain::{page_plain_text, page_plain_text_stream, stream_to_stdout};
 use static_diff::{run_interactive_diff, write_static_diff};
 use terminal::controlling_terminal_available;
+pub(crate) use terminal::sanitized_terminal_bytes;
 
 const PAGER_CLASSIFICATION_LIMIT: usize = 128 * 1024;
 const STREAM_BUFFER_SIZE: usize = 8192;

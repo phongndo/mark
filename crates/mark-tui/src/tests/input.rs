@@ -3281,7 +3281,8 @@ fn replace_path_changeset_preserves_wrapped_file_relative_scroll() {
     set_wrapped_scroll_relative_to_file_start(&mut app, 1, relative_scroll);
     let replacement = changeset_with_files(&["target.rs"]);
 
-    app.replace_path_changeset(Path::new("target.rs"), replacement);
+    app.replace_path_changeset(Path::new("target.rs"), replacement)
+        .unwrap();
 
     assert_eq!(
         app.viewport.scroll,

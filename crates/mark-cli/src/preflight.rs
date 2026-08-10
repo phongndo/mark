@@ -22,6 +22,7 @@ fn has_diff_args(args: &args::DiffArgs) -> bool {
         || args.repo.repo.is_some()
         || args.base.is_some()
         || args.no_untracked
+        || args.watch.watch
         || args.watch.no_watch
         || args.display.no_syntax
         || args.display.decorations.override_value().is_some()

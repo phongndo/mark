@@ -30,7 +30,11 @@ in the same focused review UI.
   or custom theme, customize keybindings, and open the focused code in your
   editor.
 - **Fit into Git.** Use Mark directly, as `core.pager`, or as a Git difftool.
-  Local worktree sessions can watch for changes and reload in place.
+  Reviews stay stable by default, report source changes, and reload continuously
+  only with `--watch`.
+- **Review with an external agent.** A private local session lets an existing
+  shell-driven agent inspect bounded patches and place inline comments while
+  the human keeps control of the TUI.
 
 ## Install
 
@@ -84,6 +88,7 @@ mark show HEAD~1             # review one commit
 mark review 123              # review GitHub PR #123 from the current repo
 mark patch changes.diff      # review an existing patch file
 git diff | mark pager        # use mark as a diff pager
+mark diff --watch            # opt into continuous worktree reload
 ```
 
 Plain `mark` is a shortcut for `mark diff`. While reviewing, move the cursor
@@ -91,6 +96,25 @@ with Vim-style motions and counts such as `3j`. Press `v` or `V` for linewise
 Visual mode, select a range, and press `Enter` to annotate it; `Enter` also
 annotates a single line, hunk header, or file header. Use `y` to copy annotations and
 `Shift-Q` to copy them and quit (`q` quits without submitting them).
+
+## Live agent review
+
+Open Mark yourself, then let an external agent use the bundled local workflow:
+
+```sh
+mark skill path
+mark session list --json
+mark session review --repo . --json
+mark session patch --repo . --file src/lib.rs --hunk 1 --json
+```
+
+Agents can apply atomic, source-anchored comment batches that appear inline in
+the open review. Review passes persist comments and reviewed progress, report
+changed files, and conservatively re-anchor unambiguous findings while the human
+owns dispositions and the final verdict. The interface uses a private local Unix
+socket, bounded JSON frames, and no daemon, model integration, telemetry, or
+network service. See
+[Usage](docs/usage.md#live-agent-review-sessions) for the full command flow.
 
 ## Built for huge diffs
 
@@ -125,7 +149,7 @@ diff engine.
 | Split / side-by-side view | Yes | Yes | Yes | Yes | Yes |
 | Runtime layout switching | Yes | Yes | Yes | — | — |
 | Inline review annotations | Yes | Yes | Yes | — | — |
-| Persistent review sessions | — | Yes | — | — | — |
+| Persistent review sessions | Yes | Yes | — | — | — |
 | GitHub review submission | — | Yes | — | — | — |
 | GitLab merge request review | — | Yes | — | — | — |
 | Live worktree or file reload | Yes | — | Yes | — | — |
@@ -192,6 +216,7 @@ crates/mark-command   command facade shared by CLI and future integrations
 crates/mark-core      shared errors and path helpers
 crates/mark-git       low-level Git process boundary
 crates/mark-diff      diff loading, parsing, and plain rendering
+crates/mark-session   local session protocol, registry, and Unix transport
 crates/mark-syntax    thin Mark settings/rendering adapter over syntaxmate
 crates/mark-tui       ratatui/crossterm diff review UI
 crates/mark-bench     local benchmark fixture generation

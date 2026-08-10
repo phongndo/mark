@@ -62,9 +62,10 @@ pub(crate) use core::{
     show_rev_from_options,
 };
 pub(crate) use diff_files::{
-    diff_content_width, diff_file_matches_path, editor_reload_request_for_file, repo_relative_path,
-    splice_diff_files_for_path, split_cell_content_width, unified_content_width,
-    wrapped_line_count, wrapped_line_start_columns,
+    diff_content_width, diff_file_matches_path, diff_file_matches_path_scope,
+    editor_reload_request_for_file, repo_relative_path, splice_diff_files_for_paths,
+    split_cell_content_width, unified_content_width, wrapped_line_count,
+    wrapped_line_start_columns,
 };
 #[cfg(test)]
 pub(crate) use diff_load::diff_cache_entry;

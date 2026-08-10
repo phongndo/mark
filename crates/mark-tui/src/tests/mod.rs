@@ -368,6 +368,8 @@ fn pending_diff_load(options: DiffOptions) -> PendingDiffLoad {
         options,
         error_prefix: "load failed".to_owned(),
         branch_metadata: BranchMetadataPolicy::Preserve,
+        scoped_paths: None,
+        completion: None,
         job: AsyncJob::new(rx),
     }
 }

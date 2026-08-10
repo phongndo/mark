@@ -9,10 +9,13 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthStr;
 
-use super::annotation_target::annotation_target_header_line;
+use super::{
+    annotation_target::annotation_target_header_line, review_lifecycle::push_review_lifecycle_spans,
+};
 use crate::{
     app::DiffApp,
     controls::BranchMenu,
+    keymap::GlobalAction,
     render::{
         menus::{diff_comparison_label_for_theme, diff_selector_text},
         style::statusline_bg,
@@ -134,6 +137,20 @@ pub(crate) fn push_statusline_left_spans(
             .add_modifier(Modifier::BOLD),
         remaining,
     );
+    if app.jobs.source_changed {
+        let reload_key = app.config.keymap.global_action_label(GlobalAction::Reload);
+        push_fitted_statusline_span(spans, "  ", Style::default().bg(info_bg), remaining);
+        push_fitted_statusline_span(
+            spans,
+            format!("source changed · {reload_key} reload"),
+            Style::default()
+                .fg(app.config.theme.notice)
+                .bg(info_bg)
+                .add_modifier(Modifier::BOLD),
+            remaining,
+        );
+    }
+    push_review_lifecycle_spans(spans, app, remaining);
     let annotation_count = app.annotations_state.annotations.len();
     if annotation_count > 0 {
         push_fitted_statusline_span(spans, "  ", Style::default().bg(info_bg), remaining);

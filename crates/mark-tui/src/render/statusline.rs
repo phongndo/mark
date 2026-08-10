@@ -2,6 +2,7 @@ mod annotation_target;
 mod error_log;
 mod filter_bar;
 mod header;
+mod review_lifecycle;
 
 pub(crate) use error_log::draw_error_log;
 #[cfg(test)]

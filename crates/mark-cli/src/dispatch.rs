@@ -5,6 +5,8 @@ use crate::{
     pager::pager,
     preflight::{reject_likely_unknown_command, reject_pre_subcommand_diff_args},
     review::{ReviewRequest, run_review},
+    session::session,
+    skill::skill,
     syntax::{diff_options, difftool_options, patch_options, review_options, show_options, syntax},
     update::update,
 };
@@ -24,6 +26,8 @@ pub(crate) fn run_cli(cli: Cli) -> CliResult<()> {
         Some(Command::Show(args)) => run_review_command(args),
         Some(Command::Review(args)) => run_review_command(args),
         Some(Command::Patch(args)) => run_review_command(args),
+        Some(Command::Session { command }) => session(command),
+        Some(Command::Skill { command }) => skill(command),
         Some(Command::Syntax { command }) => syntax(command),
         Some(Command::Update(args)) => update(args),
     }
@@ -55,7 +59,7 @@ fn review_request(
 
 impl ReviewCommand for args::DiffArgs {
     fn into_review_request(self) -> CliResult<ReviewRequest> {
-        let live_updates = !self.watch.no_watch;
+        let live_updates = self.watch.watch;
         let syntax_enabled = self.display.syntax_enabled();
         let empty_diff_fill = self.display.empty_diff_fill_override();
         let decorations = self.display.decoration_override();

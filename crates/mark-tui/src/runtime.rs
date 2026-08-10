@@ -24,6 +24,7 @@ pub(crate) fn build_runtime() -> io::Result<Runtime> {
         .worker_threads(RUNTIME_WORKER_THREADS)
         .max_blocking_threads(RUNTIME_MAX_BLOCKING_THREADS)
         .thread_name("mark-tokio")
+        .enable_io()
         .enable_time()
         .build()
 }

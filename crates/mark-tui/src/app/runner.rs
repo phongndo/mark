@@ -3,10 +3,11 @@ use crate::controls::CrosstermTerminal;
 use crate::event_reader::TerminalEventReader;
 use crate::live_diff::{LiveDiff, LiveDiffReload, live_diff_supported};
 use crate::render::draw;
+use crate::session::{self, SessionRuntime};
 use crate::theme::MAX_READY_EVENTS_PER_FRAME;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use mark_core::MarkResult;
-use mark_diff::DiffOptions;
+use mark_diff::{DiffOptions, DiffSource};
 use ratatui::layout::Rect;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::Receiver;
@@ -19,12 +20,16 @@ pub(crate) async fn run_loop(
     app: &mut DiffApp,
     live_updates: bool,
     live_diff: &mut Option<LiveDiff>,
+    mut session_runtime: Option<&mut SessionRuntime>,
 ) -> MarkResult<()> {
     let mut events = TerminalEventReader::start("mark-diff-events")?;
     let mut scroll_fence = MouseScrollContextFence::default();
 
     loop {
         app.expire_toasts(Instant::now());
+        if let Some(runtime) = session_runtime.as_deref_mut() {
+            runtime.drain_startup(app);
+        }
         drain_live_diff_invalidation(app, live_diff.as_ref());
         drain_live_reloads(
             app,
@@ -57,7 +62,31 @@ pub(crate) async fn run_loop(
             continue;
         }
 
-        if let Some(event) = events.read_timeout(app.event_poll()).await?
+        let poll = app.event_poll();
+        if let Some(runtime) = session_runtime.as_deref_mut()
+            && runtime.active()
+        {
+            tokio::select! {
+                terminal = events.read() => {
+                    if handle_ready_events(
+                        app,
+                        live_diff,
+                        terminal?,
+                        &mut events,
+                        &mut scroll_fence,
+                    )? {
+                        break;
+                    }
+                }
+                command = runtime.commands.recv() => {
+                    match command {
+                        Some(command) => session::handle(app, runtime, command),
+                        None => runtime.mark_closed(),
+                    }
+                }
+                _ = tokio::time::sleep(poll) => {}
+            }
+        } else if let Some(event) = events.read_timeout(poll).await?
             && handle_ready_events(app, live_diff, event, &mut events, &mut scroll_fence)?
         {
             break;
@@ -298,11 +327,13 @@ pub(crate) fn sync_live_diff(
     app: &mut DiffApp,
     live_updates: bool,
 ) {
-    if !live_updates
-        || !app.jobs.live_updates.allowed()
-        || !app.jobs.live_updates.enabled()
-        || !live_diff_supported(&app.document.options)
-    {
+    let difftool_requires_watch =
+        matches!(app.document.options.source, DiffSource::Difftool { .. });
+    let source_watch_enabled =
+        live_diff_supported(&app.document.options) && (!difftool_requires_watch || live_updates);
+    let auto_reload =
+        live_updates && app.jobs.live_updates.allowed() && app.jobs.live_updates.enabled();
+    if !source_watch_enabled {
         *live_diff = None;
         app.jobs.live_diff_failed_options = None;
         app.jobs.live_updates.reset_reload();
@@ -312,6 +343,7 @@ pub(crate) fn sync_live_diff(
 
     if let Some(current_live_diff) = live_diff.as_ref() {
         if current_live_diff.options == app.document.options
+            && current_live_diff.auto_reload == auto_reload
             && !current_live_diff._worker.is_finished()
         {
             return;
@@ -325,7 +357,11 @@ pub(crate) fn sync_live_diff(
         return;
     }
 
-    match LiveDiff::start(app.document.options.clone(), &app.document.changeset.repo) {
+    match LiveDiff::start(
+        app.document.options.clone(),
+        &app.document.changeset.repo,
+        auto_reload,
+    ) {
         Ok(next_live_diff) => {
             app.jobs.live_diff_failed_options = None;
             app.jobs.live_updates.reset_reload();
@@ -336,7 +372,12 @@ pub(crate) fn sync_live_diff(
             app.jobs.live_diff_failed_options = Some(app.document.options.clone());
             app.jobs.live_updates.reset_reload();
             app.clear_cached_diff_choices();
-            app.set_error_log(format!("live reload unavailable: {error}"));
+            let feature = if auto_reload {
+                "live reload"
+            } else {
+                "source change detection"
+            };
+            app.set_error_log(format!("{feature} unavailable: {error}"));
         }
     }
 }
@@ -369,7 +410,12 @@ pub(crate) fn drain_live_reloads(
                 app.jobs.live_diff_failed_options = Some(app.document.options.clone());
                 app.jobs.live_updates.reset_reload();
                 app.clear_cached_diff_choices();
-                app.set_error_log(format!("live reload watcher failed: {error}"));
+                let feature = if app.jobs.live_updates.allowed() {
+                    "live reload watcher"
+                } else {
+                    "source change watcher"
+                };
+                app.set_error_log(format!("{feature} failed: {error}"));
             }
         }
     }

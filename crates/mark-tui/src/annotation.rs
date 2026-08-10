@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use mark_diff::{Changeset, DiffFile, DiffLine, DiffLineKind};
+use serde::{Deserialize, Serialize};
 
 use crate::model::UiRow;
 
@@ -13,7 +14,7 @@ pub(crate) const ANNOTATION_EDIT_BUTTON: &str = "[↻]";
 pub(crate) const ANNOTATION_EDIT_BUTTON_ASCII: &str = "[e]";
 pub(crate) const ANNOTATION_EDIT_BUTTON_WIDTH: usize = 3;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub(crate) struct AnnotationKey {
     pub(crate) path: String,
     pub(crate) side: AnnotationSide,
@@ -21,7 +22,8 @@ pub(crate) struct AnnotationKey {
     pub(crate) scope: AnnotationScope,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum AnnotationScope {
     File,
     Hunk {
@@ -40,7 +42,8 @@ pub(crate) enum AnnotationScope {
     Line,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum AnnotationSide {
     Old,
     New,
@@ -264,12 +267,12 @@ impl AnnotationKey {
         }
     }
 
-    fn for_file(file: &DiffFile) -> Option<Self> {
+    pub(crate) fn for_file(file: &DiffFile) -> Option<Self> {
         let (path, side) = preferred_file_path_and_side(file)?;
         Some(Self::new(path, side, 0, AnnotationScope::File))
     }
 
-    fn for_hunk(file: &DiffFile, hunk: &mark_diff::DiffHunk) -> Option<Self> {
+    pub(crate) fn for_hunk(file: &DiffFile, hunk: &mark_diff::DiffHunk) -> Option<Self> {
         let (path, side) = preferred_file_path_and_side(file)?;
         let line = match side {
             AnnotationSide::Old => hunk.old_start(),
@@ -494,8 +497,6 @@ pub(crate) struct AnnotationDraft {
     pub(crate) input: String,
     pub(crate) cursor: usize,
 }
-
-pub(crate) type AnnotationStore = HashMap<AnnotationKey, String>;
 
 #[derive(Debug, Clone)]
 pub(crate) struct AnnotationConnectorInterval {

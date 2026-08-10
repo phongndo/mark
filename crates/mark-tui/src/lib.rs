@@ -7,10 +7,12 @@ mod keymap;
 mod live_diff;
 mod model;
 mod render;
+mod review;
 mod run;
 mod runtime;
 mod search;
 mod selector;
+mod session;
 mod static_pager;
 mod syntax;
 mod terminal_input;
@@ -22,7 +24,7 @@ mod toast;
 
 pub use run::{
     DiffRunOptions, benchmark_diff_view, run, run_diff, run_diff_with_live_updates,
-    run_diff_with_live_updates_and_syntax, run_diff_with_options,
+    run_diff_with_live_updates_and_syntax, run_diff_with_options, run_pager_diff_with_options,
 };
 pub use static_pager::{
     StaticPagerLayout, StaticPagerOptions, render_static_changeset,

@@ -266,6 +266,42 @@ fn new_source_and_file_defaults_do_not_conflict_with_existing_bindings() {
 }
 
 #[test]
+fn new_review_defaults_do_not_conflict_with_existing_custom_bindings() {
+    let keymap = Keymap::parse(
+        r#"
+            [keymap.global]
+            reload = "ctrl-r"
+            file_filter = "ctrl-a"
+            grep = "ctrl-v"
+            options_menu = "ctrl-d"
+            quit = "R"
+            "#,
+    )
+    .expect("existing custom bindings should take precedence over new review defaults");
+
+    assert_eq!(keymap.global_action_label(GlobalAction::Reload), "Ctrl-R");
+    assert_eq!(
+        keymap.global_action_label(GlobalAction::FileFilter),
+        "Ctrl-A"
+    );
+    assert_eq!(keymap.global_action_label(GlobalAction::Grep), "Ctrl-V");
+    assert_eq!(
+        keymap.global_action_label(GlobalAction::OptionsMenu),
+        "Ctrl-D"
+    );
+    assert_eq!(keymap.global_action_label(GlobalAction::Quit), "R");
+    for action in [
+        GlobalAction::ToggleReviewed,
+        GlobalAction::ApproveReview,
+        GlobalAction::RequestChanges,
+        GlobalAction::CommentVerdict,
+        GlobalAction::ClearVerdict,
+    ] {
+        assert_eq!(keymap.global_action_label(action), "unbound");
+    }
+}
+
+#[test]
 fn default_copy_error_log_matches_hunk_diff_binding() {
     let keymap = Keymap::default();
 

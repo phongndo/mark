@@ -6,7 +6,6 @@ use super::{
     full_file_context_expansions, full_file_mode_available, layout_override_from_setting,
     layout_setting_from_override, show_context_expansion_controls, show_rev_from_options,
 };
-use crate::annotation::AnnotationStore;
 use crate::controls::{
     DiffLayoutMode, branch_head_from_options, comparison_branches, comparison_commits,
     current_head_label, default_branch_base,
@@ -17,6 +16,7 @@ use crate::model::{
     UiModelBuildOptions, UiRow, line_after_hunk,
 };
 use crate::render::{snapshot::HitMap, text::display_width};
+use crate::review::ReviewCommentStore;
 use crate::search::DiffSearchIndex;
 use crate::selector::SelectorState;
 use crate::syntax::{
@@ -547,7 +547,9 @@ impl DiffApp {
                 file_sidebar_resizing: false,
             },
             annotations_state: AnnotationState {
-                annotations: AnnotationStore::default(),
+                annotations: ReviewCommentStore::default(),
+                lifecycle: crate::review::ReviewLifecycleState::default(),
+                persistence: None,
                 annotation_rows: RefCell::new(HashMap::new()),
                 annotation_keys_by_row: RefCell::new(None),
                 annotation_heights: RefCell::new(HashMap::new()),
@@ -618,6 +620,7 @@ impl DiffApp {
             },
             jobs: JobState {
                 live_diff_failed_options: None,
+                source_changed: false,
                 editor_reload: None,
                 pending_editor_reload: None,
                 post_editor_quit_key_ignore_until: None,

@@ -33,13 +33,16 @@ mark diff --repo ../project
 mark show --repo ../project HEAD~1
 ```
 
-Use `--no-watch` to disable local worktree reloads for one run, and
-`--no-syntax` to disable syntax highlighting for one run:
+Reviews are stable snapshots by default. Relevant worktree changes set a
+`source changed` notice without replacing the visible changeset. Press `r` to
+reload explicitly, or opt into continuous replacement with `--watch`:
 
 ```sh
-mark diff --no-watch
+mark diff --watch
 mark diff --no-syntax
 ```
+
+`--no-watch` remains a hidden compatibility no-op for one release.
 
 Mark chooses between fancy and minimal UI decorations automatically. Use minimal
 decorations for constrained terminals, or force fancy decorations when auto
@@ -135,6 +138,62 @@ mark difftool -- "$LOCAL" "$REMOTE" "$MERGED"
 mark difftool --watch -- "$LOCAL" "$REMOTE" "$MERGED"
 ```
 
+## Live agent review sessions
+
+Every interactive review except pager mode registers a private local session.
+An external shell-driven agent can inspect bounded structure and add inline
+comments without launching or controlling the TUI:
+
+```sh
+mark skill path
+mark session list --json
+mark session context --repo . --json
+mark session review --repo . --json
+mark session review --repo . --changed-only --json
+mark session patch --repo . --file src/lib.rs --hunk 1 --json
+```
+
+Apply an atomic comment batch using the generation returned by `context`:
+
+```sh
+cat comments.json | mark session comment apply --repo . --stdin --json
+```
+
+Navigate or explicitly advance the stable snapshot:
+
+```sh
+mark session navigate --repo . --next-comment --json
+mark session reload --repo . --json -- diff -- src/lib.rs
+```
+
+Session selection is deterministic: use an ID, `--repo`, or rely on implicit
+selection only when exactly one live session exists. Sessions use a private
+Unix socket and disappear when the TUI closes. They do not run a daemon or
+contact a network service. Comments, reviewed file/hunk progress, pass
+fingerprints, dispositions, and the final verdict are saved automatically under
+the user's private state directory. On a later pass, Mark reports changed files,
+retains progress for unchanged files, and re-anchors comments only when their
+saved evidence has one unambiguous match. Unmatched comments remain recorded as
+`stale` or `cleared`; relocated comments are marked `moved`.
+
+Humans can manage lifecycle state from the open TUI or with explicit session
+commands:
+
+```sh
+mark session progress --repo . --file src/lib.rs --hunk 1 --json
+mark session comment disposition --repo . --comment-id agent-2 --disposition blocking --json
+mark session verdict set --repo . --kind approve --destination local --json
+mark session verdict clear --repo . --json
+```
+
+A `local` verdict remains in the persisted review. A `stdout` verdict is emitted
+as one JSON object after the TUI closes and is then consumed. Advancing to a
+changed pass clears the
+previous verdict. Agents should report findings but leave dispositions and the
+final verdict to the human. `mark skill show` prints the exact bundled,
+version-matched agent workflow. A plain process transcript is available in
+[the live review demonstration](live-agent-review-demo.md).
+
 ## Interactive controls
 
 Common default controls:
@@ -173,6 +232,9 @@ Ctrl-G         open the viewport line (full file) or focused hunk in the editor
 y              copy marks to the terminal clipboard
 Ctrl-U         clear filters
 { / }          previous / next annotation
+R              toggle reviewed state for the focused hunk or file
+Ctrl-A/Ctrl-R  set approve / request-changes verdict
+Ctrl-V/Ctrl-D  set comment verdict / clear verdict
 Ctrl-Shift-C   copy the error log pane to the terminal clipboard
 ```
 
@@ -204,7 +266,10 @@ side when present and otherwise the old/left side. A selection that would form
 disjoint source ranges cannot be stored as one note and must be shortened.
 
 Outside Visual mode, press `Enter` on a code line, hunk header, or file header to
-annotate that line, entire hunk, or entire file.
+annotate that line, entire hunk, or entire file. In the annotation menu, use
+`Ctrl-A`, `Ctrl-D`, `Ctrl-B`, `Ctrl-O`, or `Ctrl-F` to accept, dismiss, mark
+blocking, mark non-blocking, or mark fixed all agent findings in the selected
+card. Human notes are not modified by these actions.
 
 Press `A` to annotate and advance. After saving the draft, the selection moves
 to the next row. Press Esc while writing to cancel the draft.

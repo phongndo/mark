@@ -260,7 +260,8 @@ fn full_file_editor_reload_preserves_wrapped_row_offset() {
     assert_eq!(anchor.row_visual_offset, row_visual_offset);
     assert_eq!(anchor.viewport_row, viewport_row);
 
-    app.replace_path_changeset(Path::new("file.rs"), replacement);
+    app.replace_path_changeset(Path::new("file.rs"), replacement)
+        .unwrap();
     app.set_scroll(0);
     app.restore_editor_view_anchor_for_test(Path::new("file.rs"), anchor);
 
@@ -507,7 +508,8 @@ fn editor_reload_restores_trailing_full_file_context_before_the_anchor() {
     assert!(app.expand_trailing_context_for_key(0, 1));
     app.set_viewport_rows(9);
 
-    app.replace_path_changeset(Path::new("file.rs"), replacement);
+    app.replace_path_changeset(Path::new("file.rs"), replacement)
+        .unwrap();
     assert!(app.document.model.context_line_row(FILE_0, 90).is_none());
     app.restore_editor_view_for_test(Path::new("file.rs"), 90, 4);
 
@@ -531,7 +533,8 @@ fn editor_reload_restores_the_focused_line_at_its_viewport_row() {
     app.set_scroll(40);
 
     assert_eq!(app.focused_hunk_editor_target().unwrap().line, 44);
-    app.replace_path_changeset(Path::new("file.rs"), replacement);
+    app.replace_path_changeset(Path::new("file.rs"), replacement)
+        .unwrap();
     app.set_scroll(0);
     app.restore_editor_view_for_test(Path::new("file.rs"), 44, 5);
 
@@ -566,7 +569,8 @@ fn editor_reload_restores_anchor_through_annotation_rows() {
         .annotations
         .insert(key, "note".to_owned());
 
-    app.replace_path_changeset(Path::new("file.rs"), replacement);
+    app.replace_path_changeset(Path::new("file.rs"), replacement)
+        .unwrap();
     app.set_scroll(0);
     app.restore_editor_view_for_test(Path::new("file.rs"), 44, 5);
 
