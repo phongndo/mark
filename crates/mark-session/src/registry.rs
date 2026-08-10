@@ -287,7 +287,7 @@ fn process_identity(process_id: u32) -> Option<String> {
         let stat = fs::read_to_string(format!("/proc/{process_id}/stat")).ok()?;
         let after_name = stat.rsplit_once(") ").map(|(_, rest)| rest)?;
         let start_time = after_name.split_whitespace().nth(19)?;
-        return Some(format!("linux:{process_id}:{start_time}"));
+        Some(format!("linux:{process_id}:{start_time}"))
     }
     #[cfg(not(target_os = "linux"))]
     {
