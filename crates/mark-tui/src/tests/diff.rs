@@ -317,6 +317,42 @@ fn selecting_current_file_preserves_focused_hunk() {
 }
 
 #[test]
+fn changing_diff_source_starts_a_fresh_live_review() {
+    use crate::annotation::{AnnotationKey, AnnotationSide};
+
+    let repo = PathBuf::from("/repo");
+    let changeset = changeset_with_hunks_at(repo.clone(), &[10]);
+    let mut app = DiffApp::new(
+        DiffOptions::default(),
+        changeset.clone(),
+        DiffLayoutMode::Unified,
+    );
+    let key =
+        AnnotationKey::for_file_line(&app.document.changeset.files[0], AnnotationSide::New, 10)
+            .unwrap();
+    app.annotations_state
+        .annotations
+        .insert_human(key, "question".to_owned(), 0)
+        .unwrap();
+    app.annotations_state
+        .lifecycle
+        .mark_file(app.document.changeset.files[0].display_path());
+    app.annotations_state.lifecycle.pass = 3;
+    let options = DiffOptions {
+        source: DiffSource::Show("HEAD".into()),
+        ..DiffOptions::default()
+    };
+
+    app.replace_loaded_diff(options, changeset);
+
+    assert!(app.annotations_state.annotations.is_empty());
+    assert_eq!(
+        app.annotations_state.lifecycle,
+        crate::review::ReviewLifecycleState::default()
+    );
+}
+
+#[test]
 fn replace_loaded_diff_clears_manual_hunk_focus() {
     let repo = PathBuf::from("/repo");
     let changeset = changeset_with_hunks_at(repo.clone(), &[10, 20, 30]);

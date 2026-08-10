@@ -316,7 +316,7 @@ impl DiffApp {
     ) -> Option<(AnnotationSide, usize)> {
         // A saved range can outlive the layout that created it. Prefer the
         // current layout's display side, but fall back to any coordinate the
-        // persisted source ranges actually cover.
+        // stored source ranges actually cover.
         let preferred_side = if self.viewport.layout == DiffLayoutMode::Split {
             AnnotationSide::New
         } else {

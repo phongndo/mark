@@ -69,22 +69,6 @@ pub(crate) fn apply(
     for comment in params.comments {
         validated.push(validate_comment(app, comment)?);
     }
-    let fits_persistence_budget =
-        match crate::review::persistence::agent_comments_fit_persistence_budget(app, &validated) {
-            Ok(fits) => fits,
-            Err(error) => {
-                return Err(ProtocolError::new(
-                    "internal_error",
-                    format!("could not size persisted comments: {error}"),
-                ));
-            }
-        };
-    if !fits_persistence_budget {
-        return Err(ProtocolError::new(
-            "comment_limit",
-            "comments would exceed the persisted review byte limit",
-        ));
-    }
     let first_anchor = validated.first().map(|comment| comment.anchor.clone());
     let affected = validated
         .iter()
@@ -679,7 +663,7 @@ mod tests {
                 lifecycle: crate::review::CommentLifecycle::Stale,
                 disposition: crate::review::FindingDisposition::Open,
                 document_generation: 0,
-                evidence: None,
+                original_anchor_evidence: None,
             }])
             .unwrap();
         let changed_patch = "diff --git a/src/lib.rs b/src/lib.rs\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -2 +2 @@\n-old\n+new\n";
@@ -836,7 +820,7 @@ mod tests {
     }
 
     #[test]
-    fn comment_batches_cannot_exceed_the_persistence_budget() {
+    fn comment_batches_cannot_exceed_the_live_review_budget() {
         let mut app = app();
         let mut large_comment = comment(1);
         large_comment.rationale = Some("x".repeat(mark_session::MAX_RATIONALE_BYTES));

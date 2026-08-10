@@ -109,9 +109,10 @@ mark session patch --repo . --file src/lib.rs --hunk 1 --json
 ```
 
 Agents can apply atomic, source-anchored comment batches that appear inline in
-the open review. Review passes persist comments and reviewed progress, report
-changed files, and conservatively re-anchor unambiguous findings while the human
-owns dispositions and the final verdict. The interface uses a private local Unix
+the open review. While the TUI remains open, review passes retain comments and
+reviewed progress, report changed files, and conservatively re-anchor
+unambiguous findings while the human owns dispositions and the final verdict.
+Closing Mark discards the review state. The interface uses a private local Unix
 socket, bounded JSON frames, and no daemon, model integration, telemetry, or
 network service. See
 [Usage](docs/usage.md#live-agent-review-sessions) for the full command flow.
@@ -149,7 +150,7 @@ diff engine.
 | Split / side-by-side view | Yes | Yes | Yes | Yes | Yes |
 | Runtime layout switching | Yes | Yes | Yes | — | — |
 | Inline review annotations | Yes | Yes | Yes | — | — |
-| Persistent review sessions | Yes | Yes | — | — | — |
+| Persistent review sessions | — | Yes | — | — | — |
 | GitHub review submission | — | Yes | — | — | — |
 | GitLab merge request review | — | Yes | — | — | — |
 | Live worktree or file reload | Yes | — | Yes | — | — |

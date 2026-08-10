@@ -19,7 +19,7 @@ Use this skill only to review a changeset that the human has already opened in M
 8. Use `--focus` sparingly. The human owns navigation and the TUI.
 9. Do not remove or clear human comments. Mark's session commands only remove agent comments.
 10. Dispositions, reviewed progress, and the final verdict belong to the human. Never run `session comment disposition`, `session progress`, or `session verdict` unless the human explicitly asks for that exact action.
-11. On a later review pass, inspect `changed_files`, moved/stale comment state, and `session review --changed-only` before requesting patches.
+11. After a snapshot reload in the same live session, inspect `changed_files`, moved/stale comment state, and `session review --changed-only` before requesting patches.
 12. Summarize the review when complete, including when there are no findings.
 
 ## Workflow

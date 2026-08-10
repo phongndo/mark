@@ -1667,7 +1667,7 @@ fn annotation_target_mode_labels_the_entire_viewport_and_selects_a_hint() {
 }
 
 #[test]
-fn rejected_persistence_budget_keeps_annotation_draft_open() {
+fn rejected_live_review_budget_keeps_annotation_draft_open() {
     let lines = vec!["line"; 100];
     let changeset = changeset_with_line_texts(&lines);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
@@ -1680,22 +1680,17 @@ fn rejected_persistence_budget_keeps_annotation_draft_open() {
             line,
         )
         .unwrap();
-        match crate::review::persistence::human_comment_persistence_budget(&app, &key, &text)
-            .unwrap()
+        if app
+            .annotations_state
+            .annotations
+            .insert_human(key.clone(), text.clone(), 0)
+            .is_err()
         {
-            Some(budget) => {
-                app.annotations_state
-                    .annotations
-                    .insert_human_with_budget(key, text.clone(), 0, budget)
-                    .unwrap();
-            }
-            None => {
-                rejected_key = Some(key);
-                break;
-            }
+            rejected_key = Some(key);
+            break;
         }
     }
-    let key = rejected_key.expect("fixture should reach the persistence budget");
+    let key = rejected_key.expect("fixture should reach the live review budget");
     let model_row_index = app.annotation_model_row(&key).unwrap();
     app.annotations_state.annotation_draft = Some(AnnotationDraft {
         key: key.clone(),

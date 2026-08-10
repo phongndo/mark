@@ -549,7 +549,6 @@ impl DiffApp {
             annotations_state: AnnotationState {
                 annotations: ReviewCommentStore::default(),
                 lifecycle: crate::review::ReviewLifecycleState::default(),
-                persistence: None,
                 annotation_rows: RefCell::new(HashMap::new()),
                 annotation_keys_by_row: RefCell::new(None),
                 annotation_heights: RefCell::new(HashMap::new()),

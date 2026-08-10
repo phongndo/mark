@@ -1,16 +1,12 @@
-use serde::{Deserialize, Serialize};
-
 use crate::annotation::AnnotationKey;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CommentOrigin {
     Human,
     Agent,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CommentLifecycle {
     Open,
     Moved,
@@ -24,8 +20,7 @@ impl CommentLifecycle {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FindingDisposition {
     Open,
     Accepted,
@@ -35,15 +30,11 @@ pub(crate) enum FindingDisposition {
     Fixed,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ReviewAnchorEvidence {
-    #[serde(default)]
     pub(crate) file_fingerprint: Option<String>,
-    #[serde(default)]
     pub(crate) old_lines: Vec<String>,
-    #[serde(default)]
     pub(crate) new_lines: Vec<String>,
-    #[serde(default)]
     pub(crate) hunk_fingerprint: Option<String>,
 }
 
@@ -58,7 +49,7 @@ pub(crate) struct ReviewComment {
     pub(crate) lifecycle: CommentLifecycle,
     pub(crate) disposition: FindingDisposition,
     pub(crate) document_generation: u64,
-    pub(crate) evidence: Option<ReviewAnchorEvidence>,
+    pub(crate) original_anchor_evidence: Option<ReviewAnchorEvidence>,
 }
 
 #[derive(Debug, Clone)]
