@@ -47,6 +47,13 @@ pub fn load_review_ref(options: &DiffOptions) -> MarkResult<Changeset> {
     load_changeset(options, false)
 }
 
+/// Load an interactive review while retaining the shared raw patch for durable
+/// snapshot identity. Text lines already retain this allocation; this adds only
+/// an `Arc` owner and covers binary or metadata-only diffs.
+pub fn load_review_ref_with_raw_patch(options: &DiffOptions) -> MarkResult<Changeset> {
+    load_changeset(options, true)
+}
+
 pub fn load_review_ref_limited(options: &DiffOptions, limits: DiffLimits) -> MarkResult<Changeset> {
     load_changeset_limited(options, false, limits)
 }
@@ -61,6 +68,13 @@ pub fn load_review_ref_path(options: &DiffOptions, path: &Path) -> MarkResult<Ch
 
 pub fn load_review_ref_paths(options: &DiffOptions, paths: &[PathBuf]) -> MarkResult<Changeset> {
     load_changeset_paths(options, paths, false)
+}
+
+pub fn load_review_ref_paths_with_raw_patch(
+    options: &DiffOptions,
+    paths: &[PathBuf],
+) -> MarkResult<Changeset> {
+    load_changeset_paths(options, paths, true)
 }
 
 fn load_changeset(options: &DiffOptions, keep_raw_patch: bool) -> MarkResult<Changeset> {

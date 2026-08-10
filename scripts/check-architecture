@@ -26,6 +26,8 @@ check_absent 'persist_options_menu_draft_to_path\(' -g '!effect.rs' -g '!options
 check_absent 'ThreadPoolBuilder|rayon::(join|scope|spawn)' crates -g '*.rs' -g '!**/mark-runtime/src/lib.rs'
 check_absent '\.(par_iter|par_iter_mut|into_par_iter)\(' crates -g '*.rs' -g '!**/mark-diff/src/parser.rs' -g '!**/mark-tui/src/search.rs'
 check_absent 'syntaxmate::(engine|grammars)' crates/mark-syntax/src -g '*.rs'
+check_absent 'mark[_-]tui|ratatui' crates/mark-session
+check_absent '\bDiffApp\b|\bUiRow\b' crates/mark-session/src
 
 for removed_path in \
   assets/grammars \
@@ -137,6 +139,27 @@ mark_syntax = next(
     (package for package in metadata['packages'] if package['name'] == 'mark-syntax'),
     None,
 )
+mark_session = next(
+    (package for package in metadata['packages'] if package['name'] == 'mark-session'),
+    None,
+)
+if mark_session is None:
+    print('mark-session workspace crate is missing', file=sys.stderr)
+    failed = True
+else:
+    forbidden = {'mark-tui', 'ratatui', 'mark-diff'}
+    present = sorted(
+        dependency['name']
+        for dependency in mark_session['dependencies']
+        if dependency['name'] in forbidden
+    )
+    if present:
+        print(
+            f'mark-session has forbidden UI/diff dependencies: {", ".join(present)}',
+            file=sys.stderr,
+        )
+        failed = True
+
 syntaxmate_dependencies = [] if mark_syntax is None else [
     dependency
     for dependency in mark_syntax['dependencies']

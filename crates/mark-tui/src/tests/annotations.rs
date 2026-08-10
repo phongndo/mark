@@ -1,3 +1,5 @@
+use crate::annotation::{AnnotationDraft, AnnotationKey, AnnotationSide};
+
 use super::*;
 
 fn use_annotation_hints(app: &mut DiffApp) {
@@ -709,8 +711,8 @@ fn file_and_hunk_headers_accept_scoped_annotations() {
         .map(line_text)
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(rendered.contains("Note · file"));
-    assert!(rendered.contains("Note · hunk -1 → +1"));
+    assert!(rendered.contains("Human · file"));
+    assert!(rendered.contains("Human · hunk -1 → +1"));
     assert!(rendered.contains("file note"));
     assert!(rendered.contains("hunk note"));
 
@@ -1073,12 +1075,16 @@ fn copy_marks_omits_annotations_without_current_diff_line() {
     );
 
     assert_eq!(app.marks_clipboard_json().as_deref(), Some(expected));
+    let old_comment = app
+        .annotations_state
+        .annotations
+        .comments()
+        .find(|comment| comment.anchor == old_key)
+        .expect("old-side review intent should remain recorded");
+    assert_eq!(old_comment.summary, "old note");
     assert_eq!(
-        app.annotations_state
-            .annotations
-            .get(&old_key)
-            .map(String::as_str),
-        Some("old note")
+        old_comment.lifecycle,
+        crate::review::CommentLifecycle::Stale
     );
 }
 
@@ -1127,13 +1133,14 @@ fn copy_marks_omits_a_range_when_only_its_anchor_line_survives() {
             .is_none()
     );
     assert_eq!(app.marks_clipboard_json(), None);
-    assert_eq!(
-        app.annotations_state
-            .annotations
-            .get(&key)
-            .map(String::as_str),
-        Some("range note")
-    );
+    let comment = app
+        .annotations_state
+        .annotations
+        .comments()
+        .find(|comment| comment.anchor == key)
+        .expect("range review intent should remain recorded");
+    assert_eq!(comment.summary, "range note");
+    assert_eq!(comment.lifecycle, crate::review::CommentLifecycle::Stale);
 }
 
 #[test]
@@ -1657,6 +1664,59 @@ fn annotation_target_mode_labels_the_entire_viewport_and_selects_a_hint() {
         .expect("draft should save");
     assert!(app.annotations_state.annotation_target_mode.is_none());
     assert!(!app.annotations_state.sticky_annotation_draft);
+}
+
+#[test]
+fn rejected_persistence_budget_keeps_annotation_draft_open() {
+    let lines = vec!["line"; 100];
+    let changeset = changeset_with_line_texts(&lines);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    let text = "x".repeat(mark_session::MAX_RATIONALE_BYTES);
+    let mut rejected_key = None;
+    for line in 1..=lines.len() {
+        let key = AnnotationKey::for_file_line(
+            &app.document.changeset.files[0],
+            AnnotationSide::New,
+            line,
+        )
+        .unwrap();
+        match crate::review::persistence::human_comment_persistence_budget(&app, &key, &text)
+            .unwrap()
+        {
+            Some(budget) => {
+                app.annotations_state
+                    .annotations
+                    .insert_human_with_budget(key, text.clone(), 0, budget)
+                    .unwrap();
+            }
+            None => {
+                rejected_key = Some(key);
+                break;
+            }
+        }
+    }
+    let key = rejected_key.expect("fixture should reach the persistence budget");
+    let model_row_index = app.annotation_model_row(&key).unwrap();
+    app.annotations_state.annotation_draft = Some(AnnotationDraft {
+        key: key.clone(),
+        model_row_index,
+        input: text.clone(),
+        cursor: text.len(),
+    });
+    app.annotations_state.sticky_annotation_draft = true;
+
+    app.handle_annotation_input_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+
+    let draft = app
+        .annotations_state
+        .annotation_draft
+        .as_ref()
+        .expect("rejected draft should remain open");
+    assert_eq!(draft.key, key);
+    assert_eq!(draft.input, text);
+    assert_eq!(draft.cursor, draft.input.len());
+    assert!(app.annotations_state.sticky_annotation_draft);
+    assert!(!app.annotations_state.annotations.has_human(&key));
 }
 
 #[test]
@@ -3019,8 +3079,16 @@ fn annotations_are_keyed_by_path_and_line_across_model_changes() {
     app.replace_loaded_diff(DiffOptions::default(), replacement);
 
     let rendered = crate::render::diff::build_diff_viewport_lines(&mut app, 40, 6);
-    assert!(!rendered.iter().any(|line| line_text(line).contains("note")));
-    assert_eq!(app.marks_clipboard_json(), None);
+    assert!(rendered.iter().any(|line| line_text(line).contains("note")));
+    let comment = app
+        .annotations_state
+        .annotations
+        .comments()
+        .next()
+        .expect("unambiguous renamed-file comment should remain visible");
+    assert_eq!(comment.anchor.path, "other.rs");
+    assert_eq!(comment.lifecycle, crate::review::CommentLifecycle::Moved);
+    assert!(app.marks_clipboard_json().is_some());
 }
 
 #[test]
@@ -3136,6 +3204,7 @@ fn render_saved_annotation_with_body_width(
         },
         DiffTheme::default(),
         None,
+        true,
     )
 }
 
@@ -3222,6 +3291,110 @@ fn annotation_input_supports_native_cursor_shortcuts() {
             .map(String::as_str),
         Some(">hello world!\n")
     );
+}
+
+#[test]
+fn close_button_removes_agent_response_before_the_human_comment() {
+    use crate::{annotation::AnnotationKey, review::NewAgentComment};
+
+    let changeset = changeset_with_line_text("hello");
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_rendered_diff_area(Rect {
+        x: 0,
+        y: 1,
+        width: 48,
+        height: 10,
+    });
+    app.set_viewport_width(48);
+    app.set_viewport_rows(10);
+    let code_row = app
+        .document
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
+        .expect("unified line");
+    let key = AnnotationKey::from_ui_row(
+        &app.document.changeset,
+        app.document.model.row(code_row).expect("row"),
+    )
+    .expect("annotation key");
+    app.annotations_state
+        .annotations
+        .insert_human(key.clone(), "explain this".to_owned(), 0)
+        .unwrap();
+    app.annotations_state
+        .annotations
+        .insert_agent_batch(
+            vec![NewAgentComment {
+                anchor: key.clone(),
+                summary: "agent response".to_owned(),
+                rationale: None,
+                author: Some("pi".to_owned()),
+            }],
+            0,
+        )
+        .unwrap();
+    app.viewport.scroll = code_row;
+
+    let rendered = build_diff_viewport_lines(&mut app, 48, 10);
+    let top_row = rendered
+        .iter()
+        .position(|line| line_text(line).contains("2 comments"))
+        .expect("mixed comment card") as u16
+        + 1;
+    assert!(app.handle_diff_click(46, top_row));
+
+    assert_eq!(
+        app.annotations_state.annotations.human_text(&key),
+        Some("explain this")
+    );
+    assert!(!app.annotations_state.annotations.has_agent(&key));
+    assert!(app.annotations_state.annotations.is_human_only(&key));
+}
+
+#[test]
+fn mark_exports_include_only_human_comment_text() {
+    use crate::review::NewAgentComment;
+
+    let changeset = changeset_with_line_texts(&["mixed", "agent only"]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    let file = &app.document.changeset.files[0];
+    let mixed_key = AnnotationKey::for_file_line(file, AnnotationSide::New, 1).unwrap();
+    let agent_key = AnnotationKey::for_file_line(file, AnnotationSide::New, 2).unwrap();
+    app.annotations_state
+        .annotations
+        .insert_human(mixed_key.clone(), "human note".to_owned(), 0)
+        .unwrap();
+    app.annotations_state
+        .annotations
+        .insert_agent_batch(
+            vec![
+                NewAgentComment {
+                    anchor: mixed_key.clone(),
+                    summary: "mixed agent finding".to_owned(),
+                    rationale: Some("mixed rationale".to_owned()),
+                    author: Some("agent".to_owned()),
+                },
+                NewAgentComment {
+                    anchor: agent_key,
+                    summary: "agent-only finding".to_owned(),
+                    rationale: None,
+                    author: Some("agent".to_owned()),
+                },
+            ],
+            0,
+        )
+        .unwrap();
+
+    let json = app.marks_clipboard_json().expect("human mark JSON");
+    assert_eq!(json.matches("\"body\":").count(), 1);
+    assert!(json.contains("\"body\": \"human note\""));
+    assert!(!json.contains("mixed agent finding"));
+    assert!(!json.contains("agent-only finding"));
+
+    let _ = app.annotations_state.annotations.remove_human(&mixed_key);
+    assert_eq!(app.marks_clipboard_json(), None);
 }
 
 #[test]

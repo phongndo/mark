@@ -7,7 +7,7 @@ use super::{
 };
 use crate::annotation::{
     AnnotationCursor, AnnotationDraft, AnnotationKey, AnnotationKeyIndex, AnnotationSide,
-    AnnotationStore, AnnotationTargetMode,
+    AnnotationTargetMode,
 };
 use crate::controls::{BranchMenu, DiffFilterKind, DiffLayoutMode, GitCommit};
 use crate::keymap::{KeyPress, Keymap};
@@ -16,6 +16,9 @@ use crate::model::{
     ContextKey, ContextSourceEntry, ContextSourceKey, FileIndex, HunkIndex, ModelRow, UiModel,
 };
 use crate::render::snapshot::HitMap;
+use crate::review::{
+    ReviewCommentStore, ReviewLifecycleState, persistence::ReviewPersistenceSession,
+};
 use crate::search::{DiffSearchIndex, SearchMatchIndex};
 use crate::selector::SelectorState;
 use crate::syntax::{InlineHunkEmphasisCache, InlineHunkKey, LruCache, SyntaxRuntime};
@@ -133,7 +136,9 @@ pub(crate) struct AnnotationVisualAnchor {
 
 #[derive(Debug)]
 pub(crate) struct AnnotationState {
-    pub(crate) annotations: AnnotationStore,
+    pub(crate) annotations: ReviewCommentStore,
+    pub(crate) lifecycle: ReviewLifecycleState,
+    pub(crate) persistence: Option<ReviewPersistenceSession>,
     pub(crate) annotation_rows: RefCell<HashMap<AnnotationKey, Option<usize>>>,
     pub(crate) annotation_keys_by_row: RefCell<Option<AnnotationKeyIndex>>,
     pub(crate) annotation_heights: RefCell<HashMap<AnnotationKey, AnnotationHeightCacheEntry>>,
@@ -148,7 +153,7 @@ pub(crate) struct AnnotationState {
     pub(crate) sticky_annotation_draft: bool,
 }
 
-/// Cached against the immutable `String` buffer stored in `AnnotationStore`.
+/// Cached against the immutable rendered buffer stored in `ReviewCommentStore`.
 /// Annotation text is replaced by insertion rather than mutated in place, so
 /// pointer/length changes invalidate edits without hashing the body per frame.
 #[derive(Debug, Clone, Copy)]
@@ -551,6 +556,7 @@ impl ReferenceState {
 #[derive(Debug)]
 pub(crate) struct JobState {
     pub(crate) live_diff_failed_options: Option<DiffOptions>,
+    pub(crate) source_changed: bool,
     pub(crate) editor_reload: Option<EditorReloadWorker>,
     pub(crate) pending_editor_reload: Option<EditorReloadRequest>,
     pub(crate) post_editor_quit_key_ignore_until: Option<Instant>,
@@ -680,6 +686,7 @@ impl JobState {
     }
 
     pub(crate) fn mark_live_reload_invalidated(&mut self) {
+        self.source_changed = true;
         self.live_updates.mark_invalidated();
     }
 

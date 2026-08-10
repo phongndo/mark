@@ -617,7 +617,7 @@ impl DiffApp {
         let view_anchor = request.view_anchor;
         let (tx, rx) = oneshot::channel();
         drop(runtime::spawn_blocking(move || {
-            let changeset = mark_diff::load_review_ref_paths(&options, &pathspecs);
+            let changeset = mark_diff::load_review_ref_paths_with_raw_patch(&options, &pathspecs);
             let _ = tx.send(EditorScopedReload {
                 path,
                 changeset,
@@ -658,11 +658,17 @@ impl DiffApp {
                 match reload.changeset {
                     Ok(changeset) => {
                         let restore_view = worker.navigation == self.editor_reload_navigation();
-                        self.replace_path_changeset(&reload.path, changeset);
-                        if restore_view && let Some(anchor) = reload.view_anchor {
-                            self.restore_editor_view(&reload.path, anchor);
+                        match self.replace_path_changeset(&reload.path, changeset) {
+                            Ok(()) => {
+                                if restore_view && let Some(anchor) = reload.view_anchor {
+                                    self.restore_editor_view(&reload.path, anchor);
+                                }
+                                self.set_success_notice("edited file reloaded");
+                            }
+                            Err(error) => {
+                                self.set_error_log(format!("edited file reload failed: {error}"));
+                            }
                         }
-                        self.set_success_notice("edited file reloaded");
                     }
                     Err(error) => self.set_error_log(format!("edited file reload failed: {error}")),
                 }

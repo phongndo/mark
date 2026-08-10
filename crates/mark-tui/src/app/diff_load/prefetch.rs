@@ -78,7 +78,7 @@ impl DiffApp {
             let (tx, rx) = oneshot::channel();
             let load_options = options.clone();
             drop(runtime::spawn_blocking(move || {
-                let _ = tx.send(mark_diff::load_review_ref(&load_options));
+                let _ = tx.send(mark_diff::load_review_ref_with_raw_patch(&load_options));
             }));
             self.jobs.pending_diff_prefetch = Some(PendingDiffPrefetch {
                 options,

@@ -10,6 +10,7 @@ use crate::editor::{configured_editor, open_text_in_editor};
 use crate::keymap::{AnnotationMenuAction, GlobalAction, MenuAction};
 use crate::model::{DiffLineIndex, FileIndex, HunkIndex, UiRow};
 use crate::render::viewport_plan::{ViewportSlotKind, plan_diff_viewport_rows_at_scroll};
+use crate::review::{FindingDisposition, persistence::human_comment_persistence_budget};
 use crate::selector::{SelectorController, SelectorMovement};
 use crate::syntax::DiffSide;
 use crate::text_input::{TextInputKeyResult, handle_text_input_key};
@@ -168,6 +169,36 @@ impl DiffApp {
             .matches_annotation_menu(AnnotationMenuAction::Remove, key)
         {
             self.remove_selected_annotation();
+        } else if self
+            .config
+            .keymap
+            .matches_annotation_menu(AnnotationMenuAction::Accept, key)
+        {
+            self.set_selected_agent_disposition(FindingDisposition::Accepted);
+        } else if self
+            .config
+            .keymap
+            .matches_annotation_menu(AnnotationMenuAction::Dismiss, key)
+        {
+            self.set_selected_agent_disposition(FindingDisposition::Dismissed);
+        } else if self
+            .config
+            .keymap
+            .matches_annotation_menu(AnnotationMenuAction::Blocking, key)
+        {
+            self.set_selected_agent_disposition(FindingDisposition::Blocking);
+        } else if self
+            .config
+            .keymap
+            .matches_annotation_menu(AnnotationMenuAction::NonBlocking, key)
+        {
+            self.set_selected_agent_disposition(FindingDisposition::NonBlocking);
+        } else if self
+            .config
+            .keymap
+            .matches_annotation_menu(AnnotationMenuAction::Fixed, key)
+        {
+            self.set_selected_agent_disposition(FindingDisposition::Fixed);
         } else {
             let len = self.filtered_annotation_menu_items().len();
             let outcome = SelectorController::new(&mut self.overlays.annotation_menu, len)
@@ -210,17 +241,70 @@ impl DiffApp {
         self.runtime.dirty = true;
     }
 
-    fn remove_selected_annotation(&mut self) {
+    fn set_selected_agent_disposition(&mut self, disposition: FindingDisposition) {
         let Some(item) = self.selected_annotation_menu_item() else {
             return;
         };
-        self.annotations_state.annotations.remove(&item.key);
+        let changed = self
+            .annotations_state
+            .annotations
+            .set_agents_disposition_at(&item.key, disposition);
+        if changed == 0 {
+            self.set_notice("no agent findings at annotation");
+            return;
+        }
         self.annotations_state.annotation_block_scroll = None;
         self.annotations_state
             .annotation_rows
             .borrow_mut()
             .remove(&item.key);
         *self.annotations_state.annotation_keys_by_row.borrow_mut() = None;
+        self.annotations_state
+            .annotation_heights
+            .borrow_mut()
+            .remove(&item.key);
+        let len = self.filtered_annotation_menu_items().len();
+        self.overlays.annotation_menu.clamp(len);
+        if len == 0 {
+            self.close_annotation_menu();
+        }
+        self.set_scroll_with_grep_sync(
+            self.viewport.scroll,
+            false,
+            HunkFocusScrollBehavior::Preserve,
+        );
+        self.sync_annotation_cursor_to_viewport();
+        self.set_notice(match disposition {
+            FindingDisposition::Accepted => "finding accepted",
+            FindingDisposition::Dismissed => "finding dismissed",
+            FindingDisposition::Blocking => "finding marked blocking",
+            FindingDisposition::NonBlocking => "finding marked non-blocking",
+            FindingDisposition::Fixed => "finding marked fixed",
+            FindingDisposition::Open => "finding reopened",
+        });
+        self.runtime.dirty = true;
+    }
+
+    fn remove_selected_annotation(&mut self) {
+        let Some(item) = self.selected_annotation_menu_item() else {
+            return;
+        };
+        if self
+            .annotations_state
+            .annotations
+            .remove(&item.key)
+            .is_none()
+        {
+            return;
+        }
+        self.annotations_state.annotation_block_scroll = None;
+        if !self.annotations_state.annotations.contains_key(&item.key) {
+            self.annotations_state
+                .annotation_rows
+                .borrow_mut()
+                .remove(&item.key);
+            *self.annotations_state.annotation_keys_by_row.borrow_mut() = None;
+        }
         self.annotations_state
             .annotation_heights
             .borrow_mut()
@@ -801,7 +885,7 @@ impl DiffApp {
         self.handle_annotation_input_key(key)
     }
 
-    pub(super) fn commit_annotation_draft(&mut self, draft: AnnotationDraft) {
+    pub(super) fn commit_annotation_draft(&mut self, draft: AnnotationDraft) -> bool {
         let draft_key = draft.key.clone();
         self.annotations_state.annotation_block_scroll = None;
         *self.annotations_state.annotation_keys_by_row.borrow_mut() = None;
@@ -814,15 +898,42 @@ impl DiffApp {
             .borrow_mut()
             .insert(draft.key.clone(), Some(draft.model_row_index));
         if draft.input.trim().is_empty() {
-            self.annotations_state.annotations.remove(&draft.key);
-            self.annotations_state
-                .annotation_rows
-                .borrow_mut()
-                .remove(&draft.key);
+            self.annotations_state.annotations.remove_human(&draft.key);
+            if self.annotations_state.annotations.get(&draft.key).is_none() {
+                self.annotations_state
+                    .annotation_rows
+                    .borrow_mut()
+                    .remove(&draft.key);
+            }
         } else {
-            self.annotations_state
+            let canonical_anchor = self
+                .annotations_state
                 .annotations
-                .insert(draft.key, draft.input);
+                .canonical_anchor(&draft.key);
+            let persistence_check =
+                human_comment_persistence_budget(self, &canonical_anchor, &draft.input);
+            let error = match persistence_check {
+                Ok(Some(budget)) => self
+                    .annotations_state
+                    .annotations
+                    .insert_human_with_budget(
+                        draft.key.clone(),
+                        draft.input.clone(),
+                        self.document.generation,
+                        budget,
+                    )
+                    .err()
+                    .map(|_| "comment exceeds the live review limits".to_owned()),
+                Ok(None) => Some("comment exceeds the persisted review byte limit".to_owned()),
+                Err(error) => Some(format!("could not size persisted comment: {error}")),
+            };
+            if let Some(error) = error {
+                self.annotations_state.annotation_draft = Some(draft);
+                self.ensure_annotation_draft_visible();
+                self.set_error_log(error);
+                self.runtime.dirty = true;
+                return false;
+            }
         }
         let sticky = std::mem::take(&mut self.annotations_state.sticky_annotation_draft);
         if sticky && self.annotation_cursor_enabled() {
@@ -841,6 +952,7 @@ impl DiffApp {
         }
         self.sync_annotation_cursor_to_viewport();
         self.runtime.dirty = true;
+        true
     }
 
     pub(crate) fn open_annotation_draft_in_editor(&mut self) {
@@ -870,8 +982,9 @@ impl DiffApp {
                     let mut updated = draft;
                     updated.input = normalize_annotation_editor_contents(&contents);
                     updated.cursor = updated.input.len();
-                    self.commit_annotation_draft(updated);
-                    self.set_success_notice("annotation saved");
+                    if self.commit_annotation_draft(updated) {
+                        self.set_success_notice("annotation saved");
+                    }
                 }
                 Err(error) => {
                     self.annotations_state.annotation_draft = Some(draft);

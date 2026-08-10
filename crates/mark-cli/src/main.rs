@@ -9,6 +9,8 @@ mod dispatch;
 mod pager;
 mod preflight;
 mod review;
+mod session;
+mod skill;
 mod syntax;
 mod update;
 mod version;

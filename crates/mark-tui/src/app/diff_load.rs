@@ -1,15 +1,13 @@
 mod cache;
+mod completion;
 mod prefetch;
 mod review;
+mod session_reload;
 
 #[cfg(test)]
 pub(crate) use cache::diff_cache_entry;
 
-use self::cache::diff_cache_entry_with_annotation_candidates;
-use super::{
-    AsyncJob, BranchMetadataPolicy, DiffApp, DiffLoadCachePolicy, PendingDiffLoad,
-    cacheable_diff_options,
-};
+use super::{AsyncJob, BranchMetadataPolicy, DiffApp, DiffLoadCachePolicy, PendingDiffLoad};
 use crate::runtime;
 use mark_diff::DiffOptions;
 use tokio::sync::oneshot;
@@ -70,6 +68,8 @@ impl DiffApp {
                     options,
                     error_prefix,
                     branch_metadata: BranchMetadataPolicy::Preserve,
+                    scoped_paths: None,
+                    completion: None,
                     job: prefetch.job,
                 });
                 self.set_success_notice("reloading");
@@ -83,7 +83,7 @@ impl DiffApp {
         let (tx, rx) = oneshot::channel();
         let load_options = options.clone();
         drop(runtime::spawn_blocking(move || {
-            let _ = tx.send(mark_diff::load_review_ref(&load_options));
+            let _ = tx.send(mark_diff::load_review_ref_with_raw_patch(&load_options));
         }));
 
         self.jobs.pending_diff_load = Some(PendingDiffLoad {
@@ -94,6 +94,8 @@ impl DiffApp {
             } else {
                 BranchMetadataPolicy::Refresh
             },
+            scoped_paths: None,
+            completion: None,
             job: AsyncJob::new(rx),
         });
         self.set_success_notice("reloading");
@@ -119,21 +121,21 @@ impl DiffApp {
             return;
         };
 
-        match outcome {
-            Some(Ok(changeset)) => {
-                if cacheable_diff_options(&pending.options) {
-                    let cached = diff_cache_entry_with_annotation_candidates(
-                        pending.options.clone(),
-                        changeset,
-                        self.annotation_cursor_enabled(),
-                    );
-                    self.replace_cached_diff(pending.options, cached, pending.branch_metadata);
-                } else {
-                    self.replace_loaded_diff(pending.options, changeset);
-                }
+        let completion_result = match outcome {
+            Some(Ok(changeset)) => self.apply_pending_diff_load(&pending, changeset),
+            Some(Err(error)) => {
+                let message = format!("{}: {error}", pending.error_prefix);
+                self.set_error_log(&message);
+                Err(message)
             }
-            Some(Err(error)) => self.set_error_log(format!("{}: {error}", pending.error_prefix)),
-            None => self.set_error_log(format!("{}: worker stopped", pending.error_prefix)),
+            None => {
+                let message = format!("{}: worker stopped", pending.error_prefix);
+                self.set_error_log(&message);
+                Err(message)
+            }
+        };
+        if let Some(completion) = pending.completion {
+            let _ = completion.send(completion_result);
         }
     }
 }

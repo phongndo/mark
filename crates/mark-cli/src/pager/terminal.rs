@@ -6,7 +6,7 @@ use std::{
 #[cfg(unix)]
 use std::os::fd::OwnedFd;
 
-pub(super) fn sanitized_terminal_bytes(input: &[u8]) -> Vec<u8> {
+pub(crate) fn sanitized_terminal_bytes(input: &[u8]) -> Vec<u8> {
     let stripped = strip_terminal_escapes(input);
     let text = String::from_utf8_lossy(&stripped);
     let mut output = String::with_capacity(text.len());

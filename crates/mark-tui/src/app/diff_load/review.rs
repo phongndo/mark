@@ -14,7 +14,8 @@ impl DiffApp {
         drop(runtime::spawn_blocking(move || {
             let result = mark_command::review_diff_options(repo, &worker_target, false).and_then(
                 |options| {
-                    mark_diff::load_review_ref(&options).map(|changeset| (options, changeset))
+                    mark_diff::load_review_ref_with_raw_patch(&options)
+                        .map(|changeset| (options, changeset))
                 },
             );
             let _ = tx.send(result);

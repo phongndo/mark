@@ -296,7 +296,7 @@ impl DiffApp {
             }
             OptionsMenuItem::LiveReload => {
                 if !self.jobs.live_updates.allowed() {
-                    self.set_error_log("live reload disabled by --no-watch");
+                    self.set_error_log("live reload requires launching with --watch");
                     return;
                 }
                 self.overlays.options_menu_draft.live_updates_enabled =

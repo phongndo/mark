@@ -36,16 +36,19 @@ fn push_unique_pathspec(pathspecs: &mut Vec<PathBuf>, path: Option<&str>) {
     }
 }
 
-pub(crate) fn splice_diff_files_for_path(
+pub(crate) fn splice_diff_files_for_paths(
     files: &mut Vec<mark_diff::DiffFile>,
-    path: &Path,
+    paths: &[PathBuf],
     mut replacement: Vec<mark_diff::DiffFile>,
 ) {
     let mut next = Vec::with_capacity(files.len().saturating_add(replacement.len()));
     let mut inserted = false;
 
     for file in files.drain(..) {
-        if diff_file_matches_path(&file, path) {
+        if paths
+            .iter()
+            .any(|path| diff_file_matches_path_scope(&file, path))
+        {
             if !inserted {
                 next.append(&mut replacement);
                 inserted = true;
@@ -66,6 +69,16 @@ pub(crate) fn splice_diff_files_for_path(
 pub(crate) fn diff_file_matches_path(file: &mark_diff::DiffFile, path: &Path) -> bool {
     let path = diff_path_string(path);
     file.old_path() == Some(path.as_str()) || file.new_path() == Some(path.as_str())
+}
+
+pub(crate) fn diff_file_matches_path_scope(file: &mark_diff::DiffFile, path: &Path) -> bool {
+    let path = diff_path_string(path);
+    let path = Path::new(&path);
+    file.old_path()
+        .is_some_and(|file_path| Path::new(file_path).starts_with(path))
+        || file
+            .new_path()
+            .is_some_and(|file_path| Path::new(file_path).starts_with(path))
 }
 
 pub(crate) fn diff_path_string(path: &Path) -> String {

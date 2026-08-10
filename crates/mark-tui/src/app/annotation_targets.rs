@@ -897,7 +897,7 @@ impl DiffApp {
         let existing = {
             let mut annotated = candidates
                 .iter()
-                .filter(|key| self.annotations_state.annotations.contains_key(*key));
+                .filter(|key| self.annotations_state.annotations.contains_key(key));
             let first = annotated.next().cloned();
             first.filter(|_| annotated.next().is_none())
         };

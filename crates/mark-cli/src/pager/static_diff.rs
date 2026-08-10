@@ -105,7 +105,7 @@ pub(super) fn run_interactive_diff(
         Ok(guard) => guard,
         Err(_) => return write_static_diff(&input, args, static_color),
     };
-    mark_tui::run_diff_with_options(
+    mark_tui::run_pager_diff_with_options(
         patch_options(normalized_patch_input(&input)),
         mark_tui::DiffRunOptions {
             live_updates: false,

@@ -50,6 +50,11 @@ impl Keymap {
         let visual_mode_configured = stored_global.visual_mode.is_some();
         let previous_file_configured = stored_global.previous_file.is_some();
         let next_file_configured = stored_global.next_file.is_some();
+        let toggle_reviewed_configured = stored_global.toggle_reviewed.is_some();
+        let approve_review_configured = stored_global.approve_review.is_some();
+        let request_changes_configured = stored_global.request_changes.is_some();
+        let comment_verdict_configured = stored_global.comment_verdict.is_some();
+        let clear_verdict_configured = stored_global.clear_verdict.is_some();
 
         if let Some(leader) = stored_global.leader.take() {
             parse_key_press(&leader)?;
@@ -84,9 +89,9 @@ impl Keymap {
         if !visual_mode_configured {
             keymap.clear_default_on_conflict(GlobalAction::VisualMode);
         }
-        // These defaults changed together. Keep explicit bindings from older
-        // configs authoritative instead of rejecting the entire keymap when
-        // they use one of the new keys or prefixes.
+        // These defaults were added or changed together. Keep explicit bindings
+        // from older configs authoritative instead of rejecting the entire keymap
+        // when they use one of the new keys or prefixes.
         for (action, configured) in [
             (GlobalAction::DiffMenu, diff_menu_configured),
             (GlobalAction::ReviewTarget, review_target_configured),
@@ -95,6 +100,11 @@ impl Keymap {
             (GlobalAction::CommitPicker, commit_picker_configured),
             (GlobalAction::PreviousFile, previous_file_configured),
             (GlobalAction::NextFile, next_file_configured),
+            (GlobalAction::ToggleReviewed, toggle_reviewed_configured),
+            (GlobalAction::ApproveReview, approve_review_configured),
+            (GlobalAction::RequestChanges, request_changes_configured),
+            (GlobalAction::CommentVerdict, comment_verdict_configured),
+            (GlobalAction::ClearVerdict, clear_verdict_configured),
         ] {
             if !configured {
                 keymap.clear_default_on_conflict(action);
@@ -305,6 +315,11 @@ struct StoredGlobalKeymap {
     previous_diff_type: Option<KeySpec>,
     next_annotation: Option<KeySpec>,
     previous_annotation: Option<KeySpec>,
+    toggle_reviewed: Option<KeySpec>,
+    approve_review: Option<KeySpec>,
+    request_changes: Option<KeySpec>,
+    comment_verdict: Option<KeySpec>,
+    clear_verdict: Option<KeySpec>,
 }
 
 impl StoredGlobalKeymap {
@@ -348,6 +363,11 @@ impl StoredGlobalKeymap {
             GlobalAction::PreviousDiffType => self.previous_diff_type.take(),
             GlobalAction::NextAnnotation => self.next_annotation.take(),
             GlobalAction::PreviousAnnotation => self.previous_annotation.take(),
+            GlobalAction::ToggleReviewed => self.toggle_reviewed.take(),
+            GlobalAction::ApproveReview => self.approve_review.take(),
+            GlobalAction::RequestChanges => self.request_changes.take(),
+            GlobalAction::CommentVerdict => self.comment_verdict.take(),
+            GlobalAction::ClearVerdict => self.clear_verdict.take(),
         }
     }
 }
@@ -357,6 +377,11 @@ struct StoredAnnotationMenuKeymap {
     jump: Option<KeySpec>,
     edit_external: Option<KeySpec>,
     remove: Option<KeySpec>,
+    accept: Option<KeySpec>,
+    dismiss: Option<KeySpec>,
+    blocking: Option<KeySpec>,
+    non_blocking: Option<KeySpec>,
+    fixed: Option<KeySpec>,
 }
 
 impl StoredAnnotationMenuKeymap {
@@ -365,6 +390,11 @@ impl StoredAnnotationMenuKeymap {
             AnnotationMenuAction::Jump => self.jump.take(),
             AnnotationMenuAction::EditExternal => self.edit_external.take(),
             AnnotationMenuAction::Remove => self.remove.take(),
+            AnnotationMenuAction::Accept => self.accept.take(),
+            AnnotationMenuAction::Dismiss => self.dismiss.take(),
+            AnnotationMenuAction::Blocking => self.blocking.take(),
+            AnnotationMenuAction::NonBlocking => self.non_blocking.take(),
+            AnnotationMenuAction::Fixed => self.fixed.take(),
         }
     }
 }

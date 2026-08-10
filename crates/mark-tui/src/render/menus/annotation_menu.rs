@@ -17,7 +17,7 @@ use crate::{
             selector_title_color,
         },
         style::base_bg,
-        text::{fit_padded, status_code},
+        text::{fit_padded, status_code, terminal_text},
     },
     theme::DiffTheme,
 };
@@ -83,6 +83,14 @@ fn annotation_menu_lines(
             index == selected,
         ));
     }
+    lines.push(selector_separator_line(width, theme));
+    lines.push(Line::from(Span::styled(
+        fit_padded(
+            " ^A accept  ^D dismiss  ^B blocking  ^O non-blocking  ^F fixed",
+            width,
+        ),
+        Style::default().fg(theme.muted).bg(base_bg(theme)),
+    )));
     lines
 }
 
@@ -97,7 +105,7 @@ pub(crate) fn annotation_menu_area(
     let list_cap = annotation_menu_visible_items(floating_menu_max_inner_height(area));
     let list_rows = items.len().max(1).min(list_cap).saturating_mul(2);
     let width = floating_menu_max_width(area, annotation_menu_width(app, items));
-    let height = selector_menu_outer_height(area, list_rows, 0);
+    let height = selector_menu_outer_height(area, list_rows, 2);
     if width == 0 || height == 0 {
         return None;
     }
@@ -112,7 +120,7 @@ pub(crate) fn annotation_menu_list_visible_rows(app: &DiffApp, area: Rect) -> Op
 }
 
 fn annotation_menu_visible_items(inner_height: u16) -> usize {
-    selector_menu_list_rows(inner_height, 0)
+    selector_menu_list_rows(inner_height, 2)
         .saturating_div(2)
         .max(1)
 }
@@ -149,8 +157,9 @@ fn annotation_menu_width(app: &DiffApp, items: &[AnnotationMenuItem]) -> u16 {
     let rows = items
         .iter()
         .map(|item| {
-            let body = item.text.lines().next().unwrap_or("");
-            format!(" {} {} {} ", status_code(item.status), item.label, body).width()
+            let label = terminal_text(&item.label);
+            let body = terminal_text(item.text.lines().next().unwrap_or(""));
+            format!(" {} {label} {body} ", status_code(item.status)).width()
         })
         .max()
         .unwrap_or(24);
@@ -170,16 +179,16 @@ fn annotation_menu_item_lines(
             .fg(status_color(item.status, theme))
             .add_modifier(Modifier::BOLD),
     );
-    let header = fit_padded(&item.label, width.saturating_sub(3));
+    let header = fit_padded(&terminal_text(&item.label), width.saturating_sub(3));
     let body = if item.text.trim().is_empty() {
-        "(empty annotation)"
+        "(empty annotation)".to_owned()
     } else {
-        item.text.lines().next().unwrap_or("")
+        terminal_text(item.text.lines().next().unwrap_or(""))
     };
     [
         Line::from(vec![status, Span::styled(format!(" {header}"), style)]),
         Line::from(Span::styled(
-            format!("   {}", fit_padded(body, width.saturating_sub(3))),
+            format!("   {}", fit_padded(&body, width.saturating_sub(3))),
             style,
         )),
     ]

@@ -105,11 +105,21 @@ next_diff_type = []
 previous_diff_type = []
 next_annotation = "}"
 previous_annotation = "{"
+toggle_reviewed = "R"
+approve_review = "ctrl-a"
+request_changes = "ctrl-r"
+comment_verdict = "ctrl-v"
+clear_verdict = "ctrl-d"
 
 [keymap.annotation_menu]
 jump = "enter"
 edit_external = "ctrl-g"
 remove = "ctrl-x"
+accept = "ctrl-a"
+dismiss = "ctrl-d"
+blocking = "ctrl-b"
+non_blocking = "ctrl-o"
+fixed = "ctrl-f"
 
 [keymap.menu]
 up = ["up", "shift-tab", "ctrl-p"]

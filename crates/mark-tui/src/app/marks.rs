@@ -109,8 +109,9 @@ impl DiffApp {
         let exportable_range_coordinates = self.exportable_range_coordinates(&export_model);
         self.annotations_state
             .annotations
-            .iter()
-            .filter_map(|(key, body)| {
+            .keys()
+            .filter_map(|key| {
+                let body = self.annotations_state.annotations.human_text(key)?;
                 let is_exportable = if key.is_range() {
                     self.range_is_exportable(&export_model, &exportable_range_coordinates, key)
                 } else {

@@ -174,6 +174,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "95832e849adfb21180ccb6826a99da14e5d266ae5c2e668e1602cf234f153797"
 
 [[package]]
+name = "bytes"
+version = "1.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
+
+[[package]]
 name = "castaway"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -892,11 +898,15 @@ dependencies = [
  "mark-diff",
  "mark-git",
  "mark-runtime",
+ "mark-session",
  "mark-syntax",
  "mark-tui",
  "mimalloc",
  "rustix",
+ "serde",
+ "serde_json",
  "shlex",
+ "tempfile",
  "unicode-width",
 ]
 
@@ -947,6 +957,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "mark-session"
+version = "0.10.7"
+dependencies = [
+ "mark-core",
+ "rustix",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "mark-syntax"
 version = "0.10.7"
 dependencies = [
@@ -969,6 +991,7 @@ dependencies = [
  "mark-diff",
  "mark-git",
  "mark-runtime",
+ "mark-session",
  "mark-syntax",
  "memchr",
  "notify",
@@ -976,6 +999,7 @@ dependencies = [
  "rayon",
  "rustix",
  "serde",
+ "serde_json",
  "shlex",
  "tempfile",
  "tokio",
@@ -1684,6 +1708,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
 
 [[package]]
+name = "socket2"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
+dependencies = [
+ "libc",
+ "windows-sys 0.60.2",
+]
+
+[[package]]
 name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1920,7 +1954,24 @@ version = "1.53.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "202caea871b69668250d242070849eb495be178ed697a3e98aebce5bc81a0bed"
 dependencies = [
+ "bytes",
+ "libc",
+ "mio",
  "pin-project-lite",
+ "socket2",
+ "tokio-macros",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "tokio-macros"
+version = "2.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6328af13490e73a9b4694030fafd93f8c8c6a9dede33e821c3fc63eddf8042ba"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]

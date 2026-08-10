@@ -157,9 +157,16 @@ pub(crate) fn build_diff_viewport_lines(
                     let block_scroll = annotation_saved_block_scroll(app, &key);
                     push_annotation_block(
                         &mut lines,
-                        render_annotation_saved_block(text, width, geometry, theme, Some(&label))
-                            .into_iter()
-                            .skip(block_scroll),
+                        render_annotation_saved_block(
+                            text,
+                            width,
+                            geometry,
+                            theme,
+                            Some(&label),
+                            app.annotations_state.annotations.is_human_only(&key),
+                        )
+                        .into_iter()
+                        .skip(block_scroll),
                         visible_rows,
                     );
                 }
@@ -273,6 +280,7 @@ fn build_wrapped_viewport_lines(
                                 geometry,
                                 theme,
                                 Some(&label),
+                                app.annotations_state.annotations.is_human_only(&key),
                             )
                             .into_iter()
                             .skip(block_scroll),

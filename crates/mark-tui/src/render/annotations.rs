@@ -11,7 +11,9 @@ use crate::{
     render::{
         annotation_ranges::AnnotationBlockGeometry,
         style::{base_bg, input_cursor_style, spans_with_input_cursor},
-        text::{fit, fit_byte_prefix_with_width, fit_padded, spaces, terminal_text},
+        text::{
+            fit, fit_byte_prefix_with_width, fit_padded, spaces, terminal_text, terminal_text_cow,
+        },
     },
     theme::DiffTheme,
 };
@@ -62,7 +64,8 @@ fn annotation_top_border_line(
     let has_title_rule = label.is_some() && label_width > 0;
     let title_width = label_width.saturating_sub(usize::from(has_title_rule));
     let title = label
-        .map(|label| fit(&format!(" {label} "), title_width))
+        .map(|label| terminal_text(&format!(" {label} ")))
+        .map(|label| fit(&label, title_width))
         .unwrap_or_default();
     let used = title.width().saturating_add(usize::from(has_title_rule));
     let fill = annotation_rule(label_width.saturating_sub(used), theme);
@@ -113,7 +116,7 @@ fn annotation_bottom_border_line(
     width: usize,
     geometry: AnnotationBlockGeometry,
     theme: DiffTheme,
-    button: AnnotationFooterButton,
+    button: Option<AnnotationFooterButton>,
 ) -> Line<'static> {
     let card_width = geometry.card_width();
     if card_width < 2 {
@@ -124,11 +127,14 @@ fn annotation_bottom_border_line(
     }
     let (_, _, bottom_left, bottom_right, _) = annotation_frame_characters(theme);
     let interior = card_width.saturating_sub(2);
-    let label = annotation_footer_button_label(interior, button, theme);
+    let label = button
+        .map(|button| annotation_footer_button_label(interior, button, theme))
+        .unwrap_or_default();
     let label_width = label.width();
     let button_fg = match button {
-        AnnotationFooterButton::Edit => theme.search_match_bg,
-        AnnotationFooterButton::Submit => theme.addition_fg,
+        Some(AnnotationFooterButton::Edit) => theme.search_match_bg,
+        Some(AnnotationFooterButton::Submit) => theme.addition_fg,
+        None => theme.foreground,
     };
     let mut spans = annotation_line_prefix(width, geometry, theme);
     spans.push(Span::styled(
@@ -240,7 +246,8 @@ fn annotation_body_line(
     }
     let (_, side, _, _, _) = annotation_frame_characters(theme);
     let body_width = geometry.body_width();
-    let display = fit_padded(text, body_width);
+    let display_text = terminal_text_cow(text);
+    let display = fit_padded(&display_text, body_width);
     let mut spans = annotation_line_prefix(width, geometry, theme);
     spans.push(Span::styled(
         side.to_string(),
@@ -352,6 +359,7 @@ pub(crate) fn render_annotation_saved_block(
     geometry: AnnotationBlockGeometry,
     theme: DiffTheme,
     label: Option<&str>,
+    editable_human: bool,
 ) -> Vec<Line<'static>> {
     let mut lines = vec![annotation_top_border_line(width, geometry, theme, label)];
     for line in annotation_display_lines(text, geometry.body_width()) {
@@ -367,7 +375,7 @@ pub(crate) fn render_annotation_saved_block(
         width,
         geometry,
         theme,
-        AnnotationFooterButton::Edit,
+        editable_human.then_some(AnnotationFooterButton::Edit),
     ));
     lines
 }
@@ -398,7 +406,7 @@ pub(crate) fn render_annotation_compose_block(
         width,
         geometry,
         theme,
-        AnnotationFooterButton::Submit,
+        Some(AnnotationFooterButton::Submit),
     ));
     lines
 }
@@ -450,8 +458,29 @@ mod tests {
 
     use super::{
         annotation_button_hit_at_column, annotation_display_line_count, annotation_display_lines,
-        annotation_top_border_line,
+        annotation_top_border_line, render_annotation_saved_block,
     };
+
+    #[test]
+    fn agent_and_mixed_cards_do_not_render_an_edit_button() {
+        let geometry = AnnotationBlockGeometry {
+            start: 0,
+            end: 32,
+            connected: false,
+        };
+        let lines = render_annotation_saved_block(
+            "Agent: explanation",
+            32,
+            geometry,
+            DiffTheme::default(),
+            Some("Agent"),
+            false,
+        );
+        let footer = lines.last().unwrap().to_string();
+
+        assert!(!footer.contains("[↻]"));
+        assert!(!footer.contains("[e]"));
+    }
 
     #[test]
     fn annotation_button_hits_exclude_corners_and_narrow_cards() {
@@ -460,6 +489,25 @@ mod tests {
         assert!(annotation_button_hit_at_column(6, (0, 10), 3));
         assert!(annotation_button_hit_at_column(8, (0, 10), 3));
         assert!(!annotation_button_hit_at_column(9, (0, 10), 3));
+    }
+
+    #[test]
+    fn annotation_titles_escape_terminal_controls() {
+        let line = annotation_top_border_line(
+            120,
+            AnnotationBlockGeometry {
+                start: 0,
+                end: 120,
+                connected: false,
+            },
+            DiffTheme::default(),
+            Some("Agent · unsafe\u{1b}]52;c;payload\u{7}"),
+        )
+        .to_string();
+
+        assert!(!line.contains('\u{1b}'));
+        assert!(!line.contains('\u{7}'));
+        assert!(line.contains("\\u{1b}]52;c;payload\\u{7}"));
     }
 
     #[test]

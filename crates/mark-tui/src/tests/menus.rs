@@ -2331,7 +2331,7 @@ fn options_menu_does_not_enable_live_reload_when_watch_is_disabled() {
     assert!(!app.overlays.options_menu_draft.live_updates_enabled);
     assert_eq!(
         app.notifications.error_log.as_deref(),
-        Some("live reload disabled by --no-watch")
+        Some("live reload requires launching with --watch")
     );
 }
 

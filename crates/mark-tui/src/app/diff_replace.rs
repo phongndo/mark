@@ -1,11 +1,15 @@
-use std::{path::Path, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
-use mark_core::MarkResult;
+use mark_core::{MarkError, MarkResult};
 use mark_diff::{Changeset, DiffOptions};
 
 use super::{
     BranchMetadataPolicy, DiffApp, DiffCacheEntry, HunkFocusModelBehavior, HunkFocusScrollBehavior,
-    MAX_LIVE_GREP_MATCHES, PostFilterNavigation, show_rev_from_options, splice_diff_files_for_path,
+    MAX_LIVE_GREP_MATCHES, PostFilterNavigation, diff_file_matches_path_scope,
+    show_rev_from_options, splice_diff_files_for_paths,
 };
 use crate::{
     controls::{
@@ -13,6 +17,7 @@ use crate::{
         comparison_commits, current_head_label, default_branch_base,
     },
     model::{ContextKey, FileIndex, HunkIndex, UiModel, UiModelBuildOptions},
+    review::persistence::ReviewTransition,
     search::DiffSearchIndex,
     syntax::invalidate_range_operand_revision_cache,
 };
@@ -30,7 +35,31 @@ impl DiffApp {
         self.replace_loaded_diff(self.document.options.clone(), changeset);
     }
 
-    pub(crate) fn replace_path_changeset(&mut self, path: &Path, path_changeset: Changeset) {
+    pub(crate) fn replace_path_changeset(
+        &mut self,
+        path: &Path,
+        path_changeset: Changeset,
+    ) -> MarkResult<()> {
+        self.replace_paths_changeset(&[path.to_path_buf()], path_changeset)
+    }
+
+    pub(crate) fn replace_paths_changeset(
+        &mut self,
+        paths: &[PathBuf],
+        path_changeset: Changeset,
+    ) -> MarkResult<()> {
+        let raw_patch_is_shared = Arc::ptr_eq(
+            &self.document.changeset.raw_patch,
+            &self.document.base_changeset.raw_patch,
+        );
+        let raw_patch =
+            splice_raw_patch_for_paths(&self.document.changeset, paths, &path_changeset)?;
+        let base_raw_patch = if raw_patch_is_shared {
+            Arc::clone(&raw_patch)
+        } else {
+            splice_raw_patch_for_paths(&self.document.base_changeset, paths, &path_changeset)?
+        };
+        let review_transition = ReviewTransition::capture(self);
         self.close_annotation_target_mode();
         self.invalidate_diff_cache();
         let selected_path = self
@@ -42,16 +71,18 @@ impl DiffApp {
         let relative_scroll =
             self.relative_scroll_from_file_start(self.sidebar.selected_file.get());
 
-        splice_diff_files_for_path(
+        splice_diff_files_for_paths(
             &mut self.document.changeset.files,
-            path,
+            paths,
             path_changeset.files.clone(),
         );
-        splice_diff_files_for_path(
+        self.document.changeset.raw_patch = raw_patch;
+        splice_diff_files_for_paths(
             &mut self.document.base_changeset.files,
-            path,
+            paths,
             path_changeset.files,
         );
+        self.document.base_changeset.raw_patch = base_raw_patch;
         self.document.total_stats = self.document.changeset.stats();
         self.document.context_expansions.clear();
         self.document.trailing_context_lines.clear();
@@ -82,7 +113,9 @@ impl DiffApp {
             HunkFocusModelBehavior::Clear,
         );
         self.store_current_diff_cache();
+        review_transition.apply(self);
         self.runtime.dirty = true;
+        Ok(())
     }
 
     pub(crate) fn replace_cached_diff(
@@ -91,6 +124,20 @@ impl DiffApp {
         cached: DiffCacheEntry,
         branch_metadata: BranchMetadataPolicy,
     ) {
+        let persistence_transition = if self.document.options != options {
+            match self.prepare_review_persistence_source_change() {
+                Ok(active) => active,
+                Err(error) => {
+                    self.set_error_log(format!(
+                        "could not save review before source change: {error}"
+                    ));
+                    return;
+                }
+            }
+        } else {
+            false
+        };
+        let review_transition = (!persistence_transition).then(|| ReviewTransition::capture(self));
         self.close_annotation_target_mode();
         let DiffCacheEntry {
             changeset,
@@ -183,6 +230,7 @@ impl DiffApp {
         self.jobs.context_load_worker = None;
         self.jobs.trailing_context_worker = None;
         self.document.generation = self.document.generation.wrapping_add(1);
+        self.jobs.source_changed = false;
         self.document.inline_cache.clear();
         self.jobs.pending_filter_apply = None;
         self.jobs.filter_worker = None;
@@ -269,6 +317,11 @@ impl DiffApp {
             self.sync_annotation_cursor_to_viewport();
             self.runtime.dirty = true;
         }
+        if let Some(review_transition) = review_transition {
+            review_transition.apply(self);
+        } else {
+            self.finish_review_persistence_source_change();
+        }
     }
 
     pub(crate) fn replace_loaded_diff(&mut self, options: DiffOptions, changeset: Changeset) {
@@ -281,9 +334,24 @@ impl DiffApp {
             && !self.full_file_mode_active()
         {
             self.jobs.live_updates.reset_reload();
+            self.jobs.source_changed = false;
             self.runtime.dirty = true;
             return;
         }
+        let persistence_transition = if options_changed {
+            match self.prepare_review_persistence_source_change() {
+                Ok(active) => active,
+                Err(error) => {
+                    self.set_error_log(format!(
+                        "could not save review before source change: {error}"
+                    ));
+                    return;
+                }
+            }
+        } else {
+            false
+        };
+        let review_transition = (!persistence_transition).then(|| ReviewTransition::capture(self));
         self.close_annotation_target_mode();
 
         // Keep only the current full-file anchor hot across a reload, and
@@ -363,6 +431,7 @@ impl DiffApp {
         self.jobs.context_load_worker = None;
         self.jobs.trailing_context_worker = None;
         self.document.generation = self.document.generation.wrapping_add(1);
+        self.jobs.source_changed = false;
         self.document.inline_cache.clear();
         self.jobs.pending_filter_apply = None;
         self.jobs.filter_worker = None;
@@ -388,6 +457,85 @@ impl DiffApp {
             PostFilterNavigation::Preserve,
             HunkFocusModelBehavior::Clear,
         );
+        if let Some(review_transition) = review_transition {
+            review_transition.apply(self);
+        } else {
+            self.finish_review_persistence_source_change();
+        }
         self.runtime.dirty = true;
     }
+}
+
+fn splice_raw_patch_for_paths(
+    changeset: &Changeset,
+    paths: &[PathBuf],
+    replacement: &Changeset,
+) -> MarkResult<Arc<[u8]>> {
+    if changeset.raw_patch.is_empty() {
+        return if changeset.files.is_empty() {
+            Ok(Arc::clone(&replacement.raw_patch))
+        } else {
+            Ok(Changeset::empty_raw_patch())
+        };
+    }
+
+    let segments = aligned_raw_file_segments(changeset)?;
+    let replacement_segments = aligned_raw_file_segments(replacement)?;
+    let mut raw_patch = Vec::with_capacity(
+        changeset
+            .raw_patch
+            .len()
+            .saturating_add(replacement.raw_patch.len()),
+    );
+    let mut inserted = false;
+    for (file, segment) in changeset.files.iter().zip(segments) {
+        if paths
+            .iter()
+            .any(|path| diff_file_matches_path_scope(file, path))
+        {
+            if !inserted {
+                for replacement_segment in &replacement_segments {
+                    raw_patch.extend_from_slice(replacement_segment);
+                }
+                inserted = true;
+            }
+        } else {
+            raw_patch.extend_from_slice(segment);
+        }
+    }
+    if !inserted {
+        for replacement_segment in replacement_segments {
+            raw_patch.extend_from_slice(replacement_segment);
+        }
+    }
+    Ok(Arc::from(raw_patch.into_boxed_slice()))
+}
+
+fn aligned_raw_file_segments(changeset: &Changeset) -> MarkResult<Vec<&[u8]>> {
+    let segments = raw_file_segments(&changeset.raw_patch);
+    if segments.len() != changeset.files.len() {
+        return Err(MarkError::Usage(
+            "scoped reload patch did not align with its parsed files".to_owned(),
+        ));
+    }
+    Ok(segments)
+}
+
+fn raw_file_segments(raw_patch: &[u8]) -> Vec<&[u8]> {
+    const HEADER: &[u8] = b"diff --git ";
+    let mut starts = raw_patch
+        .windows(HEADER.len())
+        .enumerate()
+        .filter_map(|(index, window)| {
+            (window == HEADER && (index == 0 || raw_patch[index - 1] == b'\n')).then_some(index)
+        })
+        .collect::<Vec<_>>();
+    if starts.is_empty() {
+        return Vec::new();
+    }
+    starts.push(raw_patch.len());
+    starts
+        .windows(2)
+        .map(|range| &raw_patch[range[0]..range[1]])
+        .collect()
 }

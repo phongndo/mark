@@ -42,6 +42,11 @@ pub(crate) enum AppAction {
     PreviousDiffType,
     NextAnnotation,
     PreviousAnnotation,
+    ToggleReviewed,
+    ApproveReview,
+    RequestChanges,
+    CommentVerdict,
+    ClearVerdict,
 }
 
 impl AppAction {
@@ -83,6 +88,11 @@ impl AppAction {
             GlobalAction::PreviousDiffType => Self::PreviousDiffType,
             GlobalAction::NextAnnotation => Self::NextAnnotation,
             GlobalAction::PreviousAnnotation => Self::PreviousAnnotation,
+            GlobalAction::ToggleReviewed => Self::ToggleReviewed,
+            GlobalAction::ApproveReview => Self::ApproveReview,
+            GlobalAction::RequestChanges => Self::RequestChanges,
+            GlobalAction::CommentVerdict => Self::CommentVerdict,
+            GlobalAction::ClearVerdict => Self::ClearVerdict,
             GlobalAction::SaveMark | GlobalAction::CancelMark => return None,
         })
     }
@@ -103,8 +113,10 @@ impl DiffApp {
         match action {
             AppAction::Quit => Ok(ActionOutcome::effect(AppEffect::Quit)),
             AppAction::SubmitMarks => {
-                if let Some(draft) = self.annotations_state.annotation_draft.take() {
-                    self.commit_annotation_draft(draft);
+                if let Some(draft) = self.annotations_state.annotation_draft.take()
+                    && !self.commit_annotation_draft(draft)
+                {
+                    return Ok(ActionOutcome::consumed());
                 }
                 let Some(text) = self.marks_clipboard_json() else {
                     return Ok(ActionOutcome::effect(AppEffect::Toast(
@@ -266,6 +278,26 @@ impl DiffApp {
             }
             AppAction::PreviousAnnotation => {
                 self.move_annotation(-1);
+                Ok(ActionOutcome::consumed())
+            }
+            AppAction::ToggleReviewed => {
+                self.toggle_reviewed_progress();
+                Ok(ActionOutcome::consumed())
+            }
+            AppAction::ApproveReview => {
+                self.set_local_verdict(crate::review::VerdictKind::Approve);
+                Ok(ActionOutcome::consumed())
+            }
+            AppAction::RequestChanges => {
+                self.set_local_verdict(crate::review::VerdictKind::RequestChanges);
+                Ok(ActionOutcome::consumed())
+            }
+            AppAction::CommentVerdict => {
+                self.set_local_verdict(crate::review::VerdictKind::Comment);
+                Ok(ActionOutcome::consumed())
+            }
+            AppAction::ClearVerdict => {
+                self.clear_local_verdict();
                 Ok(ActionOutcome::consumed())
             }
         }

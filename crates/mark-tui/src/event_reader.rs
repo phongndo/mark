@@ -39,6 +39,13 @@ impl TerminalEventReader {
         })
     }
 
+    pub(crate) async fn read(&mut self) -> MarkResult<Event> {
+        match self.rx.recv().await {
+            Some(result) => result.map_err(MarkError::Io),
+            None => Err(reader_stopped_error()),
+        }
+    }
+
     pub(crate) async fn read_timeout(&mut self, timeout: Duration) -> MarkResult<Option<Event>> {
         if timeout.is_zero() {
             return self.try_read();

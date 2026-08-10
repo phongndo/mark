@@ -24,13 +24,14 @@ pub(crate) struct LiveDiff {
     pub(crate) _worker: tokio::task::JoinHandle<()>,
     pub(crate) control_tx: Sender<LiveDiffCommand>,
     pub(crate) reload_rx: Receiver<LiveDiffReload>,
+    pub(crate) auto_reload: bool,
     paused: Arc<AtomicBool>,
     pending_while_paused: Arc<AtomicBool>,
     invalidated: Arc<AtomicBool>,
 }
 
 impl LiveDiff {
-    pub(crate) fn start(options: DiffOptions, repo: &Path) -> MarkResult<Self> {
+    pub(crate) fn start(options: DiffOptions, repo: &Path, auto_reload: bool) -> MarkResult<Self> {
         let watch_spec = live_diff_watch_spec_for_options(repo, &options)?;
         let filter = watch_spec.filter.clone();
         let (control_tx, control_rx) = mpsc::channel(LIVE_DIFF_CONTROL_CHANNEL_CAPACITY);
@@ -48,6 +49,7 @@ impl LiveDiff {
                 match result {
                     Ok(event) if filter.is_relevant_event(&event) => {
                         queue_changed_or_record_pending(
+                            auto_reload,
                             &watcher_paused,
                             &watcher_pending_while_paused,
                             &watcher_invalidated,
@@ -91,6 +93,7 @@ impl LiveDiff {
             _worker: worker,
             control_tx,
             reload_rx,
+            auto_reload,
             paused,
             pending_while_paused,
             invalidated,
@@ -425,7 +428,7 @@ pub(crate) fn spawn_live_diff_worker(
             }
             let load_options = options.clone();
             let changeset = match runtime::run_blocking(move || {
-                mark_diff::load_review_ref(&load_options)
+                mark_diff::load_review_ref_with_raw_patch(&load_options)
             })
             .await
             {
@@ -449,12 +452,17 @@ async fn send_live_reload(sender: &Sender<LiveDiffReload>, reload: LiveDiffReloa
 }
 
 fn queue_changed_or_record_pending(
+    auto_reload: bool,
     paused: &AtomicBool,
     pending_while_paused: &AtomicBool,
     invalidated: &AtomicBool,
     control_tx: &Sender<LiveDiffCommand>,
 ) {
     invalidated.store(true, Ordering::Release);
+
+    if !auto_reload {
+        return;
+    }
 
     if paused.load(Ordering::Acquire) {
         pending_while_paused.store(true, Ordering::Release);
@@ -528,7 +536,7 @@ mod tests {
         let invalidated = AtomicBool::new(false);
         let (tx, mut rx) = mpsc::channel(2);
 
-        queue_changed_or_record_pending(&paused, &pending, &invalidated, &tx);
+        queue_changed_or_record_pending(true, &paused, &pending, &invalidated, &tx);
 
         assert!(pending.load(Ordering::Acquire));
         assert!(invalidated.load(Ordering::Acquire));
@@ -551,11 +559,27 @@ mod tests {
         let invalidated = AtomicBool::new(false);
         let (tx, mut rx) = mpsc::channel(2);
 
-        queue_changed_or_record_pending(&paused, &pending, &invalidated, &tx);
+        queue_changed_or_record_pending(true, &paused, &pending, &invalidated, &tx);
 
         assert!(invalidated.load(Ordering::Acquire));
         assert!(!pending.load(Ordering::Acquire));
         assert!(matches!(rx.try_recv(), Ok(LiveDiffCommand::Changed)));
+    }
+
+    #[test]
+    fn snapshot_change_detection_does_not_queue_reload() {
+        let paused = AtomicBool::new(false);
+        let pending = AtomicBool::new(false);
+        let invalidated = AtomicBool::new(false);
+        let (tx, mut rx) = mpsc::channel(2);
+
+        queue_changed_or_record_pending(false, &paused, &pending, &invalidated, &tx);
+
+        assert!(invalidated.load(Ordering::Acquire));
+        assert!(matches!(
+            rx.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ));
     }
 
     #[test]
