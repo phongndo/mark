@@ -169,6 +169,7 @@ canonical `theme` values.
 - Nord: `nordic` and `nord`.
 - Ayu: `ayu-dark`, `ayu-light`, and `ayu-mirage`.
 - Molokai: `molokai`.
+- Origin: `origin`.
 - Kanagawa: `kanagawa-wave`, `kanagawa-dragon`, and `kanagawa-lotus`.
 - Everforest: `everforest-dark` and `everforest-light`.
 - Token: `token-dark` and `token-light`.

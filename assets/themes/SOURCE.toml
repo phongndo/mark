@@ -376,5 +376,18 @@ sha256 = "843c3c971b8e4e5de842721c9408e47ade0e22d02743ed76ea78213b49c3c920"
 id = "mfd-nerv"
 source_path = "colors/mfd-nerv.lua (adapted TextMate rules)"
 sha256 = "7d05c37ffb50b52b6ffb5021d79f81d7f7c9a733a13382141291704864610dee"
+
+[[source]]
+package = "origin.nvim"
+version = "git"
+repository = "https://github.com/phongndo/origin.nvim"
+source_commit = "ae57215580ff46dade17a025080baa8b39edb628"
+license = "MIT"
+resolved = true
+
+[[source.theme]]
+id = "origin"
+source_path = "lua/origin/palette.lua + lua/origin/groups.lua + queries/*/highlights.scm (adapted TextMate scopes)"
+sha256 = "52edeab787944e5704831b955e38dc01ed9363f8b4cb76074752182c342a4f5b"
 # Regenerate package-backed themes with: node tools/vendor-textmate-themes.mjs
 # Regenerate Zenbones adaptations with: python3 tools/vendor-zenbones-themes.py

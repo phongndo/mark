@@ -430,6 +430,7 @@ fn builtin_base16_palette(
             0x1B1D1E, 0x272822, 0x75715E, 0xF8F8F2, 0xFFFFFF, 0xF92672, 0xFD971F, 0xE6DB74,
             0xA6E22E, 0x66D9EF, 0x66D9EF, 0xAE81FF
         ),
+        Theme::Origin => default_textmate_palette(theme),
         Theme::ZenbonesDark
         | Theme::ZenbonesLight
         | Theme::Duckbones

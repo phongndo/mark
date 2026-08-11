@@ -18,6 +18,7 @@ LICENSE_FILES = {
     "token": "token.license",
     "gruvbox-material-vscode": "gruvbox-material-vscode.license",
     "mfd.nvim": "mfd.nvim.license",
+    "origin.nvim": "origin.nvim.license",
 }
 
 

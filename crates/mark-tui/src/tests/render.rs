@@ -3671,6 +3671,28 @@ fn zenbones_tui_colors_match_the_pinned_upstream_theme() {
 }
 
 #[test]
+fn origin_tui_colors_match_the_pinned_upstream_theme() {
+    let theme = builtin_diff_theme(Some("origin")).expect("Origin theme should load");
+
+    assert_eq!(theme.background, Color::Rgb(0x05, 0x05, 0x07));
+    assert_eq!(theme.foreground, Color::Rgb(0xdc, 0xd9, 0xd2));
+    assert_eq!(theme.cursor_line_bg, Color::Rgb(0x0d, 0x0c, 0x0e));
+    assert_eq!(theme.search_match_bg, Color::Rgb(0xe8, 0xa1, 0x5f));
+    assert_eq!(theme.addition_fg, Color::Rgb(0x7f, 0xcb, 0x8f));
+    assert_eq!(theme.addition_bg, Color::Rgb(0x16, 0x21, 0x1a));
+    assert_eq!(theme.deletion_fg, Color::Rgb(0xe7, 0x7e, 0x70));
+    assert_eq!(theme.deletion_bg, Color::Rgb(0x25, 0x16, 0x16));
+    assert_eq!(
+        theme.syntax.color(SyntaxClass::Comment),
+        Some(Color::Rgb(0x9a, 0x96, 0xa0))
+    );
+    assert_eq!(
+        theme.syntax.color(SyntaxClass::Type),
+        Some(Color::Rgb(0x82, 0xa8, 0xe0))
+    );
+}
+
+#[test]
 fn palette_cursor_lines_match_upstream_theme_tokens() {
     for (theme, cursor_line_bg) in [
         (DiffTheme::catppuccin_latte(), Color::Rgb(0xcc, 0xd0, 0xda)),

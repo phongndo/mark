@@ -14,8 +14,9 @@ in Mark's source tree:
 - Token: https://github.com/ThorstenRhau/token
 - Gruvbox Material: https://github.com/sainnhe/gruvbox-material-vscode
 - MFD: https://github.com/kungfusheep/mfd.nvim
+- Origin: https://github.com/phongndo/origin.nvim
 
-The Nordic, Zenbones, and MFD files are modified adaptations that map upstream
+The Nordic, Zenbones, MFD, and Origin files are modified adaptations that map upstream
 Neovim/Vim highlight groups and palettes to TextMate scopes and VS Code
 workbench color keys for use by Mark. Mark's adaptation is Copyright (c) 2026
 Mark contributors.
