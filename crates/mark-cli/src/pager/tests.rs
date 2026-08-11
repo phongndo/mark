@@ -16,6 +16,11 @@ mod routing;
 mod streaming;
 mod terminal;
 
+#[test]
+fn terminal_stdin_guidance_uses_explicit_diff_command() {
+    assert!(TERMINAL_STDIN_GUIDANCE.ends_with("run `mark diff` for the current worktree"));
+}
+
 fn env(term: Option<&str>, lv: Option<&str>, git_pager: Option<&str>, lazygit: bool) -> PagerEnv {
     PagerEnv {
         term: term.map(OsString::from),

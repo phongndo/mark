@@ -25,14 +25,11 @@ pub(crate) use terminal::sanitized_terminal_bytes;
 
 const PAGER_CLASSIFICATION_LIMIT: usize = 128 * 1024;
 const STREAM_BUFFER_SIZE: usize = 8192;
+const TERMINAL_STDIN_GUIDANCE: &str = "mark pager reads diff text from stdin; use `git diff | mark pager`, configure `git config --global core.pager \"mark pager\"`, or run `mark diff` for the current worktree";
 
 pub(crate) fn pager(args: PagerArgs) -> CliResult<()> {
     if io::stdin().is_terminal() {
-        return Err(MarkError::Usage(
-            "mark pager reads diff text from stdin; use `git diff | mark pager`, configure `git config --global core.pager \"mark pager\"`, or run `mark` for the current worktree"
-                .to_owned(),
-        )
-        .into());
+        return Err(MarkError::Usage(TERMINAL_STDIN_GUIDANCE.to_owned()).into());
     }
 
     let env = PagerEnv::current();

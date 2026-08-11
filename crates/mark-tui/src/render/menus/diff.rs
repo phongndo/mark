@@ -240,7 +240,7 @@ pub(crate) fn diff_type_label(options: &DiffOptions) -> &'static str {
 
     match &options.source {
         DiffSource::Show(_) => "Show",
-        DiffSource::Range { .. } => "Range",
+        DiffSource::Range { .. } => "Compare",
         DiffSource::Difftool { .. } => "Difftool",
         DiffSource::Patch(_) => "Patch",
         DiffSource::Worktree | DiffSource::Base(_) | DiffSource::Branch { .. } => "Diff",

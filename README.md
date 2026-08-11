@@ -81,9 +81,9 @@ Nightly binaries report their channel and build commit in `mark --version`.
 ## Quick start
 
 ```sh
-mark                         # review current worktree changes
-mark main                    # review current branch against main
-mark main feature            # review a revision range
+mark diff                    # review all local changes
+mark compare main            # compare main with the current workspace
+mark compare main feature    # compare two branches or commits
 mark show HEAD~1             # review one commit
 mark review 123              # review GitHub PR #123 from the current repo
 mark patch changes.diff      # review an existing patch file
@@ -91,8 +91,9 @@ git diff | mark pager        # use mark as a diff pager
 mark diff --watch            # opt into continuous worktree reload
 ```
 
-Plain `mark` is a shortcut for `mark diff`. While reviewing, move the cursor
-with Vim-style motions and counts such as `3j`. Press `v` or `V` for linewise
+Bare `mark` is reserved for the upcoming dashboard and currently exits without
+output. While reviewing, move the cursor with Vim-style motions and counts such
+as `3j`. Press `v` or `V` for linewise
 Visual mode, select a range, and press `Enter` to annotate it; `Enter` also
 annotates a single line, hunk header, or file header. Use `y` to copy annotations and
 `Shift-Q` to copy them and quit (`q` quits without submitting them).

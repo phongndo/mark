@@ -332,7 +332,7 @@ pub(crate) fn reject_core_language_removal(requested: &BTreeSet<String>) -> Mark
     }
 
     Err(MarkError::Usage(format!(
-        "cannot remove core syntax languages: {}; use `mark --no-syntax` to disable syntax for a run",
+        "cannot remove core syntax languages: {}; use `mark diff --no-syntax` to disable syntax for a run",
         blocked.join(", ")
     )))
 }

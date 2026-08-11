@@ -5,7 +5,7 @@ use std::{
 
 use mark_core::{MarkError, MarkResult};
 
-use crate::args::{DiffArgs, DifftoolArgs, PatchArgs, ReviewArgs, ShowArgs};
+use crate::args::{CompareArgs, DiffArgs, DifftoolArgs, PatchArgs, ReviewArgs, ShowArgs};
 
 fn diff_output(stat: bool) -> mark_command::DiffOutput {
     if stat {
@@ -16,22 +16,24 @@ fn diff_output(stat: bool) -> mark_command::DiffOutput {
 }
 
 pub(crate) fn diff_options(args: DiffArgs) -> MarkResult<mark_command::DiffOptions> {
-    let source = match (args.base, args.revs.as_slice()) {
-        (Some(base), []) => mark_command::DiffSource::Base(base.into()),
-        (Some(_), _) => {
-            return Err(MarkError::Usage(
-                "use either --base or positional revisions, not both".to_owned(),
-            ));
-        }
-        (None, []) => mark_command::DiffSource::Worktree,
-        (None, [base]) => mark_command::DiffSource::Base(base.clone().into()),
-        (None, [left, right]) => mark_command::DiffSource::Range {
+    Ok(mark_command::DiffOptions {
+        repo: args.repo.repo.map(Into::into),
+        source: mark_command::DiffSource::Worktree,
+        local_untracked: mark_command::UntrackedMode::from_include(!args.no_untracked),
+        output: diff_output(args.display.stat),
+    })
+}
+
+pub(crate) fn compare_options(args: CompareArgs) -> MarkResult<mark_command::DiffOptions> {
+    let source = match args.revs.as_slice() {
+        [base] => mark_command::DiffSource::Base(base.clone().into()),
+        [left, right] => mark_command::DiffSource::Range {
             left: left.clone().into(),
             right: right.clone().into(),
         },
-        (None, _) => {
+        _ => {
             return Err(MarkError::Usage(
-                "mark accepts at most two revisions".to_owned(),
+                "compare expects one or two revisions".to_owned(),
             ));
         }
     };
@@ -93,4 +95,49 @@ pub(crate) fn patch_source(path: PathBuf) -> MarkResult<mark_command::DiffSource
     Ok(mark_command::DiffSource::Patch(
         mark_command::PatchSource::File(path),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::args::{DiffWatchArgs, DisplayArgs, RepoArgs};
+
+    fn compare_args(revs: &[&str]) -> CompareArgs {
+        CompareArgs {
+            revs: revs.iter().map(|rev| (*rev).to_owned()).collect(),
+            repo: RepoArgs::default(),
+            no_untracked: false,
+            watch: DiffWatchArgs::default(),
+            display: DisplayArgs::default(),
+        }
+    }
+
+    #[test]
+    fn diff_always_selects_all_local_changes() {
+        let options = diff_options(DiffArgs::default()).expect("diff options should build");
+        assert_eq!(options.source, mark_command::DiffSource::Worktree);
+    }
+
+    #[test]
+    fn compare_one_revision_selects_the_current_workspace() {
+        let options =
+            compare_options(compare_args(&["main"])).expect("compare options should build");
+        assert_eq!(
+            options.source,
+            mark_command::DiffSource::Base("main".into())
+        );
+    }
+
+    #[test]
+    fn compare_two_revisions_selects_an_exact_comparison() {
+        let options = compare_options(compare_args(&["main", "feature"]))
+            .expect("compare options should build");
+        assert_eq!(
+            options.source,
+            mark_command::DiffSource::Range {
+                left: "main".into(),
+                right: "feature".into(),
+            }
+        );
+    }
 }

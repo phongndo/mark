@@ -4,7 +4,7 @@ This is the plain process-level dogfood flow used for the first live-session
 release. The human owns the first terminal and the agent uses a separate shell.
 
 ```text
-human$ mark
+human$ mark diff
 
 agent$ mark session list --json
 {"protocol":1,"id":"cli",..."sessions":[{"session_id":"…","source":"worktree"}]}
