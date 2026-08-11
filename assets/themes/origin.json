@@ -5,14 +5,14 @@
     "editor.background": "#050507",
     "editor.foreground": "#DCD9D2",
     "editorCursor.foreground": "#DCD9D2",
-    "editor.lineHighlightBackground": "#0D0C0E",
-    "editor.findMatchBackground": "#E8A15F",
+    "editor.lineHighlightBackground": "#272627",
+    "editor.findMatchBackground": "#FFA657",
     "statusBar.background": "#131314",
-    "gitDecoration.addedResourceForeground": "#7FCB8F",
-    "gitDecoration.deletedResourceForeground": "#E77E70",
-    "gitDecoration.modifiedResourceForeground": "#E8A15F",
-    "diffEditor.insertedLineBackground": "#16211A",
-    "diffEditor.removedLineBackground": "#251616"
+    "gitDecoration.addedResourceForeground": "#26CD4D",
+    "gitDecoration.deletedResourceForeground": "#FF6A69",
+    "gitDecoration.modifiedResourceForeground": "#FFA657",
+    "diffEditor.insertedLineBackground": "#0A2111",
+    "diffEditor.removedLineBackground": "#281315"
   },
   "tokenColors": [
     {
@@ -136,7 +136,7 @@
         "keyword.other.throw"
       ],
       "settings": {
-        "foreground": "#E8A15F",
+        "foreground": "#FFA657",
         "fontStyle": "bold"
       }
     },
@@ -185,7 +185,7 @@
         "keyword.declaration.type"
       ],
       "settings": {
-        "foreground": "#82A8E0",
+        "foreground": "#71B7FF",
         "fontStyle": ""
       }
     },
@@ -222,7 +222,7 @@
         "entity.name.function.constructor"
       ],
       "settings": {
-        "foreground": "#82A8E0",
+        "foreground": "#71B7FF",
         "fontStyle": ""
       }
     },
@@ -230,7 +230,7 @@
       "name": "Labels",
       "scope": "entity.name.label",
       "settings": {
-        "foreground": "#E8A15F",
+        "foreground": "#FFA657",
         "fontStyle": "bold"
       }
     },
@@ -273,7 +273,7 @@
       "name": "Git added",
       "scope": "markup.inserted",
       "settings": {
-        "foreground": "#7FCB8F",
+        "foreground": "#26CD4D",
         "fontStyle": ""
       }
     },
@@ -281,7 +281,7 @@
       "name": "Git removed",
       "scope": "markup.deleted",
       "settings": {
-        "foreground": "#E77E70",
+        "foreground": "#FF6A69",
         "fontStyle": ""
       }
     },
@@ -289,14 +289,14 @@
       "name": "Git changed",
       "scope": "markup.changed",
       "settings": {
-        "foreground": "#E8A15F",
+        "foreground": "#FFA657",
         "fontStyle": ""
       }
     }
   ],
   "markSource": {
     "repository": "https://github.com/phongndo/origin.nvim",
-    "commit": "ae57215580ff46dade17a025080baa8b39edb628",
+    "commit": "30d95bd286d1c8eb0cfbc771b21442d0181495f1",
     "paths": [
       "lua/origin/palette.lua",
       "lua/origin/groups.lua",

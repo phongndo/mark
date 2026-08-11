@@ -44,6 +44,6 @@
   "origin.nvim": {
     "license": "MIT",
     "repository": "https://github.com/phongndo/origin.nvim",
-    "commit": "ae57215580ff46dade17a025080baa8b39edb628"
+    "commit": "30d95bd286d1c8eb0cfbc771b21442d0181495f1"
   }
 }

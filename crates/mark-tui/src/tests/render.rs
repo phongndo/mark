@@ -3676,19 +3676,19 @@ fn origin_tui_colors_match_the_pinned_upstream_theme() {
 
     assert_eq!(theme.background, Color::Rgb(0x05, 0x05, 0x07));
     assert_eq!(theme.foreground, Color::Rgb(0xdc, 0xd9, 0xd2));
-    assert_eq!(theme.cursor_line_bg, Color::Rgb(0x0d, 0x0c, 0x0e));
-    assert_eq!(theme.search_match_bg, Color::Rgb(0xe8, 0xa1, 0x5f));
-    assert_eq!(theme.addition_fg, Color::Rgb(0x7f, 0xcb, 0x8f));
-    assert_eq!(theme.addition_bg, Color::Rgb(0x16, 0x21, 0x1a));
-    assert_eq!(theme.deletion_fg, Color::Rgb(0xe7, 0x7e, 0x70));
-    assert_eq!(theme.deletion_bg, Color::Rgb(0x25, 0x16, 0x16));
+    assert_eq!(theme.cursor_line_bg, Color::Rgb(0x27, 0x26, 0x27));
+    assert_eq!(theme.search_match_bg, Color::Rgb(0xff, 0xa6, 0x57));
+    assert_eq!(theme.addition_fg, Color::Rgb(0x26, 0xcd, 0x4d));
+    assert_eq!(theme.addition_bg, Color::Rgb(0x0a, 0x21, 0x11));
+    assert_eq!(theme.deletion_fg, Color::Rgb(0xff, 0x6a, 0x69));
+    assert_eq!(theme.deletion_bg, Color::Rgb(0x28, 0x13, 0x15));
     assert_eq!(
         theme.syntax.color(SyntaxClass::Comment),
         Some(Color::Rgb(0x9a, 0x96, 0xa0))
     );
     assert_eq!(
         theme.syntax.color(SyntaxClass::Type),
-        Some(Color::Rgb(0x82, 0xa8, 0xe0))
+        Some(Color::Rgb(0x71, 0xb7, 0xff))
     );
 }
 

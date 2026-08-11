@@ -509,7 +509,7 @@ mod tests {
             ),
             (
                 &["source.test", "keyword.control.flow.test"],
-                RgbColor::new(0xe8, 0xa1, 0x5f),
+                RgbColor::new(0xff, 0xa6, 0x57),
                 SyntaxModifiers::BOLD,
             ),
             (
@@ -528,12 +528,12 @@ mod tests {
                     "keyword.declaration.struct.rust",
                     "storage.type.rust",
                 ],
-                RgbColor::new(0x82, 0xa8, 0xe0),
+                RgbColor::new(0x71, 0xb7, 0xff),
                 SyntaxModifiers::empty(),
             ),
             (
                 &["source.test", "entity.name.type.test"],
-                RgbColor::new(0x82, 0xa8, 0xe0),
+                RgbColor::new(0x71, 0xb7, 0xff),
                 SyntaxModifiers::empty(),
             ),
             (
@@ -586,12 +586,12 @@ mod tests {
             ),
             (
                 &["source.diff", "markup.inserted.diff"],
-                RgbColor::new(0x7f, 0xcb, 0x8f),
+                RgbColor::new(0x26, 0xcd, 0x4d),
                 SyntaxModifiers::empty(),
             ),
             (
                 &["source.diff", "markup.deleted.diff"],
-                RgbColor::new(0xe7, 0x7e, 0x70),
+                RgbColor::new(0xff, 0x6a, 0x69),
                 SyntaxModifiers::empty(),
             ),
         ];
