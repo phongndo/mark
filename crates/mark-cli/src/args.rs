@@ -19,9 +19,9 @@ options:
 {options}
 
 examples:
-  mark
-  mark main
-  mark main feature
+  mark diff
+  mark compare main
+  mark compare main feature
   mark difftool -- \"$LOCAL\" \"$REMOTE\" \"$MERGED\"
   mark show
   mark show HEAD~1
@@ -47,7 +47,7 @@ pub(crate) const RELEASE_REPO: &str = "phongndo/mark";
     name = "mark",
     version = CLI_VERSION,
     about = "Fast, keyboard-first terminal Git diff reviewer",
-    override_usage = "mark [OPTIONS] [COMMAND|REV] [REV]",
+    override_usage = "mark [COMMAND]",
     help_template = HELP_TEMPLATE,
     next_help_heading = "options",
     subcommand_help_heading = "commands",
@@ -56,8 +56,6 @@ pub(crate) const RELEASE_REPO: &str = "phongndo/mark";
 pub(crate) struct Cli {
     #[command(subcommand)]
     pub(crate) command: Option<Command>,
-    #[command(flatten)]
-    pub(crate) diff: DiffArgs,
 }
 
 pub(crate) fn help_styles() -> Styles {
@@ -71,14 +69,22 @@ pub(crate) fn help_styles() -> Styles {
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
     #[command(
-        about = "Review local changes or a revision range",
+        about = "Review all local changes",
         after_help = "\
 examples:
   mark diff
-  mark diff --base main
-  mark diff main feature"
+  mark diff --no-untracked
+  mark diff --watch"
     )]
     Diff(DiffArgs),
+    #[command(
+        about = "Compare the workspace or two Git revisions",
+        after_help = "\
+examples:
+  mark compare main
+  mark compare main feature"
+    )]
+    Compare(CompareArgs),
     #[command(
         alias = "page",
         about = "Read pager input from stdin and review diffs",
@@ -685,15 +691,25 @@ impl EmptyDiffFillArgs {
 
 #[derive(Debug, Args, Default)]
 pub(crate) struct DiffArgs {
-    /// One revision is a worktree base; two revisions compare a range.
-    #[arg(value_name = "REV", num_args = 0..=2)]
+    #[command(flatten)]
+    pub(crate) repo: RepoArgs,
+    /// Exclude untracked files from the local changes review.
+    #[arg(long = "no-untracked")]
+    pub(crate) no_untracked: bool,
+    #[command(flatten)]
+    pub(crate) watch: DiffWatchArgs,
+    #[command(flatten)]
+    pub(crate) display: DisplayArgs,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct CompareArgs {
+    /// One revision is compared with the current workspace; two compare directly.
+    #[arg(value_name = "REV", num_args = 1..=2, required = true)]
     pub(crate) revs: Vec<String>,
     #[command(flatten)]
     pub(crate) repo: RepoArgs,
-    /// Compare the worktree with the merge base of this revision and HEAD.
-    #[arg(short = 'b', long, value_name = "REV")]
-    pub(crate) base: Option<String>,
-    /// Exclude untracked files from a worktree review.
+    /// Exclude untracked files when comparing with the current workspace.
     #[arg(long = "no-untracked")]
     pub(crate) no_untracked: bool,
     #[command(flatten)]
@@ -805,23 +821,20 @@ mod tests {
     }
 
     #[test]
-    fn parses_top_level_diff_compatibility_args() {
-        let cli = parse(&["mark", "--stat"]);
+    fn bare_mark_has_no_command() {
+        let cli = parse(&["mark"]);
         assert!(cli.command.is_none());
-        assert!(cli.diff.display.stat);
+    }
 
-        let cli = parse(&["mark", "--empty-diff-fill"]);
-        assert_eq!(cli.diff.display.empty_diff_fill_override(), Some(true));
-
-        let cli = parse(&["mark", "--minimal"]);
-        assert_eq!(
-            cli.diff.display.decoration_override(),
-            Some(mark_tui::DecorationPreference::Minimal)
-        );
-
-        let cli = parse(&["mark", "main", "feature"]);
-        assert!(cli.command.is_none());
-        assert_eq!(cli.diff.revs, ["main", "feature"]);
+    #[test]
+    fn rejects_removed_implicit_diff_forms() {
+        parse_err(&["mark", "--stat"]);
+        parse_err(&["mark", "main"]);
+        parse_err(&["mark", "main", "feature"]);
+        parse_err(&["mark", "diff", "main"]);
+        parse_err(&["mark", "diff", "--base", "main"]);
+        parse_err(&["mark", "compare"]);
+        parse_err(&["mark", "compare", "main", "feature", "release"]);
     }
 
     #[test]
@@ -836,7 +849,7 @@ mod tests {
             matches!(cli.command, Some(Command::Pager(args)) if args.empty_diff_fill.override_value() == Some(true))
         );
 
-        parse_err(&["mark", "--empty-diff-fill", "--no-empty-diff-fill"]);
+        parse_err(&["mark", "diff", "--empty-diff-fill", "--no-empty-diff-fill"]);
     }
 
     #[test]
@@ -851,19 +864,23 @@ mod tests {
             matches!(cli.command, Some(Command::Pager(args)) if args.decorations.override_value() == Some(mark_tui::DecorationPreference::Minimal))
         );
 
-        parse_err(&["mark", "--minimal", "--fancy"]);
-        parse_err(&["mark", "--minimal", "--decorations", "auto"]);
+        parse_err(&["mark", "diff", "--minimal", "--fancy"]);
+        parse_err(&["mark", "diff", "--minimal", "--decorations", "auto"]);
     }
 
     #[test]
     fn parses_source_subcommands() {
-        let cli = parse(&["mark", "diff", "--base", "main"]);
+        let cli = parse(&["mark", "compare", "main"]);
         assert!(matches!(
             cli.command,
-            Some(Command::Diff(DiffArgs {
-                base: Some(base),
-                ..
-            })) if base == "main"
+            Some(Command::Compare(CompareArgs { revs, .. })) if revs == ["main"]
+        ));
+
+        let cli = parse(&["mark", "compare", "main", "feature"]);
+        assert!(matches!(
+            cli.command,
+            Some(Command::Compare(CompareArgs { revs, .. }))
+                if revs == ["main", "feature"]
         ));
 
         let cli = parse(&["mark", "show", "--stat", "HEAD~1"]);

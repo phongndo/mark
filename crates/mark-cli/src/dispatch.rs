@@ -3,24 +3,22 @@ use crate::{
     args::{self, Cli, Command},
     config,
     pager::pager,
-    preflight::{reject_likely_unknown_command, reject_pre_subcommand_diff_args},
     review::{ReviewRequest, run_review},
     session::session,
     skill::skill,
-    syntax::{diff_options, difftool_options, patch_options, review_options, show_options, syntax},
+    syntax::{
+        compare_options, diff_options, difftool_options, patch_options, review_options,
+        show_options, syntax,
+    },
     update::update,
 };
 
 pub(crate) fn run_cli(cli: Cli) -> CliResult<()> {
-    reject_pre_subcommand_diff_args(&cli)?;
-    let Cli { command, diff } = cli;
-    match command {
-        None => {
-            reject_likely_unknown_command(&diff)?;
-            run_review_command(diff)
-        }
+    match cli.command {
+        None => Ok(()),
         Some(Command::Config) => config::config(),
         Some(Command::Diff(args)) => run_review_command(args),
+        Some(Command::Compare(args)) => run_review_command(args),
         Some(Command::Difftool(args)) => run_review_command(args),
         Some(Command::Pager(args)) => pager(args),
         Some(Command::Show(args)) => run_review_command(args),
@@ -65,6 +63,22 @@ impl ReviewCommand for args::DiffArgs {
         let decorations = self.display.decoration_override();
         Ok(review_request(
             diff_options(self)?,
+            live_updates,
+            syntax_enabled,
+            empty_diff_fill,
+            decorations,
+        ))
+    }
+}
+
+impl ReviewCommand for args::CompareArgs {
+    fn into_review_request(self) -> CliResult<ReviewRequest> {
+        let live_updates = self.watch.watch;
+        let syntax_enabled = self.display.syntax_enabled();
+        let empty_diff_fill = self.display.empty_diff_fill_override();
+        let decorations = self.display.decoration_override();
+        Ok(review_request(
+            compare_options(self)?,
             live_updates,
             syntax_enabled,
             empty_diff_fill,

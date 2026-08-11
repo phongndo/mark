@@ -1,35 +1,37 @@
 # Usage
 
-`mark` reviews Git diffs in an interactive terminal UI when stdout is a terminal.
-When stdout is not a terminal it streams rendered diff output instead. When
-`--stat` is requested it streams diff statistics instead of opening the UI.
+Mark's review commands open Git diffs in an interactive terminal UI when stdout
+is a terminal. When stdout is not a terminal they stream rendered diff output
+instead. When `--stat` is requested they stream diff statistics instead of
+opening the UI. Bare `mark` is reserved for the upcoming dashboard and currently
+exits without output.
 
 Run `mark --help` for the authoritative command list.
 
 ## Diff sources
 
-`mark` is a shortcut for `mark diff`:
+`mark diff` reviews all local changes relative to `HEAD`, including staged,
+unstaged, and untracked files:
 
 ```sh
-mark
 mark diff
+mark diff --no-untracked
 ```
 
-Common local review modes:
+`mark compare` compares one revision with the current workspace or compares two
+revisions directly. Revisions can be branches, tags, or commit IDs:
 
 ```sh
-mark diff --no-untracked
-mark main                  # current branch against main
-mark main feature          # revision range
+mark compare main             # current workspace against main
+mark compare main feature     # main against feature
+mark compare HEAD~2 HEAD      # two commits
 ```
-
-The explicit forms `mark diff --base main` and `mark diff main feature` are
-equivalent when preferred for scripts or discoverability.
 
 Use `--repo` when running from outside the target repository:
 
 ```sh
 mark diff --repo ../project
+mark compare --repo ../project main
 mark show --repo ../project HEAD~1
 ```
 
@@ -39,6 +41,7 @@ reload explicitly, or opt into continuous replacement with `--watch`:
 
 ```sh
 mark diff --watch
+mark compare main --watch
 mark diff --no-syntax
 ```
 
@@ -62,6 +65,7 @@ Use `--stat` to print summary statistics instead of opening the interactive UI:
 
 ```sh
 mark diff --stat
+mark compare main feature --stat
 mark show HEAD~1 --stat
 ```
 

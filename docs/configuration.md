@@ -147,8 +147,9 @@ Syntaxmate 0.1 provides **264 public language IDs**, all covered by its upstream
 oracle and catalog checks. Run `mark syntax available --installed` for the exact
 catalog in the installed Mark build.
 
-Use `mark --no-syntax`, `mark diff --no-syntax`, `mark show --no-syntax`, or
-`mark patch --no-syntax changes.diff` to disable syntax highlighting for one run.
+Use `mark diff --no-syntax`, `mark compare main --no-syntax`,
+`mark show --no-syntax`, or `mark patch --no-syntax changes.diff` to disable
+syntax highlighting for one run.
 
 ## Themes and colors
 
