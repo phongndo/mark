@@ -8,7 +8,7 @@ user overrides, and terminal rendering in `crates/mark-syntax` and `mark-tui`.
 |---|---|---|---|
 | GitHub Dark/Light and high-contrast | Syntaxmate exact scopes | `github-vscode-themes@6.3.4` | Enabled |
 | Catppuccin, Gruvbox, Tokyo Night, Ayu, Kanagawa, Everforest, Nord | Syntaxmate exact scopes | pinned upstream theme packages | Enabled |
-| Zenbones, Token, Gruvbox Material, MFD | Syntaxmate exact scopes | pinned upstream repositories | Enabled |
+| Zenbones, Token, Gruvbox Material, MFD, Origin | Syntaxmate exact scopes | pinned upstream repositories | Enabled |
 | System, ANSI, user Base16 | Mark coarse fallback and terminal palette | user/terminal-defined | Intentional fallback |
 
 Mark's Rust and TUI regression suites verify exact-scope resolution, modifiers,

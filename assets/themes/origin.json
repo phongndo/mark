@@ -1,0 +1,310 @@
+{
+  "name": "Origin",
+  "type": "dark",
+  "colors": {
+    "editor.background": "#050507",
+    "editor.foreground": "#DCD9D2",
+    "editorCursor.foreground": "#DCD9D2",
+    "editor.lineHighlightBackground": "#0D0C0E",
+    "editor.findMatchBackground": "#E8A15F",
+    "statusBar.background": "#131314",
+    "gitDecoration.addedResourceForeground": "#7FCB8F",
+    "gitDecoration.deletedResourceForeground": "#E77E70",
+    "gitDecoration.modifiedResourceForeground": "#E8A15F",
+    "diffEditor.insertedLineBackground": "#16211A",
+    "diffEditor.removedLineBackground": "#251616"
+  },
+  "tokenColors": [
+    {
+      "name": "Comments",
+      "scope": "comment",
+      "settings": {
+        "foreground": "#9A96A0",
+        "fontStyle": "italic"
+      }
+    },
+    {
+      "name": "Literals",
+      "scope": [
+        "string",
+        "constant",
+        "constant.other.symbol",
+        "variable.other.constant",
+        "variable.other.enummember"
+      ],
+      "settings": {
+        "foreground": "#DCD9D2",
+        "fontStyle": ""
+      }
+    },
+    {
+      "name": "Identifiers",
+      "scope": [
+        "variable",
+        "support.variable",
+        "entity.name.namespace"
+      ],
+      "settings": {
+        "foreground": "#DCD9D2",
+        "fontStyle": ""
+      }
+    },
+    {
+      "name": "Declared identifiers",
+      "scope": [
+        "entity.name.variable",
+        "meta.definition.variable variable",
+        "meta.variable.declaration variable",
+        "meta.declaration variable",
+        "meta.property.declaration variable",
+        "meta.namespace entity.name.namespace",
+        "meta.module entity.name.namespace"
+      ],
+      "settings": {
+        "foreground": "#DCD9D2",
+        "fontStyle": "bold"
+      }
+    },
+    {
+      "name": "Built-ins and special syntax",
+      "scope": [
+        "variable.language",
+        "variable.other.builtin",
+        "support.variable.builtin"
+      ],
+      "settings": {
+        "foreground": "#DCD9D2",
+        "fontStyle": "bold"
+      }
+    },
+    {
+      "name": "Function declarations and definitions",
+      "scope": [
+        "entity.name.function",
+        "entity.name.method"
+      ],
+      "settings": {
+        "foreground": "#DCD9D2",
+        "fontStyle": "bold"
+      }
+    },
+    {
+      "name": "Function calls",
+      "scope": [
+        "entity.name.function.call",
+        "entity.name.function.method.call",
+        "meta.function-call entity.name.function",
+        "support.function"
+      ],
+      "settings": {
+        "foreground": "#DCD9D2",
+        "fontStyle": ""
+      }
+    },
+    {
+      "name": "Metadata functions and macros",
+      "scope": [
+        "entity.name.function.preprocessor",
+        "entity.name.function.macro",
+        "support.function.macro"
+      ],
+      "settings": {
+        "foreground": "#9A96A0",
+        "fontStyle": ""
+      }
+    },
+    {
+      "name": "Structural keywords",
+      "scope": [
+        "keyword",
+        "storage"
+      ],
+      "settings": {
+        "foreground": "#DCD9D2",
+        "fontStyle": "bold"
+      }
+    },
+    {
+      "name": "Control flow",
+      "scope": [
+        "keyword.control",
+        "keyword.other.await",
+        "keyword.other.yield",
+        "keyword.other.return",
+        "keyword.other.break",
+        "keyword.other.continue",
+        "keyword.other.throw"
+      ],
+      "settings": {
+        "foreground": "#E8A15F",
+        "fontStyle": "bold"
+      }
+    },
+    {
+      "name": "Metadata",
+      "scope": [
+        "meta.preprocessor",
+        "meta.attribute",
+        "meta.use keyword.other",
+        "keyword.control.import",
+        "keyword.control.directive",
+        "keyword.other.import",
+        "storage.modifier.import",
+        "entity.other.attribute-name",
+        "variable.annotation"
+      ],
+      "settings": {
+        "foreground": "#9A96A0",
+        "fontStyle": ""
+      }
+    },
+    {
+      "name": "Type and container markers",
+      "scope": [
+        "storage.type.class",
+        "storage.type.struct",
+        "storage.type.union",
+        "storage.type.enum",
+        "storage.type.trait",
+        "storage.type.interface",
+        "storage.type.template",
+        "storage.type.type",
+        "keyword.declaration.class storage.type",
+        "keyword.declaration.struct storage.type",
+        "keyword.declaration.union storage.type",
+        "keyword.declaration.enum storage.type",
+        "keyword.declaration.trait storage.type",
+        "keyword.declaration.interface storage.type",
+        "keyword.declaration.type storage.type",
+        "keyword.declaration.class",
+        "keyword.declaration.struct",
+        "keyword.declaration.union",
+        "keyword.declaration.enum",
+        "keyword.declaration.trait",
+        "keyword.declaration.interface",
+        "keyword.declaration.type"
+      ],
+      "settings": {
+        "foreground": "#82A8E0",
+        "fontStyle": ""
+      }
+    },
+    {
+      "name": "Type definition names",
+      "scope": [
+        "entity.name.type.class",
+        "entity.name.type.struct",
+        "entity.name.type.union",
+        "entity.name.type.enum",
+        "entity.name.type.trait",
+        "entity.name.type.interface",
+        "entity.name.type.alias",
+        "entity.name.type.typedef",
+        "entity.name.type.template",
+        "entity.name.class",
+        "entity.name.struct",
+        "entity.name.enum",
+        "entity.name.trait",
+        "entity.name.interface"
+      ],
+      "settings": {
+        "foreground": "#DCD9D2",
+        "fontStyle": "bold"
+      }
+    },
+    {
+      "name": "Type references",
+      "scope": [
+        "entity.name.type",
+        "support.type",
+        "support.class",
+        "storage.type.primitive",
+        "entity.name.function.constructor"
+      ],
+      "settings": {
+        "foreground": "#82A8E0",
+        "fontStyle": ""
+      }
+    },
+    {
+      "name": "Labels",
+      "scope": "entity.name.label",
+      "settings": {
+        "foreground": "#E8A15F",
+        "fontStyle": "bold"
+      }
+    },
+    {
+      "name": "Operators",
+      "scope": "keyword.operator",
+      "settings": {
+        "foreground": "#DCD9D2",
+        "fontStyle": ""
+      }
+    },
+    {
+      "name": "Punctuation",
+      "scope": "punctuation",
+      "settings": {
+        "foreground": "#9A96A0",
+        "fontStyle": ""
+      }
+    },
+    {
+      "name": "Special characters",
+      "scope": [
+        "constant.character.escape",
+        "support.constant"
+      ],
+      "settings": {
+        "foreground": "#DCD9D2",
+        "fontStyle": "bold"
+      }
+    },
+    {
+      "name": "Tags",
+      "scope": "entity.name.tag",
+      "settings": {
+        "foreground": "#DCD9D2",
+        "fontStyle": ""
+      }
+    },
+    {
+      "name": "Git added",
+      "scope": "markup.inserted",
+      "settings": {
+        "foreground": "#7FCB8F",
+        "fontStyle": ""
+      }
+    },
+    {
+      "name": "Git removed",
+      "scope": "markup.deleted",
+      "settings": {
+        "foreground": "#E77E70",
+        "fontStyle": ""
+      }
+    },
+    {
+      "name": "Git changed",
+      "scope": "markup.changed",
+      "settings": {
+        "foreground": "#E8A15F",
+        "fontStyle": ""
+      }
+    }
+  ],
+  "markSource": {
+    "repository": "https://github.com/phongndo/origin.nvim",
+    "commit": "ae57215580ff46dade17a025080baa8b39edb628",
+    "paths": [
+      "lua/origin/palette.lua",
+      "lua/origin/groups.lua",
+      "lua/origin/init.lua",
+      "queries/cpp/highlights.scm",
+      "queries/python/highlights.scm",
+      "queries/racket/highlights.scm",
+      "queries/rust/highlights.scm"
+    ]
+  }
+}

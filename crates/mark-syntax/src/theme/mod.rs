@@ -28,6 +28,7 @@ pub enum BuiltinTextMateTheme {
     AyuLight,
     AyuMirage,
     Molokai,
+    Origin,
     ZenbonesDark,
     ZenbonesLight,
     Duckbones,
@@ -120,6 +121,7 @@ impl BuiltinTextMateTheme {
             Self::AyuLight => "ayu-light",
             Self::AyuMirage => "ayu-mirage",
             Self::Molokai => "molokai",
+            Self::Origin => "origin",
             Self::ZenbonesDark => "zenbones-dark",
             Self::ZenbonesLight => "zenbones-light",
             Self::Duckbones => "duckbones",
@@ -192,6 +194,7 @@ impl BuiltinTextMateTheme {
             Self::AyuLight,
             Self::AyuMirage,
             Self::Molokai,
+            Self::Origin,
             Self::ZenbonesDark,
             Self::ZenbonesLight,
             Self::Duckbones,
@@ -338,6 +341,7 @@ vendored_theme!(ayu_dark, "ayu-dark.json");
 vendored_theme!(ayu_light, "ayu-light.json");
 vendored_theme!(ayu_mirage, "ayu-mirage.json");
 vendored_theme!(molokai, "molokai.json");
+vendored_theme!(origin, "origin.json");
 vendored_theme!(zenbones_dark, "zenbones-dark.json");
 vendored_theme!(zenbones_light, "zenbones-light.json");
 vendored_theme!(duckbones, "duckbones.json");
@@ -404,6 +408,7 @@ fn builtin_theme(theme: BuiltinTextMateTheme) -> &'static TextMateTheme {
         BuiltinTextMateTheme::AyuLight => ayu_light(),
         BuiltinTextMateTheme::AyuMirage => ayu_mirage(),
         BuiltinTextMateTheme::Molokai => molokai(),
+        BuiltinTextMateTheme::Origin => origin(),
         BuiltinTextMateTheme::ZenbonesDark => zenbones_dark(),
         BuiltinTextMateTheme::ZenbonesLight => zenbones_light(),
         BuiltinTextMateTheme::Duckbones => duckbones(),
@@ -461,6 +466,141 @@ mod tests {
     fn every_named_builtin_theme_loads() {
         for theme in BuiltinTextMateTheme::all() {
             assert!(!theme.get().name().is_empty(), "{}", theme.name());
+        }
+    }
+
+    #[test]
+    fn origin_scope_mapping_matches_the_upstream_semantic_model() {
+        trait TestRgbColor {
+            fn new(red: u8, green: u8, blue: u8) -> Self;
+        }
+        impl TestRgbColor for RgbColor {
+            fn new(red: u8, green: u8, blue: u8) -> Self {
+                Self { red, green, blue }
+            }
+        }
+
+        let theme = BuiltinTextMateTheme::Origin.get();
+        let cases: &[(&[&str], RgbColor, SyntaxModifiers)] = &[
+            (
+                &["source.test", "comment.line.test"],
+                RgbColor::new(0x9a, 0x96, 0xa0),
+                SyntaxModifiers::ITALIC,
+            ),
+            (
+                &["source.test", "variable.other.test"],
+                RgbColor::new(0xdc, 0xd9, 0xd2),
+                SyntaxModifiers::empty(),
+            ),
+            (
+                &["source.test", "string.quoted.test"],
+                RgbColor::new(0xdc, 0xd9, 0xd2),
+                SyntaxModifiers::empty(),
+            ),
+            (
+                &["source.test", "constant.numeric.test"],
+                RgbColor::new(0xdc, 0xd9, 0xd2),
+                SyntaxModifiers::empty(),
+            ),
+            (
+                &["source.test", "storage.modifier.test"],
+                RgbColor::new(0xdc, 0xd9, 0xd2),
+                SyntaxModifiers::BOLD,
+            ),
+            (
+                &["source.test", "keyword.control.flow.test"],
+                RgbColor::new(0xe8, 0xa1, 0x5f),
+                SyntaxModifiers::BOLD,
+            ),
+            (
+                &["source.test", "keyword.control.import.test"],
+                RgbColor::new(0x9a, 0x96, 0xa0),
+                SyntaxModifiers::empty(),
+            ),
+            (
+                &["source.test", "entity.name.function.macro.test"],
+                RgbColor::new(0x9a, 0x96, 0xa0),
+                SyntaxModifiers::empty(),
+            ),
+            (
+                &[
+                    "source.rust",
+                    "keyword.declaration.struct.rust",
+                    "storage.type.rust",
+                ],
+                RgbColor::new(0x82, 0xa8, 0xe0),
+                SyntaxModifiers::empty(),
+            ),
+            (
+                &["source.test", "entity.name.type.test"],
+                RgbColor::new(0x82, 0xa8, 0xe0),
+                SyntaxModifiers::empty(),
+            ),
+            (
+                &["source.test", "entity.name.type.struct.test"],
+                RgbColor::new(0xdc, 0xd9, 0xd2),
+                SyntaxModifiers::BOLD,
+            ),
+            (
+                &["source.test", "entity.name.function.definition.test"],
+                RgbColor::new(0xdc, 0xd9, 0xd2),
+                SyntaxModifiers::BOLD,
+            ),
+            (
+                &["source.test", "entity.name.function.call.test"],
+                RgbColor::new(0xdc, 0xd9, 0xd2),
+                SyntaxModifiers::empty(),
+            ),
+            (
+                &["source.test", "variable.language.self.test"],
+                RgbColor::new(0xdc, 0xd9, 0xd2),
+                SyntaxModifiers::BOLD,
+            ),
+            (
+                &[
+                    "source.test",
+                    "meta.property.declaration.test",
+                    "variable.other.property.test",
+                ],
+                RgbColor::new(0xdc, 0xd9, 0xd2),
+                SyntaxModifiers::BOLD,
+            ),
+            (
+                &[
+                    "source.test",
+                    "meta.namespace.test",
+                    "entity.name.namespace.test",
+                ],
+                RgbColor::new(0xdc, 0xd9, 0xd2),
+                SyntaxModifiers::BOLD,
+            ),
+            (
+                &["source.test", "keyword.operator.test"],
+                RgbColor::new(0xdc, 0xd9, 0xd2),
+                SyntaxModifiers::empty(),
+            ),
+            (
+                &["source.test", "punctuation.separator.test"],
+                RgbColor::new(0x9a, 0x96, 0xa0),
+                SyntaxModifiers::empty(),
+            ),
+            (
+                &["source.diff", "markup.inserted.diff"],
+                RgbColor::new(0x7f, 0xcb, 0x8f),
+                SyntaxModifiers::empty(),
+            ),
+            (
+                &["source.diff", "markup.deleted.diff"],
+                RgbColor::new(0xe7, 0x7e, 0x70),
+                SyntaxModifiers::empty(),
+            ),
+        ];
+
+        for (scopes, foreground, modifiers) in cases {
+            let (table, stack) = HighlightScopeTable::from_scope_names(scopes);
+            let resolved = theme.resolve(&table, stack);
+            assert_eq!(resolved.foreground, Some(*foreground), "{scopes:?}");
+            assert_eq!(resolved.modifiers, *modifiers, "{scopes:?}");
         }
     }
 
