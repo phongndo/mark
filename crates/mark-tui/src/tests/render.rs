@@ -3674,17 +3674,17 @@ fn zenbones_tui_colors_match_the_pinned_upstream_theme() {
 fn origin_tui_colors_match_the_pinned_upstream_theme() {
     let theme = builtin_diff_theme(Some("origin")).expect("Origin theme should load");
 
-    assert_eq!(theme.background, Color::Rgb(0x05, 0x05, 0x07));
+    assert_eq!(theme.background, Color::Rgb(0x0a, 0x0b, 0x0a));
     assert_eq!(theme.foreground, Color::Rgb(0xdc, 0xd9, 0xd2));
-    assert_eq!(theme.cursor_line_bg, Color::Rgb(0x27, 0x26, 0x27));
+    assert_eq!(theme.cursor_line_bg, Color::Rgb(0x2b, 0x2c, 0x2a));
     assert_eq!(theme.search_match_bg, Color::Rgb(0xff, 0xa6, 0x57));
     assert_eq!(theme.addition_fg, Color::Rgb(0x26, 0xcd, 0x4d));
-    assert_eq!(theme.addition_bg, Color::Rgb(0x0a, 0x21, 0x11));
+    assert_eq!(theme.addition_bg, Color::Rgb(0x0e, 0x26, 0x13));
     assert_eq!(theme.deletion_fg, Color::Rgb(0xff, 0x6a, 0x69));
-    assert_eq!(theme.deletion_bg, Color::Rgb(0x28, 0x13, 0x15));
+    assert_eq!(theme.deletion_bg, Color::Rgb(0x2c, 0x18, 0x17));
     assert_eq!(
         theme.syntax.color(SyntaxClass::Comment),
-        Some(Color::Rgb(0x9a, 0x96, 0xa0))
+        Some(Color::Rgb(0x9d, 0x99, 0xa3))
     );
     assert_eq!(
         theme.syntax.color(SyntaxClass::Type),
