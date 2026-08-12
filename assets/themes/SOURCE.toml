@@ -381,13 +381,13 @@ sha256 = "7d05c37ffb50b52b6ffb5021d79f81d7f7c9a733a13382141291704864610dee"
 package = "origin.nvim"
 version = "git"
 repository = "https://github.com/phongndo/origin.nvim"
-source_commit = "30d95bd286d1c8eb0cfbc771b21442d0181495f1"
+source_commit = "00cacf17dd434f588ad5ddde605b2b58c09ee47d"
 license = "MIT"
 resolved = true
 
 [[source.theme]]
 id = "origin"
 source_path = "lua/origin/palette.lua + lua/origin/groups.lua + queries/*/highlights.scm (adapted TextMate scopes)"
-sha256 = "c4bad392020c49f5265bebb23133a24edab05bcf22347d378188b022dec0003b"
+sha256 = "78f0770d1cbbbd9f8f5939fe1e49e1d893f816368d8094c0687b8dd20e41c50b"
 # Regenerate package-backed themes with: node tools/vendor-textmate-themes.mjs
 # Regenerate Zenbones adaptations with: python3 tools/vendor-zenbones-themes.py
