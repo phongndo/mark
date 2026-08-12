@@ -1,5 +1,4 @@
 setup:
-    mise install
     cargo fetch --locked
     cargo build -p mark-cli --locked
 
@@ -18,7 +17,7 @@ ci-performance:
     scripts/ci/performance smoke
 
 ci-workflows:
-    mise x -- actionlint -color
+    actionlint -color
 
 fix:
     hk fix --all

@@ -60,7 +60,7 @@ def classify_paths(paths: Iterable[str]) -> dict[str, bool]:
             result["generated"] = True
             result["performance"] = True
 
-        if _is(path, "flake.nix", "flake.lock", "mise.toml", "hk.pkl", "justfile"):
+        if _is(path, "flake.nix", "flake.lock", "hk.pkl", "justfile"):
             result["rust"] = True
             result["workflows"] = True
 
