@@ -51,17 +51,18 @@
           default = pkgs.mkShell {
             packages = with pkgs; [
               rustToolchain
+              actionlint
               coreutils
               curl
               git
               gnutar
               hk
               just
-              mise
               nodejs_24
               nixd
               ripgrep
               sccache
+              taplo
             ];
             RUSTC_WRAPPER = "${pkgs.sccache}/bin/sccache";
             RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";

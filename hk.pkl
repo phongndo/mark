@@ -47,30 +47,30 @@ local fast = new Mapping<String, Step | Group> {
 
   ["rustfmt"] {
     glob = "**/*.rs"
-    check = "mise x -- rustfmt --check --edition 2024 {{files}}"
-    check_list_files = "mise x -- rustfmt --check --edition 2024 --files-with-diff {{files}}"
-    fix = "mise x -- rustfmt --edition 2024 {{files}}"
+    check = "rustfmt --check --edition 2024 {{files}}"
+    check_list_files = "rustfmt --check --edition 2024 --files-with-diff {{files}}"
+    fix = "rustfmt --edition 2024 {{files}}"
   }
 
   ["architecture"] {
     glob = architectureGlobs
-    check = "mise x -- scripts/check-architecture"
+    check = "scripts/check-architecture"
   }
 
   ["actionlint"] = (Builtins.actionlint) {
-    check = "mise x -- actionlint {{files}}"
+    check = "actionlint {{files}}"
   }
 
   ["taplo-lint"] {
     glob = "**/*.toml"
     env { ["RUST_LOG"] = "warn" }
-    check = "mise x -- taplo lint {{files}}"
+    check = "taplo lint {{files}}"
   }
 
   ["just-format"] {
     glob = "justfile"
-    check = "mise x -- just --fmt --check --unstable --justfile justfile"
-    fix = "mise x -- just --fmt --unstable --justfile justfile"
+    check = "just --fmt --check --unstable --justfile justfile"
+    fix = "just --fmt --unstable --justfile justfile"
   }
 }
 
@@ -78,14 +78,14 @@ local full = new Mapping<String, Step | Group> {
   ["rust-analyzer"] {
     profiles = List("full")
     glob = rustImpactGlobs
-    check = "mise x -- rust-analyzer diagnostics ."
+    check = "rust-analyzer diagnostics ."
     exclusive = true
   }
 
   ["cargo-clippy"] {
     profiles = List("full")
     glob = rustImpactGlobs
-    check = "mise x -- cargo clippy --workspace --all-targets --all-features --locked -- -D warnings"
+    check = "cargo clippy --workspace --all-targets --all-features --locked -- -D warnings"
     exclusive = true
   }
 }
@@ -94,21 +94,21 @@ local ci = new Mapping<String, Step | Group> {
   ["cargo-check"] {
     profiles = List("ci")
     glob = rustImpactGlobs
-    check = "mise x -- cargo check --workspace --all-targets --all-features --locked"
+    check = "cargo check --workspace --all-targets --all-features --locked"
     exclusive = true
   }
 
   ["cargo-test"] {
     profiles = List("ci")
     glob = rustImpactGlobs
-    check = "mise x -- cargo test --workspace --all-targets --all-features --locked"
+    check = "cargo test --workspace --all-targets --all-features --locked"
     exclusive = true
   }
 
   ["cargo-build"] {
     profiles = List("ci")
     glob = rustImpactGlobs
-    check = "mise x -- cargo build --workspace --all-targets --all-features --locked"
+    check = "cargo build --workspace --all-targets --all-features --locked"
     exclusive = true
   }
 }

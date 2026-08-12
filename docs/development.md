@@ -8,28 +8,19 @@ make the smallest safe diff, and document user-visible behavior changes.
 - Git
 - Rust toolchain from [`rust-toolchain.toml`](../rust-toolchain.toml)
 - `curl`, `tar`, and `install` for installer smoke tests
-- `just` for repository recipes
-- `mise` for hook tool provisioning (`hk` itself comes from Nix)
-- Node.js 24 and npm for vendored theme checks
-- Nix, optional but preferred for a complete local shell
+- Nix with flakes enabled
 
-Do not install global tools just to work in the repo when `nix develop` or the
-checked-in package manager setup is available.
+The development flake provides the Rust toolchain, `hk`, `just`, Node.js 24,
+and all formatter and linter dependencies. Do not install global tools just to
+work in the repository.
 
 ## Setup
 
-Preferred:
+Enter the pinned development shell and set up the repository:
 
 ```sh
 nix develop
 just setup
-```
-
-Without Nix:
-
-```sh
-cargo fetch --locked
-cargo build -p mark-cli --locked
 ```
 
 From the Nix development shell, install global hk Git hooks:
