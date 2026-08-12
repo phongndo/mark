@@ -58,6 +58,7 @@
               just
               mise
               nodejs_24
+              nixd
               ripgrep
               sccache
             ];
