@@ -1,6 +1,5 @@
 [tools]
 actionlint = "1.7.12"
-hk = "1.49.0"
 just = "1.51.0"
 node = "24"
 ripgrep = "15.1.0"
