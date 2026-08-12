@@ -55,6 +55,7 @@
               curl
               git
               gnutar
+              hk
               just
               mise
               nodejs_24
