@@ -4,6 +4,7 @@ mod annotation_targets;
 mod annotations;
 mod choices;
 mod clipboard;
+mod code_selection;
 mod context;
 mod controllers;
 mod core;
@@ -44,6 +45,7 @@ pub(crate) use annotations::AnnotationMenuItem;
 #[cfg(test)]
 pub(crate) use clipboard::osc52_clipboard_sequence;
 pub(crate) use clipboard::{json_string, write_osc52_clipboard};
+pub(crate) use code_selection::CodeSelectionState;
 pub(crate) use context::{full_file_context_expansions, full_file_mode_available};
 pub(crate) use core::{
     AnnotationScratchFile, AsyncJob, BranchMetadataPolicy, CONTEXT_LOAD_WORKER_POLL,

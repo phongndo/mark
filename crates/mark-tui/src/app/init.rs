@@ -1,10 +1,11 @@
 use super::{
-    ActiveOverlay, ActiveReferenceMenu, AnnotationState, AppConfigState, BuiltinTheme, DiffApp,
-    DocumentState, ERROR_LOG_DEFAULT_HEIGHT, FileSidebarState, FilterState, InputState, JobState,
-    LiveUpdatesState, MouseScroll, NotificationState, OptionsDraft, OverlayState, ReferenceState,
-    RuntimeState, SyntaxStartupMode, ViewportState, color_scheme_from_config,
-    full_file_context_expansions, full_file_mode_available, layout_override_from_setting,
-    layout_setting_from_override, show_context_expansion_controls, show_rev_from_options,
+    ActiveOverlay, ActiveReferenceMenu, AnnotationState, AppConfigState, BuiltinTheme,
+    CodeSelectionState, DiffApp, DocumentState, ERROR_LOG_DEFAULT_HEIGHT, FileSidebarState,
+    FilterState, InputState, JobState, LiveUpdatesState, MouseScroll, NotificationState,
+    OptionsDraft, OverlayState, ReferenceState, RuntimeState, SyntaxStartupMode, ViewportState,
+    color_scheme_from_config, full_file_context_expansions, full_file_mode_available,
+    layout_override_from_setting, layout_setting_from_override, show_context_expansion_controls,
+    show_rev_from_options,
 };
 use crate::controls::{
     DiffLayoutMode, branch_head_from_options, comparison_branches, comparison_commits,
@@ -652,6 +653,7 @@ impl DiffApp {
                 key_prefix_pending: None,
                 vim_motion_count: None,
                 mouse_scroll: MouseScroll::default(),
+                code_selection: CodeSelectionState::default(),
             },
             config: AppConfigState {
                 keymap,

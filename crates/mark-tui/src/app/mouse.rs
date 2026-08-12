@@ -170,6 +170,7 @@ impl DiffApp {
             return Ok(self.mouse_burst_outcome());
         }
 
+        self.clear_code_selection();
         match mouse.kind {
             MouseEventKind::ScrollDown => {
                 if self.is_file_sidebar_position(mouse.column, mouse.row) {

@@ -3534,6 +3534,351 @@ fn left_click_moves_the_annotation_cursor_to_the_clicked_line() {
 }
 
 #[test]
+fn dragging_unified_code_highlights_without_the_gutter_and_copies_on_release() {
+    let changeset = changeset_with_line_texts(&["alpha", "beta"]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    let width = 40;
+    let code_row = app
+        .document
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
+        .expect("first code row");
+    app.viewport.scroll = code_row;
+    app.set_viewport_width(width);
+    app.set_viewport_rows(2);
+    app.set_rendered_diff_area(Rect {
+        x: 0,
+        y: 0,
+        width: width as u16,
+        height: 2,
+    });
+    build_diff_viewport_lines(&mut app, width, 2);
+    let content_start = unified_content_start_column(width) as u16;
+
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: content_start,
+        row: 0,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("selection should start");
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Drag(MouseButton::Left),
+        column: content_start + 3,
+        row: 1,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("selection should extend");
+
+    let highlighted = build_diff_viewport_lines(&mut app, width, 2);
+    for (line, gutter_digit) in highlighted.iter().zip(['1', '2']) {
+        let selected_text: String = line
+            .spans
+            .iter()
+            .filter(|span| span.style.add_modifier.contains(Modifier::REVERSED))
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert!(!selected_text.contains(gutter_digit));
+    }
+    assert!(highlighted[0].spans.iter().any(|span| {
+        span.style.add_modifier.contains(Modifier::REVERSED) && span.content.contains("alpha")
+    }));
+    assert!(highlighted[1].spans.iter().any(|span| {
+        span.style.add_modifier.contains(Modifier::REVERSED) && span.content.contains("beta")
+    }));
+
+    let outcome = app
+        .handle_mouse_with_effects(MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            column: content_start + 3,
+            row: 1,
+            modifiers: KeyModifiers::NONE,
+        })
+        .expect("selection release should be handled");
+    assert!(matches!(
+        outcome.into_effects().as_slice(),
+        [AppEffect::CopyToClipboard { text, .. }] if text == "alpha\nbeta"
+    ));
+}
+
+#[test]
+fn dragging_full_code_rows_copies_source_whitespace_and_control_characters() {
+    let changeset = changeset_with_line_texts(&["alpha  ", "\tb\u{1b}  "]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    let width = 40;
+    let code_row = app
+        .document
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
+        .expect("first code row");
+    app.viewport.scroll = code_row;
+    app.set_viewport_width(width);
+    app.set_viewport_rows(2);
+    app.set_rendered_diff_area(Rect {
+        x: 0,
+        y: 0,
+        width: width as u16,
+        height: 2,
+    });
+    build_diff_viewport_lines(&mut app, width, 2);
+    let content_start = unified_content_start_column(width) as u16;
+
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: content_start,
+        row: 0,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("selection should start");
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Drag(MouseButton::Left),
+        column: width as u16 - 1,
+        row: 1,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("selection should extend");
+    let outcome = app
+        .handle_mouse_with_effects(MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            column: width as u16 - 1,
+            row: 1,
+            modifiers: KeyModifiers::NONE,
+        })
+        .expect("selection release should be handled");
+
+    assert!(matches!(
+        outcome.into_effects().as_slice(),
+        [AppEffect::CopyToClipboard { text, .. }] if text == "alpha  \n\tb\u{1b}  "
+    ));
+}
+
+#[test]
+fn dragging_code_copies_only_the_visible_horizontally_scrolled_source() {
+    let changeset = changeset_with_line_text("abcdefghijklmnopqrstuvwxyz12");
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    let width = 40;
+    let code_row = app
+        .document
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
+        .expect("code row");
+    app.viewport.scroll = code_row;
+    app.set_viewport_width(width);
+    app.set_horizontal_scroll(2);
+    app.set_viewport_rows(1);
+    app.set_rendered_diff_area(Rect {
+        x: 0,
+        y: 0,
+        width: width as u16,
+        height: 1,
+    });
+    build_diff_viewport_lines(&mut app, width, 1);
+    let content_start = unified_content_start_column(width) as u16;
+
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: content_start,
+        row: 0,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("selection should start");
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Drag(MouseButton::Left),
+        column: width as u16 - 1,
+        row: 0,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("selection should extend");
+    let outcome = app
+        .handle_mouse_with_effects(MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            column: width as u16 - 1,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        })
+        .expect("selection release should be handled");
+
+    assert!(matches!(
+        outcome.into_effects().as_slice(),
+        [AppEffect::CopyToClipboard { text, .. }] if text == "cdefghijklmnopqrstuvwxyz12"
+    ));
+}
+
+#[test]
+fn dragging_wrapped_tab_fragments_copies_the_tab_once() {
+    let changeset = changeset_with_line_text("a\tb");
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    let width = 18;
+    let code_row = app
+        .document
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
+        .expect("code row");
+    app.viewport.line_wrapping = true;
+    app.set_viewport_width(width);
+    app.set_viewport_rows(2);
+    let code_scroll = app.wrapped_visual_scroll_for_model_row(code_row);
+    app.set_scroll(code_scroll);
+    app.set_rendered_diff_area(Rect {
+        x: 0,
+        y: 0,
+        width: width as u16,
+        height: 2,
+    });
+    build_diff_viewport_lines(&mut app, width, 2);
+    let content_start = unified_content_start_column(width) as u16;
+
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: content_start,
+        row: 0,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("selection should start");
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Drag(MouseButton::Left),
+        column: width as u16 - 1,
+        row: 1,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("selection should extend");
+    let outcome = app
+        .handle_mouse_with_effects(MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            column: width as u16 - 1,
+            row: 1,
+            modifiers: KeyModifiers::NONE,
+        })
+        .expect("selection release should be handled");
+
+    assert!(matches!(
+        outcome.into_effects().as_slice(),
+        [AppEffect::CopyToClipboard { text, .. }] if text == "a\tb"
+    ));
+}
+
+#[test]
+fn dragging_split_code_stays_in_the_starting_pane() {
+    let changeset = changeset_with_line_texts(&["left one", "left two"]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Split);
+    let width = 50;
+    let code_row = app
+        .document
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::SplitLine { .. }))
+        .expect("first code row");
+    app.viewport.scroll = code_row;
+    app.set_viewport_width(width);
+    app.set_viewport_rows(2);
+    app.set_rendered_diff_area(Rect {
+        x: 0,
+        y: 0,
+        width: width as u16,
+        height: 2,
+    });
+    build_diff_viewport_lines(&mut app, width, 2);
+    let left_width = width / 2;
+    let right_content_start = left_width
+        + crate::render::grep::split_content_start_column(width.saturating_sub(left_width));
+    let right_content_start = right_content_start as u16;
+
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: right_content_start,
+        row: 0,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("right-pane selection should start");
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Drag(MouseButton::Left),
+        column: width as u16 - 1,
+        row: 1,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("right-pane selection should extend");
+    let outcome = app
+        .handle_mouse_with_effects(MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            column: width as u16 - 1,
+            row: 1,
+            modifiers: KeyModifiers::NONE,
+        })
+        .expect("selection release should be handled");
+
+    assert!(matches!(
+        outcome.into_effects().as_slice(),
+        [AppEffect::CopyToClipboard { text, .. }] if text == "left one\nleft two"
+    ));
+}
+
+#[test]
+fn dragging_from_the_line_gutter_does_not_select_or_copy() {
+    let changeset = changeset_with_line_text("code");
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    let width = 40;
+    let code_row = app
+        .document
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
+        .expect("code row");
+    app.viewport.scroll = code_row;
+    app.set_viewport_width(width);
+    app.set_viewport_rows(1);
+    app.set_rendered_diff_area(Rect {
+        x: 0,
+        y: 0,
+        width: width as u16,
+        height: 1,
+    });
+    build_diff_viewport_lines(&mut app, width, 1);
+    let content_start = unified_content_start_column(width) as u16;
+
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: content_start - 1,
+        row: 0,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("gutter click should be handled");
+    app.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Drag(MouseButton::Left),
+        column: content_start + 3,
+        row: 0,
+        modifiers: KeyModifiers::NONE,
+    })
+    .expect("gutter drag should be ignored");
+    let outcome = app
+        .handle_mouse_with_effects(MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            column: content_start + 3,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        })
+        .expect("gutter release should be ignored");
+
+    assert!(outcome.into_effects().is_empty());
+    let rendered = build_diff_viewport_lines(&mut app, width, 1);
+    assert!(
+        rendered[0]
+            .spans
+            .iter()
+            .all(|span| !span.style.add_modifier.contains(Modifier::REVERSED))
+    );
+}
+
+#[test]
 fn mouse_movement_leaves_only_the_keyboard_cursor_highlight() {
     let lines: Vec<&str> = (0..12).map(|_| "line").collect();
     let changeset = changeset_with_line_texts(&lines);
