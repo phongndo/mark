@@ -2,24 +2,24 @@
   "name": "Origin",
   "type": "dark",
   "colors": {
-    "editor.background": "#050507",
+    "editor.background": "#0A0B0A",
     "editor.foreground": "#DCD9D2",
     "editorCursor.foreground": "#DCD9D2",
-    "editor.lineHighlightBackground": "#272627",
+    "editor.lineHighlightBackground": "#2B2C2A",
     "editor.findMatchBackground": "#FFA657",
-    "statusBar.background": "#131314",
+    "statusBar.background": "#181817",
     "gitDecoration.addedResourceForeground": "#26CD4D",
     "gitDecoration.deletedResourceForeground": "#FF6A69",
     "gitDecoration.modifiedResourceForeground": "#FFA657",
-    "diffEditor.insertedLineBackground": "#0A2111",
-    "diffEditor.removedLineBackground": "#281315"
+    "diffEditor.insertedLineBackground": "#0E2613",
+    "diffEditor.removedLineBackground": "#2C1817"
   },
   "tokenColors": [
     {
       "name": "Comments",
       "scope": "comment",
       "settings": {
-        "foreground": "#9A96A0",
+        "foreground": "#9D99A3",
         "fontStyle": "italic"
       }
     },
@@ -109,7 +109,7 @@
         "support.function.macro"
       ],
       "settings": {
-        "foreground": "#9A96A0",
+        "foreground": "#9D99A3",
         "fontStyle": ""
       }
     },
@@ -154,7 +154,7 @@
         "variable.annotation"
       ],
       "settings": {
-        "foreground": "#9A96A0",
+        "foreground": "#9D99A3",
         "fontStyle": ""
       }
     },
@@ -246,7 +246,7 @@
       "name": "Punctuation",
       "scope": "punctuation",
       "settings": {
-        "foreground": "#9A96A0",
+        "foreground": "#9D99A3",
         "fontStyle": ""
       }
     },
