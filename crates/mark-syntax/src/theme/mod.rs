@@ -484,7 +484,7 @@ mod tests {
         let cases: &[(&[&str], RgbColor, SyntaxModifiers)] = &[
             (
                 &["source.test", "comment.line.test"],
-                RgbColor::new(0x9a, 0x96, 0xa0),
+                RgbColor::new(0x9d, 0x99, 0xa3),
                 SyntaxModifiers::ITALIC,
             ),
             (
@@ -514,12 +514,12 @@ mod tests {
             ),
             (
                 &["source.test", "keyword.control.import.test"],
-                RgbColor::new(0x9a, 0x96, 0xa0),
+                RgbColor::new(0x9d, 0x99, 0xa3),
                 SyntaxModifiers::empty(),
             ),
             (
                 &["source.test", "entity.name.function.macro.test"],
-                RgbColor::new(0x9a, 0x96, 0xa0),
+                RgbColor::new(0x9d, 0x99, 0xa3),
                 SyntaxModifiers::empty(),
             ),
             (
@@ -581,7 +581,7 @@ mod tests {
             ),
             (
                 &["source.test", "punctuation.separator.test"],
-                RgbColor::new(0x9a, 0x96, 0xa0),
+                RgbColor::new(0x9d, 0x99, 0xa3),
                 SyntaxModifiers::empty(),
             ),
             (
