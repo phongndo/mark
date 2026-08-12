@@ -123,16 +123,47 @@ impl MouseEventContext for MouseEventCtx<'_> {
     fn handle_diff_mouse(&mut self, mouse: MouseEvent) -> bool {
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
+                self.app.clear_code_selection();
                 if self.app.start_error_log_resize(mouse.row) {
                     return true;
                 }
                 if self.app.start_file_sidebar_resize(mouse.column, mouse.row) {
                     return true;
                 }
+                if let Some((column, row)) =
+                    self.app.diff_viewport_position(mouse.column, mouse.row)
+                {
+                    self.app.begin_code_selection(column, row);
+                }
                 self.app.handle_click(mouse.column, mouse.row);
                 true
             }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                if !self.app.code_selection_mouse_down() {
+                    return false;
+                }
+                if let Some((column, row)) =
+                    self.app.diff_viewport_position(mouse.column, mouse.row)
+                {
+                    self.app.update_code_selection(column, row);
+                }
+                true
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                if !self.app.code_selection_mouse_down() {
+                    return false;
+                }
+                if let Some((column, row)) =
+                    self.app.diff_viewport_position(mouse.column, mouse.row)
+                {
+                    self.app.finish_code_selection(column, row);
+                } else {
+                    self.app.clear_code_selection();
+                }
+                true
+            }
             MouseEventKind::ScrollDown => {
+                self.app.clear_code_selection();
                 if self.app.is_file_sidebar_position(mouse.column, mouse.row) {
                     self.app.input.reset_mouse_scroll();
                     self.app.scroll_file_sidebar_by(1);
@@ -143,6 +174,7 @@ impl MouseEventContext for MouseEventCtx<'_> {
                 true
             }
             MouseEventKind::ScrollUp => {
+                self.app.clear_code_selection();
                 if self.app.is_file_sidebar_position(mouse.column, mouse.row) {
                     self.app.input.reset_mouse_scroll();
                     self.app.scroll_file_sidebar_by(-1);
@@ -153,6 +185,7 @@ impl MouseEventContext for MouseEventCtx<'_> {
                 true
             }
             MouseEventKind::ScrollLeft => {
+                self.app.clear_code_selection();
                 if self.app.is_file_sidebar_position(mouse.column, mouse.row) {
                     self.app.input.reset_mouse_scroll();
                     return true;
@@ -162,6 +195,7 @@ impl MouseEventContext for MouseEventCtx<'_> {
                 true
             }
             MouseEventKind::ScrollRight => {
+                self.app.clear_code_selection();
                 if self.app.is_file_sidebar_position(mouse.column, mouse.row) {
                     self.app.input.reset_mouse_scroll();
                     return true;

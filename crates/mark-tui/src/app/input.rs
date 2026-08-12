@@ -19,6 +19,7 @@ impl DiffApp {
     }
 
     pub(crate) fn handle_key_with_effects(&mut self, key: KeyEvent) -> MarkResult<ActionOutcome> {
+        self.clear_code_selection();
         let mut outcome =
             ActionOutcome::from_component_event_result(route_key_through_layers(self, key)?);
         outcome.extend_effects(self.take_queued_effects());

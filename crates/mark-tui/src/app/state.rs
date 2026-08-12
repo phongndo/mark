@@ -1,8 +1,8 @@
 use super::{
-    AppEffect, BuiltinTheme, CONTEXT_LOAD_WORKER_POLL, ContextLoadWorker, DIFF_PREFETCH_POLL,
-    DiffCacheEntry, EDITOR_RELOAD_POLL, EditorReloadRequest, EditorReloadWorker,
-    FILTER_WORKER_POLL, FilterWorker, MouseScroll, OptionsDraft, PendingDiffLoad,
-    PendingDiffPrefetch, PendingFilterApply, PendingReviewLoad, SyntaxStartupMode,
+    AppEffect, BuiltinTheme, CONTEXT_LOAD_WORKER_POLL, CodeSelectionState, ContextLoadWorker,
+    DIFF_PREFETCH_POLL, DiffCacheEntry, EDITOR_RELOAD_POLL, EditorReloadRequest,
+    EditorReloadWorker, FILTER_WORKER_POLL, FilterWorker, MouseScroll, OptionsDraft,
+    PendingDiffLoad, PendingDiffPrefetch, PendingFilterApply, PendingReviewLoad, SyntaxStartupMode,
     TRAILING_CONTEXT_WORKER_POLL, TrailingContextWorker, WrappedVisualLayout,
 };
 use crate::annotation::{
@@ -717,6 +717,7 @@ pub(crate) struct InputState {
     /// Vim-style count entered before a built-in diff motion.
     pub(in crate::app) vim_motion_count: Option<usize>,
     pub(crate) mouse_scroll: MouseScroll,
+    pub(crate) code_selection: CodeSelectionState,
 }
 
 impl InputState {
