@@ -4,10 +4,4 @@ hk = "1.49.0"
 just = "1.51.0"
 node = "24"
 ripgrep = "15.1.0"
-# Keep hk's Clippy aligned with CI; Rust 1.88 is validated separately as the MSRV.
-rust = "stable"
-rust-analyzer = "2026-06-29"
 taplo = "0.10.0"
-
-[env]
-RUSTUP_INIT_SKIP_PATH_CHECK = "yes"
