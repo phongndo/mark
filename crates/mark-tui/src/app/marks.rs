@@ -62,7 +62,6 @@ impl DiffApp {
                 out.push_str(&json_string(match scope {
                     MarkScope::File => "file",
                     MarkScope::Hunk => "hunk",
-                    MarkScope::Range => "range",
                 }));
             }
             if let Some(old_line) = mark.old_line {
@@ -106,19 +105,14 @@ impl DiffApp {
             UiModelBuildOptions::new(true, true, false),
         );
         let exportable_keys = self.exportable_annotation_keys(&export_model);
-        let exportable_range_coordinates = self.exportable_range_coordinates(&export_model);
         self.annotations_state
             .annotations
             .keys()
             .filter_map(|key| {
                 let body = self.annotations_state.annotations.human_text(key)?;
-                let is_exportable = if key.is_range() {
-                    self.range_is_exportable(&export_model, &exportable_range_coordinates, key)
-                } else {
-                    exportable_keys.contains(key)
-                        || self.collapsed_context_contains_annotation_key(&export_model, key)
-                };
-                if !is_exportable {
+                if !exportable_keys.contains(key)
+                    && !self.collapsed_context_contains_annotation_key(&export_model, key)
+                {
                     return None;
                 }
                 self.export_mark(key, body)
@@ -133,125 +127,12 @@ impl DiffApp {
             .collect()
     }
 
-    fn exportable_range_coordinates(
-        &self,
-        model: &UiModel,
-    ) -> HashSet<(usize, AnnotationSide, usize)> {
-        let mut coordinates = HashSet::new();
-        for (model_row, row) in model.iter_rows().enumerate() {
-            let Some(file_index) = model.file_at_row(model_row) else {
-                continue;
-            };
-            for preferred_side in [AnnotationSide::Old, AnnotationSide::New] {
-                if let Some((side, line)) = AnnotationKey::line_coordinates_from_ui_row(
-                    &self.document.changeset,
-                    row,
-                    preferred_side,
-                ) {
-                    coordinates.insert((file_index, side, line));
-                }
-            }
-            if let UiRow::UnifiedLine { file, hunk, line } = row
-                && let Some(diff_line) = self
-                    .document
-                    .changeset
-                    .files
-                    .get(file.get())
-                    .and_then(|file| file.hunks().get(hunk.get()))
-                    .and_then(|hunk| hunk.lines.get(line.get()))
-            {
-                if let Some(line) = diff_line.old_line() {
-                    coordinates.insert((file_index, AnnotationSide::Old, line));
-                }
-                if let Some(line) = diff_line.new_line() {
-                    coordinates.insert((file_index, AnnotationSide::New, line));
-                }
-            }
-        }
-        coordinates
-    }
-
-    fn range_is_exportable(
-        &self,
-        model: &UiModel,
-        exportable_coordinates: &HashSet<(usize, AnnotationSide, usize)>,
-        key: &AnnotationKey,
-    ) -> bool {
-        let AnnotationScope::Range {
-            old_start,
-            old_count,
-            new_start,
-            new_count,
-        } = key.scope
-        else {
-            return false;
-        };
-        if !key.covers_coordinate(key.side, key.line) {
-            return false;
-        }
-
-        self.document
-            .changeset
-            .files
-            .iter()
-            .enumerate()
-            .filter(|(_, file)| {
-                AnnotationKey::path_for_side(file, key.side) == Some(key.path.as_str())
-            })
-            .any(|(file_index, file)| {
-                self.source_range_is_exportable(
-                    model,
-                    exportable_coordinates,
-                    file_index,
-                    file,
-                    AnnotationSide::Old,
-                    old_start,
-                    old_count,
-                ) && self.source_range_is_exportable(
-                    model,
-                    exportable_coordinates,
-                    file_index,
-                    file,
-                    AnnotationSide::New,
-                    new_start,
-                    new_count,
-                )
-            })
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn source_range_is_exportable(
-        &self,
-        model: &UiModel,
-        exportable_coordinates: &HashSet<(usize, AnnotationSide, usize)>,
-        file_index: usize,
-        file: &mark_diff::DiffFile,
-        side: AnnotationSide,
-        start: usize,
-        count: usize,
-    ) -> bool {
-        if count == 0 {
-            return true;
-        }
-        let Some(path) = AnnotationKey::path_for_side(file, side) else {
-            return false;
-        };
-
-        (0..count).all(|offset| {
-            let Some(line) = start.checked_add(offset) else {
-                return false;
-            };
-            exportable_coordinates.contains(&(file_index, side, line))
-                || self.collapsed_context_contains_coordinate(model, path, side, line)
-        })
-    }
-
     fn collapsed_context_contains_annotation_key(
         &self,
         model: &UiModel,
         key: &AnnotationKey,
     ) -> bool {
-        (key.is_line() || key.is_range())
+        key.is_line()
             && key.side == AnnotationSide::New
             && self.collapsed_context_contains_coordinate(model, &key.path, key.side, key.line)
     }
@@ -361,22 +242,6 @@ impl DiffApp {
                 mark.old_count = Some(old_count);
                 mark.new_start = Some(new_start);
                 mark.new_count = Some(new_count);
-            }
-            AnnotationScope::Range {
-                old_start,
-                old_count,
-                new_start,
-                new_count,
-            } => {
-                mark.scope = Some(MarkScope::Range);
-                if old_count > 0 {
-                    mark.old_start = Some(old_start);
-                    mark.old_count = Some(old_count);
-                }
-                if new_count > 0 {
-                    mark.new_start = Some(new_start);
-                    mark.new_count = Some(new_count);
-                }
             }
             AnnotationScope::Line => match key.side {
                 AnnotationSide::Old => mark.old_line = Some(key.line),

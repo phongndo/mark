@@ -68,12 +68,7 @@ pub(crate) fn push_statusline_left_spans(
     app: &DiffApp,
     remaining: &mut usize,
 ) {
-    let visual_mode = app.annotation_visual_mode_active();
-    let selector_text = if visual_mode {
-        Cow::Borrowed(" VISUAL ")
-    } else {
-        Cow::Owned(diff_selector_text(&app.document.options))
-    };
+    let selector_text = Cow::Owned(diff_selector_text(&app.document.options));
     push_fitted_statusline_span(spans, selector_text, statusline_mode_style(app), remaining);
     let info_bg = app.config.theme.statusline_info_bg;
     push_fitted_statusline_span(
@@ -211,16 +206,10 @@ pub(crate) fn statusline_right_max_width(width: usize) -> usize {
 }
 
 fn statusline_mode_style(app: &DiffApp) -> Style {
-    let style = if app.annotation_visual_mode_active() {
-        Style::default()
-            .fg(app.config.theme.search_match_fg)
-            .bg(app.config.theme.search_match_bg)
-    } else {
-        Style::default()
-            .fg(app.config.theme.statusline_accent_fg)
-            .bg(app.config.theme.statusline_accent_bg)
-    };
-    style.add_modifier(Modifier::BOLD)
+    Style::default()
+        .fg(app.config.theme.statusline_accent_fg)
+        .bg(app.config.theme.statusline_accent_bg)
+        .add_modifier(Modifier::BOLD)
 }
 
 fn statusline_info_style(app: &DiffApp) -> Style {

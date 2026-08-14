@@ -6,8 +6,7 @@ use super::{
     TRAILING_CONTEXT_WORKER_POLL, TrailingContextWorker, WrappedVisualLayout,
 };
 use crate::annotation::{
-    AnnotationCursor, AnnotationDraft, AnnotationKey, AnnotationKeyIndex, AnnotationSide,
-    AnnotationTargetMode,
+    AnnotationCursor, AnnotationDraft, AnnotationKey, AnnotationKeyIndex, AnnotationTargetMode,
 };
 use crate::controls::{BranchMenu, DiffFilterKind, DiffLayoutMode, GitCommit};
 use crate::keymap::{KeyPress, Keymap};
@@ -124,14 +123,6 @@ impl FileSidebarState {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct AnnotationVisualAnchor {
-    pub(crate) model_row: usize,
-    pub(crate) first_model_row: usize,
-    pub(crate) last_model_row: usize,
-    pub(crate) side: AnnotationSide,
-}
-
 #[derive(Debug)]
 pub(crate) struct AnnotationState {
     pub(crate) annotations: ReviewCommentStore,
@@ -141,10 +132,6 @@ pub(crate) struct AnnotationState {
     pub(crate) annotation_heights: RefCell<HashMap<AnnotationKey, AnnotationHeightCacheEntry>>,
     pub(crate) annotation_draft: Option<AnnotationDraft>,
     pub(crate) annotation_cursor: Option<AnnotationCursor>,
-    /// Model-row anchor, initiating side, and bounds for Vim-style visual-line
-    /// selection. The head is the current annotation cursor, so extending is
-    /// allocation-free.
-    pub(crate) visual_anchor: Option<AnnotationVisualAnchor>,
     pub(crate) annotation_block_scroll: Option<(AnnotationKey, usize)>,
     pub(crate) annotation_target_mode: Option<AnnotationTargetMode>,
     pub(crate) sticky_annotation_draft: bool,

@@ -23,7 +23,6 @@ impl NavigationController {
         let horizontal_delta = (HORIZONTAL_SCROLL_STEP as isize).saturating_mul(count);
 
         let handled = match key.code {
-            KeyCode::Esc if ctx.cancel_visual_mode() => true,
             KeyCode::Esc if ctx.filters_active() => {
                 ctx.clear_all_filters();
                 true

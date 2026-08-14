@@ -3,8 +3,7 @@ use super::{
     normalize_annotation_editor_contents, viewport_center_offset,
 };
 use crate::annotation::{
-    AnnotationConnectorInterval, AnnotationDraft, AnnotationKey, AnnotationKeyIndex,
-    AnnotationScope, AnnotationSide,
+    AnnotationDraft, AnnotationKey, AnnotationKeyIndex, AnnotationScope, AnnotationSide,
 };
 use crate::editor::{configured_editor, open_text_in_editor};
 use crate::keymap::{AnnotationMenuAction, GlobalAction, MenuAction};
@@ -408,16 +407,9 @@ impl DiffApp {
         }
         self.cache_annotation_model_rows();
         let mut index = AnnotationKeyIndex::default();
-        if self.annotations_state.annotations.is_empty() {
-            *self.annotations_state.annotation_keys_by_row.borrow_mut() = Some(index);
-            return;
-        }
         let annotation_rows = self.annotations_state.annotation_rows.borrow();
-        let file_indices_by_side_path =
-            annotation_file_indices_by_side_path(&self.document.changeset);
         for key in self.annotations_state.annotations.keys() {
             let Some(model_row) = annotation_rows.get(key).copied().flatten() else {
-                // Connectors without a current anchor would have no card.
                 continue;
             };
             index
@@ -425,69 +417,9 @@ impl DiffApp {
                 .entry(model_row)
                 .or_default()
                 .push(key.clone());
-            let Some(file_indices) = file_indices_by_side_path.get(&(key.side, key.path.as_str()))
-            else {
-                continue;
-            };
-            for &file_index in file_indices {
-                match key.scope {
-                    AnnotationScope::Line if key.is_line() => {
-                        index
-                            .line_connectors_by_coordinate
-                            .entry((file_index, key.side, key.line))
-                            .or_default()
-                            .push(key.clone());
-                    }
-                    AnnotationScope::Range {
-                        old_start,
-                        old_count,
-                        new_start,
-                        new_count,
-                    } => {
-                        for (side, start, count) in [
-                            (AnnotationSide::Old, old_start, old_count),
-                            (AnnotationSide::New, new_start, new_count),
-                        ] {
-                            if count == 0 {
-                                continue;
-                            }
-                            index
-                                .range_connectors_by_file_side
-                                .entry((file_index, side))
-                                .or_default()
-                                .entries
-                                .push(AnnotationConnectorInterval {
-                                    start,
-                                    end: start.saturating_add(count.saturating_sub(1)),
-                                    key: key.clone(),
-                                });
-                        }
-                    }
-                    AnnotationScope::File
-                    | AnnotationScope::Hunk { .. }
-                    | AnnotationScope::Line => {}
-                }
-            }
         }
         for keys in index.anchors_by_model_row.values_mut() {
             keys.sort_unstable();
-        }
-        for keys in index.line_connectors_by_coordinate.values_mut() {
-            keys.sort_unstable();
-        }
-        for intervals in index.range_connectors_by_file_side.values_mut() {
-            intervals.entries.sort_unstable_by(|left, right| {
-                (left.start, left.end, &left.key).cmp(&(right.start, right.end, &right.key))
-            });
-            let mut max_end = 0usize;
-            intervals.prefix_max_end = intervals
-                .entries
-                .iter()
-                .map(|interval| {
-                    max_end = max_end.max(interval.end);
-                    max_end
-                })
-                .collect();
         }
         *self.annotations_state.annotation_keys_by_row.borrow_mut() = Some(index);
     }
@@ -521,55 +453,6 @@ impl DiffApp {
                 }
             }
         }
-        keys
-    }
-
-    pub(crate) fn annotation_connector_keys_at_model_row(
-        &self,
-        model_row: usize,
-        row: UiRow,
-    ) -> Vec<AnnotationKey> {
-        let Some(file_index) = self.document.model.file_at_row(model_row) else {
-            return Vec::new();
-        };
-        self.cache_annotation_keys_by_model_row();
-        let index = self.annotations_state.annotation_keys_by_row.borrow();
-        let Some(index) = index.as_ref() else {
-            return Vec::new();
-        };
-        let mut keys = Vec::new();
-        for preferred_side in [AnnotationSide::Old, AnnotationSide::New] {
-            let Some((side, line)) = AnnotationKey::line_coordinates_from_ui_row(
-                &self.document.changeset,
-                row,
-                preferred_side,
-            ) else {
-                continue;
-            };
-            if let Some(candidates) = index
-                .line_connectors_by_coordinate
-                .get(&(file_index, side, line))
-            {
-                keys.extend(candidates.iter().cloned());
-            }
-            if let Some(intervals) = index.range_connectors_by_file_side.get(&(file_index, side)) {
-                let mut interval_index = intervals
-                    .entries
-                    .partition_point(|interval| interval.start <= line);
-                while interval_index > 0 {
-                    interval_index -= 1;
-                    if intervals.prefix_max_end[interval_index] < line {
-                        break;
-                    }
-                    let interval = &intervals.entries[interval_index];
-                    if interval.end >= line {
-                        keys.push(interval.key.clone());
-                    }
-                }
-            }
-        }
-        keys.sort_unstable();
-        keys.dedup();
         keys
     }
 
@@ -633,24 +516,6 @@ impl DiffApp {
                             .hunk_row_range(file_index.get(), hunk_index.get())
                             .and_then(|range| (!range.is_empty()).then_some(range.start))
                     });
-            }
-            AnnotationScope::Range {
-                old_start,
-                old_count,
-                new_start,
-                new_count,
-            } => {
-                return [
-                    (AnnotationSide::Old, old_start, old_count),
-                    (AnnotationSide::New, new_start, new_count),
-                ]
-                .into_iter()
-                .filter(|(_, _, count)| *count > 0)
-                .filter_map(|(side, start, count)| {
-                    let line = start.saturating_add(count.saturating_sub(1));
-                    self.model_row_for_source_coordinate(file_index, file, side, line)
-                })
-                .max();
             }
             AnnotationScope::Line => {}
         }

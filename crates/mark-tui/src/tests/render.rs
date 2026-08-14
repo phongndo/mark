@@ -2706,12 +2706,8 @@ fn mouse_click_selects_line_and_enter_opens_annotation_input() {
 
     let lines = crate::render::diff::build_diff_viewport_lines(&mut app, 40, 6);
     assert_eq!(lines.len(), 4);
-    assert!(
-        line_text(&lines[1])
-            .trim_start()
-            .starts_with("├─ Add note · +1")
-    );
-    assert!(line_text(&lines[1]).ends_with('┐'));
+    assert!(line_text(&lines[1]).starts_with("┌Add note · +1"));
+    assert!(line_text(&lines[1]).ends_with("[x]┐"));
     assert!(
         lines[1]
             .spans
@@ -2720,9 +2716,8 @@ fn mouse_click_selects_line_and_enter_opens_annotation_input() {
     );
     assert!(line_text(&lines[2]).contains(INPUT_CURSOR));
     let footer = line_text(&lines[3]);
-    assert!(footer.trim_start().starts_with('└'));
     assert!(footer.contains("[✓]"));
-    assert!(footer.ends_with('┘'));
+    assert!(footer.ends_with("[✓]┘"));
     assert!(lines[3].spans.iter().any(|span| {
         span.content.contains("[✓]") && span.style.fg == Some(app.config.theme.addition_fg)
     }));
@@ -2811,102 +2806,6 @@ fn enter_annotates_removed_line_in_replacement_block() {
         .expect("removed-line draft");
     assert_eq!(draft.key.side, AnnotationSide::Old);
     assert_eq!(draft.key.line, 1);
-}
-
-#[test]
-fn mouse_click_selects_split_side_and_visual_mode_uses_right_side() {
-    use crate::annotation::{AnnotationKey, AnnotationSide};
-
-    let changeset = changeset_with_replacement_pair();
-    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Split);
-    app.set_rendered_diff_area(Rect {
-        x: 0,
-        y: 1,
-        width: 60,
-        height: 8,
-    });
-    app.set_viewport_width(60);
-    app.set_viewport_rows(8);
-    let split_row = app
-        .document
-        .model
-        .rows
-        .iter()
-        .position(|row| matches!(row, UiRow::SplitLine { .. }))
-        .expect("split line");
-    app.viewport.scroll = split_row;
-
-    let row = app.document.model.row(split_row).expect("row");
-    let keys = AnnotationKey::candidates_from_ui_row(&app.document.changeset, row);
-    assert_eq!(keys.len(), 2);
-    let old_key = keys
-        .iter()
-        .find(|key| key.side == AnnotationSide::Old)
-        .cloned()
-        .expect("old-side key");
-    let key = AnnotationKey::from_ui_row(&app.document.changeset, row).expect("default key");
-    assert_eq!(key.side, AnnotationSide::New);
-    let left_width = app.viewport.viewport_width / 2;
-    let old_side_column = (left_width - 1) as u16;
-    assert!(app.handle_diff_click(old_side_column, 1));
-    assert!(app.annotations_state.annotation_draft.is_none());
-    assert_eq!(
-        app.annotation_cursor_target().map(|target| &target.key),
-        Some(&old_key)
-    );
-    app.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE))
-        .expect("v should enter Visual mode");
-    assert!(app.annotation_visual_mode_active());
-    assert_eq!(
-        app.annotation_active_line_side(split_row, row),
-        Some(AnnotationSide::New)
-    );
-    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
-        .expect("Enter should annotate the deterministic right side");
-    assert_eq!(
-        app.annotations_state
-            .annotation_draft
-            .as_ref()
-            .map(|draft| &draft.key),
-        Some(&key)
-    );
-    app.handle_annotation_input_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-    app.viewport.scroll = split_row;
-
-    let new_side_column = (app.viewport.viewport_width - 1) as u16;
-    assert!(app.handle_diff_click(new_side_column, 1));
-    assert!(app.annotations_state.annotation_draft.is_none());
-    assert_eq!(
-        app.annotation_cursor_target().map(|target| &target.key),
-        Some(&key)
-    );
-    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
-        .expect("Enter should annotate the selected split row");
-    let draft = app
-        .annotations_state
-        .annotation_draft
-        .as_ref()
-        .expect("draft");
-    assert_eq!(draft.key, key);
-
-    for character in "new note".chars() {
-        app.handle_annotation_input_key(KeyEvent::new(
-            KeyCode::Char(character),
-            KeyModifiers::NONE,
-        ));
-    }
-    app.handle_annotation_input_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
-
-    assert_eq!(
-        app.annotations_state
-            .annotations
-            .get(&key)
-            .map(String::as_str),
-        Some("new note")
-    );
-    let json = app.marks_clipboard_json().expect("marks JSON");
-    assert!(json.contains("\"old_line\": 1"));
-    assert!(json.contains("\"new_line\": 1"));
 }
 
 #[test]
@@ -3305,8 +3204,7 @@ fn annotation_hidden_compose_footer_is_not_submit_target() {
     }
 
     let rendered = crate::render::diff::build_diff_viewport_lines(&mut app, 40, 2);
-    assert!(line_text(&rendered[1]).contains("[x]"));
-    assert!(line_text(&rendered[1]).ends_with('┐'));
+    assert!(line_text(&rendered[1]).ends_with("[x]┐"));
     assert!(!rendered.iter().any(|line| line_text(line).contains("[✓]")));
     assert!(app.handle_diff_click(38, 2));
 

@@ -182,16 +182,6 @@ fn candidate_anchor(
             let line = unique_sequence_start(file, anchor.side, lines)?;
             AnnotationKey::for_file_line(file, anchor.side, line)
         }
-        AnnotationScope::Range { .. } => {
-            let old = unique_optional_range(file, AnnotationSide::Old, &evidence.old_lines)?;
-            let new = unique_optional_range(file, AnnotationSide::New, &evidence.new_lines)?;
-            let (side, line) = new
-                .map(|(start, count)| (AnnotationSide::New, start + count - 1))
-                .or_else(|| old.map(|(start, count)| (AnnotationSide::Old, start + count - 1)))?;
-            let (old_start, old_count) = old.unwrap_or((0, 0));
-            let (new_start, new_count) = new.unwrap_or((0, 0));
-            AnnotationKey::for_range(file, side, line, old_start, old_count, new_start, new_count)
-        }
         AnnotationScope::Hunk { .. } => {
             let expected = evidence.hunk_fingerprint.as_deref()?;
             let mut matches = file
@@ -231,17 +221,6 @@ fn anchor_evidence(app: &DiffApp, anchor: &AnnotationKey) -> ReviewAnchorEvidenc
             },
             hunk_fingerprint: None,
         },
-        AnnotationScope::Range {
-            old_start,
-            old_count,
-            new_start,
-            new_count,
-        } => ReviewAnchorEvidence {
-            file_fingerprint,
-            old_lines: range_lines(file, AnnotationSide::Old, old_start, old_count),
-            new_lines: range_lines(file, AnnotationSide::New, new_start, new_count),
-            hunk_fingerprint: None,
-        },
         AnnotationScope::Hunk {
             old_start,
             old_count,
@@ -270,17 +249,6 @@ fn anchor_evidence_bytes(evidence: &ReviewAnchorEvidence) -> usize {
         + evidence.old_lines.iter().map(String::len).sum::<usize>()
         + evidence.new_lines.iter().map(String::len).sum::<usize>()
         + evidence.hunk_fingerprint.as_ref().map_or(0, String::len)
-}
-
-fn unique_optional_range(
-    file: &DiffFile,
-    side: AnnotationSide,
-    expected: &[String],
-) -> Option<Option<(usize, usize)>> {
-    if expected.is_empty() {
-        return Some(None);
-    }
-    unique_sequence_start(file, side, expected).map(|start| Some((start, expected.len())))
 }
 
 fn unique_sequence_start(

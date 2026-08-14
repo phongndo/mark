@@ -9,11 +9,8 @@ use crate::{
     },
     controls::INPUT_CURSOR,
     render::{
-        annotation_ranges::AnnotationBlockGeometry,
         style::{base_bg, input_cursor_style, spans_with_input_cursor},
-        text::{
-            fit, fit_byte_prefix_with_width, fit_padded, spaces, terminal_text, terminal_text_cow,
-        },
+        text::{fit, fit_byte_prefix_with_width, fit_padded, spaces, terminal_text},
     },
     theme::DiffTheme,
 };
@@ -27,125 +24,110 @@ fn annotation_border_style(theme: DiffTheme) -> Style {
 
 fn annotation_top_border_line(
     width: usize,
-    geometry: AnnotationBlockGeometry,
     theme: DiffTheme,
     label: Option<&str>,
 ) -> Line<'static> {
-    let card_width = geometry.card_width();
-    if card_width < 2 {
-        return Line::from(Span::styled(
-            spaces(width),
-            Style::default().bg(base_bg(theme)),
-        ));
+    if width == 0 {
+        return Line::default();
     }
-    let (top_left, _, _, _, top_right) = annotation_frame_characters(theme);
-    let top_left = if geometry.connected {
-        if theme.decorations.is_fancy() {
-            '├'
-        } else {
-            '+'
-        }
-    } else {
-        top_left
-    };
-    let interior = card_width.saturating_sub(2);
-    let close = if interior >= ANNOTATION_CLOSE_BUTTON_WIDTH {
-        ANNOTATION_CLOSE_BUTTON
-    } else {
-        ""
-    };
-    let close_width = close.width();
-    let label_width = interior.saturating_sub(close_width);
-    let title_rule = if theme.decorations.is_fancy() {
-        '─'
-    } else {
-        '-'
-    };
-    let has_title_rule = label.is_some() && label_width > 0;
-    let title_width = label_width.saturating_sub(usize::from(has_title_rule));
-    let title = label
-        .map(|label| terminal_text(&format!(" {label} ")))
-        .map(|label| fit(&label, title_width))
-        .unwrap_or_default();
-    let used = title.width().saturating_add(usize::from(has_title_rule));
-    let fill = annotation_rule(label_width.saturating_sub(used), theme);
-    let mut spans = annotation_line_prefix(width, geometry, theme);
-    spans.push(Span::styled(
-        top_left.to_string(),
-        annotation_border_style(theme),
-    ));
-    if has_title_rule {
-        spans.push(Span::styled(
-            title_rule.to_string(),
+    if width == 1 {
+        return Line::from(Span::styled(
+            annotation_rule(1, theme),
             annotation_border_style(theme),
         ));
     }
-    if !title.is_empty() {
+
+    let inner_width = annotation_body_width(width);
+    let show_close = inner_width >= ANNOTATION_CLOSE_BUTTON_WIDTH;
+    let rule_width = inner_width.saturating_sub(if show_close {
+        ANNOTATION_CLOSE_BUTTON_WIDTH
+    } else {
+        0
+    });
+    let mut spans = Vec::with_capacity(5);
+    spans.push(annotation_border_span("┌", theme));
+    if let Some(label) = label {
+        let label = terminal_text(&format!("{label} "));
+        let label = fit(&label, rule_width);
+        let label_width = label.width();
+        if label_width > 0 {
+            spans.push(Span::styled(
+                label,
+                Style::default().fg(theme.foreground).bg(base_bg(theme)),
+            ));
+        }
+        let fill_width = rule_width.saturating_sub(label_width);
+        if fill_width > 0 {
+            spans.push(Span::styled(
+                annotation_rule(fill_width, theme),
+                annotation_border_style(theme),
+            ));
+        }
+    } else if rule_width > 0 {
         spans.push(Span::styled(
-            title,
-            Style::default().fg(theme.foreground).bg(base_bg(theme)),
+            annotation_rule(rule_width, theme),
+            annotation_border_style(theme),
         ));
     }
-    if !fill.is_empty() {
-        spans.push(Span::styled(fill, annotation_border_style(theme)));
-    }
-    if !close.is_empty() {
+    if show_close {
         spans.push(Span::styled(
-            close.to_owned(),
+            ANNOTATION_CLOSE_BUTTON.to_owned(),
             Style::default()
                 .fg(theme.deletion_fg)
                 .bg(base_bg(theme))
                 .add_modifier(Modifier::BOLD),
         ));
     }
-    spans.push(Span::styled(
-        top_right.to_string(),
-        annotation_border_style(theme),
-    ));
-    push_annotation_line_suffix(&mut spans, width, geometry, theme);
+    spans.push(annotation_border_span("┐", theme));
     Line::from(spans)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AnnotationFooterButton {
+    None,
     Edit,
     Submit,
 }
 
 fn annotation_bottom_border_line(
     width: usize,
-    geometry: AnnotationBlockGeometry,
     theme: DiffTheme,
-    button: Option<AnnotationFooterButton>,
+    button: AnnotationFooterButton,
 ) -> Line<'static> {
-    let card_width = geometry.card_width();
-    if card_width < 2 {
+    if width == 0 {
+        return Line::default();
+    }
+    if width == 1 {
         return Line::from(Span::styled(
-            spaces(width),
-            Style::default().bg(base_bg(theme)),
+            annotation_rule(1, theme),
+            annotation_border_style(theme),
         ));
     }
-    let (_, _, bottom_left, bottom_right, _) = annotation_frame_characters(theme);
-    let interior = card_width.saturating_sub(2);
-    let label = button
-        .map(|button| annotation_footer_button_label(interior, button, theme))
-        .unwrap_or_default();
-    let label_width = label.width();
-    let button_fg = match button {
-        Some(AnnotationFooterButton::Edit) => theme.search_match_bg,
-        Some(AnnotationFooterButton::Submit) => theme.addition_fg,
-        None => theme.foreground,
+
+    let style = annotation_border_style(theme);
+    let inner_width = annotation_body_width(width);
+    let button_width = match button {
+        AnnotationFooterButton::None => 0,
+        AnnotationFooterButton::Edit => ANNOTATION_EDIT_BUTTON_WIDTH,
+        AnnotationFooterButton::Submit => ANNOTATION_SUBMIT_BUTTON_WIDTH,
     };
-    let mut spans = annotation_line_prefix(width, geometry, theme);
-    spans.push(Span::styled(
-        bottom_left.to_string(),
-        annotation_border_style(theme),
-    ));
-    spans.push(Span::styled(
-        annotation_rule(interior.saturating_sub(label_width), theme),
-        annotation_border_style(theme),
-    ));
-    if !label.is_empty() {
+    let show_button = button_width > 0 && inner_width >= button_width;
+    let label = if show_button {
+        annotation_footer_button_label(inner_width, button, theme)
+    } else {
+        String::new()
+    };
+    let left = inner_width.saturating_sub(label.width());
+    let button_fg = match button {
+        AnnotationFooterButton::None => theme.hunk,
+        AnnotationFooterButton::Edit => theme.search_match_bg,
+        AnnotationFooterButton::Submit => theme.addition_fg,
+    };
+    let mut spans = vec![
+        annotation_border_span("└", theme),
+        Span::styled(annotation_rule(left, theme), style),
+    ];
+    if show_button {
         spans.push(Span::styled(
             label,
             Style::default()
@@ -154,29 +136,27 @@ fn annotation_bottom_border_line(
                 .add_modifier(Modifier::BOLD),
         ));
     }
-    spans.push(Span::styled(
-        bottom_right.to_string(),
-        annotation_border_style(theme),
-    ));
-    push_annotation_line_suffix(&mut spans, width, geometry, theme);
+    spans.push(annotation_border_span("┘", theme));
     Line::from(spans)
 }
 
-fn annotation_frame_characters(theme: DiffTheme) -> (char, char, char, char, char) {
-    if theme.decorations.is_fancy() {
-        ('┌', '│', '└', '┘', '┐')
-    } else {
-        ('+', '|', '+', '+', '+')
-    }
+fn annotation_border_span(glyph: &'static str, theme: DiffTheme) -> Span<'static> {
+    Span::styled(
+        if theme.decorations.show_borders() {
+            glyph
+        } else {
+            " "
+        },
+        annotation_border_style(theme),
+    )
 }
 
 fn annotation_rule(width: usize, theme: DiffTheme) -> String {
-    let character = if theme.decorations.is_fancy() {
-        '─'
+    if theme.decorations.show_borders() {
+        theme.decorations.horizontal_rule().repeat(width)
     } else {
-        '-'
-    };
-    std::iter::repeat_n(character, width).collect()
+        spaces(width).into_owned()
+    }
 }
 
 fn annotation_footer_button_label(
@@ -185,6 +165,7 @@ fn annotation_footer_button_label(
     theme: DiffTheme,
 ) -> String {
     match button {
+        AnnotationFooterButton::None => String::new(),
         AnnotationFooterButton::Edit => {
             if width >= ANNOTATION_EDIT_BUTTON_WIDTH && theme.decorations.is_fancy() {
                 ANNOTATION_EDIT_BUTTON.to_owned()
@@ -202,87 +183,46 @@ fn annotation_footer_button_label(
     }
 }
 
-fn annotation_line_prefix(
-    width: usize,
-    geometry: AnnotationBlockGeometry,
-    theme: DiffTheme,
-) -> Vec<Span<'static>> {
-    let mut spans = Vec::with_capacity(8);
-    let prefix = geometry.start.min(width);
-    if prefix > 0 {
-        spans.push(Span::styled(
-            spaces(prefix),
-            Style::default().bg(base_bg(theme)),
-        ));
-    }
-    spans
+fn annotation_body_width(width: usize) -> usize {
+    width.saturating_sub(2)
 }
 
-fn push_annotation_line_suffix(
-    spans: &mut Vec<Span<'static>>,
-    width: usize,
-    geometry: AnnotationBlockGeometry,
-    theme: DiffTheme,
-) {
-    let suffix = width.saturating_sub(geometry.end.min(width));
-    if suffix > 0 {
-        spans.push(Span::styled(
-            spaces(suffix),
-            Style::default().bg(base_bg(theme)),
-        ));
+fn annotation_body_line(text: &str, width: usize, theme: DiffTheme, fg: Color) -> Line<'static> {
+    if width == 0 {
+        return Line::default();
     }
-}
+    if width == 1 {
+        return Line::from(annotation_border_span("│", theme));
+    }
 
-fn annotation_body_line(
-    text: &str,
-    width: usize,
-    geometry: AnnotationBlockGeometry,
-    theme: DiffTheme,
-    fg: Color,
-) -> Line<'static> {
     let bg = base_bg(theme);
-    if geometry.card_width() < 4 {
-        return Line::from(Span::styled(spaces(width), Style::default().bg(bg)));
-    }
-    let (_, side, _, _, _) = annotation_frame_characters(theme);
-    let body_width = geometry.body_width();
-    let display_text = terminal_text_cow(text);
-    let display = fit_padded(&display_text, body_width);
-    let mut spans = annotation_line_prefix(width, geometry, theme);
-    spans.push(Span::styled(
-        side.to_string(),
-        annotation_border_style(theme),
-    ));
-    spans.push(Span::styled(" ", Style::default().bg(bg)));
+    let display = fit_padded(text, annotation_body_width(width));
+    let text_style = Style::default().fg(fg).bg(bg);
+    let mut spans = vec![annotation_border_span("│", theme)];
     if display.contains(INPUT_CURSOR) {
         spans.extend(spans_with_input_cursor(
             &display,
-            Style::default().fg(fg).bg(bg),
+            text_style,
             input_cursor_style(theme, bg),
             theme.decorations.input_cursor(),
         ));
     } else {
-        spans.push(Span::styled(display, Style::default().fg(fg).bg(bg)));
+        spans.push(Span::styled(display, text_style));
     }
-    spans.push(Span::styled(" ", Style::default().bg(bg)));
-    spans.push(Span::styled(
-        side.to_string(),
-        annotation_border_style(theme),
-    ));
-    push_annotation_line_suffix(&mut spans, width, geometry, theme);
+    spans.push(annotation_border_span("│", theme));
     Line::from(spans)
 }
 
 fn annotation_display_lines(text: &str, width: usize) -> Vec<String> {
     let mut lines = Vec::new();
-    visit_annotation_display_lines(text, width, |line| {
+    visit_annotation_display_lines(text, annotation_body_width(width), |line| {
         lines.push(line.to_owned());
     });
     lines
 }
 
 fn annotation_display_line_count(text: &str, width: usize) -> usize {
-    visit_annotation_display_lines(text, width, |_| {})
+    visit_annotation_display_lines(text, annotation_body_width(width), |_| {})
 }
 
 fn visit_annotation_display_lines(text: &str, width: usize, mut visit: impl FnMut(&str)) -> usize {
@@ -293,8 +233,6 @@ fn visit_annotation_display_lines(text: &str, width: usize, mut visit: impl FnMu
 
     let mut line_count = 0usize;
     for paragraph in text.split('\n') {
-        // Wrap terminal-safe text so expanded tabs/control escapes can be
-        // split across visual line boundaries without re-rendering bytes.
         let display_paragraph = terminal_text(paragraph);
         visit_annotation_paragraph(&display_paragraph, width, &mut |line| {
             line_count = line_count.saturating_add(1);
@@ -356,57 +294,45 @@ fn annotation_wrap_boundary(text: &str, fit_len: usize) -> Option<usize> {
 pub(crate) fn render_annotation_saved_block(
     text: &str,
     width: usize,
-    geometry: AnnotationBlockGeometry,
     theme: DiffTheme,
     label: Option<&str>,
     editable_human: bool,
 ) -> Vec<Line<'static>> {
-    let mut lines = vec![annotation_top_border_line(width, geometry, theme, label)];
-    for line in annotation_display_lines(text, geometry.body_width()) {
-        lines.push(annotation_body_line(
-            &line,
-            width,
-            geometry,
-            theme,
-            theme.muted,
-        ));
+    let mut lines = vec![annotation_top_border_line(width, theme, label)];
+    for line in annotation_display_lines(text, width) {
+        lines.push(annotation_body_line(&line, width, theme, theme.muted));
     }
     lines.push(annotation_bottom_border_line(
         width,
-        geometry,
         theme,
-        editable_human.then_some(AnnotationFooterButton::Edit),
+        if editable_human {
+            AnnotationFooterButton::Edit
+        } else {
+            AnnotationFooterButton::None
+        },
     ));
     lines
 }
 
-pub(crate) fn annotation_saved_block_height(text: &str, body_width: usize) -> usize {
-    annotation_display_line_count(text, body_width).saturating_add(2)
+pub(crate) fn annotation_saved_block_height(text: &str, width: usize) -> usize {
+    annotation_display_line_count(text, width).saturating_add(2)
 }
 
 pub(crate) fn render_annotation_compose_block(
     draft: &AnnotationDraft,
     width: usize,
-    geometry: AnnotationBlockGeometry,
     theme: DiffTheme,
     label: Option<&str>,
 ) -> Vec<Line<'static>> {
     let display = text_with_cursor(&draft.input, draft.cursor);
-    let mut lines = vec![annotation_top_border_line(width, geometry, theme, label)];
-    for line in annotation_display_lines(&display, geometry.body_width()) {
-        lines.push(annotation_body_line(
-            &line,
-            width,
-            geometry,
-            theme,
-            theme.foreground,
-        ));
+    let mut lines = vec![annotation_top_border_line(width, theme, label)];
+    for line in annotation_display_lines(&display, width) {
+        lines.push(annotation_body_line(&line, width, theme, theme.foreground));
     }
     lines.push(annotation_bottom_border_line(
         width,
-        geometry,
         theme,
-        Some(AnnotationFooterButton::Submit),
+        AnnotationFooterButton::Submit,
     ));
     lines
 }
@@ -443,18 +369,17 @@ fn annotation_button_hit_at_column(
     button_width: usize,
 ) -> bool {
     let card_width = end.saturating_sub(start);
-    if card_width.saturating_sub(2) < button_width {
+    if card_width < button_width.saturating_add(2) {
         return false;
     }
     let end = end.min(usize::from(u16::MAX)) as u16;
-    let button_end = end.saturating_sub(1); // square right corner
-    let button_start = button_end.saturating_sub(button_width as u16);
-    column >= button_start && column < button_end
+    let button_end = end.saturating_sub(1);
+    column >= button_end.saturating_sub(button_width as u16) && column < button_end
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{render::annotation_ranges::AnnotationBlockGeometry, theme::DiffTheme};
+    use crate::theme::DiffTheme;
 
     use super::{
         annotation_button_hit_at_column, annotation_display_line_count, annotation_display_lines,
@@ -463,15 +388,9 @@ mod tests {
 
     #[test]
     fn agent_and_mixed_cards_do_not_render_an_edit_button() {
-        let geometry = AnnotationBlockGeometry {
-            start: 0,
-            end: 32,
-            connected: false,
-        };
         let lines = render_annotation_saved_block(
             "Agent: explanation",
             32,
-            geometry,
             DiffTheme::default(),
             Some("Agent"),
             false,
@@ -483,23 +402,27 @@ mod tests {
     }
 
     #[test]
-    fn annotation_button_hits_exclude_corners_and_narrow_cards() {
-        assert!(!annotation_button_hit_at_column(0, (0, 4), 3));
+    fn annotation_cards_are_enclosed() {
+        let lines =
+            render_annotation_saved_block("note", 12, DiffTheme::default(), Some("Line"), true);
+        let text: Vec<String> = lines.iter().map(ToString::to_string).collect();
+
+        assert_eq!(text, ["┌Line ──[x]┐", "│note      │", "└───────[↻]┘"]);
+    }
+
+    #[test]
+    fn annotation_button_hits_use_the_trailing_inner_columns() {
         assert!(!annotation_button_hit_at_column(5, (0, 10), 3));
         assert!(annotation_button_hit_at_column(6, (0, 10), 3));
         assert!(annotation_button_hit_at_column(8, (0, 10), 3));
         assert!(!annotation_button_hit_at_column(9, (0, 10), 3));
+        assert!(!annotation_button_hit_at_column(10, (0, 10), 3));
     }
 
     #[test]
     fn annotation_titles_escape_terminal_controls() {
         let line = annotation_top_border_line(
             120,
-            AnnotationBlockGeometry {
-                start: 0,
-                end: 120,
-                connected: false,
-            },
             DiffTheme::default(),
             Some("Agent · unsafe\u{1b}]52;c;payload\u{7}"),
         )
@@ -508,34 +431,6 @@ mod tests {
         assert!(!line.contains('\u{1b}'));
         assert!(!line.contains('\u{7}'));
         assert!(line.contains("\\u{1b}]52;c;payload\\u{7}"));
-    }
-
-    #[test]
-    fn annotation_title_rule_uses_the_border_color() {
-        let theme = DiffTheme::default();
-        let line = annotation_top_border_line(
-            40,
-            AnnotationBlockGeometry {
-                start: 12,
-                end: 40,
-                connected: true,
-            },
-            theme,
-            Some("Note · +1"),
-        );
-        let rule = line
-            .spans
-            .iter()
-            .find(|span| span.content == "─")
-            .expect("title rule");
-        let title = line
-            .spans
-            .iter()
-            .find(|span| span.content.contains("Note"))
-            .expect("title");
-
-        assert_eq!(rule.style.fg, Some(theme.hunk));
-        assert_eq!(title.style.fg, Some(theme.foreground));
     }
 
     #[test]

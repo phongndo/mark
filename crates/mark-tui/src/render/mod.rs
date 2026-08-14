@@ -1,5 +1,4 @@
 pub(crate) mod annotation_hints;
-pub(crate) mod annotation_ranges;
 pub(crate) mod annotations;
 pub(crate) mod compositor;
 pub(crate) mod diff;
