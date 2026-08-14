@@ -75,6 +75,13 @@ local fast = new Mapping<String, Step | Group> {
 }
 
 local full = new Mapping<String, Step | Group> {
+  ["cargo-audit"] {
+    profiles = List("full")
+    glob = rustImpactGlobs
+    check = "cargo audit --deny warnings"
+    exclusive = true
+  }
+
   ["rust-analyzer"] {
     profiles = List("full")
     glob = rustImpactGlobs
@@ -124,6 +131,11 @@ local all = new Mapping<String, Step | Group> {
 // they cannot safely enable profiles used during selection.
 local prePush = new Mapping<String, Step | Group> {
   ...fast
+  // Advisory data changes independently of repository files, so audit every push.
+  ["cargo-audit"] = (full["cargo-audit"]) {
+    profiles = List()
+    glob = List("**")
+  }
   ["rust-analyzer"] = (full["rust-analyzer"]) { profiles = List() }
   ["cargo-clippy"] = (full["cargo-clippy"]) { profiles = List() }
 }
