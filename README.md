@@ -47,7 +47,7 @@ interface.
 
 - Split and unified layouts with syntax highlighting.
 - File filtering, diff search, expandable context, and full-file view.
-- Inline annotations, visual selection, and reviewed-state tracking.
+- Inline line, hunk, and file annotations with reviewed-state tracking.
 - Stable snapshots by default; continuous reload only with `--watch`.
 - Custom themes, keybindings, and editor integration.
 - Viewport-bounded rendering for very large diffs.
@@ -61,7 +61,6 @@ interface.
 | `[` / `]` | Previous / next hunk |
 | `Shift-Tab` / `Tab` | Previous / next file |
 | `f` / `/` | Filter files / search the diff |
-| `v` or `V` | Toggle linewise selection |
 | `Enter` | Add an annotation |
 | `s` | Toggle split / unified layout |
 | `r` | Reload |

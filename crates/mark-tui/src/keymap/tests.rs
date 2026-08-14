@@ -149,25 +149,18 @@ fn new_annotation_default_does_not_conflict_with_existing_custom_binding() {
     let keymap = Keymap::parse(
         r#"
             [keymap.global]
-            reload = ["enter", "A", "v"]
+            reload = ["enter", "A"]
             "#,
     )
     .expect("existing custom bindings should take precedence over new defaults");
 
-    assert_eq!(
-        keymap.global_action_label(GlobalAction::Reload),
-        "Enter, A, v"
-    );
+    assert_eq!(keymap.global_action_label(GlobalAction::Reload), "Enter, A");
     assert_eq!(
         keymap.global_action_label(GlobalAction::AnnotateLine),
         "unbound"
     );
     assert_eq!(
         keymap.global_action_label(GlobalAction::AnnotateBatch),
-        "unbound"
-    );
-    assert_eq!(
-        keymap.global_action_label(GlobalAction::VisualMode),
         "unbound"
     );
 }
@@ -345,13 +338,6 @@ fn default_mark_bindings_are_configurable_actions() {
         GlobalAction::AnnotateBatch,
         KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT)
     ));
-    for key in ['v', 'V'] {
-        assert!(keymap.matches_single(
-            GlobalAction::VisualMode,
-            KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE)
-        ));
-    }
-    assert_eq!(keymap.global_action_label(GlobalAction::VisualMode), "v, V");
     assert!(keymap.matches_single(
         GlobalAction::SaveMark,
         KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL)

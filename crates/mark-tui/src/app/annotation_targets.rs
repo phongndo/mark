@@ -3,16 +3,14 @@ use std::collections::{HashMap, HashSet};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use mark_syntax::AnnotationTargeting;
 
-use super::{AnnotationVisualAnchor, DiffApp, HunkFocusScrollBehavior};
+use super::{DiffApp, HunkFocusScrollBehavior};
 use crate::{
     annotation::{
         AnnotationKey, AnnotationSide, AnnotationTarget, AnnotationTargetMode,
         annotation_hint_codes,
     },
-    controls::DiffLayoutMode,
     model::{FileIndex, HunkIndex},
     render::{
-        annotation_ranges::annotation_block_body_width,
         annotations::annotation_compose_block_height,
         viewport_plan::{
             ViewportSlotKind, plan_diff_viewport_rows, plan_diff_viewport_rows_at_scroll,
@@ -44,11 +42,7 @@ impl DiffApp {
 
         if self.annotation_cursor_enabled() {
             self.input.reset_mouse_scroll();
-            if self.annotations_state.visual_anchor.is_some() {
-                self.open_annotation_draft_at_visual_selection(sticky);
-            } else {
-                self.open_annotation_draft_at_cursor(sticky);
-            }
+            self.open_annotation_draft_at_cursor(sticky);
             return;
         }
 
@@ -69,392 +63,6 @@ impl DiffApp {
 
     pub(crate) fn annotation_cursor_enabled(&self) -> bool {
         self.config.interactive && self.config.annotation_targeting == AnnotationTargeting::Cursor
-    }
-
-    pub(crate) fn toggle_annotation_visual_mode(&mut self) {
-        if !self.annotation_cursor_enabled() {
-            self.set_notice("Visual mode requires cursor annotation targeting");
-            return;
-        }
-        if self.annotations_state.annotation_draft.is_some()
-            || self.diff_modal_hides_annotation_cursor()
-        {
-            return;
-        }
-        if self.close_annotation_visual_mode() {
-            return;
-        }
-        self.ensure_annotation_cursor();
-        let Some(target) = self.annotation_cursor_target() else {
-            self.set_notice("no cursor line");
-            return;
-        };
-        let anchor_side = target.key.side;
-        let Some((first_model_row, last_model_row)) =
-            self.annotation_visual_line_bounds(target.model_row_index, anchor_side)
-        else {
-            self.set_notice("Visual mode requires a code line");
-            return;
-        };
-        self.annotations_state.visual_anchor = Some(AnnotationVisualAnchor {
-            model_row: target.model_row_index,
-            first_model_row,
-            last_model_row,
-            side: anchor_side,
-        });
-        self.runtime.dirty = true;
-    }
-
-    pub(crate) fn close_annotation_visual_mode(&mut self) -> bool {
-        if self.annotations_state.visual_anchor.take().is_none() {
-            return false;
-        }
-        self.runtime.dirty = true;
-        true
-    }
-
-    pub(crate) fn annotation_visual_mode_active(&self) -> bool {
-        self.annotations_state.visual_anchor.is_some()
-    }
-
-    fn annotation_visual_line_bounds(
-        &self,
-        model_row: usize,
-        anchor_side: AnnotationSide,
-    ) -> Option<(usize, usize)> {
-        let row = self.document.model.row(model_row)?;
-        self.annotation_visual_line_coordinate_for_side(row, anchor_side)?;
-        let mut range = self.document.model.visual_line_block_at(model_row)?;
-        while range.start < range.end
-            && self
-                .document
-                .model
-                .row(range.start)
-                .and_then(|row| self.annotation_visual_line_coordinate_for_side(row, anchor_side))
-                .is_none()
-        {
-            range.start += 1;
-        }
-        while range.start < range.end
-            && self
-                .document
-                .model
-                .row(range.end - 1)
-                .and_then(|row| self.annotation_visual_line_coordinate_for_side(row, anchor_side))
-                .is_none()
-        {
-            range.end -= 1;
-        }
-        (range.start < range.end && range.contains(&model_row))
-            .then_some((range.start, range.end - 1))
-    }
-
-    fn annotation_visual_model_bounds(&self) -> Option<(usize, usize)> {
-        self.annotations_state
-            .visual_anchor
-            .map(|anchor| (anchor.first_model_row, anchor.last_model_row))
-    }
-
-    fn annotation_visual_selection_range(&self) -> Option<std::ops::RangeInclusive<usize>> {
-        let visual = self.annotations_state.visual_anchor?;
-        let head = self
-            .annotation_cursor_target()?
-            .model_row_index
-            .clamp(visual.first_model_row, visual.last_model_row);
-        Some(visual.model_row.min(head)..=visual.model_row.max(head))
-    }
-
-    pub(crate) fn annotation_active_line_side(
-        &self,
-        model_row: usize,
-        row: crate::model::UiRow,
-    ) -> Option<AnnotationSide> {
-        if self
-            .annotation_visual_selection_range()
-            .is_some_and(|selection| selection.contains(&model_row))
-        {
-            return self
-                .annotation_visual_line_coordinate(row)
-                .map(|(side, _)| side);
-        }
-        let draft = self.annotations_state.annotation_draft.as_ref()?;
-        self.annotation_key_coordinate_at_model_row(&draft.key, model_row, row)
-            .map(|(side, _)| side)
-    }
-
-    pub(crate) fn annotation_connectors_at_model_row(
-        &self,
-        model_row: usize,
-        row: crate::model::UiRow,
-    ) -> [Option<(AnnotationSide, bool)>; 2] {
-        let draft_key = self
-            .annotations_state
-            .annotation_draft
-            .as_ref()
-            .map(|draft| &draft.key);
-        let saved_keys = self.annotation_connector_keys_at_model_row(model_row, row);
-        let mut starts_by_side = [None, None];
-        for key in draft_key.into_iter().chain(saved_keys.iter()) {
-            if !self.annotation_key_covers_model_row(key, model_row, row) {
-                continue;
-            }
-            let side_index = match key.block_side() {
-                AnnotationSide::Old => 0,
-                AnnotationSide::New => 1,
-            };
-            let starts = self.annotation_connector_starts(key, model_row);
-            starts_by_side[side_index] = Some(starts_by_side[side_index].unwrap_or(true) && starts);
-        }
-
-        let old = starts_by_side[0].map(|starts| (AnnotationSide::Old, starts));
-        let new = starts_by_side[1].map(|starts| (AnnotationSide::New, starts));
-        // Starting and continuing rails share a column in unified view. Apply a
-        // continuing rail last so an overlapping range stays visually open.
-        if old.is_some_and(|(_, starts)| !starts) && new.is_some_and(|(_, starts)| starts) {
-            [new, old]
-        } else {
-            [old, new]
-        }
-    }
-
-    fn annotation_connector_starts(&self, key: &AnnotationKey, model_row: usize) -> bool {
-        let mut previous = model_row;
-        loop {
-            let Some(previous_row) = previous.checked_sub(1) else {
-                return true;
-            };
-            let Some(row) = self.document.model.row(previous_row) else {
-                return true;
-            };
-            // Metadata rows sit between changed lines but never own coordinates.
-            // Keep the rail continuous across them instead of restarting. Unified
-            // mode stores meta as UnifiedLine, so detect by diff-line kind.
-            if self.ui_row_is_metadata(row) {
-                previous = previous_row;
-                continue;
-            }
-            return !self.annotation_key_covers_model_row(key, previous_row, row);
-        }
-    }
-
-    fn annotation_key_covers_model_row(
-        &self,
-        key: &AnnotationKey,
-        model_row: usize,
-        row: crate::model::UiRow,
-    ) -> bool {
-        if self
-            .annotation_key_coordinate_at_model_row(key, model_row, row)
-            .is_some()
-        {
-            return true;
-        }
-        // Bridge metadata rows that sit inside an otherwise continuous range.
-        if !self.ui_row_is_metadata(row) {
-            return false;
-        }
-        let previous_covered = (0..model_row).rev().find_map(|candidate| {
-            let row = self.document.model.row(candidate)?;
-            if self.ui_row_is_metadata(row) {
-                return None;
-            }
-            Some(self.annotation_key_covers_model_row(key, candidate, row))
-        });
-        let next_covered = ((model_row + 1)..self.document.model.len()).find_map(|candidate| {
-            let row = self.document.model.row(candidate)?;
-            if self.ui_row_is_metadata(row) {
-                return None;
-            }
-            Some(self.annotation_key_covers_model_row(key, candidate, row))
-        });
-        previous_covered == Some(true) && next_covered == Some(true)
-    }
-
-    fn ui_row_is_metadata(&self, row: crate::model::UiRow) -> bool {
-        match row {
-            crate::model::UiRow::MetaLine { .. } => true,
-            crate::model::UiRow::UnifiedLine { file, hunk, line } => self
-                .document
-                .changeset
-                .files
-                .get(file.get())
-                .and_then(|file| file.hunks().get(hunk.get()))
-                .and_then(|hunk| hunk.lines.get(line.get()))
-                .is_some_and(|line| line.kind() == mark_diff::DiffLineKind::Meta),
-            _ => false,
-        }
-    }
-
-    fn annotation_key_coordinate_at_model_row(
-        &self,
-        key: &AnnotationKey,
-        model_row: usize,
-        row: crate::model::UiRow,
-    ) -> Option<(AnnotationSide, usize)> {
-        let file = self
-            .document
-            .model
-            .file_at_row(model_row)
-            .and_then(|file| self.document.changeset.files.get(file))?;
-        if file.old_path() != Some(key.path.as_str()) && file.new_path() != Some(key.path.as_str())
-        {
-            return None;
-        }
-        if key.is_range() {
-            return self.annotation_range_covered_coordinate(key, row);
-        }
-        let coordinate =
-            AnnotationKey::line_coordinates_from_ui_row(&self.document.changeset, row, key.side)?;
-        key.covers_coordinate(coordinate.0, coordinate.1)
-            .then_some(coordinate)
-    }
-
-    fn annotation_range_covered_coordinate(
-        &self,
-        key: &AnnotationKey,
-        row: crate::model::UiRow,
-    ) -> Option<(AnnotationSide, usize)> {
-        // A saved range can outlive the layout that created it. Prefer the
-        // current layout's display side, but fall back to any coordinate the
-        // stored source ranges actually cover.
-        let preferred_side = if self.viewport.layout == DiffLayoutMode::Split {
-            AnnotationSide::New
-        } else {
-            key.side
-        };
-        let alternate_side = match preferred_side {
-            AnnotationSide::Old => AnnotationSide::New,
-            AnnotationSide::New => AnnotationSide::Old,
-        };
-        [preferred_side, alternate_side]
-            .into_iter()
-            .filter_map(|side| {
-                AnnotationKey::line_coordinates_from_ui_row(&self.document.changeset, row, side)
-            })
-            .find(|(side, line)| key.covers_coordinate(*side, *line))
-    }
-
-    fn annotation_visual_line_coordinate(
-        &self,
-        row: crate::model::UiRow,
-    ) -> Option<(AnnotationSide, usize)> {
-        let anchor_side = self.annotations_state.visual_anchor?.side;
-        self.annotation_visual_line_coordinate_for_side(row, anchor_side)
-    }
-
-    fn annotation_visual_line_coordinate_for_side(
-        &self,
-        row: crate::model::UiRow,
-        anchor_side: AnnotationSide,
-    ) -> Option<(AnnotationSide, usize)> {
-        // Split selection is row-deterministic: old-only rows use the left
-        // side, while rows with new-side content use the right side. Unified
-        // context remains on the side that initiated the selection.
-        let preferred_side = if self.viewport.layout == DiffLayoutMode::Split {
-            AnnotationSide::New
-        } else {
-            anchor_side
-        };
-        AnnotationKey::line_coordinates_from_ui_row(&self.document.changeset, row, preferred_side)
-    }
-
-    fn visual_annotation_target(&self) -> Result<(AnnotationKey, usize), &'static str> {
-        let Some(selection) = self.annotation_visual_selection_range() else {
-            return Err("no visual selection");
-        };
-        let selected_file = self
-            .annotations_state
-            .visual_anchor
-            .and_then(|anchor| self.document.model.file_at_row(anchor.model_row))
-            .ok_or("visual selection has no file")?;
-        let mut first = None;
-        let mut last_model_row = None;
-        let mut line_targets = 0usize;
-        let mut old_line_targets = 0usize;
-        let mut new_line_targets = 0usize;
-        let mut old_min = usize::MAX;
-        let mut old_max = 0usize;
-        let mut new_min = usize::MAX;
-        let mut new_max = 0usize;
-
-        for model_row in selection {
-            let Some(row) = self.document.model.row(model_row) else {
-                continue;
-            };
-            let Some(file_index) = self.document.model.file_at_row(model_row) else {
-                continue;
-            };
-            if file_index != selected_file {
-                continue;
-            }
-            let Some((side, line)) = self.annotation_visual_line_coordinate(row) else {
-                continue;
-            };
-            if first.is_none() {
-                let file = self
-                    .document
-                    .changeset
-                    .files
-                    .get(file_index)
-                    .ok_or("visual selection has no file")?;
-                let key = AnnotationKey::for_file_line(file, side, line)
-                    .ok_or("visual selection has no path")?;
-                first = Some((key, model_row));
-            }
-            last_model_row = Some(model_row);
-            line_targets = line_targets.saturating_add(1);
-            match side {
-                AnnotationSide::Old => {
-                    old_line_targets = old_line_targets.saturating_add(1);
-                    old_min = old_min.min(line);
-                    old_max = old_max.max(line);
-                }
-                AnnotationSide::New => {
-                    new_line_targets = new_line_targets.saturating_add(1);
-                    new_min = new_min.min(line);
-                    new_max = new_max.max(line);
-                }
-            }
-        }
-
-        let Some((anchor, model_row)) = first else {
-            return Err("visual selection has no annotatable lines");
-        };
-        if line_targets == 1 {
-            return Ok((anchor, model_row));
-        }
-        let Some(file) = self.document.changeset.files.get(selected_file) else {
-            return Err("visual selection has no file");
-        };
-        let (old_start, old_count) = source_range(old_min, old_max);
-        let (new_start, new_count) = source_range(new_min, new_max);
-        if old_count != old_line_targets || new_count != new_line_targets {
-            return Err("visual selection has disjoint source lines");
-        }
-        let key = AnnotationKey::for_range(
-            file,
-            anchor.side,
-            anchor.line,
-            old_start,
-            old_count,
-            new_start,
-            new_count,
-        )
-        .ok_or("visual selection has no path")?;
-        Ok((key, last_model_row.unwrap_or(model_row)))
-    }
-
-    fn open_annotation_draft_at_visual_selection(&mut self, sticky: bool) {
-        let target = self.visual_annotation_target();
-        match target {
-            Ok((key, model_row)) => {
-                if self.open_annotation_draft_for_key(key, model_row) {
-                    self.annotations_state.visual_anchor = None;
-                    self.annotations_state.sticky_annotation_draft = sticky;
-                }
-            }
-            Err(message) => self.set_notice(message),
-        }
     }
 
     pub(in crate::app) fn reset_annotation_cursor(&mut self, preferred: Option<AnnotationKey>) {
@@ -537,7 +145,6 @@ impl DiffApp {
 
     pub(in crate::app) fn rebuild_annotation_cursor(&mut self) {
         self.annotations_state.annotation_block_scroll = None;
-        self.annotations_state.visual_anchor = None;
         let preferred = self
             .annotation_cursor_target()
             .map(|target| target.key.clone());
@@ -580,8 +187,7 @@ impl DiffApp {
         if !self.annotation_cursor_enabled() {
             return;
         }
-        if self.annotations_state.annotation_draft.is_some() || self.annotation_visual_mode_active()
-        {
+        if self.annotations_state.annotation_draft.is_some() {
             self.refresh_annotation_cursor_target_layout();
             return;
         }
@@ -652,32 +258,6 @@ impl DiffApp {
         model_row: usize,
         key: Option<&AnnotationKey>,
     ) {
-        let visual_target = self
-            .annotation_visual_model_bounds()
-            .and_then(|(first, last)| {
-                let model_row = model_row.clamp(first, last);
-                let before = self.annotation_visual_target_at_or_before(model_row, first);
-                let after = self.annotation_visual_target_at_or_after(model_row, last);
-                match (before, after) {
-                    (Some(before), Some(after)) => Some(
-                        if before.model_row_index.abs_diff(model_row)
-                            <= after.model_row_index.abs_diff(model_row)
-                        {
-                            before
-                        } else {
-                            after
-                        },
-                    ),
-                    (Some(target), None) | (None, Some(target)) => Some(target),
-                    (None, None) => None,
-                }
-            });
-        let model_row = visual_target
-            .as_ref()
-            .map(|target| target.model_row_index)
-            .unwrap_or(model_row);
-        let visual_key = visual_target.as_ref().map(|target| &target.key);
-        let key = visual_key.or(key);
         let previous = self
             .annotation_cursor_target()
             .map(|target| (target.key.clone(), target.model_row_index));
@@ -1337,10 +917,6 @@ impl DiffApp {
         if delta == 0 {
             return;
         }
-        if self.annotation_visual_mode_active() {
-            self.move_visual_annotation_cursor(delta);
-            return;
-        }
         if self
             .annotations_state
             .annotation_cursor
@@ -1380,93 +956,9 @@ impl DiffApp {
         self.runtime.dirty = true;
     }
 
-    fn move_visual_annotation_cursor(&mut self, delta: isize) {
-        let Some(current) = self.annotation_cursor_target().cloned() else {
-            return;
-        };
-        let Some((first, last)) = self.annotation_visual_model_bounds() else {
-            return;
-        };
-        let moving_up = delta < 0;
-        let desired = if delta == isize::MIN {
-            first
-        } else if delta == isize::MAX {
-            last
-        } else if moving_up {
-            current
-                .model_row_index
-                .saturating_sub(delta.unsigned_abs())
-                .max(first)
-        } else {
-            current
-                .model_row_index
-                .saturating_add(delta as usize)
-                .min(last)
-        };
-        let next = if moving_up {
-            self.annotation_visual_target_at_or_before(desired, first)
-        } else {
-            self.annotation_visual_target_at_or_after(desired, last)
-        }
-        .unwrap_or(current.clone());
-        if next.key == current.key && next.model_row_index == current.model_row_index {
-            self.refresh_annotation_cursor_target_layout();
-            self.keep_annotation_cursor_inside_scroll_region(moving_up);
-            return;
-        }
-        self.select_annotation_cursor_model_row_with_key(next.model_row_index, Some(&next.key));
-        self.keep_annotation_cursor_inside_scroll_region(moving_up);
-    }
-
-    fn annotation_visual_target_at_or_after(
-        &self,
-        model_row: usize,
-        last: usize,
-    ) -> Option<AnnotationTarget> {
-        let mut candidate = self.annotation_candidate_at_or_after(model_row)?;
-        while candidate <= last {
-            if let Some(target) = self.annotation_visual_target_for_model_row(candidate) {
-                return Some(target);
-            }
-            candidate = self.annotation_candidate_at_or_after(candidate.checked_add(1)?)?;
-        }
-        None
-    }
-
-    fn annotation_visual_target_at_or_before(
-        &self,
-        model_row: usize,
-        first: usize,
-    ) -> Option<AnnotationTarget> {
-        let mut candidate = self.annotation_candidate_at_or_before(model_row)?;
-        while candidate >= first {
-            if let Some(target) = self.annotation_visual_target_for_model_row(candidate) {
-                return Some(target);
-            }
-            candidate = self.annotation_candidate_at_or_before(candidate.checked_sub(1)?)?;
-        }
-        None
-    }
-
-    fn annotation_visual_target_for_model_row(&self, model_row: usize) -> Option<AnnotationTarget> {
-        let row = self.document.model.row(model_row)?;
-        let (side, line) = self.annotation_visual_line_coordinate(row)?;
-        let file = self
-            .document
-            .model
-            .file_at_row(model_row)
-            .and_then(|file| self.document.changeset.files.get(file))?;
-        let key = AnnotationKey::for_file_line(file, side, line)?;
-        Some(self.cursor_target_for_model_row_with_key(model_row, key))
-    }
-
     pub(crate) fn move_annotation_cursor_by_visual_delta(&mut self, delta: isize) {
         self.ensure_annotation_cursor();
         if delta == 0 {
-            return;
-        }
-        if self.annotation_visual_mode_active() {
-            self.move_visual_annotation_cursor(delta);
             return;
         }
         let Some(cursor) = self.annotations_state.annotation_cursor.as_ref() else {
@@ -1871,13 +1363,10 @@ impl DiffApp {
         if let Some(draft) = self.annotations_state.annotation_draft.as_ref()
             && draft.model_row_index < target.model_row_index
         {
-            let body_width = annotation_block_body_width(
-                self.viewport.layout,
+            visual_row = visual_row.saturating_add(annotation_compose_block_height(
+                draft,
                 self.viewport.viewport_width,
-                &draft.key,
-            );
-            visual_row =
-                visual_row.saturating_add(annotation_compose_block_height(draft, body_width));
+            ));
         }
         visual_row
     }
@@ -2288,20 +1777,8 @@ impl DiffApp {
     }
 
     pub(crate) fn annotation_cursor_at_model_row(&self, model_row: usize) -> bool {
-        if !self.annotation_cursor_is_visible() {
-            return false;
-        }
-        self.annotation_visual_selection_range()
-            .is_some_and(|selection| {
-                selection.contains(&model_row)
-                    && self
-                        .document
-                        .model
-                        .row(model_row)
-                        .and_then(|row| self.annotation_visual_line_coordinate(row))
-                        .is_some()
-            })
-            || self
+        self.annotation_cursor_is_visible()
+            && self
                 .annotation_cursor_target()
                 .is_some_and(|target| target.model_row_index == model_row)
     }
@@ -2310,21 +1787,6 @@ impl DiffApp {
         if !self.annotation_cursor_is_visible() {
             return false;
         }
-        if let Some((model_row, _)) = self.model_row_at_scroll(visual_scroll)
-            && self
-                .annotation_visual_selection_range()
-                .is_some_and(|selection| {
-                    selection.contains(&model_row)
-                        && self
-                            .document
-                            .model
-                            .row(model_row)
-                            .and_then(|row| self.annotation_visual_line_coordinate(row))
-                            .is_some()
-                })
-        {
-            return true;
-        }
         self.annotation_cursor_target().is_some_and(|target| {
             visual_scroll >= target.visual_scroll
                 && visual_scroll
@@ -2332,14 +1794,6 @@ impl DiffApp {
                         .visual_scroll
                         .saturating_add(target.visual_height.max(1))
         })
-    }
-}
-
-fn source_range(minimum: usize, maximum: usize) -> (usize, usize) {
-    if minimum == usize::MAX {
-        (0, 0)
-    } else {
-        (minimum, maximum.saturating_sub(minimum).saturating_add(1))
     }
 }
 

@@ -21,7 +21,6 @@ pub(crate) enum AppAction {
     OpenAnnotationMenu,
     StartAnnotation,
     StartAnnotationBatch,
-    ToggleVisualMode,
     ToggleFileSidebar,
     PreviousFile,
     NextFile,
@@ -67,7 +66,6 @@ impl AppAction {
             GlobalAction::AnnotationMenu => Self::OpenAnnotationMenu,
             GlobalAction::AnnotateLine => Self::StartAnnotation,
             GlobalAction::AnnotateBatch => Self::StartAnnotationBatch,
-            GlobalAction::VisualMode => Self::ToggleVisualMode,
             GlobalAction::FileBrowser => Self::ToggleFileSidebar,
             GlobalAction::PreviousFile => Self::PreviousFile,
             GlobalAction::NextFile => Self::NextFile,
@@ -175,36 +173,24 @@ impl DiffApp {
                 self.open_sticky_annotation_target_mode();
                 Ok(ActionOutcome::consumed())
             }
-            AppAction::ToggleVisualMode => {
-                self.toggle_annotation_visual_mode();
-                Ok(ActionOutcome::consumed())
-            }
             AppAction::ToggleFileSidebar => {
                 self.toggle_file_sidebar();
                 Ok(ActionOutcome::consumed())
             }
             AppAction::PreviousFile => {
-                if !self.annotation_visual_mode_active() {
-                    self.move_file(-1);
-                }
+                self.move_file(-1);
                 Ok(ActionOutcome::consumed())
             }
             AppAction::NextFile => {
-                if !self.annotation_visual_mode_active() {
-                    self.move_file(1);
-                }
+                self.move_file(1);
                 Ok(ActionOutcome::consumed())
             }
             AppAction::PreviousHunk => {
-                if !self.annotation_visual_mode_active() {
-                    self.previous_hunk();
-                }
+                self.previous_hunk();
                 Ok(ActionOutcome::consumed())
             }
             AppAction::NextHunk => {
-                if !self.annotation_visual_mode_active() {
-                    self.next_hunk();
-                }
+                self.next_hunk();
                 Ok(ActionOutcome::consumed())
             }
             AppAction::ExpandContextUp => {

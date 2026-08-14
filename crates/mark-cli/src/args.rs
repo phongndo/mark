@@ -322,13 +322,15 @@ pub(crate) struct CommentTargetArgs {
     pub(crate) old_line: Option<usize>,
     #[arg(long, value_name = "N", conflicts_with_all = ["hunk", "old_line", "old_start", "new_start"])]
     pub(crate) new_line: Option<usize>,
-    #[arg(long, value_name = "N", requires = "old_end", conflicts_with_all = ["hunk", "old_line", "new_line"])]
+    // Keep legacy range flags parseable for existing scripts without advertising
+    // range annotations as a supported authoring workflow.
+    #[arg(long, hide = true, value_name = "N", requires = "old_end", conflicts_with_all = ["hunk", "old_line", "new_line"])]
     pub(crate) old_start: Option<usize>,
-    #[arg(long, value_name = "N", requires = "old_start")]
+    #[arg(long, hide = true, value_name = "N", requires = "old_start")]
     pub(crate) old_end: Option<usize>,
-    #[arg(long, value_name = "N", requires = "new_end", conflicts_with_all = ["hunk", "old_line", "new_line"])]
+    #[arg(long, hide = true, value_name = "N", requires = "new_end", conflicts_with_all = ["hunk", "old_line", "new_line"])]
     pub(crate) new_start: Option<usize>,
-    #[arg(long, value_name = "N", requires = "new_start")]
+    #[arg(long, hide = true, value_name = "N", requires = "new_start")]
     pub(crate) new_end: Option<usize>,
 }
 

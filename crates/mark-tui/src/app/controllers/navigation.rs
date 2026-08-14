@@ -33,7 +33,4 @@ pub(in crate::app) trait NavigationContext {
     fn clear_vim_motion(&mut self) -> bool {
         false
     }
-    fn cancel_visual_mode(&mut self) -> bool {
-        false
-    }
 }

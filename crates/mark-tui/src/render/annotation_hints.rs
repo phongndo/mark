@@ -77,7 +77,7 @@ fn annotation_target_hint_range_for_scope(
         AnnotationScope::Hunk { .. } => {
             return (hint_width > 0 && hint_width < width).then_some((1, hint_width));
         }
-        AnnotationScope::Range { .. } | AnnotationScope::Line => {}
+        AnnotationScope::Line => {}
     }
     let range = match layout {
         DiffLayoutMode::Unified => {

@@ -226,8 +226,7 @@ n / p          next / previous grep match
 r              reload
 m              diff type selector
 o              settings menu
-v / V          enter / leave linewise Visual mode
-Enter          annotate the selected line, range, hunk, or file
+Enter          annotate the selected line, hunk, or file
 A              annotate and advance
 n              annotation search menu
 b              file browser
@@ -257,25 +256,13 @@ The annotation row highlight is active in the diff by default. Move it with
 `j` / `k` or Up / Down; prefix cursor motions with a count to repeat them (`3j`,
 `5k`, `4l`). `d` / `u` move half a viewport, Page Up / Page Down move a full
 viewport, and `g` / `G` jump to the ends. Like Vim with `scrolloff=8`, the
-selection moves freely until it is eight rows from the top or bottom, then stays
-there while the viewport scrolls. The margin shrinks for short viewports and at diff boundaries.
+highlight moves freely until it is eight rows from the top or bottom, then stays
+there while the viewport scrolls. The margin shrinks for short viewports and at
+diff boundaries.
 
-Press `v` or `V` for linewise Visual mode, extend the selection with the same
-motions, and press `Enter` to annotate the range. The selection is clamped to
-the current hunk (or contiguous full-file context block), so motions cannot land
-on context controls or another file. The status line shows the selected side and
-source lines, such as `VISUAL +121–123 · 3 lines`. `Esc`, `v`, or `V` cancels the
-selection.
-
-Visual mode shows only the selected-line tint. After `Enter` turns the selection
-into a draft, line and range notes use a square gutter rail connected to an
-inline card after the final target line. In split view, targeting is
-row-deterministic rather than tied to the initiating pane: rows use the new/right
-side when present and otherwise the old/left side. A selection that would form
-disjoint source ranges cannot be stored as one note and must be shortened.
-
-Outside Visual mode, press `Enter` on a code line, hunk header, or file header to
-annotate that line, entire hunk, or entire file. In the annotation menu, use
+Press `Enter` on a code line, hunk header, or file header to annotate that line,
+entire hunk, or entire file. Notes render as compact inline blocks without
+altering the surrounding diff gutters. In the annotation menu, use
 `Ctrl-A`, `Ctrl-D`, `Ctrl-B`, `Ctrl-O`, or `Ctrl-F` to accept, dismiss, mark
 blocking, mark non-blocking, or mark fixed all agent findings in the selected
 card. Human notes are not modified by these actions.

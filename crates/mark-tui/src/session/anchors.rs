@@ -97,17 +97,6 @@ pub(crate) fn to_protocol(app: &DiffApp, key: &AnnotationKey) -> ReviewAnchor {
                 });
             }
         }
-        AnnotationScope::Range {
-            old_start,
-            old_count,
-            new_start,
-            new_count,
-        } => {
-            anchor.range = Some(RangeTarget {
-                old: source_range(old_start, old_count),
-                new: source_range(new_start, new_count),
-            });
-        }
         AnnotationScope::Line => match key.side {
             AnnotationSide::Old => anchor.old_line = Some(key.line),
             AnnotationSide::New => anchor.new_line = Some(key.line),
@@ -167,6 +156,8 @@ fn validate_line(
 }
 
 fn validate_range(file: &DiffFile, range: &RangeTarget) -> Result<AnnotationKey, ProtocolError> {
+    // Older clients may still send ranges. Validate the complete legacy target,
+    // then collapse it to the final current-side line at the session boundary.
     if range.old.is_none() && range.new.is_none() {
         return Err(ProtocolError::new(
             "invalid_anchor",
@@ -181,22 +172,12 @@ fn validate_range(file: &DiffFile, range: &RangeTarget) -> Result<AnnotationKey,
         .new
         .map(|range| validate_source_range(file, AnnotationSide::New, range))
         .transpose()?;
-    let (anchor_side, anchor_line) = new
+    let (side, line) = new
         .map(|(_, end, _)| (AnnotationSide::New, end))
         .or_else(|| old.map(|(_, end, _)| (AnnotationSide::Old, end)))
         .expect("range has one side");
-    let (old_start, old_count) = old.map_or((0, 0), |(start, _, count)| (start, count));
-    let (new_start, new_count) = new.map_or((0, 0), |(start, _, count)| (start, count));
-    AnnotationKey::for_range(
-        file,
-        anchor_side,
-        anchor_line,
-        old_start,
-        old_count,
-        new_start,
-        new_count,
-    )
-    .ok_or_else(|| ProtocolError::new("anchor_not_found", "range has no source path"))
+    AnnotationKey::for_file_line(file, side, line)
+        .ok_or_else(|| ProtocolError::new("anchor_not_found", "range has no source path"))
 }
 
 fn validate_source_range(
@@ -270,5 +251,40 @@ mod tests {
 
         assert_eq!(protocol.scope, Some(ReviewAnchorScope::File));
         assert_eq!(validate(&app, &protocol).unwrap(), key);
+    }
+
+    #[test]
+    fn range_anchor_collapses_to_its_final_new_side_line() {
+        let patch = "diff --git a/src/lib.rs b/src/lib.rs\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1,2 +1,2 @@\n-old one\n-old two\n+new one\n+new two\n";
+        let app = DiffApp::new(
+            DiffOptions::default(),
+            Changeset {
+                repo: RepoRoot::new("/repo"),
+                title: "test".to_owned(),
+                files: mark_diff::parse_patch(patch),
+                raw_patch: Arc::from(patch.as_bytes()),
+            },
+            DiffLayoutMode::Unified,
+        );
+        let anchor = ReviewAnchor {
+            file: "src/lib.rs".to_owned(),
+            scope: None,
+            hunk: None,
+            old_line: None,
+            new_line: None,
+            range: Some(RangeTarget {
+                old: Some(SourceRange { start: 1, end: 2 }),
+                new: Some(SourceRange { start: 1, end: 2 }),
+            }),
+        };
+
+        let key = validate(&app, &anchor).unwrap();
+
+        assert_eq!(key.side, AnnotationSide::New);
+        assert_eq!(key.line, 2);
+        assert_eq!(key.scope, AnnotationScope::Line);
+        let protocol = to_protocol(&app, &key);
+        assert_eq!(protocol.new_line, Some(2));
+        assert_eq!(protocol.range, None);
     }
 }

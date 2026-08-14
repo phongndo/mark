@@ -125,12 +125,8 @@ pub(crate) const HELP_MENU_ROWS: &[HelpMenuRow] = &[
     ),
     HelpMenuRow::Section("Annotations"),
     HelpMenuRow::Binding(
-        HelpMenuKey::Global(GlobalAction::VisualMode),
-        "select a line range (Visual mode)",
-    ),
-    HelpMenuRow::Binding(
         HelpMenuKey::Global(GlobalAction::AnnotateLine),
-        "annotate selected line, range, hunk, or file",
+        "annotate selected line, hunk, or file",
     ),
     HelpMenuRow::Binding(
         HelpMenuKey::Global(GlobalAction::AnnotateBatch),

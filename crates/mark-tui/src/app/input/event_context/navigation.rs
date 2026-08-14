@@ -66,8 +66,4 @@ impl NavigationContext for KeyEventCtx<'_> {
     fn clear_vim_motion(&mut self) -> bool {
         self.app.input.clear_vim_motion()
     }
-
-    fn cancel_visual_mode(&mut self) -> bool {
-        self.app.close_annotation_visual_mode()
-    }
 }

@@ -661,9 +661,7 @@ fn disposition_name(disposition: FindingDisposition) -> Option<&'static str> {
 mod tests {
     use crate::{
         annotation::{AnnotationScope, AnnotationSide},
-        render::{
-            annotation_ranges::AnnotationBlockGeometry, annotations::render_annotation_saved_block,
-        },
+        render::annotations::render_annotation_saved_block,
         theme::DiffTheme,
     };
 
@@ -675,20 +673,6 @@ mod tests {
             side: AnnotationSide::New,
             line: 4,
             scope: AnnotationScope::Line,
-        }
-    }
-
-    fn range_anchor(side: AnnotationSide, line: usize) -> AnnotationKey {
-        AnnotationKey {
-            path: "src/lib.rs".to_owned(),
-            side,
-            line,
-            scope: AnnotationScope::Range {
-                old_start: 37,
-                old_count: 5,
-                new_start: 36,
-                new_count: 10,
-            },
         }
     }
 
@@ -744,11 +728,6 @@ mod tests {
         let lines = render_annotation_saved_block(
             store.get(&anchor()).unwrap(),
             240,
-            AnnotationBlockGeometry {
-                start: 0,
-                end: 240,
-                connected: false,
-            },
             DiffTheme::default(),
             store.label(&anchor()),
             false,
@@ -794,42 +773,6 @@ mod tests {
             .set_disposition(&ids[0], FindingDisposition::Open)
             .unwrap();
         assert!(store.contains_key(&anchor()));
-    }
-
-    #[test]
-    fn equivalent_range_sides_share_one_rendered_anchor() {
-        let mut store = ReviewCommentStore::default();
-        let human_anchor = range_anchor(AnnotationSide::Old, 37);
-        store
-            .insert_human(human_anchor.clone(), "question".to_owned(), 1)
-            .unwrap();
-        store
-            .insert_agent_batch(
-                vec![NewAgentComment {
-                    anchor: range_anchor(AnnotationSide::New, 45),
-                    summary: "answer".to_owned(),
-                    rationale: None,
-                    author: Some("agent".to_owned()),
-                }],
-                1,
-            )
-            .unwrap();
-
-        assert_eq!(store.anchor_count(), 1);
-        assert!(store.has_human(&human_anchor));
-        assert!(store.has_agent(&human_anchor));
-        assert!(
-            store
-                .get(&human_anchor)
-                .unwrap()
-                .contains("Human: question")
-        );
-        assert!(
-            store
-                .get(&human_anchor)
-                .unwrap()
-                .contains("Agent (agent): answer")
-        );
     }
 
     #[test]

@@ -7,7 +7,6 @@ use super::super::{
 };
 use crate::model::FileIndex;
 use crate::render::{
-    annotation_ranges::annotation_block_body_width,
     annotations::{annotation_compose_block_height, annotation_saved_block_height},
     viewport_plan::model_row_for_viewport_row,
 };
@@ -39,10 +38,6 @@ impl DiffApp {
         }
         if self.annotation_cursor_enabled() {
             self.ensure_annotation_cursor();
-            if self.annotation_visual_mode_active() {
-                self.move_annotation_cursor(delta);
-                return;
-            }
             if self.annotation_cursor_target_is_rendered() {
                 self.move_annotation_cursor(delta);
                 if self.annotation_cursor_target_is_rendered() {
@@ -59,10 +54,6 @@ impl DiffApp {
         }
         if self.annotation_cursor_enabled() {
             self.ensure_annotation_cursor();
-            if self.annotation_visual_mode_active() {
-                self.move_annotation_cursor_by_visual_delta(delta);
-                return;
-            }
             if self.annotation_cursor_target_is_rendered() {
                 self.move_annotation_cursor_by_visual_delta(delta);
                 if self.annotation_cursor_target_is_rendered() {
@@ -440,12 +431,7 @@ impl DiffApp {
         }
         if let Some(draft) = self.annotations_state.annotation_draft.as_ref() {
             let anchor = self.annotation_anchor_visual_scroll(draft.model_row_index);
-            let body_width = annotation_block_body_width(
-                self.viewport.layout,
-                self.viewport.viewport_width,
-                &draft.key,
-            );
-            let height = annotation_compose_block_height(draft, body_width);
+            let height = annotation_compose_block_height(draft, self.viewport.viewport_width);
             blocks.push((anchor, height));
         }
         max_scroll_for_annotated_viewport(row_count, self.viewport.viewport_rows, blocks)
@@ -458,8 +444,7 @@ impl DiffApp {
     ) -> usize {
         let text_ptr = text.as_ptr() as usize;
         let text_len = text.len();
-        let body_width =
-            annotation_block_body_width(self.viewport.layout, self.viewport.viewport_width, key);
+        let body_width = self.viewport.viewport_width;
         if let Some(entry) = self.annotations_state.annotation_heights.borrow().get(key)
             && entry.text_ptr == text_ptr
             && entry.text_len == text_len
