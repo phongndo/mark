@@ -33,7 +33,7 @@ The Nix development shell provides `hk` and Git 2.54 or newer, which hk's
 global hooks require. The hook command is a no-op in repositories without
 `hk.pkl`.
 This repository's pre-commit hook runs fast staged-file checks and safe fixers;
-pre-push directly requires the slower Clippy and rust-analyzer checks.
+pre-push directly requires dependency audit, Clippy, and rust-analyzer checks.
 
 ## Common commands
 
@@ -45,6 +45,7 @@ just ci-generated
 just ci-performance
 hk check --all --plan
 cargo fmt --all --check
+cargo audit --deny warnings
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo test --workspace --all-targets --all-features --locked
 cargo build -p mark-cli --locked

@@ -51,6 +51,7 @@
           default = pkgs.mkShell {
             packages = with pkgs; [
               rustToolchain
+              cargo-audit
               actionlint
               coreutils
               curl
