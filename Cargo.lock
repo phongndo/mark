@@ -875,7 +875,7 @@ dependencies = [
 
 [[package]]
 name = "mark-bench"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "clap",
  "mark-diff",
@@ -889,7 +889,7 @@ dependencies = [
 
 [[package]]
 name = "mark-cli"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "clap",
  "crossterm",
@@ -912,7 +912,7 @@ dependencies = [
 
 [[package]]
 name = "mark-command"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "mark-core",
  "mark-diff",
@@ -922,7 +922,7 @@ dependencies = [
 
 [[package]]
 name = "mark-core"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -931,7 +931,7 @@ dependencies = [
 
 [[package]]
 name = "mark-diff"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "mark-core",
  "mark-git",
@@ -942,14 +942,14 @@ dependencies = [
 
 [[package]]
 name = "mark-git"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "mark-core",
 ]
 
 [[package]]
 name = "mark-runtime"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "num_cpus",
  "rayon",
@@ -958,7 +958,7 @@ dependencies = [
 
 [[package]]
 name = "mark-session"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "mark-core",
  "rustix",
@@ -970,7 +970,7 @@ dependencies = [
 
 [[package]]
 name = "mark-syntax"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "mark-core",
  "serde",
@@ -982,7 +982,7 @@ dependencies = [
 
 [[package]]
 name = "mark-tui"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "crossterm",
  "fff-grep",
