@@ -229,6 +229,7 @@ const CUSTOM_COLOR_KEYS: &[&str] = &[
     "file",
     "hunk",
     "notice",
+    "warning",
     "cursor",
     "cursor_line",
     "cursor_line_bg",

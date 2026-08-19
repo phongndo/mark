@@ -1271,13 +1271,6 @@ fn live_reload_invalidation_clears_cache_without_visible_pending_state() {
         ..DiffOptions::default()
     };
 
-    app.config.keymap = Keymap::parse(
-        r#"
-        [keymap.global]
-        reload = "ctrl-r"
-        "#,
-    )
-    .unwrap();
     app.cache_loaded_diff(options, changeset_with_files(&["cached.rs"]));
     assert!(!app.jobs.diff_cache.is_empty());
 
@@ -1290,9 +1283,11 @@ fn live_reload_invalidation_clears_cache_without_visible_pending_state() {
     assert!(app.jobs.diff_cache.is_empty());
 
     let line = statusline_header_line(&app, 160);
-    assert!(!line_text(&line).contains("refreshing diff"));
-    assert!(line_text(&line).contains("source changed · Ctrl-R reload"));
-    assert!(!line_text(&line).contains("source changed · r reload"));
+    let text = line_text(&line);
+    assert!(!text.contains("refreshing diff"));
+    assert!(text.contains("+1 -0 !"));
+    assert!(!text.contains("source changed"));
+    assert!(!text.contains("reload"));
 }
 
 #[test]

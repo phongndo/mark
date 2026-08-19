@@ -261,6 +261,7 @@ pub(crate) struct DiffTheme {
     pub(crate) file: Color,
     pub(crate) hunk: Color,
     pub(crate) notice: Color,
+    pub(crate) warning: Color,
     pub(crate) cursor: Color,
     pub(crate) cursor_line_bg: Color,
     pub(crate) muted: Color,
@@ -310,6 +311,7 @@ impl DiffTheme {
             file: Color::Reset,
             hunk: Color::Indexed(13),
             notice: green.color(),
+            warning: Color::Indexed(3),
             cursor: Color::White,
             cursor_line_bg: Color::Indexed(237),
             muted: Color::Rgb(0x7d, 0x87, 0x94),
@@ -350,6 +352,7 @@ impl DiffTheme {
             file: Color::Indexed(15),
             hunk: Color::Indexed(13),
             notice: Color::Indexed(2),
+            warning: Color::Indexed(3),
             cursor: Color::White,
             cursor_line_bg: Color::Indexed(237),
             muted: Color::Indexed(8),
@@ -393,6 +396,7 @@ impl DiffTheme {
             file: Color::Rgb(0xc0, 0xca, 0xf5),
             hunk: Color::Rgb(0xbb, 0x9a, 0xf7),
             notice: green.color(),
+            warning: Color::Rgb(0xe0, 0xaf, 0x68),
             cursor: Color::White,
             cursor_line_bg: Color::Rgb(0x1e, 0x20, 0x2e),
             muted: Color::Rgb(0x56, 0x5f, 0x89),
@@ -433,6 +437,7 @@ impl DiffTheme {
             file: scheme.base05.color(),
             hunk: scheme.base0e.color(),
             notice: scheme.base0b.color(),
+            warning: scheme.base0a.color(),
             cursor: Color::White,
             cursor_line_bg: scheme.base01.color(),
             muted: scheme.base03.color(),
@@ -462,6 +467,25 @@ impl DiffTheme {
             exact_syntax: None,
             scope_overrides: None,
         }
+        .with_readable_warning()
+    }
+
+    fn with_readable_warning(mut self) -> Self {
+        let warning_luminance = color_luminance(self.warning);
+        let background_luminance =
+            color_luminance(self.statusline_info_bg).or_else(|| color_luminance(self.background));
+        let readable = match (warning_luminance, background_luminance) {
+            (Some(warning), Some(background)) => warning.abs_diff(background) >= 48,
+            _ => true,
+        };
+        if readable && self.warning != self.notice {
+            return self;
+        }
+        self.warning = match background_luminance {
+            Some(luminance) if luminance >= 160 => Color::Rgb(0x9a, 0x67, 0x00),
+            _ => Color::Rgb(0xe8, 0xc0, 0x6a),
+        };
+        self
     }
 
     pub(crate) fn with_transparent_background_override(
@@ -503,6 +527,9 @@ impl DiffTheme {
         }
         if let Some(color) = config_color(&colors.notice, "notice")? {
             self.notice = color;
+        }
+        if let Some(color) = config_color(&colors.warning, "warning")? {
+            self.warning = color;
         }
         if let Some(color) = config_color(&colors.cursor, "cursor")? {
             self.cursor = color;
@@ -661,6 +688,15 @@ impl DiffTheme {
 fn scope_override_registry() -> &'static RwLock<HashMap<u64, TextMateTheme>> {
     static REGISTRY: OnceLock<RwLock<HashMap<u64, TextMateTheme>>> = OnceLock::new();
     REGISTRY.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+fn color_luminance(color: Color) -> Option<u16> {
+    match color {
+        Color::Rgb(red, green, blue) => {
+            Some((u16::from(red) * 3 + u16::from(green) * 6 + u16::from(blue)) / 10)
+        }
+        _ => None,
+    }
 }
 
 pub(crate) fn with_scope_override_theme<T>(
