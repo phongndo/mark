@@ -15,7 +15,6 @@ use super::{
 use crate::{
     app::DiffApp,
     controls::BranchMenu,
-    keymap::GlobalAction,
     render::{
         menus::{diff_comparison_label_for_theme, diff_selector_text},
         style::statusline_bg,
@@ -133,13 +132,12 @@ pub(crate) fn push_statusline_left_spans(
         remaining,
     );
     if app.jobs.source_changed {
-        let reload_key = app.config.keymap.global_action_label(GlobalAction::Reload);
-        push_fitted_statusline_span(spans, "  ", Style::default().bg(info_bg), remaining);
+        push_fitted_statusline_span(spans, " ", Style::default().bg(info_bg), remaining);
         push_fitted_statusline_span(
             spans,
-            format!("source changed · {reload_key} reload"),
+            "!",
             Style::default()
-                .fg(app.config.theme.notice)
+                .fg(app.config.theme.warning)
                 .bg(info_bg)
                 .add_modifier(Modifier::BOLD),
             remaining,

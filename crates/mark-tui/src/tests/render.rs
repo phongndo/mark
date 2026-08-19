@@ -1627,6 +1627,34 @@ fn statusline_header_escapes_controls_in_fitting_commit_subject() {
 }
 
 #[test]
+fn statusline_header_marks_stale_source_with_bang() {
+    let changeset = changeset_with_files(&["src/lib.rs"]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.config.theme.warning = Color::Rgb(0xfe, 0x80, 0x19);
+    app.jobs.source_changed = true;
+    app.annotations_state.lifecycle.pass = 2;
+    app.annotations_state
+        .lifecycle
+        .changed_files
+        .insert("src/lib.rs".to_owned());
+
+    let line = statusline_header_line(&app, 120);
+    let text = line_text(&line);
+    let bang = line
+        .spans
+        .iter()
+        .find(|span| span.content == "!")
+        .expect("stale source should show a warning bang");
+
+    assert!(text.contains("+1 -0 !"));
+    assert_eq!(bang.style.fg, Some(Color::Rgb(0xfe, 0x80, 0x19)));
+    assert!(bang.style.add_modifier.contains(Modifier::BOLD));
+    assert!(!text.contains("source changed"));
+    assert!(!text.contains("pass 2"));
+    assert!(!text.contains("1 changed"));
+}
+
+#[test]
 fn statusline_header_shows_saved_annotation_count() {
     use crate::annotation::AnnotationKey;
 
@@ -3504,6 +3532,14 @@ fn packaged_builtin_themes_are_available() {
             "{name} should use a white caret"
         );
         assert_ne!(theme.statusline_accent_bg, Color::Reset);
+        assert_ne!(
+            theme.warning, theme.background,
+            "{name} should color warnings separately from the editor background"
+        );
+        assert_ne!(
+            theme.warning, theme.notice,
+            "{name} should color warnings separately from notices"
+        );
         assert_ne!(
             theme.gutter_bg, theme.background,
             "{name} should distinguish gutters from the editor background"

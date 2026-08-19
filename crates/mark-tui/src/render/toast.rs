@@ -151,7 +151,7 @@ fn toast_accent_color(app: &DiffApp, level: ToastLevel) -> ratatui::prelude::Col
     match level {
         ToastLevel::Info => app.config.theme.foreground,
         ToastLevel::Success => app.config.theme.addition_fg,
-        ToastLevel::Warning => ratatui::prelude::Color::Yellow,
+        ToastLevel::Warning => app.config.theme.warning,
         ToastLevel::Error => app.config.theme.deletion_fg,
         ToastLevel::Debug => app.config.theme.muted,
     }

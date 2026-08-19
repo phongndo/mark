@@ -36,8 +36,9 @@ mark show --repo ../project HEAD~1
 ```
 
 Reviews are stable snapshots by default. Relevant worktree changes set a
-`source changed` notice without replacing the visible changeset. Press `r` to
-reload explicitly, or opt into continuous replacement with `--watch`:
+warning `!` after the statusline `+/-` counts without replacing the visible
+changeset. Press `r` to reload explicitly, or opt into continuous replacement
+with `--watch`:
 
 ```sh
 mark diff --watch

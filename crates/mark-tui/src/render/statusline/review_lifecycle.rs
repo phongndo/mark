@@ -10,22 +10,6 @@ pub(super) fn push_review_lifecycle_spans(
 ) {
     let lifecycle = &app.annotations_state.lifecycle;
     let info_bg = app.config.theme.statusline_info_bg;
-    if lifecycle.pass > 1 || !lifecycle.changed_files.is_empty() {
-        push_fitted_statusline_span(spans, "  ", Style::default().bg(info_bg), remaining);
-        push_fitted_statusline_span(
-            spans,
-            format!(
-                "pass {} · {} changed",
-                lifecycle.pass,
-                format_count(lifecycle.changed_files.len())
-            ),
-            Style::default()
-                .fg(app.config.theme.notice)
-                .bg(info_bg)
-                .add_modifier(Modifier::BOLD),
-            remaining,
-        );
-    }
     let reviewed = lifecycle
         .reviewed_files
         .len()

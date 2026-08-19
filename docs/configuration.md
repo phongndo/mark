@@ -255,7 +255,7 @@ both follow the emulator theme unless overridden in `[colors]`.
 Common override keys include:
 
 ```text
-bg, fg, header, file, hunk, notice, cursor, cursor_line_bg, muted, gutter_bg, empty_diff,
+bg, fg, header, file, hunk, notice, warning, cursor, cursor_line_bg, muted, gutter_bg, empty_diff,
 search_match_fg, search_match_bg,
 statusline_fg, statusline_bg, statusline_accent_fg, statusline_accent_bg,
 statusline_info_fg, statusline_info_bg,

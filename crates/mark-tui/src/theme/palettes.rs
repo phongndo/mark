@@ -588,6 +588,7 @@ impl DiffTheme {
             file: palette.text.color(),
             hunk: palette.mauve.color(),
             notice: palette.green.color(),
+            warning: palette.peach.color(),
             cursor: Color::White,
             cursor_line_bg: palette.surface0.color(),
             muted: palette.overlay0.color(),
@@ -638,6 +639,7 @@ impl DiffTheme {
             file: palette.fg1.color(),
             hunk: palette.bright_purple.color(),
             notice: addition.color(),
+            warning: palette.bright_yellow.color(),
             cursor: Color::White,
             cursor_line_bg: palette.bg1.color(),
             muted: palette.gray.color(),
@@ -696,6 +698,7 @@ impl DiffTheme {
             file: palette.fg_default.color(),
             hunk: palette.done_fg.color(),
             notice: palette.success_fg.color(),
+            warning: palette.attention_fg.color(),
             // Keep the caret consistently visible while preserving each
             // GitHub variant's authentic neutral active-line surface.
             cursor: Color::White,
@@ -748,7 +751,18 @@ impl DiffTheme {
     }
 
     pub(crate) fn with_exact_syntax(mut self, theme: BuiltinTextMateTheme) -> Self {
-        self.exact_syntax = Some(theme.get());
-        self
+        let exact = theme.get();
+        self.exact_syntax = Some(exact);
+        if let Some(color) = [
+            "editorWarning.foreground",
+            "list.warningForeground",
+            "notificationsWarningIcon.foreground",
+        ]
+        .into_iter()
+        .find_map(|name| exact.color(name))
+        {
+            self.warning = Color::Rgb(color.red, color.green, color.blue);
+        }
+        self.with_readable_warning()
     }
 }
