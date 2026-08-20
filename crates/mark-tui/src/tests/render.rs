@@ -1949,6 +1949,25 @@ fn hunk_header_uses_raw_location_context_and_delta() {
 }
 
 #[test]
+fn unlabeled_hunk_header_uses_first_nonblank_changed_line_as_context() {
+    let hunk = mark_diff::DiffHunk {
+        header: "@@ -0,0 +1,3 @@".to_owned(),
+        ranges: HunkLineRanges::new(0, 0, 1, 3),
+        lines: vec![
+            DiffLine::addition(1, ""),
+            DiffLine::addition(2, "fn example() {"),
+            DiffLine::addition(3, "}"),
+        ],
+    };
+
+    let theme = DiffTheme::default();
+    let text = line_text(&hunk_header_line(&hunk, 64, theme));
+
+    assert!(text.contains("@@ -0,0 +1,3 @@ fn example() {"));
+    assert!(text.ends_with("+3"));
+}
+
+#[test]
 fn hunk_header_fits_emoji_sequences_with_terminal_width() {
     let hunk = mark_diff::DiffHunk {
         header: "@@ -1 +1 @@ 👩‍💻❤️abc".to_owned(),

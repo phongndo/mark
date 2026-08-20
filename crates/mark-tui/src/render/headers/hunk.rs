@@ -60,9 +60,10 @@ pub(crate) fn hunk_header_spans(
     bg: Color,
 ) -> Vec<Span<'static>> {
     let (additions, deletions) = hunk_change_counts(hunk);
+    let context = hunk_header_display_context(hunk);
     hunk_header_spans_with_delta(
         &hunk_header_location_parts(&hunk.header, theme, bg),
-        hunk_header_context(&hunk.header),
+        &context,
         &compact_delta_parts(additions, deletions),
         width,
         HeaderStyles {
@@ -83,6 +84,20 @@ pub(crate) fn hunk_header_context(header: &str) -> &str {
         .unwrap_or_default()
 }
 
+fn hunk_header_display_context(hunk: &mark_diff::DiffHunk) -> String {
+    let context = hunk_header_context(&hunk.header);
+    if !context.is_empty() {
+        return terminal_text(context);
+    }
+
+    hunk.lines
+        .iter()
+        .filter(|line| line.kind() != DiffLineKind::Meta)
+        .map(|line| line.text().trim())
+        .find(|text| !text.is_empty())
+        .map(terminal_text)
+        .unwrap_or_default()
+}
 pub(crate) fn normalized_hunk_header_text(header: &str) -> String {
     let mut text = hunk_header_location_text(header);
     let context = hunk_header_context(header);
