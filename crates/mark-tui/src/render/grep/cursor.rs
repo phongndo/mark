@@ -32,6 +32,21 @@ pub(crate) fn highlighted_cursor_full_line(
     highlighted_cursor_line_in_ranges(line, vec![(0, width)], theme)
 }
 
+pub(crate) fn highlight_saved_annotation_block(
+    lines: Vec<Line<'static>>,
+    width: usize,
+    theme: DiffTheme,
+    focused: bool,
+) -> Vec<Line<'static>> {
+    if !focused {
+        return lines;
+    }
+    lines
+        .into_iter()
+        .map(|line| highlighted_cursor_full_line(line, width, theme))
+        .collect()
+}
+
 pub(crate) fn highlighted_cursor_line_in_ranges(
     line: Line<'static>,
     column_ranges: Vec<(usize, usize)>,

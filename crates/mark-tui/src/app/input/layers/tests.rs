@@ -117,6 +117,10 @@ impl MenuKeyContext for FakeKeyCtx {
         Ok(self.options_menu)
     }
 
+    fn handle_marks_confirm_key_if_open(&mut self, _key: KeyEvent) -> MarkResult<Option<bool>> {
+        Ok(None)
+    }
+
     fn handle_annotation_menu_key_if_open(&mut self, _key: KeyEvent) -> MarkResult<Option<bool>> {
         Ok(self.annotation_menu)
     }
@@ -155,7 +159,6 @@ impl NavigationContext for FakeKeyCtx {
         self.navigation = true;
     }
 }
-
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
 }

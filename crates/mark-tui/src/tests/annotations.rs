@@ -3196,7 +3196,7 @@ fn annotation_input_supports_native_cursor_shortcuts() {
 }
 
 #[test]
-fn close_button_removes_agent_response_before_the_human_comment() {
+fn close_button_removes_the_whole_mark_stack() {
     use crate::{annotation::AnnotationKey, review::NewAgentComment};
 
     let changeset = changeset_with_line_text("hello");
@@ -3247,12 +3247,7 @@ fn close_button_removes_agent_response_before_the_human_comment() {
         + 1;
     assert!(app.handle_diff_click(46, top_row));
 
-    assert_eq!(
-        app.annotations_state.annotations.human_text(&key),
-        Some("explain this")
-    );
-    assert!(!app.annotations_state.annotations.has_agent(&key));
-    assert!(app.annotations_state.annotations.is_human_only(&key));
+    assert!(app.annotations_state.annotations.is_empty());
 }
 
 #[test]
@@ -3681,4 +3676,309 @@ fn hunk_source_keeps_single_line_without_trailing_newline_marker() {
     assert_eq!(source.text, "let value = 1;");
     assert_eq!(source.line_map, vec![Some(0)]);
     assert_eq!(source.source_lines, 1);
+}
+
+#[test]
+fn follow_up_on_answered_mark_starts_empty_and_appends() {
+    use crate::review::NewAgentComment;
+
+    let changeset = changeset_with_line_text("hello");
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_rendered_diff_area(Rect {
+        x: 0,
+        y: 1,
+        width: 48,
+        height: 12,
+    });
+    app.set_viewport_width(48);
+    app.set_viewport_rows(12);
+    let code_row = app
+        .document
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
+        .expect("unified line");
+    let key = AnnotationKey::from_ui_row(
+        &app.document.changeset,
+        app.document.model.row(code_row).expect("row"),
+    )
+    .expect("annotation key");
+    app.annotations_state
+        .annotations
+        .insert_human(key.clone(), "what does this mean?".to_owned(), 0)
+        .unwrap();
+    app.annotations_state
+        .annotations
+        .insert_agent_batch(
+            vec![NewAgentComment {
+                anchor: key.clone(),
+                summary: "it greets".to_owned(),
+                rationale: None,
+                author: Some("pi".to_owned()),
+            }],
+            0,
+        )
+        .unwrap();
+
+    app.select_annotation_cursor_model_row(code_row);
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .expect("open follow-up");
+    let draft = app
+        .annotations_state
+        .annotation_draft
+        .as_ref()
+        .expect("follow-up draft");
+    assert_eq!(draft.input, "");
+
+    app.handle_annotation_input_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE));
+    app.handle_annotation_input_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+    assert_eq!(
+        app.annotations_state
+            .annotations
+            .human_bodies(&key)
+            .as_deref(),
+        Some("what does this mean?\n\nr")
+    );
+    assert_eq!(app.annotations_state.annotations.len(), 3);
+}
+
+fn marked_unified_app(lines: &[&str], note: &str) -> (DiffApp, usize, AnnotationKey) {
+    let changeset = changeset_with_line_texts(lines);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.set_viewport_width(48);
+    app.set_viewport_rows(12);
+    let code_row = app
+        .document
+        .model
+        .rows
+        .iter()
+        .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
+        .expect("unified line");
+    let key = AnnotationKey::from_ui_row(
+        &app.document.changeset,
+        app.document.model.row(code_row).expect("row"),
+    )
+    .expect("annotation key");
+    app.annotations_state
+        .annotations
+        .insert_human(key.clone(), note.to_owned(), 0)
+        .unwrap();
+    app.select_annotation_cursor_model_row(code_row);
+    (app, code_row, key)
+}
+
+fn press(code: KeyCode) -> KeyEvent {
+    KeyEvent::new(code, KeyModifiers::NONE)
+}
+
+fn shift_x() -> KeyEvent {
+    KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT)
+}
+
+#[test]
+fn x_on_a_code_line_still_locks_horizontal_scroll() {
+    let (mut app, _, key) = marked_unified_app(&["hello"], "question");
+    assert!(!app.annotation_cursor_on_mark());
+
+    app.handle_key(press(KeyCode::Char('x')))
+        .expect("x should lock scroll");
+
+    assert!(app.viewport.horizontal_scroll_locked);
+    assert!(app.annotations_state.annotations.contains_key(&key));
+    assert!(!app.overlays.marks_confirm_is_open());
+}
+
+#[test]
+fn x_on_a_saved_mark_removes_the_stack() {
+    use crate::review::NewAgentComment;
+
+    let (mut app, code_row, key) = marked_unified_app(&["hello"], "question");
+    app.annotations_state
+        .annotations
+        .insert_agent_batch(
+            vec![NewAgentComment {
+                anchor: key.clone(),
+                summary: "answer".to_owned(),
+                rationale: None,
+                author: None,
+            }],
+            0,
+        )
+        .unwrap();
+    app.select_annotation_cursor_model_row(code_row);
+    app.handle_key(press(KeyCode::Char('j')))
+        .expect("step onto mark");
+    assert!(app.annotation_cursor_on_mark());
+
+    app.handle_key(press(KeyCode::Char('x')))
+        .expect("x should remove the mark");
+    assert!(!app.overlays.marks_confirm_is_open());
+    assert!(app.annotations_state.annotations.is_empty());
+    assert!(!app.annotation_cursor_on_mark());
+}
+
+#[test]
+fn shift_x_asks_before_clearing_all_marks() {
+    let changeset = changeset_with_line_texts(&["one", "two"]);
+    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    let file = &app.document.changeset.files[0];
+    let first = AnnotationKey::for_file_line(file, AnnotationSide::New, 1).unwrap();
+    let second = AnnotationKey::for_file_line(file, AnnotationSide::New, 2).unwrap();
+    app.annotations_state
+        .annotations
+        .insert_human(first, "a".to_owned(), 0)
+        .unwrap();
+    app.annotations_state
+        .annotations
+        .insert_human(second, "b".to_owned(), 0)
+        .unwrap();
+
+    app.handle_key(shift_x()).expect("X should confirm");
+    assert!(app.overlays.marks_confirm_is_open());
+    assert_eq!(app.annotations_state.annotations.len(), 2);
+
+    app.handle_key(press(KeyCode::Char('x')))
+        .expect("plain x should not confirm clear-all");
+    assert!(app.overlays.marks_confirm_is_open());
+    assert_eq!(app.annotations_state.annotations.len(), 2);
+
+    app.handle_key(press(KeyCode::Esc))
+        .expect("esc should cancel");
+    assert!(!app.overlays.marks_confirm_is_open());
+    assert_eq!(app.annotations_state.annotations.len(), 2);
+
+    app.handle_key(shift_x()).expect("X should confirm again");
+    app.handle_key(press(KeyCode::Enter))
+        .expect("enter should clear");
+    assert!(!app.overlays.marks_confirm_is_open());
+    assert!(app.annotations_state.annotations.is_empty());
+}
+
+#[test]
+fn filter_x_types_x_instead_of_deleting_a_mark() {
+    let (mut app, _, key) = marked_unified_app(&["hello"], "question");
+    app.handle_key(press(KeyCode::Char('j')))
+        .expect("step onto mark");
+    assert!(app.annotation_cursor_on_mark());
+    app.handle_key(press(KeyCode::Char('f')))
+        .expect("open file filter");
+    app.handle_key(press(KeyCode::Char('x')))
+        .expect("type x into filter");
+
+    assert!(app.filters.input_open());
+    assert!(app.filters.file_filter_input.contains('x'));
+    assert!(app.annotations_state.annotations.contains_key(&key));
+    assert!(!app.overlays.marks_confirm_is_open());
+}
+
+#[test]
+fn hint_x_does_not_delete_a_mark() {
+    let (mut app, _, key) = marked_unified_app(&["hello"], "question");
+    use_annotation_hints(&mut app);
+    app.open_annotation_target_mode();
+    assert!(app.annotations_state.annotation_target_mode.is_some());
+
+    app.handle_key(press(KeyCode::Char('x')))
+        .expect("hint x should be consumed");
+
+    assert!(app.annotations_state.annotations.contains_key(&key));
+    assert!(!app.overlays.marks_confirm_is_open());
+}
+
+#[test]
+fn counted_j_is_not_eaten_by_a_saved_mark() {
+    let (mut app, first_row, key) =
+        marked_unified_app(&["alpha", "beta", "gamma", "delta"], "look here");
+    assert!(!app.annotation_cursor_on_mark());
+
+    app.handle_key(press(KeyCode::Char('3')))
+        .expect("count prefix");
+    app.handle_key(press(KeyCode::Char('j')))
+        .expect("3j should move");
+
+    assert!(!app.annotation_cursor_on_mark());
+    assert_ne!(
+        app.annotation_cursor_target()
+            .map(|target| target.model_row_index),
+        Some(first_row)
+    );
+    assert!(app.annotations_state.annotations.contains_key(&key));
+}
+
+#[test]
+fn page_down_is_not_eaten_by_a_saved_mark() {
+    let (mut app, first_row, key) =
+        marked_unified_app(&["a", "b", "c", "d", "e", "f", "g", "h"], "note");
+    app.set_viewport_rows(6);
+    app.select_annotation_cursor_model_row(first_row);
+    assert!(!app.annotation_cursor_on_mark());
+
+    app.handle_key(press(KeyCode::Char('d')))
+        .expect("half-page down");
+
+    assert!(!app.annotation_cursor_on_mark());
+    assert!(app.annotations_state.annotations.contains_key(&key));
+    let stayed_on_first_mark = app.annotation_cursor_on_mark()
+        && app
+            .annotation_cursor_target()
+            .is_some_and(|target| target.model_row_index == first_row);
+    assert!(!stayed_on_first_mark);
+}
+
+#[test]
+fn cursor_steps_onto_a_saved_mark_before_the_next_line() {
+    let (mut app, first_row, first_key) = marked_unified_app(&["alpha", "beta"], "look here");
+    assert!(!app.annotation_cursor_on_mark());
+
+    app.handle_key(press(KeyCode::Char('j')))
+        .expect("j should step onto the mark");
+    assert!(app.annotation_cursor_on_mark());
+    assert!(app.annotation_cursor_focuses_saved_key(&first_key));
+    assert_eq!(
+        app.annotation_cursor_target()
+            .map(|target| target.model_row_index),
+        Some(first_row)
+    );
+}
+
+#[test]
+fn follow_up_edit_prefills_the_latest_human_turn() {
+    use crate::review::NewAgentComment;
+
+    let (mut app, code_row, key) = marked_unified_app(&["hello"], "what does this mean?");
+    app.annotations_state
+        .annotations
+        .insert_agent_batch(
+            vec![NewAgentComment {
+                anchor: key.clone(),
+                summary: "it greets".to_owned(),
+                rationale: None,
+                author: Some("pi".to_owned()),
+            }],
+            0,
+        )
+        .unwrap();
+    app.select_annotation_cursor_model_row(code_row);
+    app.handle_key(press(KeyCode::Enter))
+        .expect("open follow-up");
+    app.handle_annotation_input_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
+    app.handle_annotation_input_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
+    assert_eq!(
+        app.annotations_state
+            .annotations
+            .human_bodies(&key)
+            .as_deref(),
+        Some("what does this mean?\n\nt")
+    );
+
+    app.select_annotation_cursor_model_row(code_row);
+    app.handle_key(press(KeyCode::Enter))
+        .expect("edit latest human turn");
+    let draft = app
+        .annotations_state
+        .annotation_draft
+        .as_ref()
+        .expect("edit draft");
+    assert_eq!(draft.input, "t");
 }

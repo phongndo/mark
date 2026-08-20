@@ -146,8 +146,9 @@ mark difftool --watch -- "$LOCAL" "$REMOTE" "$MERGED"
 ## Live agent review sessions
 
 Every interactive review except pager mode registers a private local session.
-An external shell-driven agent can inspect bounded structure and add inline
-comments without launching or controlling the TUI:
+An external shell-driven agent can inspect bounded structure and talk on the
+same marks as the human, without launching or steering the TUI. Saved marks are
+visible on the CLI; a draft the human has not saved is not.
 
 ```sh
 mark skill path
@@ -206,8 +207,8 @@ Common default controls:
 ```text
 q / Ctrl-C     quit
 ?              help
-j / Down       scroll down or move focus (accepts a count, e.g. 3j)
-k / Up         scroll up or move focus (accepts a count, e.g. 3k)
+j / Down       scroll down or move focus; stops on a mark so you can act on it
+k / Up         scroll up or move focus; lands on a mark before its code line
 d              half-page down
 u              half-page up
 PgDn           full-page down
@@ -229,6 +230,8 @@ m              diff type selector
 o              settings menu
 Enter          annotate the selected line, hunk, or file
 A              annotate and advance
+x              remove the mark under the cursor; otherwise lock horizontal scroll
+X              clear all marks (confirm)
 n              annotation search menu
 b              file browser
 s              toggle split/unified layout

@@ -201,4 +201,11 @@ impl MenuKeyContext for KeyEventCtx<'_> {
         }
         Ok(None)
     }
+
+    fn handle_marks_confirm_key_if_open(&mut self, key: KeyEvent) -> MarkResult<Option<bool>> {
+        if self.app.handle_marks_confirm_key(key) {
+            return Ok(Some(false));
+        }
+        Ok(None)
+    }
 }

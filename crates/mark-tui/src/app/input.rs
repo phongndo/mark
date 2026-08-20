@@ -31,6 +31,16 @@ impl DiffApp {
             return Ok(None);
         }
 
+        if self
+            .config
+            .keymap
+            .matches_single(GlobalAction::RemoveMark, key)
+            && self.request_remove_focused_mark()
+        {
+            self.input.clear_vim_motion();
+            return Ok(Some(false));
+        }
+
         for action in NORMAL_GLOBAL_ACTIONS.iter().copied() {
             if self.config.keymap.matches_single(action, key) {
                 self.input.clear_vim_motion();

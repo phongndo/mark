@@ -5,8 +5,8 @@ mod target;
 pub(crate) mod types;
 
 pub(crate) use cursor::{
-    highlighted_cursor_diff_content_line, highlighted_cursor_full_line,
-    highlighted_cursor_meta_line,
+    highlight_saved_annotation_block, highlighted_cursor_diff_content_line,
+    highlighted_cursor_full_line, highlighted_cursor_meta_line,
 };
 pub(crate) use highlight::highlighted_grep_text_line;
 pub(crate) use ranges::highlighted_line_in_ranges;

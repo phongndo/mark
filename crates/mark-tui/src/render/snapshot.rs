@@ -17,6 +17,7 @@ pub(crate) enum OverlayLayer {
     BranchMenu,
     CommitMenu,
     HelpMenu,
+    MarksConfirm,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,6 +68,9 @@ impl RenderSnapshot {
         }
         if app.overlays.help_menu_is_open() {
             overlay_layers.push(OverlayLayer::HelpMenu);
+        }
+        if app.overlays.marks_confirm_is_open() {
+            overlay_layers.push(OverlayLayer::MarksConfirm);
         }
 
         Self {

@@ -35,6 +35,7 @@ pub(crate) enum AppAction {
     ToggleHorizontalScrollLock,
     EditHunk,
     CopyMarks,
+    ClearMarks,
     CopyErrorLog,
     ClearFilters,
     NextDiffType,
@@ -80,6 +81,7 @@ impl AppAction {
             GlobalAction::HorizontalScrollLock => Self::ToggleHorizontalScrollLock,
             GlobalAction::EditHunk => Self::EditHunk,
             GlobalAction::CopyMarks => Self::CopyMarks,
+            GlobalAction::ClearMarks => Self::ClearMarks,
             GlobalAction::CopyErrorLog => Self::CopyErrorLog,
             GlobalAction::ClearFilters => Self::ClearFilters,
             GlobalAction::NextDiffType => Self::NextDiffType,
@@ -91,7 +93,9 @@ impl AppAction {
             GlobalAction::RequestChanges => Self::RequestChanges,
             GlobalAction::CommentVerdict => Self::CommentVerdict,
             GlobalAction::ClearVerdict => Self::ClearVerdict,
-            GlobalAction::SaveMark | GlobalAction::CancelMark => return None,
+            GlobalAction::SaveMark | GlobalAction::CancelMark | GlobalAction::RemoveMark => {
+                return None;
+            }
         })
     }
 }
@@ -222,6 +226,10 @@ impl DiffApp {
                 Ok(ActionOutcome::consumed())
             }
             AppAction::EditHunk => Ok(ActionOutcome::effect(AppEffect::OpenFocusedHunkInEditor)),
+            AppAction::ClearMarks => {
+                self.request_clear_all_marks();
+                Ok(ActionOutcome::consumed())
+            }
             AppAction::CopyMarks => {
                 let Some(text) = self.marks_clipboard_json() else {
                     return Ok(ActionOutcome::effect(AppEffect::Toast(

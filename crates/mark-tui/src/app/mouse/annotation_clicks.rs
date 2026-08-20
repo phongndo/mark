@@ -82,7 +82,12 @@ impl DiffApp {
         else {
             return false;
         };
-        if !self.annotations_state.annotations.is_human_only(&key) {
+        if self
+            .annotations_state
+            .annotations
+            .editable_human_text(&key)
+            .is_none()
+        {
             return false;
         }
         self.open_annotation_draft_for_key(key, model_row)
@@ -113,38 +118,7 @@ impl DiffApp {
         let Some((_model_row, key)) = annotation_saved_key_at_top_border(self, viewport_row) else {
             return false;
         };
-        let removed = if self.annotations_state.annotations.has_agent(&key) {
-            self.annotations_state.annotations.remove_agents_at(&key) > 0
-        } else {
-            self.annotations_state
-                .annotations
-                .remove_human(&key)
-                .is_some()
-        };
-        if !removed {
-            return false;
-        }
-
-        self.annotations_state.annotation_block_scroll = None;
-        if !self.annotations_state.annotations.contains_key(&key) {
-            self.annotations_state
-                .annotation_rows
-                .borrow_mut()
-                .remove(&key);
-            *self.annotations_state.annotation_keys_by_row.borrow_mut() = None;
-        }
-        self.annotations_state
-            .annotation_heights
-            .borrow_mut()
-            .remove(&key);
-        self.set_scroll_with_grep_sync(
-            self.viewport.scroll,
-            false,
-            HunkFocusScrollBehavior::Preserve,
-        );
-        self.sync_annotation_cursor_to_viewport();
-        self.runtime.dirty = true;
-        true
+        self.remove_mark_at_key(&key)
     }
 
     pub(in crate::app) fn open_annotation_draft_for_key(
@@ -165,7 +139,7 @@ impl DiffApp {
         let existing = self
             .annotations_state
             .annotations
-            .human_text(&key)
+            .editable_human_text(&key)
             .map(str::to_owned)
             .unwrap_or_default();
         let cursor = existing.len();

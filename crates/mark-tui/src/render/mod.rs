@@ -26,8 +26,9 @@ use self::{
         branch_menu_list_visible_rows, color_scheme_picker_area,
         color_scheme_picker_list_visible_rows, commit_menu_area, commit_menu_list_visible_rows,
         diff_menu_area, draw_annotation_menu, draw_branch_menu, draw_color_scheme_picker,
-        draw_commit_menu, draw_diff_menu, draw_help_menu, draw_options_menu, draw_review_input,
-        help_menu_list_visible_rows, options_menu_area, options_menu_block, review_input_area,
+        draw_commit_menu, draw_diff_menu, draw_help_menu, draw_marks_confirm, draw_options_menu,
+        draw_review_input, help_menu_list_visible_rows, options_menu_area, options_menu_block,
+        review_input_area,
     },
     screen_layout::ScreenLayout,
     selector_menu::selector_menu_list_rows,
@@ -47,6 +48,7 @@ fn overlay_component_id(layer: OverlayLayer) -> ComponentId {
         OverlayLayer::BranchMenu => ComponentId::BranchMenu,
         OverlayLayer::CommitMenu => ComponentId::CommitMenu,
         OverlayLayer::HelpMenu => ComponentId::HelpMenu,
+        OverlayLayer::MarksConfirm => ComponentId::MarksConfirm,
     }
 }
 
@@ -116,6 +118,7 @@ impl RenderContext for AppRenderCtx<'_> {
             ComponentId::BranchMenu => draw_branch_menu(frame, self.app, area),
             ComponentId::CommitMenu => draw_commit_menu(frame, self.app, area),
             ComponentId::HelpMenu => draw_help_menu(frame, self.app, area),
+            ComponentId::MarksConfirm => draw_marks_confirm(frame, self.app, area),
             ComponentId::AnnotationTarget
             | ComponentId::AnnotationDraftBindings
             | ComponentId::QuitKey

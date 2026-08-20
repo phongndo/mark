@@ -180,6 +180,7 @@ pub(crate) enum ActiveOverlay {
     ReviewInput,
     OptionsMenu(OptionsOverlayMode),
     AnnotationMenu,
+    MarksConfirm,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -209,6 +210,10 @@ impl OverlayState {
         self.active_overlay == ActiveOverlay::AnnotationMenu
     }
 
+    pub(crate) fn marks_confirm_is_open(&self) -> bool {
+        self.active_overlay == ActiveOverlay::MarksConfirm
+    }
+
     pub(crate) fn color_scheme_picker_is_open(&self) -> bool {
         self.active_overlay == ActiveOverlay::OptionsMenu(OptionsOverlayMode::ColorSchemePicker)
     }
@@ -227,6 +232,18 @@ impl OverlayState {
 
     pub(crate) fn open_annotation_menu(&mut self) {
         self.active_overlay = ActiveOverlay::AnnotationMenu;
+    }
+
+    pub(crate) fn open_marks_confirm(&mut self) {
+        self.active_overlay = ActiveOverlay::MarksConfirm;
+    }
+
+    pub(crate) fn close_marks_confirm(&mut self) -> bool {
+        if !self.marks_confirm_is_open() {
+            return false;
+        }
+        self.active_overlay = ActiveOverlay::None;
+        true
     }
 
     pub(crate) fn hide_diff_menu(&mut self) {

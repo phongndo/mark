@@ -109,13 +109,13 @@ impl DiffApp {
             .annotations
             .keys()
             .filter_map(|key| {
-                let body = self.annotations_state.annotations.human_text(key)?;
+                let body = self.annotations_state.annotations.human_bodies(key)?;
                 if !exportable_keys.contains(key)
                     && !self.collapsed_context_contains_annotation_key(&export_model, key)
                 {
                     return None;
                 }
-                self.export_mark(key, body)
+                self.export_mark(key, &body)
             })
             .collect()
     }

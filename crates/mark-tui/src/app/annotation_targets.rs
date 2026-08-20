@@ -93,6 +93,7 @@ impl DiffApp {
                 lazy: true,
                 previous_exhausted: false,
                 next_exhausted: false,
+                on_mark: false,
             });
             return;
         }
@@ -122,6 +123,7 @@ impl DiffApp {
             lazy: false,
             previous_exhausted: false,
             next_exhausted: false,
+            on_mark: false,
         });
     }
 
@@ -516,6 +518,7 @@ impl DiffApp {
         if !unchanged {
             cursor.previous_exhausted = false;
             cursor.next_exhausted = false;
+            cursor.on_mark = false;
             self.annotations_state.annotation_block_scroll = None;
         }
     }
@@ -901,13 +904,19 @@ impl DiffApp {
     }
 
     pub(crate) fn move_annotation_cursor(&mut self, delta: isize) -> bool {
-        let previous = self
-            .annotation_cursor_target()
-            .map(|target| (target.key.clone(), target.model_row_index));
+        let previous = self.annotation_cursor_target().map(|target| {
+            (
+                target.key.clone(),
+                target.model_row_index,
+                self.annotation_cursor_on_mark(),
+            )
+        });
         self.move_annotation_cursor_inner(delta);
         self.annotation_cursor_target().is_some_and(|target| {
-            previous.as_ref().is_none_or(|(key, model_row)| {
-                key != &target.key || *model_row != target.model_row_index
+            previous.as_ref().is_none_or(|(key, model_row, on_mark)| {
+                key != &target.key
+                    || *model_row != target.model_row_index
+                    || *on_mark != self.annotation_cursor_on_mark()
             })
         })
     }
@@ -915,6 +924,9 @@ impl DiffApp {
     fn move_annotation_cursor_inner(&mut self, delta: isize) {
         self.ensure_annotation_cursor();
         if delta == 0 {
+            return;
+        }
+        if self.step_cursor_onto_or_off_mark(delta) {
             return;
         }
         if self
@@ -949,10 +961,14 @@ impl DiffApp {
         }
 
         cursor.selected = selected;
+        cursor.on_mark = false;
         self.annotations_state.annotation_block_scroll = None;
         self.refresh_annotation_cursor_target_layout();
         self.keep_annotation_cursor_inside_scroll_region(selected < previous);
         self.focus_hunk_at_annotation_cursor();
+        if delta < 0 {
+            self.set_annotation_cursor_on_mark(true);
+        }
         self.runtime.dirty = true;
     }
 
@@ -961,6 +977,7 @@ impl DiffApp {
         if delta == 0 {
             return;
         }
+        self.set_annotation_cursor_on_mark(false);
         let Some(cursor) = self.annotations_state.annotation_cursor.as_ref() else {
             return;
         };
@@ -1089,12 +1106,14 @@ impl DiffApp {
             cursor.targets.clear();
             cursor.targets.push(next);
             cursor.selected = 0;
+            cursor.on_mark = false;
             cursor.previous_exhausted = false;
             cursor.next_exhausted = false;
         } else if let Some(next_selected) = cursor.targets.iter().position(|target| {
             target.key == next.key && target.model_row_index == next.model_row_index
         }) {
             cursor.selected = next_selected;
+            cursor.on_mark = false;
         } else {
             return;
         }
@@ -1102,6 +1121,9 @@ impl DiffApp {
         self.refresh_annotation_cursor_target_layout();
         self.keep_annotation_cursor_inside_scroll_region(moving_up);
         self.focus_hunk_at_annotation_cursor();
+        if moving_up {
+            self.set_annotation_cursor_on_mark(true);
+        }
         self.runtime.dirty = true;
     }
 
@@ -1273,6 +1295,7 @@ impl DiffApp {
         let scroll = self.scroll_for_model_row(model_row);
         self.set_scroll_with_grep_sync(scroll, true, HunkFocusScrollBehavior::Preserve);
         self.select_annotation_cursor(&key);
+        self.set_annotation_cursor_on_mark(true);
         self.annotations_state.annotation_block_scroll = Some((key, offset));
         self.clamp_scroll_for_annotation_block();
         self.refresh_annotation_cursor_target_layout();
@@ -1372,6 +1395,9 @@ impl DiffApp {
     }
 
     fn move_lazy_annotation_cursor(&mut self, delta: isize) {
+        if self.step_cursor_onto_or_off_mark(delta) {
+            return;
+        }
         let moving_up = delta < 0;
         let Some(previous) = self.annotation_cursor_target().cloned() else {
             let exhausted = self
@@ -1453,12 +1479,16 @@ impl DiffApp {
         cursor.targets.clear();
         cursor.targets.push(next);
         cursor.selected = 0;
+        cursor.on_mark = false;
         cursor.previous_exhausted = delta == isize::MIN;
         cursor.next_exhausted = delta == isize::MAX;
         self.annotations_state.annotation_block_scroll = None;
         self.refresh_annotation_cursor_target_layout();
         self.keep_annotation_cursor_inside_scroll_region(moving_up);
         self.focus_hunk_at_annotation_cursor();
+        if moving_up {
+            self.set_annotation_cursor_on_mark(true);
+        }
         self.runtime.dirty = true;
     }
 
@@ -1671,6 +1701,67 @@ impl DiffApp {
         cursor.targets.get(cursor.selected)
     }
 
+    pub(crate) fn annotation_cursor_on_mark(&self) -> bool {
+        self.annotations_state
+            .annotation_cursor
+            .as_ref()
+            .is_some_and(|cursor| cursor.on_mark)
+            && self.current_cursor_target_has_mark()
+    }
+
+    pub(crate) fn annotation_cursor_focuses_saved_key(&self, key: &AnnotationKey) -> bool {
+        self.annotation_cursor_on_mark()
+            && self
+                .annotation_cursor_target()
+                .is_some_and(|target| &target.key == key)
+    }
+
+    fn current_cursor_target_has_mark(&self) -> bool {
+        self.annotation_cursor_target().is_some_and(|target| {
+            !target.key.is_cursor_only()
+                && self.annotations_state.annotations.contains_key(&target.key)
+        })
+    }
+
+    pub(in crate::app) fn set_annotation_cursor_on_mark(&mut self, on_mark: bool) {
+        let on_mark = on_mark && self.current_cursor_target_has_mark();
+        let Some(cursor) = self.annotations_state.annotation_cursor.as_mut() else {
+            return;
+        };
+        if cursor.on_mark == on_mark {
+            return;
+        }
+        cursor.on_mark = on_mark;
+        if on_mark {
+            self.annotations_state.annotation_block_scroll = None;
+        }
+        self.refresh_annotation_cursor_target_layout();
+        self.runtime.dirty = true;
+    }
+
+    fn step_cursor_onto_or_off_mark(&mut self, delta: isize) -> bool {
+        if delta != 1 && delta != -1 {
+            if delta != 0 {
+                self.set_annotation_cursor_on_mark(false);
+            }
+            return false;
+        }
+        let has_mark = self.current_cursor_target_has_mark();
+        let on_mark = self.annotation_cursor_on_mark();
+        if delta > 0 && has_mark && !on_mark {
+            self.set_annotation_cursor_on_mark(true);
+            if let Some(target) = self.annotation_cursor_target().cloned() {
+                self.reveal_saved_annotation_block(&target);
+            }
+            return true;
+        }
+        if delta < 0 && on_mark {
+            self.set_annotation_cursor_on_mark(false);
+            return true;
+        }
+        false
+    }
+
     pub(crate) fn annotation_cursor_is_visible(&self) -> bool {
         self.annotation_cursor_enabled()
             && !self.diff_modal_hides_annotation_cursor()
@@ -1778,13 +1869,14 @@ impl DiffApp {
 
     pub(crate) fn annotation_cursor_at_model_row(&self, model_row: usize) -> bool {
         self.annotation_cursor_is_visible()
+            && !self.annotation_cursor_on_mark()
             && self
                 .annotation_cursor_target()
                 .is_some_and(|target| target.model_row_index == model_row)
     }
 
     pub(crate) fn annotation_cursor_at_visual_scroll(&self, visual_scroll: usize) -> bool {
-        if !self.annotation_cursor_is_visible() {
+        if !self.annotation_cursor_is_visible() || self.annotation_cursor_on_mark() {
             return false;
         }
         self.annotation_cursor_target().is_some_and(|target| {

@@ -68,5 +68,7 @@ mod tests {
         assert!(SKILL.contains("structure first"));
         assert!(SKILL.contains("stale_generation"));
         assert!(SKILL.contains("untrusted data"));
+        assert!(SKILL.contains("Never run `mark session navigate`"));
+        assert!(SKILL.contains("same file and line"));
     }
 }

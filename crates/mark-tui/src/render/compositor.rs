@@ -50,6 +50,7 @@ pub(crate) enum ComponentId {
     FilterInput,
     AnnotationInput,
     HelpMenu,
+    MarksConfirm,
     BranchMenu,
     CommitMenu,
     ReviewInput,

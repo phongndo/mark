@@ -1,6 +1,7 @@
 mod annotation_menu;
 mod diff;
 mod help;
+mod marks_confirm;
 mod options;
 mod refs;
 
@@ -19,6 +20,7 @@ pub(crate) use help::{
     help_menu_bg, help_menu_content_rows, help_menu_lines, help_menu_row_line, help_menu_row_spans,
     help_menu_title_color,
 };
+pub(crate) use marks_confirm::draw_marks_confirm;
 pub(crate) use options::{
     color_scheme_picker_area, color_scheme_picker_block, draw_color_scheme_picker,
     draw_options_menu, options_menu_area, options_menu_block,

@@ -141,6 +141,14 @@ pub(crate) const HELP_MENU_ROWS: &[HelpMenuRow] = &[
     ),
     HelpMenuRow::Binding(HelpMenuKey::Global(GlobalAction::SaveMark), "save mark"),
     HelpMenuRow::Binding(HelpMenuKey::Global(GlobalAction::CancelMark), "cancel mark"),
+    HelpMenuRow::Binding(
+        HelpMenuKey::Global(GlobalAction::RemoveMark),
+        "remove the mark under the cursor",
+    ),
+    HelpMenuRow::Binding(
+        HelpMenuKey::Global(GlobalAction::ClearMarks),
+        "clear all marks",
+    ),
     HelpMenuRow::Binding(HelpMenuKey::Static("Enter"), "new annotation paragraph"),
     HelpMenuRow::Binding(HelpMenuKey::Static("Cmd-←/→, Ctrl-A/E"), "line start / end"),
     HelpMenuRow::Binding(HelpMenuKey::Static("Alt-←/→"), "word left / right"),
