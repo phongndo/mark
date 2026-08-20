@@ -148,6 +148,7 @@ impl Keymap {
 
         self.validate_global_conflicts()?;
         self.validate_mark_draft_conflicts()?;
+        self.validate_mark_focus_conflicts()?;
         self.validate_menu_conflicts()?;
         self.validate_annotation_menu_conflicts()?;
 
@@ -176,6 +177,15 @@ impl Keymap {
         let bindings = GLOBAL_ACTION_SPECS
             .iter()
             .filter(|spec| spec.conflict_group == GlobalConflictGroup::MarkDraft)
+            .map(|spec| (spec.name, self.global_sequences(spec.action)))
+            .collect::<Vec<_>>();
+        validate_conflicts("keymap.global", &bindings)
+    }
+
+    fn validate_mark_focus_conflicts(&self) -> Result<(), String> {
+        let bindings = GLOBAL_ACTION_SPECS
+            .iter()
+            .filter(|spec| spec.conflict_group == GlobalConflictGroup::MarkFocus)
             .map(|spec| (spec.name, self.global_sequences(spec.action)))
             .collect::<Vec<_>>();
         validate_conflicts("keymap.global", &bindings)
@@ -302,6 +312,8 @@ struct StoredGlobalKeymap {
     edit_hunk: Option<KeySpec>,
     save_mark: Option<KeySpec>,
     cancel_mark: Option<KeySpec>,
+    remove_mark: Option<KeySpec>,
+    clear_marks: Option<KeySpec>,
     copy_marks: Option<KeySpec>,
     copy_error_log: Option<KeySpec>,
     clear_filters: Option<KeySpec>,
@@ -350,6 +362,8 @@ impl StoredGlobalKeymap {
             GlobalAction::EditHunk => self.edit_hunk.take(),
             GlobalAction::SaveMark => self.save_mark.take(),
             GlobalAction::CancelMark => self.cancel_mark.take(),
+            GlobalAction::RemoveMark => self.remove_mark.take(),
+            GlobalAction::ClearMarks => self.clear_marks.take(),
             GlobalAction::CopyMarks => self.copy_marks.take(),
             GlobalAction::CopyErrorLog => self.copy_error_log.take(),
             GlobalAction::ClearFilters => self.clear_filters.take(),

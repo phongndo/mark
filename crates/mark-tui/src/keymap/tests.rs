@@ -347,6 +347,18 @@ fn default_mark_bindings_are_configurable_actions() {
         KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)
     ));
     assert!(keymap.matches_single(
+        GlobalAction::RemoveMark,
+        KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)
+    ));
+    assert!(keymap.matches_single(
+        GlobalAction::ClearMarks,
+        KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT)
+    ));
+    assert!(keymap.matches_single(
+        GlobalAction::HorizontalScrollLock,
+        KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)
+    ));
+    assert!(keymap.matches_single(
         GlobalAction::CopyMarks,
         KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE)
     ));

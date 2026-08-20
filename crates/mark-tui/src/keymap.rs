@@ -37,6 +37,8 @@ pub(crate) enum GlobalAction {
     EditHunk,
     SaveMark,
     CancelMark,
+    RemoveMark,
+    ClearMarks,
     CopyMarks,
     CopyErrorLog,
     ClearFilters,
@@ -83,6 +85,7 @@ pub(crate) struct Keymap {
 enum GlobalConflictGroup {
     Normal,
     MarkDraft,
+    MarkFocus,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -213,6 +216,14 @@ const GLOBAL_ACTION_SPECS: &[GlobalActionSpec] = &[
         1,
         GlobalConflictGroup::MarkDraft
     ),
+    global_action_spec!(
+        GlobalAction::RemoveMark,
+        "remove_mark",
+        ["x"],
+        1,
+        GlobalConflictGroup::MarkFocus
+    ),
+    global_action_spec!(GlobalAction::ClearMarks, "clear_marks", ["shift-x"], 1),
     global_action_spec!(GlobalAction::CopyMarks, "copy_marks", ["y"]),
     global_action_spec!(
         GlobalAction::CopyErrorLog,

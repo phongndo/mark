@@ -349,6 +349,8 @@ pub(crate) struct AnnotationCursor {
     /// A failed lazy move is cached until the selected target changes.
     pub(crate) previous_exhausted: bool,
     pub(crate) next_exhausted: bool,
+    /// Cursor is on the saved mark card under the current row, not the code.
+    pub(crate) on_mark: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

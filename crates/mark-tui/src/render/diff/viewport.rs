@@ -9,8 +9,8 @@ use crate::{
         annotation_hints::{AnnotationTargetHint, apply_annotation_target_hint},
         annotations::{render_annotation_compose_block, render_annotation_saved_block},
         grep::{
-            highlighted_cursor_diff_content_line, highlighted_cursor_full_line,
-            highlighted_cursor_meta_line,
+            highlight_saved_annotation_block, highlighted_cursor_diff_content_line,
+            highlighted_cursor_full_line, highlighted_cursor_meta_line,
         },
     },
     theme::DiffTheme,
@@ -93,14 +93,20 @@ fn build_unwrapped_viewport_lines(
                 {
                     let label = app.annotation_block_label(&key, false);
                     let block_scroll = annotation_saved_block_scroll(app, &key);
+                    let focused = app.annotation_cursor_focuses_saved_key(&key);
                     push_annotation_block(
                         &mut lines,
-                        render_annotation_saved_block(
-                            text,
+                        highlight_saved_annotation_block(
+                            render_annotation_saved_block(
+                                text,
+                                width,
+                                theme,
+                                Some(&label),
+                                app.annotations_state.annotations.is_human_only(&key),
+                            ),
                             width,
                             theme,
-                            Some(&label),
-                            app.annotations_state.annotations.is_human_only(&key),
+                            focused,
                         )
                         .into_iter()
                         .skip(block_scroll),
@@ -187,14 +193,20 @@ fn build_wrapped_viewport_lines(
                     {
                         let label = app.annotation_block_label(&key, false);
                         let block_scroll = annotation_saved_block_scroll(app, &key);
+                        let focused = app.annotation_cursor_focuses_saved_key(&key);
                         push_annotation_block(
                             &mut lines,
-                            render_annotation_saved_block(
-                                text,
+                            highlight_saved_annotation_block(
+                                render_annotation_saved_block(
+                                    text,
+                                    width,
+                                    theme,
+                                    Some(&label),
+                                    app.annotations_state.annotations.is_human_only(&key),
+                                ),
                                 width,
                                 theme,
-                                Some(&label),
-                                app.annotations_state.annotations.is_human_only(&key),
+                                focused,
                             )
                             .into_iter()
                             .skip(block_scroll),

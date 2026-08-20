@@ -97,6 +97,8 @@ horizontal_scroll_lock = "x"
 edit_hunk = "ctrl-g"
 save_mark = "ctrl-s"
 cancel_mark = "esc"
+remove_mark = "x"
+clear_marks = "shift-x"
 copy_marks = "y"
 copy_error_log = "ctrl-shift-c"
 clear_filters = "ctrl-u"
@@ -442,8 +444,9 @@ Global bindings can be one-key or two-key bindings. A one-key global binding
 cannot also be used as a two-key prefix. Menu bindings are single-key and apply
 to searchable menus. Printable menu bindings override text input, so prefer
 non-printing keys to keep type-to-filter behavior. `annotate_line`,
-`annotate_batch`, `edit_hunk`, `save_mark`, and `cancel_mark` must be single-key
-bindings.
+`annotate_batch`, `edit_hunk`, `save_mark`, `cancel_mark`, `remove_mark`, and
+`clear_marks` must be single-key bindings. `remove_mark` may share `x` with
+`horizontal_scroll_lock`: it only fires when the cursor is on a saved mark.
 
 Bindings can be a string or a list of strings:
 

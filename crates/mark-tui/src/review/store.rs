@@ -70,11 +70,36 @@ impl ReviewCommentStore {
     }
 
     pub(crate) fn human_text(&self, key: &AnnotationKey) -> Option<&str> {
-        self.anchors.get(key)?.ids.iter().find_map(|id| {
-            let index = *self.by_id.get(id)?;
-            let comment = self.comments.get(index)?.as_ref()?;
-            (comment.origin == CommentOrigin::Human).then_some(comment.summary.as_str())
+        self.human_index(key).and_then(|index| {
+            self.comments
+                .get(index)?
+                .as_ref()
+                .map(|comment| comment.summary.as_str())
         })
+    }
+
+    pub(crate) fn editable_human_text(&self, key: &AnnotationKey) -> Option<&str> {
+        self.last_comment_is_human(key)
+            .then(|| self.human_text(key))
+            .flatten()
+    }
+
+    pub(crate) fn last_comment_is_human(&self, key: &AnnotationKey) -> bool {
+        self.last_comment(key)
+            .is_some_and(|comment| comment.origin == CommentOrigin::Human)
+    }
+
+    pub(crate) fn human_bodies(&self, key: &AnnotationKey) -> Option<String> {
+        let bodies = self
+            .comments_at(key)
+            .filter(|comment| comment.origin == CommentOrigin::Human)
+            .map(|comment| comment.summary.as_str())
+            .collect::<Vec<_>>();
+        if bodies.is_empty() {
+            None
+        } else {
+            Some(bodies.join("\n\n"))
+        }
     }
 
     pub(crate) fn has_human(&self, key: &AnnotationKey) -> bool {
@@ -110,7 +135,11 @@ impl ReviewCommentStore {
             return Err(StoreLimitError);
         }
         let anchor = self.canonical_anchor(&anchor);
-        if let Some(index) = self.human_index(&anchor) {
+        // The latest human turn is editable. A new note after an agent answer
+        // starts another turn.
+        if self.last_comment_is_human(&anchor)
+            && let Some(index) = self.human_index(&anchor)
+        {
             let comment = self.comments[index]
                 .as_ref()
                 .expect("indexed comment should exist");
@@ -267,6 +296,7 @@ impl ReviewCommentStore {
         Ok(ids)
     }
 
+    #[cfg(test)]
     pub(crate) fn remove(&mut self, anchor: &AnnotationKey) -> Option<String> {
         let previous = self.get(anchor).cloned()?;
         if self.has_agent(anchor) {
@@ -275,6 +305,23 @@ impl ReviewCommentStore {
             self.remove_human(anchor)?;
         }
         Some(previous)
+    }
+
+    pub(crate) fn clear_anchor(&mut self, anchor: &AnnotationKey) -> usize {
+        let Some(ids) = self.anchors.get(anchor).map(|view| view.ids.clone()) else {
+            return 0;
+        };
+        let count = ids.len();
+        for id in ids {
+            self.remove_any_by_id(&id);
+        }
+        count
+    }
+
+    pub(crate) fn clear_all(&mut self) -> usize {
+        let count = self.comment_count;
+        *self = Self::default();
+        count
     }
 
     pub(crate) fn remove_human(&mut self, anchor: &AnnotationKey) -> Option<String> {
@@ -355,6 +402,7 @@ impl ReviewCommentStore {
         self.remove_agent_ids(ids)
     }
 
+    #[cfg(test)]
     pub(crate) fn remove_agents_at(&mut self, anchor: &AnnotationKey) -> usize {
         let ids = self
             .comments_at(anchor)
@@ -397,8 +445,14 @@ impl ReviewCommentStore {
         self.rebuild_anchor(&comment.anchor);
     }
 
+    fn last_comment(&self, anchor: &AnnotationKey) -> Option<&ReviewComment> {
+        let id = self.anchors.get(anchor)?.ids.last()?;
+        let index = *self.by_id.get(id)?;
+        self.comments.get(index)?.as_ref()
+    }
+
     fn human_index(&self, anchor: &AnnotationKey) -> Option<usize> {
-        self.anchors.get(anchor)?.ids.iter().find_map(|id| {
+        self.anchors.get(anchor)?.ids.iter().rev().find_map(|id| {
             let index = self.by_id.get(id).copied()?;
             self.comments[index]
                 .as_ref()
@@ -921,5 +975,106 @@ mod tests {
 
         assert_eq!(store.remove_agent_by_id("human-1"), Err(()));
         assert_eq!(store.len(), 1);
+    }
+
+    #[test]
+    fn human_follow_up_after_agent_appends_a_new_turn() {
+        let mut store = ReviewCommentStore::default();
+        store
+            .insert_human(anchor(), "what does this mean?".to_owned(), 1)
+            .unwrap();
+        store
+            .insert_agent_batch(
+                vec![NewAgentComment {
+                    anchor: anchor(),
+                    summary: "it retries".to_owned(),
+                    rationale: None,
+                    author: Some("pi".to_owned()),
+                }],
+                1,
+            )
+            .unwrap();
+
+        assert_eq!(store.human_text(&anchor()), Some("what does this mean?"));
+        assert_eq!(store.editable_human_text(&anchor()), None);
+        assert_eq!(
+            store.insert_human(anchor(), "replace it".to_owned(), 1),
+            Ok(None)
+        );
+        assert_eq!(store.len(), 3);
+        assert_eq!(store.human_text(&anchor()), Some("replace it"));
+        assert_eq!(store.editable_human_text(&anchor()), Some("replace it"));
+        assert_eq!(
+            store.human_bodies(&anchor()).as_deref(),
+            Some("what does this mean?\n\nreplace it")
+        );
+        let rendered = store.get(&anchor()).expect("stacked mark");
+        assert!(rendered.contains("Human: what does this mean?"));
+        assert!(rendered.contains("Agent (pi): it retries"));
+        assert!(rendered.contains("Human: replace it"));
+    }
+
+    #[test]
+    fn editing_the_latest_human_turn_replaces_it() {
+        let mut store = ReviewCommentStore::default();
+        store
+            .insert_human(anchor(), "what does this mean?".to_owned(), 1)
+            .unwrap();
+        store
+            .insert_agent_batch(
+                vec![NewAgentComment {
+                    anchor: anchor(),
+                    summary: "it retries".to_owned(),
+                    rationale: None,
+                    author: Some("pi".to_owned()),
+                }],
+                1,
+            )
+            .unwrap();
+        store.insert_human(anchor(), "typo".to_owned(), 1).unwrap();
+
+        assert_eq!(
+            store.insert_human(anchor(), "fixed".to_owned(), 1),
+            Ok(Some("typo".to_owned()))
+        );
+        assert_eq!(store.len(), 3);
+        assert_eq!(store.human_text(&anchor()), Some("fixed"));
+        assert_eq!(
+            store.human_bodies(&anchor()).as_deref(),
+            Some("what does this mean?\n\nfixed")
+        );
+    }
+
+    #[test]
+    fn human_only_edit_still_replaces() {
+        let mut store = ReviewCommentStore::default();
+        store.insert_human(anchor(), "typo".to_owned(), 1).unwrap();
+        assert_eq!(
+            store.insert_human(anchor(), "fixed".to_owned(), 1),
+            Ok(Some("typo".to_owned()))
+        );
+        assert_eq!(store.len(), 1);
+        assert_eq!(store.human_text(&anchor()), Some("fixed"));
+    }
+
+    #[test]
+    fn clear_anchor_removes_the_whole_stack() {
+        let mut store = ReviewCommentStore::default();
+        store
+            .insert_human(anchor(), "question".to_owned(), 1)
+            .unwrap();
+        store
+            .insert_agent_batch(
+                vec![NewAgentComment {
+                    anchor: anchor(),
+                    summary: "answer".to_owned(),
+                    rationale: None,
+                    author: None,
+                }],
+                1,
+            )
+            .unwrap();
+        assert_eq!(store.clear_anchor(&anchor()), 2);
+        assert!(store.is_empty());
     }
 }

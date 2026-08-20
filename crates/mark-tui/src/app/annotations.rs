@@ -38,6 +38,134 @@ enum AnnotationEditMode {
 }
 
 impl DiffApp {
+    pub(crate) fn request_clear_all_marks(&mut self) {
+        if self.marks_action_blocked() {
+            return;
+        }
+        if self.annotations_state.annotations.is_empty() {
+            self.set_warning_notice("no marks to clear");
+            return;
+        }
+        self.overlays.open_marks_confirm();
+        self.runtime.dirty = true;
+    }
+
+    pub(crate) fn request_remove_focused_mark(&mut self) -> bool {
+        if self.marks_action_blocked() || !self.annotation_cursor_on_mark() {
+            return false;
+        }
+        let Some(key) = self.focused_mark_key() else {
+            return false;
+        };
+        self.remove_mark_at_key(&key)
+    }
+
+    pub(crate) fn handle_marks_confirm_key(&mut self, key: KeyEvent) -> bool {
+        if !self.overlays.marks_confirm_is_open() {
+            return false;
+        }
+        if self.config.keymap.matches_menu(MenuAction::Close, key)
+            || self
+                .config
+                .keymap
+                .matches_single(GlobalAction::CancelMark, key)
+        {
+            self.cancel_marks_confirm();
+            return true;
+        }
+        if self.config.keymap.matches_menu(MenuAction::Confirm, key)
+            || self
+                .config
+                .keymap
+                .matches_single(GlobalAction::ClearMarks, key)
+        {
+            self.confirm_clear_all_marks();
+            return true;
+        }
+        true
+    }
+
+    fn confirm_clear_all_marks(&mut self) {
+        if !self.overlays.close_marks_confirm() {
+            return;
+        }
+        let removed = self.annotations_state.annotations.clear_all();
+        self.annotations_state.annotation_draft = None;
+        self.annotations_state.sticky_annotation_draft = false;
+        self.forget_all_annotation_layout();
+        self.set_scroll_with_grep_sync(
+            self.viewport.scroll,
+            false,
+            HunkFocusScrollBehavior::Preserve,
+        );
+        self.sync_annotation_cursor_to_viewport();
+        self.set_success_notice(if removed == 1 {
+            "cleared 1 mark".to_owned()
+        } else {
+            format!("cleared {removed} marks")
+        });
+        self.runtime.dirty = true;
+    }
+
+    fn cancel_marks_confirm(&mut self) {
+        if self.overlays.close_marks_confirm() {
+            self.runtime.dirty = true;
+        }
+    }
+
+    fn marks_action_blocked(&self) -> bool {
+        self.annotations_state.annotation_draft.is_some()
+            || self.overlays.active_overlay != super::state::ActiveOverlay::None
+            || self.refs.branch_menu_is_open()
+            || self.refs.commit_menu_is_open()
+            || self.filters.input_open()
+            || self.annotations_state.annotation_target_mode.is_some()
+    }
+
+    fn focused_mark_key(&self) -> Option<AnnotationKey> {
+        self.annotation_cursor_target()
+            .map(|target| target.key.clone())
+            .filter(|key| self.annotations_state.annotations.contains_key(key))
+    }
+
+    pub(in crate::app) fn remove_mark_at_key(&mut self, key: &AnnotationKey) -> bool {
+        if self.annotations_state.annotations.clear_anchor(key) == 0 {
+            return false;
+        }
+        self.forget_annotation_layout(key);
+        self.set_scroll_with_grep_sync(
+            self.viewport.scroll,
+            false,
+            HunkFocusScrollBehavior::Preserve,
+        );
+        self.sync_annotation_cursor_to_viewport();
+        self.runtime.dirty = true;
+        true
+    }
+
+    fn forget_annotation_layout(&mut self, key: &AnnotationKey) {
+        self.annotations_state.annotation_block_scroll = None;
+        self.annotations_state
+            .annotation_rows
+            .borrow_mut()
+            .remove(key);
+        *self.annotations_state.annotation_keys_by_row.borrow_mut() = None;
+        self.annotations_state
+            .annotation_heights
+            .borrow_mut()
+            .remove(key);
+    }
+
+    fn forget_all_annotation_layout(&mut self) {
+        self.annotations_state.annotation_block_scroll = None;
+        self.annotations_state.annotation_rows.borrow_mut().clear();
+        *self.annotations_state.annotation_keys_by_row.borrow_mut() = None;
+        self.annotations_state
+            .annotation_heights
+            .borrow_mut()
+            .clear();
+    }
+
     pub(crate) fn open_annotation_menu(&mut self) {
         if self.annotations_state.annotations.is_empty() {
             self.set_notice("no annotations");
@@ -288,38 +416,14 @@ impl DiffApp {
         let Some(item) = self.selected_annotation_menu_item() else {
             return;
         };
-        if self
-            .annotations_state
-            .annotations
-            .remove(&item.key)
-            .is_none()
-        {
+        if !self.remove_mark_at_key(&item.key) {
             return;
         }
-        self.annotations_state.annotation_block_scroll = None;
-        if !self.annotations_state.annotations.contains_key(&item.key) {
-            self.annotations_state
-                .annotation_rows
-                .borrow_mut()
-                .remove(&item.key);
-            *self.annotations_state.annotation_keys_by_row.borrow_mut() = None;
-        }
-        self.annotations_state
-            .annotation_heights
-            .borrow_mut()
-            .remove(&item.key);
         let len = self.filtered_annotation_menu_items().len();
         self.overlays.annotation_menu.clamp(len);
         if len == 0 {
             self.close_annotation_menu();
         }
-        self.set_scroll_with_grep_sync(
-            self.viewport.scroll,
-            false,
-            HunkFocusScrollBehavior::Preserve,
-        );
-        self.sync_annotation_cursor_to_viewport();
-        self.runtime.dirty = true;
     }
 
     pub(crate) fn jump_to_annotation(&mut self, key: &AnnotationKey) {
@@ -626,6 +730,7 @@ impl DiffApp {
         );
         if self.annotation_cursor_enabled() {
             self.select_annotation_cursor(&target_key);
+            self.set_annotation_cursor_on_mark(true);
         }
     }
 
@@ -763,7 +868,13 @@ impl DiffApp {
             .borrow_mut()
             .insert(draft.key.clone(), Some(draft.model_row_index));
         if draft.input.trim().is_empty() {
-            self.annotations_state.annotations.remove_human(&draft.key);
+            if self
+                .annotations_state
+                .annotations
+                .last_comment_is_human(&draft.key)
+            {
+                self.annotations_state.annotations.remove_human(&draft.key);
+            }
             if self.annotations_state.annotations.get(&draft.key).is_none() {
                 self.annotations_state
                     .annotation_rows
@@ -794,6 +905,7 @@ impl DiffApp {
             // Advance from the draft's preserved cursor origin before viewport
             // synchronization can choose a replacement for that off-screen row.
             self.select_annotation_cursor(&draft_key);
+            self.set_annotation_cursor_on_mark(true);
             self.move_annotation_cursor(1);
         }
         self.set_scroll_with_grep_sync(

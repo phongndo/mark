@@ -66,6 +66,7 @@ pub(crate) const NORMAL_GLOBAL_ACTIONS: &[GlobalAction] = &[
     GlobalAction::HorizontalScrollLock,
     GlobalAction::EditHunk,
     GlobalAction::CopyMarks,
+    GlobalAction::ClearMarks,
     GlobalAction::CopyErrorLog,
     GlobalAction::ClearFilters,
     GlobalAction::NextDiffType,
