@@ -262,7 +262,9 @@ The annotation row highlight is active in the diff by default. Move it with
 viewport, and `g` / `G` jump to the ends. Like Vim with `scrolloff=8`, the
 highlight moves freely until it is eight rows from the top or bottom, then stays
 there while the viewport scrolls. The margin shrinks for short viewports and at
-diff boundaries.
+diff boundaries. If a hunk is taller than the viewport, its `@@` header stays pinned at the top
+after it scrolls off until the next hunk. When Git supplies no optional hunk
+label, Mark shows the first nonblank changed line as a fallback label.
 
 Press `Enter` on a code line, hunk header, or file header to annotate that line,
 entire hunk, or entire file. Notes render as compact inline blocks without

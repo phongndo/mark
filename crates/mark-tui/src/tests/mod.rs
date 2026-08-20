@@ -66,6 +66,7 @@ mod input;
 mod menus;
 mod misc;
 mod render;
+mod sticky;
 mod syntax;
 
 const FILE_0: FileIndex = FileIndex::new(0);

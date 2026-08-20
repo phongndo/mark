@@ -29,6 +29,7 @@ pub(crate) fn build_diff_viewport_lines(
     } else {
         build_unwrapped_viewport_lines(app, width, visible_rows)
     };
+    super::sticky::overlay_sticky_hunk_header(app, &mut lines, width, visible_rows);
     app.refresh_code_selection_render(&mut lines, width, visible_rows);
     lines
 }
