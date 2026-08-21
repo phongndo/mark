@@ -185,20 +185,15 @@ fn read_file_arc(path: &Path, max_patch_bytes: Option<usize>) -> MarkResult<Arc<
     let mut file = fs::File::open(path)?;
     let len = usize::try_from(file.metadata()?.len())
         .map_err(|_| io::Error::other("patch file is too large for this platform"))?;
-    let mut raw = Arc::<[u8]>::new_uninit_slice(len);
-    let uninit = Arc::get_mut(&mut raw).expect("new Arc should be uniquely owned");
-    // SAFETY: the slice covers the same allocation as `uninit`; `read_exact`
-    // initializes every byte before `assume_init` below.
-    let bytes = unsafe { std::slice::from_raw_parts_mut(uninit.as_mut_ptr().cast::<u8>(), len) };
-    file.read_exact(bytes)?;
+    let mut bytes = vec![0u8; len];
+    file.read_exact(&mut bytes)?;
     let mut extra = [0u8; 1];
     if file.read(&mut extra)? != 0 {
         // The file grew after metadata was read. Preserve fs::read semantics
         // on this rare race rather than returning a truncated patch.
         return Ok(Arc::from(fs::read(path)?));
     }
-    // SAFETY: `read_exact` succeeded for the complete allocation.
-    Ok(unsafe { raw.assume_init() })
+    Ok(Arc::from(bytes))
 }
 
 fn diff_patch_bytes_paths(
