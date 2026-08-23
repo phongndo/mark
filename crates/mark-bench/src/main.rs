@@ -272,7 +272,7 @@ struct SyntaxCompareArgs {
     #[arg(long)]
     shiki: bool,
     /// Shiki package version used when --shiki is set.
-    #[arg(long, default_value = "4.3.0")]
+    #[arg(long, default_value = "4.4.3")]
     shiki_version: String,
     /// Directory used for the local Shiki package and generated scripts.
     #[arg(long, default_value = "target/shiki-syntax-compare")]
@@ -3324,7 +3324,7 @@ mod tests {
             iterations: 1,
             skip_counters: false,
             shiki,
-            shiki_version: "4.3.0".to_owned(),
+            shiki_version: "4.4.3".to_owned(),
             shiki_dir: PathBuf::from("target/shiki-syntax-compare-test"),
             json: false,
         }

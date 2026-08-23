@@ -41,7 +41,7 @@ install -m 755 "$binary" "$package_dir/mark"
 cp README.md LICENSE "$package_dir/"
 notices="$package_dir/THIRD_PARTY_NOTICES"
 : > "$notices"
-for notice_dir in assets/licenses/syntaxmate-0.1.1 assets/themes/licenses; do
+for notice_dir in assets/licenses/syntaxmate-0.1.2 assets/themes/licenses; do
   for notice in "$notice_dir"/*; do
     [ -f "$notice" ] || continue
     notice_name="${notice##*/}"
