@@ -266,14 +266,20 @@ pub(crate) fn spaces(width: usize) -> Cow<'static, str> {
 }
 
 pub(crate) fn display_width(text: &str) -> usize {
-    if text
-        .as_bytes()
-        .iter()
-        .all(|byte| is_single_width_printable_ascii(*byte))
-    {
-        return text.len();
+    if let Some(width) = single_width_ascii_width(text.as_bytes()) {
+        return width;
     }
+    DisplayChunks::new(text)
+        .map(|chunk| match chunk {
+            DisplayChunk::Text(run) => run.width(),
+            DisplayChunk::Special(ch) => display_char_width(ch),
+        })
+        .sum()
+}
 
+/// Computes width after the caller has already ruled out an all-printable-ASCII
+/// byte slice, avoiding a duplicate probe on patch-backed text.
+pub(crate) fn display_width_slow(text: &str) -> usize {
     DisplayChunks::new(text)
         .map(|chunk| match chunk {
             DisplayChunk::Text(run) => run.width(),
@@ -729,6 +735,14 @@ fn next_byte_is_single_width_ascii(text: &str, index: usize) -> bool {
     text.as_bytes()
         .get(index)
         .is_some_and(|byte| is_single_width_printable_ascii(*byte))
+}
+
+/// Returns the terminal width when every byte is printable, single-cell ASCII.
+pub(crate) fn single_width_ascii_width(bytes: &[u8]) -> Option<usize> {
+    bytes
+        .iter()
+        .all(|byte| is_single_width_printable_ascii(*byte))
+        .then_some(bytes.len())
 }
 
 fn is_single_width_printable_ascii(byte: u8) -> bool {
