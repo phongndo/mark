@@ -3,7 +3,6 @@ use ratatui::prelude::Line;
 use crate::{
     app::DiffApp,
     model::{FileIndex, HunkIndex, UiRow},
-    render::viewport_plan::{ViewportSlotKind, plan_diff_viewport_rows_at_scroll},
 };
 
 use super::render_row_with_focus;
@@ -63,6 +62,7 @@ pub(crate) fn overlay_sticky_hunk_header(
     lines: &mut [Line<'static>],
     width: usize,
     visible_rows: usize,
+    focused_hunk: Option<(FileIndex, HunkIndex)>,
 ) {
     if lines.is_empty() {
         return;
@@ -70,15 +70,6 @@ pub(crate) fn overlay_sticky_hunk_header(
     let Some(sticky) = sticky_hunk_header(app, app.viewport.scroll, visible_rows) else {
         return;
     };
-    let plans = plan_diff_viewport_rows_at_scroll(app, app.viewport.scroll, visible_rows);
-    if !matches!(
-        plans.first().map(|slot| &slot.kind),
-        Some(ViewportSlotKind::DiffVisual { .. })
-    ) {
-        return;
-    }
-
-    let focused_hunk = app.focused_hunk_for_viewport(visible_rows);
     lines[0] = render_row_with_focus(
         app,
         sticky.model_row,

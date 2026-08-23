@@ -3,15 +3,18 @@ use ratatui::prelude::{Color, Line, Span, Style};
 
 use crate::{
     render::{
-        headers::{
-            HeaderSpanPart, HeaderStyles, compact_delta_parts, hunk_header_spans_with_delta,
-        },
+        headers::{HeaderStyles, compact_delta_parts, hunk_header_spans_with_delta},
         style::{diff_base_bg, diff_indicator_span, focused_diff_indicator_span},
-        text::terminal_text,
     },
     theme::DiffTheme,
 };
 
+mod location;
+
+use location::hunk_header_location_parts;
+pub(crate) use location::{hunk_header_context, normalized_hunk_header_text};
+
+#[cfg(test)]
 pub(crate) fn hunk_header_line(
     hunk: &mark_diff::DiffHunk,
     width: usize,
@@ -25,6 +28,50 @@ pub(crate) fn hunk_header_line_with_focus(
     width: usize,
     theme: DiffTheme,
     focused: bool,
+) -> Line<'static> {
+    let (additions, deletions) = hunk_change_counts(hunk);
+    let display_context = hunk_header_display_context(hunk);
+    hunk_header_line_with_focus_and_context(
+        hunk,
+        width,
+        theme,
+        focused,
+        display_context,
+        additions,
+        deletions,
+    )
+}
+
+pub(crate) fn hunk_header_line_with_focus_and_metadata(
+    hunk: &mark_diff::DiffHunk,
+    width: usize,
+    theme: DiffTheme,
+    focused: bool,
+    fallback_context_line: Option<usize>,
+    additions: usize,
+    deletions: usize,
+) -> Line<'static> {
+    let display_context =
+        hunk_header_display_context_with_fallback_line(hunk, fallback_context_line);
+    hunk_header_line_with_focus_and_context(
+        hunk,
+        width,
+        theme,
+        focused,
+        display_context,
+        additions,
+        deletions,
+    )
+}
+
+fn hunk_header_line_with_focus_and_context(
+    hunk: &mark_diff::DiffHunk,
+    width: usize,
+    theme: DiffTheme,
+    focused: bool,
+    display_context: &str,
+    additions: usize,
+    deletions: usize,
 ) -> Line<'static> {
     if width == 0 {
         return Line::default();
@@ -41,11 +88,14 @@ pub(crate) fn hunk_header_line_with_focus(
     if content_width > 0 {
         spans.push(Span::styled(" ", Style::default().bg(content_bg)));
         if content_width > 1 {
-            spans.extend(hunk_header_spans(
+            spans.extend(hunk_header_spans_with_metadata(
                 hunk,
                 content_width - 1,
                 theme,
                 content_bg,
+                display_context,
+                additions,
+                deletions,
             ));
         }
     }
@@ -53,6 +103,7 @@ pub(crate) fn hunk_header_line_with_focus(
     Line::from(spans)
 }
 
+#[cfg(test)]
 pub(crate) fn hunk_header_spans(
     hunk: &mark_diff::DiffHunk,
     width: usize,
@@ -60,10 +111,30 @@ pub(crate) fn hunk_header_spans(
     bg: Color,
 ) -> Vec<Span<'static>> {
     let (additions, deletions) = hunk_change_counts(hunk);
-    let context = hunk_header_display_context(hunk);
+    let display_context = hunk_header_display_context(hunk);
+    hunk_header_spans_with_metadata(
+        hunk,
+        width,
+        theme,
+        bg,
+        display_context,
+        additions,
+        deletions,
+    )
+}
+
+fn hunk_header_spans_with_metadata(
+    hunk: &mark_diff::DiffHunk,
+    width: usize,
+    theme: DiffTheme,
+    bg: Color,
+    display_context: &str,
+    additions: usize,
+    deletions: usize,
+) -> Vec<Span<'static>> {
     hunk_header_spans_with_delta(
         &hunk_header_location_parts(&hunk.header, theme, bg),
-        &context,
+        display_context,
         &compact_delta_parts(additions, deletions),
         width,
         HeaderStyles {
@@ -76,18 +147,10 @@ pub(crate) fn hunk_header_spans(
     )
 }
 
-pub(crate) fn hunk_header_context(header: &str) -> &str {
-    header
-        .splitn(3, "@@")
-        .nth(2)
-        .map(str::trim)
-        .unwrap_or_default()
-}
-
-fn hunk_header_display_context(hunk: &mark_diff::DiffHunk) -> String {
+fn hunk_header_display_context(hunk: &mark_diff::DiffHunk) -> &str {
     let context = hunk_header_context(&hunk.header);
     if !context.is_empty() {
-        return terminal_text(context);
+        return context;
     }
 
     hunk.lines
@@ -95,99 +158,23 @@ fn hunk_header_display_context(hunk: &mark_diff::DiffHunk) -> String {
         .filter(|line| line.kind() != DiffLineKind::Meta)
         .map(|line| line.text().trim())
         .find(|text| !text.is_empty())
-        .map(terminal_text)
         .unwrap_or_default()
 }
-pub(crate) fn normalized_hunk_header_text(header: &str) -> String {
-    let mut text = hunk_header_location_text(header);
-    let context = hunk_header_context(header);
+
+fn hunk_header_display_context_with_fallback_line(
+    hunk: &mark_diff::DiffHunk,
+    fallback_context_line: Option<usize>,
+) -> &str {
+    let context = hunk_header_context(&hunk.header);
     if !context.is_empty() {
-        text.push(' ');
-        text.push_str(context);
+        return context;
     }
-
-    terminal_text(&text)
+    fallback_context_line
+        .and_then(|line| hunk.lines.get(line))
+        .map(|line| line.text().trim())
+        .unwrap_or_default()
 }
-
-fn hunk_header_location_text(header: &str) -> String {
-    match parse_hunk_header_location(header) {
-        HunkHeaderLocation::Ranges {
-            old_range,
-            new_range,
-        } => format!("@@ {old_range} {new_range} @@"),
-        HunkHeaderLocation::Fallback(text) => text,
-    }
-}
-
-pub(crate) fn hunk_header_location_parts(
-    header: &str,
-    theme: DiffTheme,
-    bg: Color,
-) -> Vec<HeaderSpanPart> {
-    match parse_hunk_header_location(header) {
-        HunkHeaderLocation::Ranges {
-            old_range,
-            new_range,
-        } => vec![
-            HeaderSpanPart {
-                text: "@@ ".to_owned(),
-                style: Style::default().fg(theme.muted).bg(bg),
-            },
-            HeaderSpanPart {
-                text: old_range.to_owned(),
-                style: Style::default().fg(theme.deletion_fg).bg(bg),
-            },
-            HeaderSpanPart {
-                text: " ".to_owned(),
-                style: Style::default().fg(theme.muted).bg(bg),
-            },
-            HeaderSpanPart {
-                text: new_range.to_owned(),
-                style: Style::default().fg(theme.addition_fg).bg(bg),
-            },
-            HeaderSpanPart {
-                text: " @@".to_owned(),
-                style: Style::default().fg(theme.muted).bg(bg),
-            },
-        ],
-        HunkHeaderLocation::Fallback(text) => vec![HeaderSpanPart {
-            text,
-            style: Style::default().fg(theme.muted).bg(bg),
-        }],
-    }
-}
-
-enum HunkHeaderLocation<'a> {
-    Ranges {
-        old_range: &'a str,
-        new_range: &'a str,
-    },
-    Fallback(String),
-}
-
-fn parse_hunk_header_location(header: &str) -> HunkHeaderLocation<'_> {
-    let mut parts = header.splitn(3, "@@");
-    let Some("") = parts.next() else {
-        return HunkHeaderLocation::Fallback(header.trim().to_owned());
-    };
-    let Some(location) = parts.next() else {
-        return HunkHeaderLocation::Fallback(header.trim().to_owned());
-    };
-
-    let mut coordinates = location.split_whitespace();
-    let old_range = coordinates.next().unwrap_or_default();
-    let new_range = coordinates.next().unwrap_or_default();
-    if old_range.is_empty() || new_range.is_empty() {
-        return HunkHeaderLocation::Fallback(format!("@@{location}@@"));
-    }
-
-    HunkHeaderLocation::Ranges {
-        old_range,
-        new_range,
-    }
-}
-
-pub(crate) fn hunk_change_counts(hunk: &mark_diff::DiffHunk) -> (usize, usize) {
+fn hunk_change_counts(hunk: &mark_diff::DiffHunk) -> (usize, usize) {
     hunk.lines.iter().fold(
         (0usize, 0usize),
         |(additions, deletions), line| match line.kind() {

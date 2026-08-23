@@ -10,7 +10,10 @@ pub(crate) use delta::{
 };
 pub(crate) use file::file_header_line;
 pub(crate) use fit::{header_spans, hunk_header_spans_with_delta};
+pub(crate) use hunk::{
+    hunk_header_context, hunk_header_line_with_focus, hunk_header_line_with_focus_and_metadata,
+    normalized_hunk_header_text,
+};
 #[cfg(test)]
-pub(crate) use hunk::hunk_header_spans;
-pub(crate) use hunk::{hunk_header_line, hunk_header_line_with_focus, normalized_hunk_header_text};
+pub(crate) use hunk::{hunk_header_line, hunk_header_spans};
 pub(crate) use types::{DeltaKind, DeltaPart, FittedPrefixedParts, HeaderSpanPart, HeaderStyles};
