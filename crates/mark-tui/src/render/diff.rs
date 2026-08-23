@@ -10,7 +10,9 @@ use crate::{
     model::{FileIndex, HunkIndex, UiRow},
     render::{
         grep::{grep_highlight_targets_for_row, highlighted_grep_text_line},
-        headers::{file_header_line, hunk_header_line, hunk_header_line_with_focus},
+        headers::{
+            file_header_line, hunk_header_line_with_focus, hunk_header_line_with_focus_and_metadata,
+        },
         style::diff_base_bg,
         text::fit_padded,
     },
@@ -208,11 +210,21 @@ pub(crate) fn render_row_with_focus(
             theme,
         ),
         UiRow::HunkHeader { file, hunk } => {
-            let hunk = &app.document.changeset.files[file].hunks()[hunk];
-            if hunk_focused {
-                hunk_header_line_with_focus(hunk, width, theme, true)
+            let hunk_diff = &app.document.changeset.files[file].hunks()[hunk];
+            if let Some((additions, deletions, fallback_context_line)) =
+                app.document.search_index.cached_hunk_header(file, hunk)
+            {
+                hunk_header_line_with_focus_and_metadata(
+                    hunk_diff,
+                    width,
+                    theme,
+                    hunk_focused,
+                    fallback_context_line,
+                    additions,
+                    deletions,
+                )
             } else {
-                hunk_header_line(hunk, width, theme)
+                hunk_header_line_with_focus(hunk_diff, width, theme, hunk_focused)
             }
         }
         UiRow::UnifiedLine { file, hunk, line } => {

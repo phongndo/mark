@@ -4,7 +4,7 @@ use crate::{
     annotation::AnnotationKey,
     app::DiffApp,
     controls::DiffLayoutMode,
-    model::UiRow,
+    model::{FileIndex, HunkIndex, UiRow},
     render::{
         annotation_hints::{AnnotationTargetHint, apply_annotation_target_hint},
         annotations::{render_annotation_compose_block, render_annotation_saved_block},
@@ -24,12 +24,13 @@ pub(crate) fn build_diff_viewport_lines(
     visible_rows: usize,
 ) -> Vec<Line<'static>> {
     app.prepare_full_file_context_for_viewport(visible_rows);
+    let focused_hunk = app.focused_hunk_for_viewport(visible_rows);
     let mut lines = if app.viewport.line_wrapping {
-        build_wrapped_viewport_lines(app, width, visible_rows)
+        build_wrapped_viewport_lines(app, width, visible_rows, focused_hunk)
     } else {
-        build_unwrapped_viewport_lines(app, width, visible_rows)
+        build_unwrapped_viewport_lines(app, width, visible_rows, focused_hunk)
     };
-    super::sticky::overlay_sticky_hunk_header(app, &mut lines, width, visible_rows);
+    super::sticky::overlay_sticky_hunk_header(app, &mut lines, width, visible_rows, focused_hunk);
     app.refresh_code_selection_render(&mut lines, width, visible_rows);
     lines
 }
@@ -38,12 +39,12 @@ fn build_unwrapped_viewport_lines(
     app: &mut DiffApp,
     width: usize,
     visible_rows: usize,
+    focused_hunk: Option<(FileIndex, HunkIndex)>,
 ) -> Vec<Line<'static>> {
     let theme = app.config.theme;
     let layout = app.viewport.layout;
     let draft = app.annotations_state.annotation_draft.clone();
     let has_annotation_blocks = draft.is_some() || !app.annotations_state.annotations.is_empty();
-    let focused_hunk = app.focused_hunk_for_viewport(visible_rows);
     let mut lines = Vec::with_capacity(visible_rows);
 
     for offset in 0..visible_rows {
@@ -126,12 +127,12 @@ fn build_wrapped_viewport_lines(
     app: &mut DiffApp,
     width: usize,
     visible_rows: usize,
+    focused_hunk: Option<(FileIndex, HunkIndex)>,
 ) -> Vec<Line<'static>> {
     let theme = app.config.theme;
     let layout = app.viewport.layout;
     let draft = app.annotations_state.annotation_draft.clone();
     let has_annotation_blocks = draft.is_some() || !app.annotations_state.annotations.is_empty();
-    let focused_hunk = app.focused_hunk_for_viewport(visible_rows);
     let mut lines = Vec::with_capacity(visible_rows);
     let Some((mut row_index, mut row_offset)) = app.model_row_at_scroll(app.viewport.scroll) else {
         return lines;

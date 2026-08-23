@@ -9,7 +9,7 @@ use crate::{
     controls::diff_line_grep_prefix,
     model::{DiffLineIndex, FileIndex, HunkIndex, ModelRow, UiModel},
     render::{
-        headers::normalized_hunk_header_text,
+        headers::{hunk_header_context, normalized_hunk_header_text},
         text::{display_width, terminal_text_cow},
     },
 };
@@ -26,6 +26,13 @@ const MAX_DISPLAY_COLUMNS_PER_LINE_BYTE: usize = 6;
 const PARALLEL_SEARCH_MIN_LINES: usize = 200_000;
 #[cfg(test)]
 const PARALLEL_SEARCH_MIN_LINES: usize = 16;
+// Sticky headers are rendered every frame. Cache large-hunk header metadata
+// while the search index is already walking those lines. Keep ordinary hunks on
+// the allocation-free direct path and bound repeated render work.
+#[cfg(not(test))]
+const CACHED_HUNK_HEADER_MIN_LINES: usize = 16 * 1024;
+#[cfg(test)]
+const CACHED_HUNK_HEADER_MIN_LINES: usize = 16;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum SearchLineRef {
@@ -81,6 +88,7 @@ impl SearchMatchIndex {
 pub(crate) struct DiffSearchIndex {
     files: Vec<FileSearchIndex>,
     diff_lines: usize,
+    cached_hunk_headers: Vec<CachedHunkHeader>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,11 +97,21 @@ struct FileSearchIndex {
     max_line_width: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CachedHunkHeader {
+    file: FileIndex,
+    hunk: HunkIndex,
+    additions: usize,
+    deletions: usize,
+    fallback_context_line: Option<usize>,
+}
+
 impl DiffSearchIndex {
     pub(crate) fn empty() -> Self {
         Self {
             files: Vec::new(),
             diff_lines: 0,
+            cached_hunk_headers: Vec::new(),
         }
     }
 
@@ -105,10 +123,18 @@ impl DiffSearchIndex {
             .map(|hunk| hunk.lines.len())
             .sum::<usize>();
         let compute_widths = diff_lines <= MAX_EAGER_SEARCH_WIDTH_LINES;
+        let cached_hunks = changeset
+            .files
+            .iter()
+            .flat_map(|file| file.hunks())
+            .filter(|hunk| hunk.lines.len() >= CACHED_HUNK_HEADER_MIN_LINES)
+            .count();
+        let mut cached_hunk_headers = Vec::with_capacity(cached_hunks);
         let files = changeset
             .files
             .iter()
-            .map(|file| {
+            .enumerate()
+            .map(|(file_index, file)| {
                 let mut filter_texts = Vec::with_capacity(4);
                 filter_texts.push(file.display_path().to_ascii_lowercase());
                 if let Some(old_path) = file.old_path()
@@ -124,13 +150,49 @@ impl DiffSearchIndex {
                 filter_texts.push(file.status().label().to_ascii_lowercase());
 
                 let mut max_line_width = 0usize;
-                for hunk in file.hunks() {
-                    for line in &hunk.lines {
-                        if compute_widths {
-                            max_line_width = max_line_width.max(display_width(&line.text_lossy()));
-                        } else {
-                            max_line_width = max_line_width
-                                .max(unindexed_line_width_bound(line.text_bytes().len()));
+                for (hunk_index, hunk) in file.hunks().iter().enumerate() {
+                    if hunk.lines.len() >= CACHED_HUNK_HEADER_MIN_LINES {
+                        let mut fallback_context_line = None;
+                        let mut additions = 0usize;
+                        let mut deletions = 0usize;
+                        let mut record_line = |line: &mark_diff::DiffLine| {
+                            let kind = line.kind();
+                            match kind {
+                                mark_diff::DiffLineKind::Addition => additions += 1,
+                                mark_diff::DiffLineKind::Deletion => deletions += 1,
+                                mark_diff::DiffLineKind::Context
+                                | mark_diff::DiffLineKind::Meta => {}
+                            }
+                            max_line_width =
+                                max_line_width.max(search_index_line_width(line, compute_widths));
+                            kind
+                        };
+                        let mut lines = hunk.lines.iter().enumerate();
+                        if hunk_header_context(&hunk.header).is_empty() {
+                            for (line_index, line) in lines.by_ref() {
+                                let kind = record_line(line);
+                                if kind != mark_diff::DiffLineKind::Meta
+                                    && !line.text().trim().is_empty()
+                                {
+                                    fallback_context_line = Some(line_index);
+                                    break;
+                                }
+                            }
+                        }
+                        for (_, line) in lines {
+                            let _ = record_line(line);
+                        }
+                        cached_hunk_headers.push(CachedHunkHeader {
+                            file: FileIndex::new(file_index),
+                            hunk: HunkIndex::new(hunk_index),
+                            additions,
+                            deletions,
+                            fallback_context_line,
+                        });
+                    } else {
+                        for line in &hunk.lines {
+                            max_line_width =
+                                max_line_width.max(search_index_line_width(line, compute_widths));
                         }
                     }
                 }
@@ -142,7 +204,11 @@ impl DiffSearchIndex {
             })
             .collect();
 
-        Self { files, diff_lines }
+        Self {
+            files,
+            diff_lines,
+            cached_hunk_headers,
+        }
     }
 
     pub(crate) fn search(
@@ -295,6 +361,23 @@ impl DiffSearchIndex {
         }
     }
 
+    pub(crate) fn cached_hunk_header(
+        &self,
+        file: FileIndex,
+        hunk: HunkIndex,
+    ) -> Option<(usize, usize, Option<usize>)> {
+        let index = self
+            .cached_hunk_headers
+            .binary_search_by_key(&(file, hunk), |header| (header.file, header.hunk))
+            .ok()?;
+        let header = self.cached_hunk_headers[index];
+        Some((
+            header.additions,
+            header.deletions,
+            header.fallback_context_line,
+        ))
+    }
+
     pub(crate) fn max_line_width(&self) -> usize {
         self.max_line_width_from(self.files.iter())
     }
@@ -324,6 +407,20 @@ impl DiffSearchIndex {
                     .map(FileSearchIndex::estimated_memory_bytes)
                     .sum::<usize>(),
             )
+            .saturating_add(
+                self.cached_hunk_headers
+                    .len()
+                    .saturating_mul(std::mem::size_of::<CachedHunkHeader>()),
+            )
+    }
+}
+
+#[inline]
+fn search_index_line_width(line: &mark_diff::DiffLine, compute_widths: bool) -> usize {
+    if compute_widths {
+        display_width(&line.text_lossy())
+    } else {
+        unindexed_line_width_bound(line.text_bytes().len())
     }
 }
 
@@ -729,6 +826,51 @@ mod tests {
                 FileIndex::new(0),
                 HunkIndex::new(0)
             )]
+        );
+    }
+
+    #[test]
+    fn large_hunk_header_is_cached_without_counting_meta_lines() {
+        let mut lines = (1..=8)
+            .map(|line| DiffLine::context(line, line, "context"))
+            .collect::<Vec<_>>();
+        lines.extend((9..=12).map(|line| DiffLine::addition(line, "added")));
+        lines.extend((9..=12).map(|line| DiffLine::deletion(line, "deleted")));
+        lines.extend([DiffLine::meta("meta"), DiffLine::meta("meta")]);
+        let changeset = changeset_with_hunk("@@ -1,12 +1,12 @@", lines);
+
+        let index = DiffSearchIndex::new(&changeset);
+
+        assert_eq!(
+            index.cached_hunk_header(FileIndex::new(0), HunkIndex::new(0)),
+            Some((4, 4, Some(0)))
+        );
+    }
+
+    #[test]
+    fn large_blank_hunk_caches_the_absence_of_a_fallback_context_line() {
+        let lines = (1..=16)
+            .map(|line| DiffLine::addition(line, "   "))
+            .collect();
+        let changeset = changeset_with_hunk("@@ -0,0 +1,16 @@", lines);
+
+        let index = DiffSearchIndex::new(&changeset);
+
+        assert_eq!(
+            index.cached_hunk_header(FileIndex::new(0), HunkIndex::new(0)),
+            Some((16, 0, None))
+        );
+    }
+
+    #[test]
+    fn small_hunk_header_stays_on_the_direct_render_path() {
+        let changeset = changeset_with_hunk_header("@@ -1 +1 @@");
+
+        let index = DiffSearchIndex::new(&changeset);
+
+        assert_eq!(
+            index.cached_hunk_header(FileIndex::new(0), HunkIndex::new(0)),
+            None
         );
     }
 
