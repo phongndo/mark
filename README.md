@@ -15,16 +15,24 @@ requests in one focused interface.
 
 ## Install
 
-The installer supports macOS and Linux on `aarch64` and `x86_64`.
+Homebrew on macOS or Linux:
+
+```sh
+brew install phongndo/tap/mark-cli
+```
+
+Or use the portable installer on macOS or Linux. Both methods support
+`aarch64` and `x86_64`:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/phongndo/mark/main/scripts/install.sh | sh
 ```
 
-Update in place:
+Update with the same method used to install Mark:
 
 ```sh
-mark update
+brew upgrade mark-cli  # Homebrew
+mark update             # portable installer
 ```
 
 ## Quick start

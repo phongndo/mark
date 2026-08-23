@@ -139,7 +139,17 @@ mark-vX.Y.Z-aarch64-unknown-linux-gnu.tar.gz
 mark-vX.Y.Z-x86_64-unknown-linux-gnu.tar.gz
 ```
 
-Those names are part of the installer contract.
+Those names are part of the installer contract. The publish job also generates
+`mark-cli.rb` from the four verified checksum files and attaches it to the
+GitHub release. The shared [`phongndo/tap`](https://github.com/phongndo/homebrew-tap)
+Homebrew tap consumes that formula; its scheduled workflow is the no-credential
+fallback for every stable release.
+
+For an immediate tap update, configure `HOMEBREW_TAP_TOKEN` in the `release`
+GitHub Environment. Use a fine-grained token scoped only to
+`phongndo/homebrew-tap` with repository Contents write permission. If the secret
+is absent, release publication still succeeds and the tap's scheduled workflow
+picks up the formula.
 
 ## Nightly flow
 
