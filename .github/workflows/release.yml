@@ -128,6 +128,12 @@ jobs:
       contents: write
 
     steps:
+      - name: Checkout qualified source
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+          persist-credentials: false
+
       - name: Download release assets
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
@@ -141,6 +147,16 @@ jobs:
           [[ "$(find dist -maxdepth 1 -name '*.tar.gz' | wc -l)" -eq 4 ]]
           [[ "$(find dist -maxdepth 1 -name '*.sha256' | wc -l)" -eq 4 ]]
           (cd dist && sha256sum --check ./*.sha256)
+
+      - name: Generate Homebrew formula
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+        run: |
+          scripts/ci/generate-homebrew-formula.py \
+            --tag "$RELEASE_TAG" \
+            --checksums dist \
+            --output dist/mark-cli.rb
+          ruby -c dist/mark-cli.rb
 
       - name: Create GitHub release
         env:
@@ -157,6 +173,12 @@ jobs:
 
           Source: $SOURCE_SHA
 
+          Install with Homebrew:
+
+          \`\`\`sh
+          brew install phongndo/tap/mark-cli
+          \`\`\`
+
           Install with curl:
 
           \`\`\`sh
@@ -165,7 +187,8 @@ jobs:
           EOF
 
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" dist/*.tar.gz dist/*.sha256 \
+            gh release upload "$RELEASE_TAG" \
+              dist/*.tar.gz dist/*.sha256 dist/mark-cli.rb \
               --repo "$GITHUB_REPOSITORY" \
               --clobber
             gh release edit "$RELEASE_TAG" \
@@ -178,10 +201,28 @@ jobs:
             if [[ "$GITHUB_REF" == refs/tags/* ]]; then
               create_args=(--verify-tag)
             fi
-            gh release create "$RELEASE_TAG" dist/*.tar.gz dist/*.sha256 \
+            gh release create "$RELEASE_TAG" \
+              dist/*.tar.gz dist/*.sha256 dist/mark-cli.rb \
               --repo "$GITHUB_REPOSITORY" \
               "${create_args[@]}" \
               --latest \
               --title "mark $VERSION" \
               --notes-file release-notes.md
           fi
+
+      - name: Notify Homebrew tap
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+          TAP_REPOSITORY: phongndo/homebrew-tap
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            echo "::notice::HOMEBREW_TAP_TOKEN is not configured; the tap's scheduled update will publish this formula"
+            exit 0
+          fi
+
+          gh api --method POST "repos/$TAP_REPOSITORY/dispatches" \
+            -f event_type=mark-release \
+            -f "client_payload[release_tag]=$RELEASE_TAG"

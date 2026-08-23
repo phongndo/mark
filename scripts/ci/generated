@@ -4,5 +4,6 @@ set -eux
 export PYTHONDONTWRITEBYTECODE=1
 
 npm ci --prefix tools/theme-assets --ignore-scripts
+python3 -m unittest tools/test_homebrew_formula.py
 python3 tools/check-textmate-theme-assets.py
 node tools/vendor-textmate-themes.mjs --check
