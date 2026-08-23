@@ -190,9 +190,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.4.3"
+version = "1.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "509591b7bcd67f4ef775afad7662703b4935daaa6ec0e5605cfb1090b32a2b6d"
+checksum = "0ad534f4357a5264cce5019c989cf66a4f0dc4e0d1b1d15f8aacec0ff7360273"
 dependencies = [
  "find-msvc-tools",
  "shlex",
@@ -844,9 +844,9 @@ dependencies = [
 
 [[package]]
 name = "log"
-version = "0.4.33"
+version = "0.4.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
+checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
 name = "lru"
@@ -869,7 +869,7 @@ dependencies = [
 
 [[package]]
 name = "mark-bench"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "clap",
  "mark-diff",
@@ -883,7 +883,7 @@ dependencies = [
 
 [[package]]
 name = "mark-cli"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "clap",
  "crossterm",
@@ -906,7 +906,7 @@ dependencies = [
 
 [[package]]
 name = "mark-command"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "mark-core",
  "mark-diff",
@@ -916,7 +916,7 @@ dependencies = [
 
 [[package]]
 name = "mark-core"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -925,7 +925,7 @@ dependencies = [
 
 [[package]]
 name = "mark-diff"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "mark-core",
  "mark-git",
@@ -936,14 +936,14 @@ dependencies = [
 
 [[package]]
 name = "mark-git"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "mark-core",
 ]
 
 [[package]]
 name = "mark-runtime"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "num_cpus",
  "rayon",
@@ -952,7 +952,7 @@ dependencies = [
 
 [[package]]
 name = "mark-session"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "mark-core",
  "rustix",
@@ -964,7 +964,7 @@ dependencies = [
 
 [[package]]
 name = "mark-syntax"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "mark-core",
  "serde",
@@ -976,7 +976,7 @@ dependencies = [
 
 [[package]]
 name = "mark-tui"
-version = "0.13.0"
+version = "0.13.1"
 dependencies = [
  "crossterm",
  "fff-grep",
@@ -1788,9 +1788,9 @@ dependencies = [
 
 [[package]]
 name = "syntaxmate"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9c755d00ad76742faf049d6c29b336e75c0ac151329973b8550f92d773c2e0e"
+checksum = "d1879b28c0ac0eee9a9abade0aecb759b9495ecb62b230a18fb42e091a57dd9a"
 dependencies = [
  "memchr",
  "miniz_oxide",
@@ -2090,9 +2090,9 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-version = "1.24.1"
+version = "1.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2cefc03fd367c0c6d4305de1b312cf00248c4114f4a0418ce6a6af769e3b0bd9"
+checksum = "f053576934f05a761a402421fbbe3d425d9366f75f978806a037b3ca481abecc"
 dependencies = [
  "atomic",
  "getrandom 0.4.3",

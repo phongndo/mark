@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "3"
 
 [workspace.package]
-version = "0.13.0"
+version = "0.13.1"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
@@ -42,7 +42,7 @@ mark-runtime = { path = "crates/mark-runtime" }
 mark-session = { path = "crates/mark-session" }
 mark-syntax = { path = "crates/mark-syntax" }
 mark-tui = { path = "crates/mark-tui" }
-syntaxmate = { version = "0.1.1", default-features = false, features = ["bundled-grammars"] }
+syntaxmate = { version = "0.1.2", default-features = false, features = ["bundled-grammars"] }
 
 [profile.release]
 codegen-units = 1

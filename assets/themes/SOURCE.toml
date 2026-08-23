@@ -28,31 +28,31 @@ sha256 = "4964f623e9615238a7feaeaa9728dafb769e2c1506c8c0417baefb0cab020882"
 
 [[source]]
 package = "@shikijs/themes"
-version = "3.23.0"
+version = "4.4.3"
 repository = "https://github.com/shikijs/shiki"
-source_commit = "1850697815131b3e4ab6a5ac794c58af10bc1c4b"
+source_commit = "48cd2cc695ed2e3357c3f9c370578ea843d6d9a3"
 license = "MIT"
 resolved = true
 
 [[source.theme]]
 id = "catppuccin-latte"
 source_path = "dist/catppuccin-latte.mjs"
-sha256 = "b8738fedce253854cb53ebae82d8b874d99a7dbfd5be07917f6613d4caff71d9"
+sha256 = "6f6a644bdfc2f9f726fbe4500019c115dd6a18ba0116357537bcc44ca782d1a5"
 
 [[source.theme]]
 id = "catppuccin-frappe"
 source_path = "dist/catppuccin-frappe.mjs"
-sha256 = "e6c762d66d2f8104e4ef69cac94d290134dec3715cf792476bfe7a3d1126fba4"
+sha256 = "ceab2a80285c41a3d22a896028c556d2639e944b155061c05d4e8db29860309f"
 
 [[source.theme]]
 id = "catppuccin-macchiato"
 source_path = "dist/catppuccin-macchiato.mjs"
-sha256 = "ca08dc225c75235771b2ce0fc510c7e6fa400b2f373ed02d5f2a700e969cf556"
+sha256 = "838fb5a0d482907a558b5a4bf43976b7249e6cbe0c3f6e0074af99ab691192d2"
 
 [[source.theme]]
 id = "catppuccin-mocha"
 source_path = "dist/catppuccin-mocha.mjs"
-sha256 = "aa030d67dbd4a6b66995c89ba31ef90ac3c2da23a30f712277acb50c6e94d102"
+sha256 = "43298c436f7527ef2deee6c5af9fbea61f5eaf547f5b36295c00654e87a9bd88"
 
 [[source.theme]]
 id = "gruvbox-dark"
@@ -102,17 +102,17 @@ sha256 = "5a1d79eb1d563e6d560bf95fc787d1f02e02c74c88ecbc99803e0c180553f281"
 [[source.theme]]
 id = "kanagawa-dragon"
 source_path = "dist/kanagawa-dragon.mjs"
-sha256 = "7bc83fa0cf06eb4f3caa041ddf3f9aaf5d78b04b6732d6e365c9ebf6a2a2f54e"
+sha256 = "158319f1b8fa8893522ce960aa17dfa2cdc986caaedd5acc7bc1a6474c15a9ce"
 
 [[source.theme]]
 id = "kanagawa-lotus"
 source_path = "dist/kanagawa-lotus.mjs"
-sha256 = "6a43b17291201d24d944c7eee5d45a2d190f46ef440ff797dd0910c61da609f4"
+sha256 = "caa3ec0d80c5bf21693573ba026166220b01aa52f7587d90faba8b89e3dd5ca6"
 
 [[source.theme]]
 id = "kanagawa-wave"
 source_path = "dist/kanagawa-wave.mjs"
-sha256 = "b3ded90f07b5a8372aaa7ec9c0643f7ec1921ec7e44195a13b2d115a44d65dfd"
+sha256 = "7efdd421e37c8f7f029317a9747baaa67fae2d5c21d745c21529aac4ffafa734"
 
 [[source]]
 package = "nordic.nvim"

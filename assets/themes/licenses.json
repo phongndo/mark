@@ -6,10 +6,10 @@
     "commit": "67461974ae6d337a8cf352c277bf3908bf6b6317"
   },
   "@shikijs/themes": {
-    "version": "3.23.0",
+    "version": "4.4.3",
     "license": "MIT",
     "repository": "https://github.com/shikijs/shiki",
-    "commit": "1850697815131b3e4ab6a5ac794c58af10bc1c4b"
+    "commit": "48cd2cc695ed2e3357c3f9c370578ea843d6d9a3"
   },
   "nordic.nvim": {
     "license": "MIT",
