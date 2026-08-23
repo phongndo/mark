@@ -10,7 +10,7 @@ use crate::{
     model::{DiffLineIndex, FileIndex, HunkIndex, ModelRow, UiModel},
     render::{
         headers::{hunk_header_context, normalized_hunk_header_text},
-        text::{display_width, terminal_text_cow},
+        text::{display_width_slow, single_width_ascii_width, terminal_text_cow},
     },
 };
 
@@ -418,7 +418,13 @@ impl DiffSearchIndex {
 #[inline]
 fn search_index_line_width(line: &mark_diff::DiffLine, compute_widths: bool) -> usize {
     if compute_widths {
-        display_width(&line.text_lossy())
+        let bytes = line.text_bytes();
+        // Avoid validating a patch span as UTF-8 and then scanning the same
+        // printable ASCII bytes again for their already-known cell width.
+        if let Some(width) = single_width_ascii_width(bytes) {
+            return width;
+        }
+        display_width_slow(&String::from_utf8_lossy(bytes))
     } else {
         unindexed_line_width_bound(line.text_bytes().len())
     }
@@ -794,15 +800,44 @@ pub(crate) fn grep_match_rows(model: &UiModel, grep_matches: &[SearchLineRef]) -
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use mark_diff::{
-        Changeset, DiffFile, DiffFileBody, DiffHunk, DiffLine, FileChange, HunkLineRanges, RepoRoot,
+        Changeset, DiffFile, DiffFileBody, DiffHunk, DiffLine, FileChange, HunkLineRanges,
+        RepoRoot, parse_patch_bytes,
     };
 
     use super::{
         DiffSearchIndex, MAX_DISPLAY_COLUMNS_PER_LINE_BYTE, SearchLineRef,
-        find_ascii_case_insensitive,
+        find_ascii_case_insensitive, search_index_line_width,
     };
-    use crate::model::{DiffLineIndex, FileIndex, HunkIndex};
+    use crate::{
+        model::{DiffLineIndex, FileIndex, HunkIndex},
+        render::text::display_width,
+    };
+
+    #[test]
+    fn indexed_line_width_ascii_fast_path_preserves_display_width() {
+        for text in ["printable ASCII", "tab\there", "control\u{7f}", "café 世界"] {
+            let line = DiffLine::addition(1, text);
+            assert_eq!(
+                search_index_line_width(&line, true),
+                display_width(&line.text_lossy()),
+                "width mismatch for {text:?}"
+            );
+        }
+
+        let patch = Arc::<[u8]>::from(
+            b"diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -0,0 +1 @@\n+bad:\xff\n".to_vec(),
+        );
+        let files = parse_patch_bytes(patch);
+        let line = &files[0].hunks()[0].lines[0];
+        assert_eq!(
+            search_index_line_width(line, true),
+            display_width(&line.text_lossy()),
+            "invalid UTF-8 must retain lossy display width semantics"
+        );
+    }
 
     #[test]
     fn case_insensitive_search_ignores_partial_tail_candidate() {
