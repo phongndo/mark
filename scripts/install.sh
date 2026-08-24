@@ -286,6 +286,15 @@ else
   esac
 fi
 
+if [ "$action" = "update" ] &&
+  [ -n "${MARK_CURRENT_VERSION:-}" ] &&
+  [ "v${MARK_CURRENT_VERSION#v}" = "$tag" ] &&
+  [ -x "$install_dir/$binary" ]; then
+  printf '✓ %s is already up to date (%s)\n' "$binary" "$tag"
+  printf '  path: %s\n' "$install_dir/$binary"
+  exit 0
+fi
+
 package="mark-$tag-$target"
 asset="$package.tar.gz"
 base_url="https://github.com/$repo/releases/download/$tag"

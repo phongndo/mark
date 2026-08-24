@@ -81,6 +81,13 @@ else
   exit 1
 fi
 
+# Give the updater a distinct development build so the first pass exercises
+# download and replacement. The installed release then exercises the no-op path.
+MARK_BUILD_CHANNEL=smoke-current MARK_BUILD_COMMIT= \
+  cargo build -p mark-cli --locked
+smoke_current_binary="$tmp_dir/mark-smoke-current"
+install -m 755 "$repo_dir/target/debug/mark" "$smoke_current_binary"
+
 # Fake the small curl surface that the installer needs so CI can smoke the
 # installer and update paths without depending on a published GitHub release.
 cat > "$tmp_dir/bin/curl" <<'SH'
@@ -207,6 +214,7 @@ PATH="$tmp_dir/bin:$PATH" \
   "$repo_dir/scripts/smoke-curl-install" "$version"
 
 MARK_REPO="$repo" \
+MARK_SMOKE_CURRENT_BINARY="$smoke_current_binary" \
 MARK_SMOKE_LATEST_TAG="other-tool-v0.1.1" \
 MARK_SMOKE_RELEASE_DIR="$release_dir" \
 MARK_SMOKE_REPO="$repo" \

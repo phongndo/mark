@@ -11,10 +11,41 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 cd "$repo_dir"
-cargo build -p mark-cli --locked
+if [ -n "${MARK_SMOKE_CURRENT_BINARY:-}" ]; then
+  current_binary="$MARK_SMOKE_CURRENT_BINARY"
+else
+  cargo build -p mark-cli --locked
+  current_binary="$repo_dir/target/debug/mark"
+fi
 
-install -m 755 "$repo_dir/target/debug/mark" "$install_dir/mark"
+install -m 755 "$current_binary" "$install_dir/mark"
 
-"$install_dir/mark" update --target-version "$version" --install-dir "$install_dir"
+update_output="$("$install_dir/mark" update --target-version "$version" --install-dir "$install_dir")"
+printf '%s\n' "$update_output"
 test -x "$install_dir/mark"
-"$install_dir/mark" --version
+
+version_output="$("$install_dir/mark" --version)"
+printf '%s\n' "$version_output"
+installed_version="${version_output##* }"
+installed_tag="v${installed_version#v}"
+
+if [ -n "${MARK_SMOKE_CURRENT_BINARY:-}" ]; then
+  if ! printf '%s\n' "$update_output" | grep -F "✓ Updated mark to ${MARK_SMOKE_TAG:-$installed_tag}" >/dev/null; then
+    echo "smoke-update: development build was not replaced by the release" >&2
+    exit 1
+  fi
+fi
+
+if [ -n "${MARK_SMOKE_TAG:-}" ] && [ "$installed_tag" = "$MARK_SMOKE_TAG" ]; then
+  no_op_output="$("$install_dir/mark" update --target-version "$version" --install-dir "$install_dir")"
+  printf '%s\n' "$no_op_output"
+
+  if ! printf '%s\n' "$no_op_output" | grep -F "✓ mark is already up to date ($MARK_SMOKE_TAG)" >/dev/null; then
+    echo "smoke-update: current release was not reported as up to date" >&2
+    exit 1
+  fi
+  if printf '%s\n' "$no_op_output" | grep -E '  (from|to):|✓ Updated ' >/dev/null; then
+    echo "smoke-update: no-op update reported a misleading version transition" >&2
+    exit 1
+  fi
+fi

@@ -25,19 +25,24 @@ pub(crate) fn update(args: UpdateArgs) -> CliResult<()> {
         None => default_update_install_dir(&argv0)?,
     };
     check_update_install_dir(&install_dir, &binary)?;
+    let updates_current_executable = update_target_is_current_executable(&install_dir, &binary);
     let version = args.version.unwrap_or_else(|| "latest".to_owned());
     let repo = update_repo(env::var_os("MARK_REPO"));
 
-    let mut child = ProcessCommand::new("sh")
+    let mut command = ProcessCommand::new("sh");
+    command
         .arg("-s")
         .env("MARK_REPO", repo)
-        .env("MARK_INSTALL_DIR", install_dir)
+        .env("MARK_INSTALL_DIR", &install_dir)
         .env("MARK_VERSION", version)
-        .env("MARK_CURRENT_VERSION", CLI_VERSION)
-        .env("MARK_BINARY", binary)
+        .env_remove("MARK_CURRENT_VERSION")
+        .env("MARK_BINARY", &binary)
         .env("MARK_INSTALL_ACTION", "update")
-        .stdin(Stdio::piped())
-        .spawn()?;
+        .stdin(Stdio::piped());
+    if updates_current_executable {
+        command.env("MARK_CURRENT_VERSION", CLI_VERSION);
+    }
+    let mut child = command.spawn()?;
 
     let mut stdin = child
         .stdin
@@ -106,6 +111,17 @@ pub(crate) fn check_update_install_dir(install_dir: &Path, binary: &OsStr) -> Ma
         manager.name(),
         install_dir.join(binary).display(),
     )))
+}
+
+pub(crate) fn update_target_is_current_executable(install_dir: &Path, binary: &OsStr) -> bool {
+    let Ok(current_executable) = env::current_exe().and_then(fs::canonicalize) else {
+        return false;
+    };
+    let Ok(update_target) = fs::canonicalize(install_dir.join(binary)) else {
+        return false;
+    };
+
+    update_target == current_executable
 }
 
 pub(crate) fn managed_update_install(
@@ -260,5 +276,18 @@ mod tests {
             check_update_install_dir(Path::new("mark-unmanaged-test-bin"), OsStr::new("mark"))
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn current_version_only_describes_the_running_update_target() {
+        let current_executable = env::current_exe().unwrap();
+        let install_dir = current_executable.parent().unwrap();
+        let binary = current_executable.file_name().unwrap();
+
+        assert!(update_target_is_current_executable(install_dir, binary));
+        assert!(!update_target_is_current_executable(
+            install_dir,
+            OsStr::new("missing-mark-test-binary")
+        ));
     }
 }
