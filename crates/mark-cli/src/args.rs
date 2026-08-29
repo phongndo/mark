@@ -35,7 +35,8 @@ examples:
   mark diff --minimal
   mark diff --stat
   mark session list --json
-  mark skill path
+  mark skill
+  mark skill install --agent pi
   mark config
   mark syntax add ruby elixir";
 
@@ -133,10 +134,20 @@ examples:
         #[command(subcommand)]
         command: SessionSubcommand,
     },
-    #[command(about = "Show the bundled agent review skill")]
+    #[command(
+        about = "Show or install the bundled agent review skill",
+        after_help = "\
+examples:
+  mark skill
+  mark skill path
+  mark skill install --agent pi
+  mark skill install --agent cursor
+  mark skill install --agent antigravity
+  mark skill install --agent copilot"
+    )]
     Skill {
         #[command(subcommand)]
-        command: SkillCommand,
+        command: Option<SkillCommand>,
     },
     #[command(
         alias = "ts",
@@ -165,6 +176,25 @@ pub(crate) enum SkillCommand {
     Path,
     #[command(about = "Print the bundled skill")]
     Show,
+    #[command(about = "Install the bundled skill for an agent")]
+    Install(SkillInstallArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct SkillInstallArgs {
+    #[arg(long, value_enum, required = true)]
+    pub(crate) agent: SkillAgent,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum SkillAgent {
+    Pi,
+    Codex,
+    Claude,
+    Cursor,
+    Antigravity,
+    Copilot,
+    Opencode,
 }
 
 #[derive(Debug, Args, Default)]

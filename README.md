@@ -92,6 +92,24 @@ git config --global diff.tool mark
 git config --global difftool.mark.cmd 'mark difftool -- "$LOCAL" "$REMOTE" "$MERGED"'
 ```
 
+## Agent integration
+
+Mark bundles a version-matched live-review skill. Inspect it with `mark skill`,
+or install it for one agent:
+
+```sh
+mark skill install --agent pi
+mark skill install --agent codex
+mark skill install --agent claude
+mark skill install --agent cursor
+mark skill install --agent antigravity
+mark skill install --agent copilot
+mark skill install --agent opencode
+```
+
+Run the install command again after upgrading Mark to refresh the installed
+copy.
+
 ## Documentation
 
 Mark works without configuration. Run `mark config` to find the config file and

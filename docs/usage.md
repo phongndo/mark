@@ -151,7 +151,10 @@ same marks as the human, without launching or steering the TUI. Saved marks are
 visible on the CLI; a draft the human has not saved is not.
 
 ```sh
+mark skill
 mark skill path
+mark skill install --agent pi      # pi, codex, claude, cursor, antigravity,
+                                   # copilot, or opencode
 mark session list --json
 mark session context --repo . --json
 mark session review --repo . --json
@@ -196,9 +199,11 @@ mark session verdict clear --repo . --json
 A `local` verdict remains in the current live review until Mark closes. A
 `stdout` verdict is emitted as one JSON object after the TUI closes. Advancing
 to a changed pass clears the previous verdict. Agents should report findings
-but leave dispositions and the final verdict to the human. `mark skill show`
-prints the exact bundled, version-matched agent workflow. A plain process transcript is available in
-[the live review demonstration](live-agent-review-demo.md).
+but leave dispositions and the final verdict to the human. `mark skill` prints
+the exact bundled, version-matched agent workflow; `mark skill show` remains an
+explicit equivalent. `mark skill install --agent AGENT` installs it into the
+selected agent's user-wide skill directory. A plain process transcript is
+available in [the live review demonstration](live-agent-review-demo.md).
 
 ## Interactive controls
 
