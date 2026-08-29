@@ -58,6 +58,7 @@ fn skill_install_uses_each_agents_user_skill_directory() {
         let output = Command::new(env!("CARGO_BIN_EXE_mark"))
             .args(["skill", "install", "--agent", agent])
             .env("HOME", temp.path())
+            .env_remove("XDG_CONFIG_HOME")
             .output()
             .expect("skill install should run");
         assert!(output.status.success(), "install failed for {agent}");
@@ -68,6 +69,27 @@ fn skill_install_uses_each_agents_user_skill_directory() {
         );
         assert_eq!(fs::read(expected).expect("installed skill"), show.stdout);
     }
+}
+
+#[test]
+fn opencode_install_respects_xdg_config_home() {
+    let home = tempfile::tempdir().expect("temp home");
+    let config = tempfile::tempdir().expect("temp config home");
+    let output = Command::new(env!("CARGO_BIN_EXE_mark"))
+        .args(["skill", "install", "--agent", "opencode"])
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", config.path())
+        .output()
+        .expect("skill install should run");
+    assert!(output.status.success());
+    let expected = config
+        .path()
+        .join("opencode/skills/mark-live-review/SKILL.md");
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("path should be UTF-8"),
+        format!("{}\n", expected.display())
+    );
+    assert!(expected.is_file());
 }
 
 #[test]

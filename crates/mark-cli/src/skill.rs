@@ -60,7 +60,12 @@ fn install(args: SkillInstallArgs) -> CliResult<PathBuf> {
         SkillAgent::Cursor => home.join(".cursor").join("skills"),
         SkillAgent::Antigravity => home.join(".gemini").join("config").join("skills"),
         SkillAgent::Copilot => home.join(".copilot").join("skills"),
-        SkillAgent::Opencode => home.join(".config").join("opencode").join("skills"),
+        SkillAgent::Opencode => env::var_os("XDG_CONFIG_HOME")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.join(".config"))
+            .join("opencode")
+            .join("skills"),
     };
     let path = skill_root.join(SKILL_NAME).join("SKILL.md");
     write_skill(&path)?;
