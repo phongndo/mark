@@ -182,7 +182,9 @@ impl CodeSelectionState {
             self.selection = None;
             return None;
         }
-        self.selected_copy_pieces()
+        let pieces = self.selected_copy_pieces();
+        self.selection = None;
+        pieces
     }
 
     fn selected_copy_pieces(&self) -> Option<Vec<CodeSelectionCopyPiece>> {
