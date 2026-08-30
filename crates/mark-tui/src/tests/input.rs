@@ -2725,7 +2725,7 @@ fn left_click_moves_the_annotation_cursor_to_the_clicked_line() {
 }
 
 #[test]
-fn dragging_unified_code_highlights_without_the_gutter_and_copies_on_release() {
+fn dragging_unified_code_highlights_while_dragging_then_copies_and_clears_on_release() {
     let changeset = changeset_with_line_texts(&["alpha", "beta"]);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
     let width = 40;
@@ -2792,6 +2792,13 @@ fn dragging_unified_code_highlights_without_the_gutter_and_copies_on_release() {
         outcome.into_effects().as_slice(),
         [AppEffect::CopyToClipboard { text, .. }] if text == "alpha\nbeta"
     ));
+
+    let rendered_after_release = build_diff_viewport_lines(&mut app, width, 2);
+    assert!(rendered_after_release.iter().all(|line| {
+        line.spans
+            .iter()
+            .all(|span| !span.style.add_modifier.contains(Modifier::REVERSED))
+    }));
 }
 
 #[test]

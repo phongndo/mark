@@ -252,8 +252,8 @@ Ctrl-Shift-C   copy the error log pane to the terminal clipboard
 
 Drag the left mouse button across diff code to select it. Mark highlights only the
 code cells—not line-number or sign gutters—and automatically copies the selected
-text to the terminal clipboard when the button is released. In split view, the
-selection stays in the pane where the drag started.
+text to the terminal clipboard when the button is released, then clears the
+highlight. In split view, the selection stays in the pane where the drag started.
 
 Editor commands are shell-word parsed and open on the line focused in the diff.
 Mark knows the location syntax used by Vim/Neovim, Helix, Kakoune, Emacs,
