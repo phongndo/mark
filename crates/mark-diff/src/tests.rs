@@ -1,3 +1,4 @@
+use self::test_fs as fs;
 use super::*;
 use crate::{
     difftool::rewrite_difftool_patch_paths,
@@ -5,7 +6,7 @@ use crate::{
     parser::parse_patch_bytes_serial_limited,
 };
 use std::{
-    env, fs,
+    env,
     io::{BufReader, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -22,6 +23,7 @@ mod patch_sources;
 mod range;
 mod repo_infra;
 mod show;
+mod test_fs;
 mod worktree;
 
 fn temp_test_dir(name: &str) -> PathBuf {
