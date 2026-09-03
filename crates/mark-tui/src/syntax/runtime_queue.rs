@@ -106,7 +106,7 @@ impl SyntaxRuntime {
             }
         }
 
-        let source = match build_hunk_source(&hunk_diff.lines, side, self.limits) {
+        let mut source = match build_hunk_source(&hunk_diff.lines, side, self.limits) {
             Ok(source) => source,
             Err(reason) => {
                 self.skip(position, reason);
@@ -126,7 +126,8 @@ impl SyntaxRuntime {
         };
         self.source_keys.insert(key.source, key);
         self.position_keys.insert(position, key);
-        self.line_maps.insert(position, source.line_map.clone());
+        self.line_maps
+            .insert(position, std::mem::take(&mut source.line_map));
         if self.failed.contains(&key) {
             self.skip(position, SyntaxSkipReason::HighlightError);
             return;
