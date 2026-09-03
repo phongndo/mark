@@ -492,8 +492,14 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn oversized_child_output_is_terminated_early() {
+        // Pipe stdout is fully buffered in the shell. Write with dd so the
+        // limited reader observes bytes before sleep, and exec so kill targets
+        // the sleeping process rather than an intermediate shell.
         let child = ProcessCommand::new("sh")
-            .args(["-c", "printf 0123456789; sleep 10"])
+            .args([
+                "-c",
+                "dd if=/dev/zero bs=10 count=1 2>/dev/null; exec sleep 10",
+            ])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
