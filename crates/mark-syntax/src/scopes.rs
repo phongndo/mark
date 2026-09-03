@@ -3,19 +3,32 @@ use crate::SyntaxClass;
 pub(crate) fn classify_scope_stack<'a>(
     stack: impl IntoIterator<Item = &'a str>,
 ) -> Option<SyntaxClass> {
-    let stack = stack.into_iter().collect::<Vec<_>>();
-    for preferred in [SyntaxClass::Tag, SyntaxClass::Attribute] {
-        if stack
-            .iter()
-            .rev()
-            .copied()
-            .any(|scope| classify_scope_name(scope) == Some(preferred))
-        {
-            return Some(preferred);
+    // Walk outer-to-inner once. Tag/Attribute still win if they appear anywhere,
+    // otherwise the innermost classified scope matches the previous reverse scan.
+    let mut found_tag = false;
+    let mut found_attribute = false;
+    let mut inner_class = None;
+    for scope in stack {
+        match classify_scope_name(scope) {
+            Some(SyntaxClass::Tag) => {
+                found_tag = true;
+                inner_class = Some(SyntaxClass::Tag);
+            }
+            Some(SyntaxClass::Attribute) => {
+                found_attribute = true;
+                inner_class = Some(SyntaxClass::Attribute);
+            }
+            other @ Some(_) => inner_class = other,
+            None => {}
         }
     }
-
-    stack.into_iter().rev().find_map(classify_scope_name)
+    if found_tag {
+        Some(SyntaxClass::Tag)
+    } else if found_attribute {
+        Some(SyntaxClass::Attribute)
+    } else {
+        inner_class
+    }
 }
 
 pub fn classify_scope_name(scope: &str) -> Option<SyntaxClass> {
@@ -134,5 +147,32 @@ mod tests {
             classify_scope_stack(stack.into_iter()),
             Some(SyntaxClass::Tag)
         );
+    }
+
+    #[test]
+    fn attribute_has_priority_over_inner_classes() {
+        let stack = [
+            "source.test",
+            "keyword.control",
+            "entity.other.attribute-name.html",
+        ];
+        assert_eq!(
+            classify_scope_stack(stack.into_iter()),
+            Some(SyntaxClass::Attribute)
+        );
+    }
+
+    #[test]
+    fn innermost_classified_scope_wins_without_tag_or_attribute() {
+        let stack = ["source.test", "keyword.control", "variable.other.rust"];
+        assert_eq!(
+            classify_scope_stack(stack.into_iter()),
+            Some(SyntaxClass::Variable)
+        );
+    }
+
+    #[test]
+    fn empty_scope_stack_is_unclassified() {
+        assert_eq!(classify_scope_stack(std::iter::empty()), None);
     }
 }

@@ -221,7 +221,31 @@ pub(crate) fn build_hunk_source(
     side: DiffSide,
     limits: SyntaxLimits,
 ) -> Result<HunkSource, SyntaxSkipReason> {
+    let mut estimated_bytes = 0usize;
+    let mut estimated_lines = 0usize;
+    for line in lines {
+        if !line_belongs_to_side(line.kind(), side) {
+            continue;
+        }
+        let line_bytes = line.text_bytes().len();
+        if line_bytes > limits.max_line_bytes {
+            return Err(SyntaxSkipReason::TooLarge);
+        }
+        if estimated_lines > 0 {
+            estimated_bytes = estimated_bytes.saturating_add(1);
+        }
+        estimated_bytes = estimated_bytes.saturating_add(line_bytes);
+        estimated_lines = estimated_lines.saturating_add(1);
+        if estimated_bytes > limits.max_source_bytes {
+            return Err(SyntaxSkipReason::TooLarge);
+        }
+    }
+    if estimated_lines == 0 {
+        return Err(SyntaxSkipReason::NoSource);
+    }
+
     let mut text = String::new();
+    text.reserve(estimated_bytes);
     let mut line_map = vec![None; lines.len()];
     let mut source_lines = 0;
 
@@ -242,10 +266,6 @@ pub(crate) fn build_hunk_source(
         }
         line_map[index] = Some(source_lines);
         source_lines += 1;
-    }
-
-    if source_lines == 0 {
-        return Err(SyntaxSkipReason::NoSource);
     }
 
     Ok(HunkSource {

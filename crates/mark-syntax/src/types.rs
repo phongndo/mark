@@ -1230,9 +1230,27 @@ impl SyntaxHighlighter {
     }
 
     pub fn highlight(&mut self, language: &str, source: &str) -> MarkResult<HighlightedText> {
-        let language = normalize_language_name(language.to_owned());
-        let canonical = syntaxmate::canonical_language(&language)
-            .ok_or_else(|| MarkError::Usage(format!("unknown TextMate grammar `{language}`")))?;
+        if !self.tokenizers.contains_key(language) {
+            let canonical = self.load_tokenizer(language)?;
+            let highlighted = self
+                .tokenizers
+                .get_mut(&canonical)
+                .expect("tokenizer loaded before highlighting")
+                .tokenize(source);
+            return Ok(adapt_highlighted_text(source, &highlighted));
+        }
+        let highlighted = self
+            .tokenizers
+            .get_mut(language)
+            .expect("tokenizer exists for language key")
+            .tokenize(source);
+        Ok(adapt_highlighted_text(source, &highlighted))
+    }
+
+    fn load_tokenizer(&mut self, language: &str) -> MarkResult<String> {
+        let normalized = normalize_language_name(language.to_owned());
+        let canonical = syntaxmate::canonical_language(&normalized)
+            .ok_or_else(|| MarkError::Usage(format!("unknown TextMate grammar `{normalized}`")))?;
         if !self.tokenizers.contains_key(&canonical) {
             let limits = SyntaxLimits::default();
             let tokenizer = syntaxmate::Tokenizer::for_bundled_language(
@@ -1251,13 +1269,8 @@ impl SyntaxHighlighter {
             };
             self.tokenizers.insert(canonical.clone(), tokenizer);
         }
-        let highlighted = self
-            .tokenizers
-            .get_mut(&canonical)
-            .expect("tokenizer inserted before highlighting")
-            .tokenize(source);
-        self.loaded_languages.insert(language);
-        Ok(adapt_highlighted_text(source, &highlighted))
+        self.loaded_languages.insert(normalized);
+        Ok(canonical)
     }
 
     /// Enables low-overhead native-engine counters for diagnostics and
@@ -1284,31 +1297,28 @@ fn adapt_highlighted_text(
     source: &str,
     highlighted: &syntaxmate::TokenizedDocument,
 ) -> HighlightedText {
-    let source_lines = source.split('\n').collect::<Vec<_>>();
-    let lines = highlighted
-        .lines()
-        .iter()
-        .enumerate()
-        .map(|(line_index, line)| {
-            let text = source_lines.get(line_index).copied().unwrap_or_default();
-            let segments = line
-                .spans()
-                .iter()
-                .map(|span| SyntaxSegment {
-                    byte_start: span.range().start,
-                    byte_end: span.range().end,
-                    class: crate::scopes::classify_scope_stack(
-                        line.scope_names(span.scope_stack()),
-                    ),
-                    scope_stack: span.scope_stack(),
-                })
-                .collect();
-            HighlightedLine {
-                fingerprint: LineTextFingerprint::from_text(text),
-                segments,
-                scope_table: Arc::clone(line.scope_table()),
-            }
-        })
-        .collect();
+    let mut source_lines = source.split('\n');
+    let document_lines = highlighted.lines();
+    let mut lines = Vec::with_capacity(document_lines.len());
+    for line in document_lines {
+        let text = source_lines.next().unwrap_or("");
+        let spans = line.spans();
+        let mut segments = Vec::with_capacity(spans.len());
+        for span in spans {
+            let range = span.range();
+            let scope_stack = span.scope_stack();
+            segments.push(SyntaxSegment {
+                byte_start: range.start,
+                byte_end: range.end,
+                class: crate::scopes::classify_scope_stack(line.scope_names(scope_stack)),
+                scope_stack,
+            });
+        }
+        lines.push(HighlightedLine {
+            fingerprint: LineTextFingerprint::from_text(text),
+            segments,
+            scope_table: Arc::clone(line.scope_table()),
+        });
+    }
     HighlightedText { lines }
 }
