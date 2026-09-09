@@ -61,6 +61,29 @@ interface.
 - Viewport-bounded rendering for very large diffs.
 - Private local sessions for review automation, with no daemon or hosted state.
 
+## Use with an AI agent
+
+Mark already connects to shell-capable agents through its JSON CLI—no plugin or
+MCP server required.
+
+1. Open `mark diff` in one terminal and leave it running.
+2. Start your agent in another terminal in the same repository.
+3. Paste this prompt:
+
+   > Run `mark skill show` and follow the bundled workflow to review my open Mark
+   > session. Read the diff and saved human marks, then publish findings into Mark.
+   > Leave the viewport, reviewed state, dispositions, and final verdict to me.
+
+For questions instead of a full review, save a mark with `Enter`, then ask the
+agent to answer your saved marks. Ask again after saving a follow-up; the skill
+is request-driven, not a background listener.
+
+`mark skill path` materializes the version-matched skill for agents that support
+loading skill files. If multiple reviews are open, tell the agent which session
+to use. Keep Mark open: sessions and their comments are in-memory and disappear
+when it closes. See [live agent sessions](docs/usage.md#live-agent-review-sessions)
+for commands and lifecycle details.
+
 ## Controls
 
 | Key | Action |

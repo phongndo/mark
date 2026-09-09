@@ -90,6 +90,12 @@ scripts/test-diff-error-pane
 
 The interactive smoke test must run in a terminal.
 
+For bundled agent-skill changes, run the [live agent workflow evaluations](agent-review-evals.md).
+The disposable fixture generator and scored scenarios cover session ambiguity,
+deleted-line replies, pagination, stale snapshots, and duplicate prevention.
+These real-agent evaluations are separate from the automated packaging and
+CLI-example tests (`cargo test -p mark-cli skill`).
+
 ## Allocation profiling
 
 `mark-bench` has an opt-in counting allocator that reports allocation calls,

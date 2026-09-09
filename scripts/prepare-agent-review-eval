@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Create an isolated, disposable repository for docs/agent-review-evals.md.
+set -euo pipefail
+
+repo=$(mktemp -d "${TMPDIR:-/tmp}/mark-agent-eval.XXXXXX")
+git -C "$repo" init -q
+git -C "$repo" config user.name 'Mark evaluation'
+git -C "$repo" config user.email 'mark-eval@example.invalid'
+mkdir -p "$repo/src" "$repo/pages"
+printf 'pub fn allowed(is_admin: bool) -> bool {\n    is_admin\n}\n' > "$repo/src/access.rs"
+printf 'pub fn limit() -> usize {\n    10\n}\n' > "$repo/src/limit.rs"
+for ((i=1; i<=205; i++)); do
+    printf -v name '%03d' "$i"
+    printf 'baseline %s\n' "$name" > "$repo/pages/$name.txt"
+done
+git -C "$repo" add .
+git -C "$repo" -c core.hooksPath=/dev/null -c commit.gpgsign=false commit -qm baseline
+printf 'pub fn allowed(_is_admin: bool) -> bool {\n    true\n}\n' > "$repo/src/access.rs"
+printf 'pub fn limit() -> usize {\n    0\n}\n' > "$repo/src/limit.rs"
+for ((i=1; i<=205; i++)); do
+    printf -v name '%03d' "$i"
+    printf 'changed %s\n' "$name" > "$repo/pages/$name.txt"
+done
+printf '%s\n' "$repo"

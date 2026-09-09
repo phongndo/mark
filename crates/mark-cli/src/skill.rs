@@ -110,6 +110,56 @@ fn write_skill(path: &Path) -> CliResult<()> {
 mod tests {
     use super::*;
 
+    // Exercise the actual bundled examples, rather than just checking prose.
+    // Keep examples simple shell commands; this intentionally is not a shell parser.
+    #[test]
+    fn skill_shell_examples_parse_with_repo_and_pinned_session() {
+        use clap::Parser;
+
+        let mut count = 0;
+        for block in SKILL.split("```sh\n").skip(1) {
+            let body = block.split("```").next().expect("closed shell block");
+            for line in body.lines() {
+                let command = line.strip_prefix("cat <<'JSON' | ").unwrap_or(line);
+                if !command.starts_with("mark ") {
+                    continue;
+                }
+                let args = command.split_whitespace().collect::<Vec<_>>();
+                crate::args::Cli::try_parse_from(&args)
+                    .unwrap_or_else(|error| panic!("invalid skill example {command}: {error}"));
+                if let Some(index) = args.iter().position(|arg| *arg == "--repo") {
+                    let mut pinned = args.clone();
+                    pinned.splice(index..index + 2, ["example-session"]);
+                    crate::args::Cli::try_parse_from(&pinned).unwrap_or_else(|error| {
+                        panic!("invalid pinned skill example {pinned:?}: {error}")
+                    });
+                }
+                count += 1;
+            }
+        }
+        assert!(
+            count >= 8,
+            "expected discovery, reads, write, and reload examples"
+        );
+    }
+
+    #[test]
+    fn skill_comment_batch_example_matches_protocol() {
+        let json = SKILL
+            .split("--stdin --json\n")
+            .nth(1)
+            .expect("comment batch example")
+            .split("\nJSON")
+            .next()
+            .expect("heredoc terminator");
+        let batch: mark_session::CommentApplyParams =
+            serde_json::from_str(json).expect("example must match the wire protocol");
+        assert_eq!(batch.generation, 1);
+        assert_eq!(batch.comments.len(), 1);
+        assert_eq!(batch.comments[0].anchor.new_line, Some(42));
+        assert!(!batch.focus, "examples must leave the human viewport alone");
+    }
+
     #[test]
     fn embedded_skill_has_required_session_safety_rules() {
         assert!(SKILL.contains("Never launch `mark`"));
