@@ -58,7 +58,7 @@ interface.
 - Inline line, hunk, and file annotations with reviewed-state tracking.
 - Stable snapshots by default; continuous reload only with `--watch`.
 - Custom themes, keybindings, and editor integration.
-- Viewport-bounded rendering for very large diffs.
+- Lazy loading and viewport rendering for large diffs.
 - Private local sessions for review automation, with no daemon or hosted state.
 
 ## Use with an AI agent
@@ -78,11 +78,15 @@ For questions instead of a full review, save a mark with `Enter`, then ask the
 agent to answer your saved marks. Ask again after saving a follow-up; the skill
 is request-driven, not a background listener.
 
-`mark skill path` materializes the version-matched skill for agents that support
-loading skill files. If multiple reviews are open, tell the agent which session
-to use. Keep Mark open: sessions and their comments are in-memory and disappear
-when it closes. See [live agent sessions](docs/usage.md#live-agent-review-sessions)
-for commands and lifecycle details.
+`mark skill path` materializes the version-matched skill for agents that load
+skill files. To install it, use `mark skill install --agent pi`; run
+`mark skill install --help` for supported agents. Reinstall after upgrading Mark
+to refresh that copy.
+
+If multiple reviews are open, tell the agent which session to use. Keep Mark
+open: sessions and their comments are in-memory and disappear when it closes.
+See [live agent sessions](docs/usage.md#live-agent-review-sessions) for lifecycle
+details.
 
 ## Controls
 
@@ -114,24 +118,6 @@ Use Mark as a difftool:
 git config --global diff.tool mark
 git config --global difftool.mark.cmd 'mark difftool -- "$LOCAL" "$REMOTE" "$MERGED"'
 ```
-
-## Agent integration
-
-Mark bundles a version-matched live-review skill. Inspect it with `mark skill`,
-or install it for one agent:
-
-```sh
-mark skill install --agent pi
-mark skill install --agent codex
-mark skill install --agent claude
-mark skill install --agent cursor
-mark skill install --agent antigravity
-mark skill install --agent copilot
-mark skill install --agent opencode
-```
-
-Run the install command again after upgrading Mark to refresh the installed
-copy.
 
 ## Documentation
 

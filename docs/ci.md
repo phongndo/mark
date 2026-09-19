@@ -1,78 +1,30 @@
-# Continuous integration
+# CI administration
 
-## Workflow model
+The workflow and its local entry points are the source of truth:
 
-`CI` is the only pull-request workflow that validates source changes. It first
-classifies the base-to-head diff, fans affected work out in parallel, and joins
-all selected jobs behind `CI gate`:
+- [quality.yml](../.github/workflows/quality.yml): selected validation jobs and
+  the aggregate `CI gate`.
+- [changes.py](../scripts/ci/changes.py): changed-path classification, covered by
+  [test_ci_changes.py](../tools/test_ci_changes.py). Add a case when introducing
+  a cross-component dependency or vendored asset.
+- [justfile](../justfile): local `ci-*` recipes; `just ci-check` runs them all.
+- [extended.yml](../.github/workflows/extended.yml): scheduled validation,
+  including machine-sensitive checks kept out of deterministic PR gates.
 
-```text
-Classify changes
-  ├─ Workflow lint
-  ├─ Rust correctness
-  ├─ MSRV
-  ├─ Vendored theme contracts
-  └─ Deterministic performance smoke
-          ↓
-       CI gate
-```
+Keep required workflows free of workflow-level `paths` filters: GitHub can
+leave a skipped required workflow pending. Select jobs inside the workflow and
+retain an unconditional aggregate gate.
 
-An unrelated documentation-only change can therefore complete after
-classification and the gate. Cargo and toolchain changes select every
-Rust-related lane; workflow and CI-script changes deliberately select all
-lanes.
+## Repository settings
 
-The lane mapping lives in [`scripts/ci/changes.py`](../scripts/ci/changes.py).
-Keep it conservative and add a case to `tools/test_ci_changes.py` whenever a
-new vendored asset or cross-component dependency is introduced. Syntaxmate owns
-its tokenizer oracle and generated-asset gates; Mark's Rust suite exercises the
-published API as a downstream consumer. Do not use
-workflow-level `paths` filters for required checks: GitHub can leave a skipped
-required workflow pending indefinitely.
-
-## Validation tiers
-
-- **CI** runs merge-blocking deterministic validation on pull requests and
-  pushes to `main`.
-- **Extended validation** runs rust-analyzer, machine-sensitive performance
-  thresholds, and the native four-platform test matrix each day.
-- **Nightly** builds the latest exact `main` SHA only after that SHA has a
-  successful CI push run.
-- **Release** accepts only a version-matching commit reachable from `main` with
-  a successful CI push run, then builds distribution assets without repeating
-  the test matrix.
-
-Nightly and Release call the same reusable distribution workflow and package
-assets through `scripts/ci/package-dist`. Publish jobs alone receive
-`contents: write`; build and validation jobs remain read-only.
-
-## Required repository settings
-
-Configure a branch ruleset for `main` with:
-
-- pull requests required;
-- `CI / CI gate` required;
-- `PR Template / Required PR fields` required if PR metadata is policy;
-- merge queue enabled only with the existing `merge_group` CI trigger.
+Configure a branch ruleset for `main` requiring pull requests and `CI / CI gate`.
+Require `PR Template / Required PR fields` if enforcing PR metadata. Enable the
+merge queue only while CI handles `merge_group` events.
 
 Configure `release` and `nightly` GitHub Environments with the desired branch
-and reviewer policy. Workflow checks still enforce exact-SHA qualification,
-even when an environment has no manual reviewer.
+and reviewer policy. The publishing workflows still require exact-SHA CI
+qualification; an environment approval is not a replacement for it.
 
-## Local reproduction
-
-Run the same suites used by Actions:
-
-```sh
-just ci-rust
-just ci-generated
-just ci-performance
-just ci-workflows
-```
-
-`just ci-check` runs all of them. The scheduled performance thresholds can be
-reproduced with:
-
-```sh
-scripts/ci/performance extended
-```
+[Development](development.md#releases) covers release actions and the optional
+Homebrew tap credential. Workflow files define schedules, platform matrices,
+permissions, and packaging rather than duplicating those here.
