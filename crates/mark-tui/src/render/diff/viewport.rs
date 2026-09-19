@@ -143,16 +143,18 @@ fn build_wrapped_viewport_lines(
             break;
         };
         let remaining = visible_rows.saturating_sub(lines.len());
-        let rendered = render_row_wrapped_with_focus(app, row_index, row, width, focused_hunk);
-        let wrap_count = rendered.len().saturating_sub(row_offset);
-        for (wrap_index, line) in rendered
-            .into_iter()
-            .skip(row_offset)
-            .take(remaining)
-            .enumerate()
-        {
+        let rendered = render_row_wrapped_with_focus(
+            app,
+            row_index,
+            row,
+            width,
+            focused_hunk,
+            row_offset..row_offset.saturating_add(remaining),
+        );
+        let wrap_count = rendered.len();
+        for (wrap_index, line) in rendered.into_iter().enumerate() {
             let mut line = line;
-            let is_last_wrap = wrap_index + 1 == wrap_count.min(remaining);
+            let is_last_wrap = wrap_index + 1 == wrap_count;
             if app.annotation_cursor_at_model_row(row_index) {
                 line = highlighted_annotation_row(line, row, layout, width, theme);
             }

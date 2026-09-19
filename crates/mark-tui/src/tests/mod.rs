@@ -61,6 +61,7 @@ use unicode_width::UnicodeWidthStr;
 
 mod annotations;
 mod app;
+mod benchmark;
 mod diff;
 mod input;
 mod menus;
@@ -68,6 +69,7 @@ mod misc;
 mod render;
 mod sticky;
 mod syntax;
+mod wrapped_window;
 
 const FILE_0: FileIndex = FileIndex::new(0);
 const FILE_1: FileIndex = FileIndex::new(1);

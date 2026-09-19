@@ -200,6 +200,15 @@ struct MeasurePatchArgs {
     /// Unified diff patch file to measure.
     #[arg(value_name = "PATCH")]
     patch: PathBuf,
+    /// Wrap diff lines and measure scrolling in visual rows.
+    #[arg(long)]
+    wrap_lines: bool,
+    /// Seed evenly spaced saved line annotations (included in model-open cost).
+    #[arg(long, default_value_t = 0)]
+    annotations: usize,
+    /// Words per seeded annotation.
+    #[arg(long, default_value_t = 20)]
+    annotation_words: usize,
     /// Language to enable for the syntax run. Repeat to enable several languages.
     #[arg(long = "syntax-language", value_name = "LANG")]
     syntax_languages: Vec<String>,
@@ -544,6 +553,9 @@ struct MeasureSuiteReport {
 
 #[derive(Debug, Serialize)]
 struct MeasureOptionsReport {
+    line_wrapping: bool,
+    annotation_count: usize,
+    annotation_words: usize,
     width: usize,
     viewport_rows: usize,
     scroll_step: usize,
@@ -642,6 +654,7 @@ struct TuiMeasureReport {
     hunk_navigation_total_micros: u128,
     hunk_navigation_max_micros: u128,
     initial_render_micros: u128,
+    initial_syntax_ready_micros: Option<u128>,
     cold_scroll_steps: usize,
     cold_scroll_total_micros: u128,
     cold_scroll_max_micros: u128,
@@ -781,6 +794,9 @@ struct RawSyntaxEngineReport {
 }
 
 trait DiffBenchmarkSelection {
+    fn view_options(&self) -> mark_tui::DiffBenchmarkOptions {
+        mark_tui::DiffBenchmarkOptions::default()
+    }
     fn syntax_languages(&self) -> &[String];
     fn width(&self) -> usize;
     fn viewport_rows(&self) -> usize;
@@ -826,6 +842,15 @@ impl DiffBenchmarkSelection for MeasureRepoArgs {
 }
 
 impl DiffBenchmarkSelection for MeasurePatchArgs {
+    fn view_options(&self) -> mark_tui::DiffBenchmarkOptions {
+        mark_tui::DiffBenchmarkOptions {
+            line_wrapping: self.wrap_lines,
+            annotation_count: self.annotations,
+            annotation_words: self.annotation_words,
+            ..Default::default()
+        }
+    }
+
     fn syntax_languages(&self) -> &[String] {
         &self.syntax_languages
     }
@@ -871,6 +896,7 @@ fn measure_fixtures(args: MeasureArgs) -> BenchResult<()> {
         viewport_rows: args.viewport_rows,
         scroll_step: args.scroll_step,
         max_scroll_steps: args.max_scroll_steps,
+        ..Default::default()
     };
     let mut runs = Vec::new();
 
@@ -908,6 +934,9 @@ fn measure_fixtures(args: MeasureArgs) -> BenchResult<()> {
             scroll_step: options.scroll_step,
             max_scroll_steps: options.max_scroll_steps,
             samples: args.samples,
+            line_wrapping: options.line_wrapping,
+            annotation_count: options.annotation_count,
+            annotation_words: options.annotation_words,
             syntax_languages,
         },
         runs,
@@ -1605,6 +1634,7 @@ fn measure_one_diff_source(
         viewport_rows: selection.viewport_rows(),
         scroll_step: selection.scroll_step(),
         max_scroll_steps: selection.max_scroll_steps(),
+        ..selection.view_options()
     };
     let syntax_languages = selection.syntax_languages().to_vec();
     let mut runs = Vec::new();
@@ -1638,6 +1668,9 @@ fn measure_one_diff_source(
             scroll_step: options.scroll_step,
             max_scroll_steps: options.max_scroll_steps,
             samples: selection.samples(),
+            line_wrapping: options.line_wrapping,
+            annotation_count: options.annotation_count,
+            annotation_words: options.annotation_words,
             syntax_languages,
         },
         runs,
@@ -1862,6 +1895,9 @@ fn stage_timings(load_micros: u128, tui: &TuiMeasureReport) -> Vec<StageTimingRe
         ("warm_scroll", tui.warm_scroll_total_micros),
         ("random_scroll", tui.random_scroll_total_micros),
     ];
+    if let Some(ready_micros) = tui.initial_syntax_ready_micros {
+        stages.push(("initial_syntax_ready", ready_micros));
+    }
     if let Some(syntax_settle_micros) = tui.syntax_settle_micros {
         stages.push(("syntax_settle", syntax_settle_micros));
     }
@@ -1985,6 +2021,7 @@ fn tui_report(report: mark_tui::DiffBenchmarkReport) -> TuiMeasureReport {
             report.cold_scroll_total_micros,
             report.cold_scroll_steps,
         ),
+        initial_syntax_ready_micros: report.initial_syntax_ready_micros,
         syntax_settle_micros: report.syntax_settle_micros,
         warm_scroll_steps: report.warm_scroll_steps,
         warm_scroll_total_micros: report.warm_scroll_total_micros,

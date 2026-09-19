@@ -112,6 +112,34 @@ the same totals and per-stage breakdown. Keep this feature out of latency runs:
 its atomic counters intentionally perturb timings. Use a normal release
 `mark-bench` build for before/after latency and RSS measurements.
 
+## Viewport benchmark scenarios
+
+Use the existing release benchmark for complete TestBackend frames (including
+layout, viewport planning, selection mapping, and buffer diffing):
+
+```sh
+cargo run -p mark-bench --release --locked -- measure-patch change.diff \
+  --wrap-lines --max-scroll-steps 100 --json
+cargo run -p mark-bench --release --locked -- measure-patch change.diff \
+  --annotations 50 --annotation-words 1000 --max-scroll-steps 100 --json
+```
+
+These `measure-patch` options seed saved annotations during measured model open
+and scroll wrapped views in visual-row coordinates. Annotation counts are an
+upper bound, distributed across available line anchors; normal review-store
+limits still apply. Setup is not moved outside the measured stages. Wrapping
+and annotations are disabled by default.
+
+For syntax-enabled runs, `initial_render_micros` measures the first useful frame;
+`initial_syntax_ready_micros` measures the additional time to drain queued work
+and paint highlighting. Scroll timings include syntax readiness and repaint,
+including any full-file-to-hunk fallback. The readiness wait includes queued
+prefetch work and uses 1 ms polling, so these are not pure renderer timings.
+Failure to reach readiness within 30 seconds fails the benchmark rather than
+reporting an incomplete run as success. Use `syntax-compare` for synchronous
+whole-document highlighting throughput. Ordinary release latency and RSS runs
+must not enable `allocation-profile`.
+
 ## Profile-guided builds
 
 `scripts/build-pgo` produces a profile-guided release `mark` binary:

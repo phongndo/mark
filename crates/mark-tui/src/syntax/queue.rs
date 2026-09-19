@@ -86,6 +86,27 @@ impl SyntaxWorkerQueue {
             return Err(SyntaxQueueError::Full);
         }
 
+        // Admission is transactional: callers learn which pending keys were
+        // evicted only from a successful push. Check that removing prefetch
+        // work can actually make room before mutating either queue.
+        if priority == SyntaxPriority::Visible
+            && (state.len() >= self.inner.capacity
+                || state.queued_bytes.saturating_add(job.queued_source_bytes)
+                    > self.inner.capacity_bytes)
+        {
+            let visible_bytes = state
+                .visible
+                .iter()
+                .map(|job| job.queued_source_bytes)
+                .sum::<u64>();
+            if state.visible.len() >= self.inner.capacity
+                || job.queued_source_bytes > self.inner.capacity_bytes
+                || visible_bytes > self.inner.capacity_bytes - job.queued_source_bytes
+            {
+                return Err(SyntaxQueueError::Full);
+            }
+        }
+
         let mut dropped = None;
         let mut dropped_more = Vec::new();
         while state.len() >= self.inner.capacity
@@ -142,9 +163,10 @@ impl SyntaxWorkerQueue {
         let Some(index) = state.prefetch.iter().position(|job| job.key == key) else {
             return false;
         };
-        let Some(job) = state.prefetch.remove(index) else {
+        let Some(mut job) = state.prefetch.remove(index) else {
             return false;
         };
+        job.priority = SyntaxPriority::Visible;
         state.visible.push_back(job);
         self.inner.ready.notify_one();
         true

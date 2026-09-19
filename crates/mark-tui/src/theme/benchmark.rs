@@ -4,6 +4,9 @@ pub struct DiffBenchmarkOptions {
     pub viewport_rows: usize,
     pub scroll_step: usize,
     pub max_scroll_steps: usize,
+    pub line_wrapping: bool,
+    pub annotation_count: usize,
+    pub annotation_words: usize,
 }
 
 impl Default for DiffBenchmarkOptions {
@@ -13,6 +16,9 @@ impl Default for DiffBenchmarkOptions {
             viewport_rows: 40,
             scroll_step: 20,
             max_scroll_steps: 200,
+            line_wrapping: false,
+            annotation_count: 0,
+            annotation_words: 20,
         }
     }
 }
@@ -53,6 +59,8 @@ pub struct DiffBenchmarkReport {
     pub hunk_navigation_total_micros: u128,
     pub hunk_navigation_max_micros: u128,
     pub initial_render_micros: u128,
+    /// Additional time to apply and paint syntax after the first useful frame.
+    pub initial_syntax_ready_micros: Option<u128>,
     pub cold_scroll_steps: usize,
     pub cold_scroll_total_micros: u128,
     pub cold_scroll_max_micros: u128,

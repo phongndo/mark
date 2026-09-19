@@ -116,6 +116,7 @@ pub(crate) fn render_split_line_with_focus(
 pub(crate) fn render_split_line_wrapped_with_focus(
     app: &mut DiffApp,
     render: SplitLineRender,
+    window: std::ops::Range<usize>,
 ) -> Vec<Line<'static>> {
     let SplitLineRender {
         file,
@@ -127,7 +128,11 @@ pub(crate) fn render_split_line_wrapped_with_focus(
         focused,
     } = render;
     if width == 0 {
-        return vec![Line::default()];
+        return if window.contains(&0) {
+            vec![Line::default()]
+        } else {
+            Vec::new()
+        };
     }
     let theme = app.config.theme;
 
@@ -167,8 +172,9 @@ pub(crate) fn render_split_line_wrapped_with_focus(
         .unwrap_or(0);
     let rows = left_scrolls.len().max(right_scrolls.len()).max(1);
     let visual_row_start = app.wrapped_visual_scroll_for_model_row(row_index);
-    let mut rendered_lines = Vec::with_capacity(rows);
-    for wrap_index in 0..rows {
+    let end = window.end.min(rows);
+    let mut rendered_lines = Vec::with_capacity(end.saturating_sub(window.start));
+    for wrap_index in window.start..end {
         let left_scroll = wrapped_segment_scroll(&left_scrolls, left_text_width, wrap_index);
         let right_scroll = wrapped_segment_scroll(&right_scrolls, right_text_width, wrap_index);
         let visual_row = visual_row_start.saturating_add(wrap_index);

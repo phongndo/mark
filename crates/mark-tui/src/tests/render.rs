@@ -1197,7 +1197,8 @@ fn wrapped_split_context_line_highlights_grep_on_continuation_rows() {
     let theme = DiffTheme::default();
     let line = DiffLine::context(12, 12, "prefix needle suffix".to_owned());
 
-    let lines = render_split_context_line_wrapped(&line, None, 0, 30, theme, "needle");
+    let lines =
+        render_split_context_line_wrapped(&line, None, 0, 30, theme, "needle", 0..usize::MAX);
     let highlighted_line = lines
         .iter()
         .find(|line| line_text(line).contains("needle"))
@@ -1807,7 +1808,7 @@ fn line_wrapping_wraps_long_unified_rows() {
         .model
         .row(row_index)
         .expect("diff line should exist");
-    let lines = render_row_wrapped_with_focus(&mut app, row_index, row, 18, None);
+    let lines = render_row_wrapped_with_focus(&mut app, row_index, row, 18, None, 0..usize::MAX);
     let rendered = lines
         .iter()
         .map(|line| {
@@ -1836,7 +1837,7 @@ fn line_wrapping_preserves_wide_glyphs_at_unified_wrap_boundary() {
         .model
         .row(row_index)
         .expect("diff line should exist");
-    let lines = render_row_wrapped_with_focus(&mut app, row_index, row, 18, None);
+    let lines = render_row_wrapped_with_focus(&mut app, row_index, row, 18, None, 0..usize::MAX);
     let rendered = lines.iter().map(line_text).collect::<Vec<_>>();
 
     assert_eq!(rendered.len(), 3);
@@ -1857,7 +1858,7 @@ fn line_wrapping_preserves_wide_glyphs_at_split_wrap_boundary() {
         .model
         .row(row_index)
         .expect("diff line should exist");
-    let lines = render_row_wrapped_with_focus(&mut app, row_index, row, 24, None);
+    let lines = render_row_wrapped_with_focus(&mut app, row_index, row, 24, None, 0..usize::MAX);
     let rendered = lines.iter().map(line_text).collect::<Vec<_>>();
 
     assert_eq!(rendered.len(), 3);
@@ -2547,8 +2548,8 @@ fn split_wrapped_empty_cells_follow_visual_rows() {
         .model
         .row(3)
         .expect("second addition row should exist");
-    let first = render_row_wrapped_with_focus(&mut app, 2, first_row, 24, None);
-    let second = render_row_wrapped_with_focus(&mut app, 3, second_row, 24, None);
+    let first = render_row_wrapped_with_focus(&mut app, 2, first_row, 24, None, 0..usize::MAX);
+    let second = render_row_wrapped_with_focus(&mut app, 3, second_row, 24, None, 0..usize::MAX);
 
     let left_width = 12usize;
     let content_offset = 1 + GUTTER_WIDTH.min(left_width.saturating_sub(1));

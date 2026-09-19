@@ -19,7 +19,9 @@ use super::{
         split_cell_spans_at_scroll, split_cell_spans_at_scroll_with_focus_and_continuation,
         wrapped_segment_scroll,
     },
-    unified::{render_unified_line_at_scroll, render_unified_line_wrapped_with_focus},
+    unified::{
+        WrappedLineRender, render_unified_line_at_scroll, render_unified_line_wrapped_with_focus,
+    },
 };
 
 pub(crate) fn context_show_line(
@@ -175,6 +177,7 @@ pub(crate) fn render_context_line_wrapped(
     new_line: usize,
     row_index: usize,
     width: usize,
+    rows: std::ops::Range<usize>,
 ) -> Vec<Line<'static>> {
     let theme = app.config.theme;
     let side = app.context_source_side(file);
@@ -196,10 +199,13 @@ pub(crate) fn render_context_line_wrapped(
             &diff_line,
             syntax.as_deref(),
             &[],
-            width,
-            theme,
-            false,
-            &app.filters.grep_filter,
+            WrappedLineRender {
+                width,
+                theme,
+                focused: false,
+                grep_filter: &app.filters.grep_filter,
+                rows,
+            },
         ),
         DiffLayoutMode::Split => {
             let visual_row_start = app.wrapped_visual_scroll_for_model_row(row_index);
@@ -210,6 +216,7 @@ pub(crate) fn render_context_line_wrapped(
                 width,
                 theme,
                 &app.filters.grep_filter,
+                rows,
             )
         }
     }
@@ -263,9 +270,14 @@ pub(crate) fn render_split_context_line_wrapped(
     width: usize,
     theme: DiffTheme,
     grep_filter: &str,
+    window: std::ops::Range<usize>,
 ) -> Vec<Line<'static>> {
     if width == 0 {
-        return vec![Line::default()];
+        return if window.contains(&0) {
+            vec![Line::default()]
+        } else {
+            Vec::new()
+        };
     }
 
     let left_width = width / 2;
@@ -277,8 +289,9 @@ pub(crate) fn render_split_context_line_wrapped(
     let right_scrolls = wrapped_line_start_columns(&text, right_content_width);
     let text_width = display_width(&text);
     let rows = left_scrolls.len().max(right_scrolls.len());
-    let mut lines = Vec::with_capacity(rows);
-    for wrap_index in 0..rows {
+    let end = window.end.min(rows);
+    let mut lines = Vec::with_capacity(end.saturating_sub(window.start));
+    for wrap_index in window.start..end {
         let left_scroll = wrapped_segment_scroll(&left_scrolls, text_width, wrap_index);
         let right_scroll = wrapped_segment_scroll(&right_scrolls, text_width, wrap_index);
         let visual_row = row_index.saturating_add(wrap_index);
