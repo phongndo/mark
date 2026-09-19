@@ -17,6 +17,7 @@ use std::{
 mod branch_review;
 mod difftool;
 mod parser;
+mod parser_git;
 mod parser_limits;
 mod patch_ingress;
 mod patch_sources;

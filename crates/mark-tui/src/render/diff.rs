@@ -28,6 +28,7 @@ mod split;
 mod sticky;
 mod unified;
 mod viewport;
+mod wrapped;
 pub(crate) use content::{
     ContentSpanRender, append_content_spans_at_scroll, append_gutter_spans, content_span_capacity,
     diff_indicator_span_for_focus, empty_diff_fill_from,
@@ -51,12 +52,11 @@ pub(crate) use split::{SplitCellRender, SplitSide, split_cell_spans_at_scroll};
 pub(crate) use split::{
     SplitLineRender, render_split_line_with_focus, render_split_line_wrapped_with_focus,
 };
-pub(crate) use unified::{
-    line_style, render_unified_line_at_scroll_with_focus, render_unified_line_wrapped_with_focus,
-};
+pub(crate) use unified::{line_style, render_unified_line_at_scroll_with_focus};
 #[cfg(test)]
 pub(crate) use unified::{render_unified_line_at_scroll, row_bg};
 pub(crate) use viewport::build_diff_viewport_lines;
+pub(crate) use wrapped::render_row_wrapped_with_focus;
 
 pub(crate) fn draw_diff(frame: &mut Frame<'_>, app: &mut DiffApp, area: Rect) {
     if app.document.model.is_empty() {
@@ -182,79 +182,6 @@ pub(crate) fn render_row(
     width: usize,
 ) -> Line<'static> {
     render_row_with_focus(app, row_index, row, width, None)
-}
-
-pub(crate) fn render_row_wrapped_with_focus(
-    app: &mut DiffApp,
-    row_index: usize,
-    row: UiRow,
-    width: usize,
-    focused_hunk: Option<(FileIndex, HunkIndex)>,
-) -> Vec<Line<'static>> {
-    let theme = app.config.theme;
-    let hunk_focused = row
-        .typed_hunk_key()
-        .is_some_and(|hunk_key| Some(hunk_key) == focused_hunk);
-
-    match row {
-        UiRow::ContextLine {
-            file,
-            old_line,
-            new_line,
-        } => render_context_line_wrapped(app, file.get(), old_line, new_line, row_index, width),
-        UiRow::UnifiedLine { file, hunk, line } => {
-            let kind = app.document.changeset.files[file].hunks()[hunk].lines[line].kind();
-            let syntax = unified_syntax_side(kind)
-                .and_then(|side| app.syntax_line(file.get(), hunk.get(), line.get(), side));
-            let inline = app.inline_ranges(file.get(), hunk.get(), line.get());
-            let diff_line = &app.document.changeset.files[file].hunks()[hunk].lines[line];
-            render_unified_line_wrapped_with_focus(
-                diff_line,
-                syntax.as_deref(),
-                &inline,
-                width,
-                theme,
-                hunk_focused,
-                &app.filters.grep_filter,
-            )
-        }
-        UiRow::MetaLine { file, hunk, line } => {
-            let diff_line = &app.document.changeset.files[file].hunks()[hunk].lines[line];
-            render_unified_line_wrapped_with_focus(
-                diff_line,
-                None,
-                &[],
-                width,
-                theme,
-                hunk_focused,
-                &app.filters.grep_filter,
-            )
-        }
-        UiRow::SplitLine {
-            file,
-            hunk,
-            left,
-            right,
-        } => render_split_line_wrapped_with_focus(
-            app,
-            SplitLineRender {
-                file: file.get(),
-                hunk: hunk.get(),
-                left: left.get().map(|line| line.get()),
-                right: right.get().map(|line| line.get()),
-                row_index,
-                width,
-                focused: hunk_focused,
-            },
-        ),
-        _ => vec![render_row_with_focus(
-            app,
-            row_index,
-            row,
-            width,
-            focused_hunk,
-        )],
-    }
 }
 
 pub(crate) fn render_row_with_focus(

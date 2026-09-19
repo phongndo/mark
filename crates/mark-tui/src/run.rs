@@ -230,6 +230,32 @@ pub fn benchmark_diff_view(
         DiffLayoutMode::Split,
         syntax_mode,
     );
+    app.viewport.line_wrapping = options.line_wrapping;
+    if options.annotation_count > 0 {
+        let stride = app
+            .document
+            .model
+            .len()
+            .div_ceil(options.annotation_count)
+            .max(1);
+        let text = "review ".repeat(options.annotation_words);
+        let mut next_row = 0;
+        for (index, row) in app.document.model.iter_rows().enumerate() {
+            if index < next_row {
+                continue;
+            }
+            if let Some(key) =
+                crate::annotation::AnnotationKey::from_ui_row(&app.document.changeset, row)
+                    .filter(crate::annotation::AnnotationKey::is_line)
+            {
+                app.annotations_state
+                    .annotations
+                    .insert_human(key, text.clone(), app.document.generation)
+                    .expect("benchmark annotations must fit review limits");
+                next_row = index.saturating_add(stride);
+            }
+        }
+    }
     if let Some(theme) = std::env::var("MARK_TEXTMATE_BENCH_THEME")
         .ok()
         .and_then(|name| mark_syntax::theme::BuiltinTextMateTheme::from_name(&name))
@@ -315,9 +341,21 @@ pub fn benchmark_diff_view(
     let initial_render_micros = initial_render_start.elapsed().as_micros();
     allocation_profiler.finish("initial_render", initial_render_allocations);
 
+    let initial_syntax_allocations = allocation_profiler.start();
+    let initial_syntax_ready_micros =
+        settle_syntax_for_benchmark(&mut terminal, &mut app).map(|duration| duration.as_micros());
+    allocation_profiler.finish("initial_syntax_ready", initial_syntax_allocations);
+
     let positions_allocations = allocation_profiler.start();
+    // Wrapping changes the scroll coordinate space; model rows would never
+    // reach the middle/end of a single very long wrapped line.
+    let scroll_rows = if options.line_wrapping {
+        app.wrapped_visual_scroll_for_model_row(app.document.model.len())
+    } else {
+        app.document.model.len()
+    };
     let positions = benchmark_scroll_positions(
-        app.document.model.len(),
+        scroll_rows,
         options.viewport_rows,
         options.scroll_step,
         options.max_scroll_steps,
@@ -330,7 +368,7 @@ pub fn benchmark_diff_view(
 
     let syntax_settle_allocations = allocation_profiler.start();
     let syntax_settle_micros =
-        settle_syntax_for_benchmark(&mut app).map(|duration| duration.as_micros());
+        settle_syntax_for_benchmark(&mut terminal, &mut app).map(|duration| duration.as_micros());
     allocation_profiler.finish("syntax_settle", syntax_settle_allocations);
 
     let before_warm_stats = app.syntax_stats();
@@ -346,7 +384,7 @@ pub fn benchmark_diff_view(
     allocation_profiler.finish("warm_scroll", warm_scroll_allocations);
     let random_positions_allocations = allocation_profiler.start();
     let random_positions = benchmark_random_scroll_positions(
-        app.document.model.len(),
+        scroll_rows,
         options.viewport_rows,
         options.max_scroll_steps,
     );
@@ -393,6 +431,7 @@ pub fn benchmark_diff_view(
         hunk_navigation_total_micros,
         hunk_navigation_max_micros,
         initial_render_micros,
+        initial_syntax_ready_micros,
         cold_scroll_steps: positions.len(),
         cold_scroll_total_micros,
         cold_scroll_max_micros,
@@ -515,6 +554,9 @@ pub(crate) fn benchmark_scroll_pass(
         app.drain_syntax();
         app.set_scroll(*position);
         render_viewport_for_benchmark(terminal, app);
+        // A syntax scroll sample ends with the required highlight applied and
+        // painted, not merely with a fast provisional unhighlighted frame.
+        settle_syntax_for_benchmark(terminal, app);
         let elapsed = start.elapsed().as_micros();
         total = total.saturating_add(elapsed);
         max = max.max(elapsed);
@@ -564,21 +606,40 @@ pub(crate) fn benchmark_random_scroll_positions(
     positions
 }
 
-pub(crate) fn settle_syntax_for_benchmark(app: &mut DiffApp) -> Option<Duration> {
-    app.config.syntax.as_ref()?;
+pub(crate) fn settle_syntax_for_benchmark(
+    terminal: &mut Terminal<TestBackend>,
+    app: &mut DiffApp,
+) -> Option<Duration> {
+    if app.config.syntax.as_ref()?.is_idle() {
+        return Some(Duration::ZERO);
+    }
 
     let start = Instant::now();
     let timeout = Duration::from_secs(30);
     loop {
         app.drain_syntax();
-        let idle = app
+        if app
             .config
             .syntax
             .as_ref()
-            .is_none_or(SyntaxRuntime::is_idle);
-        if idle || start.elapsed() >= timeout {
-            return Some(start.elapsed());
+            .is_none_or(SyntaxRuntime::is_idle)
+        {
+            render_viewport_for_benchmark(terminal, app);
+            // An unavailable full-file result can queue the hunk fallback on
+            // repaint. Include that work as well before declaring readiness.
+            if app
+                .config
+                .syntax
+                .as_ref()
+                .is_none_or(SyntaxRuntime::is_idle)
+            {
+                return Some(start.elapsed());
+            }
         }
+        assert!(
+            start.elapsed() < timeout,
+            "syntax benchmark did not reach readiness within 30 seconds"
+        );
         thread::sleep(Duration::from_millis(1));
     }
 }

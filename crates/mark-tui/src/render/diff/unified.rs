@@ -72,20 +72,39 @@ pub(crate) fn render_unified_line_at_scroll_with_focus(
     )
 }
 
-pub(crate) fn render_unified_line_wrapped_with_focus(
+pub(super) struct WrappedLineRender<'a> {
+    pub width: usize,
+    pub theme: DiffTheme,
+    pub focused: bool,
+    pub grep_filter: &'a str,
+    pub rows: std::ops::Range<usize>,
+}
+
+pub(super) fn render_unified_line_wrapped_with_focus(
     line: &DiffLine,
     syntax: Option<&HighlightedLine>,
     inline: &[InlineRange],
-    width: usize,
-    theme: DiffTheme,
-    focused: bool,
-    grep_filter: &str,
+    render: WrappedLineRender<'_>,
 ) -> Vec<Line<'static>> {
+    let WrappedLineRender {
+        width,
+        theme,
+        focused,
+        grep_filter,
+        rows,
+    } = render;
     let content_width = unified_content_width(width);
     let text = line.text_lossy();
     let scrolls = wrapped_line_start_columns(&text, content_width);
-    let mut lines = Vec::with_capacity(scrolls.len());
-    for (wrap_index, horizontal_scroll) in scrolls.iter().copied().enumerate() {
+    let end = rows.end.min(scrolls.len());
+    let mut lines = Vec::with_capacity(end.saturating_sub(rows.start));
+    for (wrap_index, horizontal_scroll) in scrolls
+        .iter()
+        .copied()
+        .enumerate()
+        .take(end)
+        .skip(rows.start)
+    {
         let rendered = render_unified_line_segment_with_focus(
             line,
             syntax,
