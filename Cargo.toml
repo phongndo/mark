@@ -42,7 +42,7 @@ mark-runtime = { path = "crates/mark-runtime" }
 mark-session = { path = "crates/mark-session" }
 mark-syntax = { path = "crates/mark-syntax" }
 mark-tui = { path = "crates/mark-tui" }
-syntaxmate = { version = "0.1.2", default-features = false, features = ["bundled-grammars"] }
+syntaxmate = { version = "0.1.3", default-features = false, features = ["bundled-grammars"] }
 
 [profile.release]
 codegen-units = 1
