@@ -1,48 +1,32 @@
 # Contributing
 
-Thanks for improving `mark`. This repo is optimized for careful, maintainable
-changes over clever rewrites.
+Use [development](docs/development.md) for setup and verification. For changes
+across subsystems, read the [architecture boundaries](docs/architecture.md).
+Changes to the bundled review skill also need the
+[real-agent evaluations](docs/agent-review-evals.md).
 
-## Standard
+In a pull request, explain the problem, behavior or compatibility changes, and
+risks. Record the verification commands actually run and anything left untested.
 
-- Correct > compliant.
-- Simple > clever.
-- Inspect, edit, verify.
-- Existing style wins.
-- Fix root causes, not symptoms.
-- Preserve public APIs unless the change is intentional.
-- Keep changes local; avoid unrelated cleanup.
-- Do not weaken validation, sandboxing, or error handling.
+## Documentation policy
 
-## Before changing code
+Keep docs for user workflows, operational prerequisites, and reasons behind
+constraints. Use code, tests, CLI help, and configuration as the authority for
+facts they already express.
 
-1. Check the working tree with `git status`.
-2. Read the relevant code, tests, configs, and docs.
-3. Identify the smallest safe change.
-4. Decide the cheapest useful verification command.
+- Keep one home for each explanation. Link to it rather than copying it.
+- Use small examples that demonstrate a choice, not dumps of every default.
+- Link to the owning source for option inventories, dependency versions,
+  runtime budgets, and CI rules.
+- Put enforceable invariants in tests or checks; document the reason when it
+  is not evident from the implementation.
+- Keep benchmark evidence with the change: identify the revisions, host,
+  commands, inputs, and limitations. Store raw local artifacts under `target/`.
+- Remove completed plans, status snapshots, and obsolete instructions from the
+  working tree; Git history retains them. Preserve any still-relevant rationale
+  beside the code or in the existing architecture guide.
 
-Development setup lives in [docs/development.md](docs/development.md).
-
-## Pull requests
-
-Use the PR template and include:
-
-- What changed.
-- Why it changed.
-- User-visible behavior or compatibility impact.
-- Verification commands that were actually run.
-- Known risks or follow-up work.
-
-Do not mark a check as passed unless you ran it.
-
-## Documentation
-
-Update docs with user-visible changes to:
-
-- CLI commands, flags, aliases, and examples.
-- Config keys and accepted aliases.
-- Installer environment variables.
-- Release process or asset naming.
-
-Keep the README as the product entry point. Put detailed command, config, and
-development material in `docs/`.
+Background: OpenAI's [harness-engineering account](https://openai.com/index/harness-engineering/)
+warns that monolithic manuals become stale and recommends a small map to
+maintained sources—not eliminating documentation. Here, documentation must add
+context rather than become a second description of the implementation.

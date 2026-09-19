@@ -1,66 +1,50 @@
 # Architecture boundaries
 
-This project keeps the terminal UI organized around a few explicit boundaries:
+These are design constraints, not a file-by-file description of the code.
+[scripts/check-architecture](../scripts/check-architecture) owns enforceable
+import rules, dependency boundaries, and seam-file size budgets.
 
-- `DiffApp` is the top-level state aggregate and compatibility shell. New logic should prefer narrower state/controller types instead of adding more coordinator methods directly to `DiffApp`.
-- Event routing is component based. Key and mouse components receive focused context traits, not `&mut DiffApp`.
-- Rendering is component based. The compositor talks to a render context, not directly to `DiffApp`.
-- Rendering has a mutable prepare phase followed by mostly read-only drawing. Leaf menu/sidebar/status/toast renderers take `&DiffApp`; the diff viewport remains the intentionally mutable render path because it warms lazy syntax/context/inline caches while building visible rows.
-- App modules should import concrete dependencies directly. Do not introduce app preludes or wildcard app facades.
-- Side effects that leave the event loop should be modeled as app effects where practical. App code may queue `AppEffect`s during domain handling; the runner/effect executor performs external work such as editor launch, clipboard writes, reloads, toasts, and settings persistence.
-- Keep modules cohesive. If a production module grows past its architecture budget, split it by responsibility before adding more behavior.
+## UI ownership
 
-Run `scripts/check-architecture` before submitting broad refactors.
+`DiffApp` is the composition root, not the home for every feature. Keep behavior
+with the state/controller that owns its invariant; use focused context traits
+so event routing and rendering can be tested without the whole application.
+The [app](../crates/mark-tui/src/app/) and
+[render compositor](../crates/mark-tui/src/render/compositor.rs) are the entry
+points for these boundaries.
 
-## Runtime and thread budget
+Prepare mutable state before drawing. Leaf renderers should read it; the diff
+viewport is the deliberate exception because visible rows warm lazy context,
+syntax, and inline caches. Keep materialization limited to the visible window
+where possible; that does not make wrapping or source lookup constant-time.
+Retain Ratatui buffer diffing and owned viewport output unless measurements
+justify the extra lifetime or terminal-state complexity of an alternative.
 
-Runtime resources are process-wide and lazy. The non-TTY streaming path and
-`mark --version` do not construct either runtime pool.
+Queue [AppEffect](../crates/mark-tui/src/app/effect.rs) values for external work
+such as editor launch, clipboard writes, and settings persistence. This keeps
+terminal pauses and I/O out of domain mutation and event routing.
 
-| Tier | Budget | Role |
-| --- | ---: | --- |
-| Tokio workers | 2 | Terminal events, timers, channels, and coordination. |
-| Tokio blocking | at most 8 | Synchronous Git, filesystem, reload, and filter work. |
-| Shared Rayon CPU pool | `min(physical cores, 8)` | Section-parallel parsing and grep; named `mark-cpu-N`. `MARK_CPU_THREADS=0` or `1` forces serial execution. |
-| Syntax workers | at most 4 | Priority-ordered syntax fetch/tokenize work. This remains a dedicated queue. |
-| Terminal event reader | 1 | Blocking terminal input. |
+## Concurrency
 
-Rayon pools must never be created per operation or stacked. CPU work from an
-async context enters the shared pool through `mark_runtime::run_cpu`; blocking
-callers may use `cpu_pool().install`. Tokio workers must not call `install`.
-The syntax queue remains dedicated because its visible/prefetch priority order
-does not benefit from work stealing. All persistent production threads have a
-`mark-*` name so process samples and thread censuses are attributable.
+Use the lazy process-wide [CPU pool](../crates/mark-runtime/src/lib.rs) rather
+than per-operation pools. Async callers use `run_cpu` so CPU work cannot block
+a Tokio worker. Syntax work retains a [dedicated queue](../crates/mark-tui/src/syntax/queue.rs)
+because visible work must outrank speculative prefetch, not compete through
+unprioritized work stealing.
 
-## Responsibility map
+## Syntax and themes
 
-`DiffApp` remains the composition root. It owns the state graph and wires together
-subsystems, but feature logic should live in the subsystem that owns the concept.
+[Syntaxmate](https://github.com/phongndo/syntaxmate) owns tokenization, grammars,
+and tokenizer compatibility. Mark consumes its public crates.io API;
+[mark-syntax](../crates/mark-syntax/src/lib.rs) owns product settings, language
+mappings, and theme adaptation. Keep engine fixes upstream rather than copying
+internals into Mark. [Theme provenance](../assets/themes/SOURCE.toml) and
+[scripts/ci/generated](../scripts/ci/generated) own asset pins and validation.
 
-| Area | Owner | Notes |
-| --- | --- | --- |
-| Event ordering | `app/input/layers.rs`, `app/mouse.rs` | Routes components through focused context traits. |
-| Key navigation | `app/controllers/navigation.rs` | Owns key-to-navigation behavior; context supplies narrow operations. |
-| Filter input routing | `app/controllers/filter.rs` | Owns filter input routing; filter mutation remains with filter state/app methods. |
-| Menu key routing | `app/controllers/menu.rs` | Owns open-menu precedence and routing outcomes; menu internals stay in their menu modules. |
-| Render composition | `render/compositor.rs` | Generic compositor over `RenderContext`; no `DiffApp` dependency. |
-| External effects | `app/effect.rs`, `app/runner.rs` | Domain/event code queues `AppEffect`s; effect execution owns I/O and runner-sensitive pauses. |
-| Render planning | `render/mod.rs`, `render/snapshot.rs`, `render/screen_layout.rs` | May inspect/mutate app during preparation, then render through context; render state clamps sidebar/menu scroll before leaf drawing. |
-| Diff rows | `render/diff.rs`, `render/diff/*` | Diff viewport row orchestration, split/unified line rendering, context controls, and shared content styling. |
-| Diff text highlighting | `render/grep.rs`, `render/grep/*` | Grep match target mapping, span highlighting, and mouse-hover content highlighting. |
-| Headers | `render/headers/*` | File headers, hunk headers, delta rendering, and fitting helpers. |
-| Statusline | `render/statusline/*` | Header/statusline, filter bar, and error log rendering. |
-| Diff loading/jobs | `app/diff_load.rs`, `app/diff_load/*`, `app/editor_reload.rs`, `JobState` | `diff_load.rs` starts/drains foreground loads; `diff_load/cache.rs` owns cache entries/invalidation; `diff_load/prefetch.rs` owns speculative loads; `diff_load/review.rs` owns review-target loads. Prefer explicit effects for new side effects. |
-| Syntax highlighting | `app/syntax.rs`, `syntax/*` | Runtime scheduling, queueing, source building, and result application. |
+## Live sessions
 
-## Adding new behavior
-
-1. Put routing/order decisions in the relevant controller or layer module.
-2. Put domain mutation on the state/controller that owns the invariant.
-3. Keep `DiffApp` methods as orchestration shims only when several subsystems must
-   be coordinated.
-4. Prefer immutable render snapshots for drawing. If render must mutate app state,
-   do it in the prepare/plan phase, not inside leaf draw helpers.
-5. Queue an `AppEffect` for external side effects instead of performing I/O directly from event/domain code.
-6. Add a focused unit test with a fake context when adding a new event component or
-   controller branch.
+[mark-session](../crates/mark-session/src/lib.rs) is a UI-independent transport
+and protocol boundary. Review state belongs to the live TUI, not a daemon or
+persistent review database. Agents contribute findings; human navigation,
+reviewed state, dispositions, and verdicts remain human-owned. Session lifetime
+and reload behavior are described in [usage](usage.md#live-agent-review-sessions).
