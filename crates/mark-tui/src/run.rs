@@ -224,12 +224,12 @@ pub fn benchmark_diff_view(
 
     let open_allocations = allocation_profiler.start();
     let open_start = Instant::now();
-    let mut app = DiffApp::new_with_syntax(
-        DiffOptions::default(),
-        changeset,
-        DiffLayoutMode::Split,
-        syntax_mode,
-    );
+    let layout = if options.unified {
+        DiffLayoutMode::Unified
+    } else {
+        DiffLayoutMode::Split
+    };
+    let mut app = DiffApp::new_with_syntax(DiffOptions::default(), changeset, layout, syntax_mode);
     app.viewport.line_wrapping = options.line_wrapping;
     if options.annotation_count > 0 {
         let stride = app

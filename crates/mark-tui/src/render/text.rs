@@ -300,14 +300,66 @@ pub(crate) fn display_char_supports_partial_render(ch: char) -> bool {
     ch == '\t' || ch.is_control()
 }
 
-pub(crate) fn for_display_width_units(text: &str, mut visit: impl FnMut(usize, bool)) {
+/// A nonzero-width display unit, or consecutive printable-ASCII graphemes
+/// reported together so plain text needs no grapheme segmentation. Byte
+/// offsets are relative to the visited text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DisplayWidthUnit {
+    /// One grapheme or special character. Only special characters can be
+    /// split across rows.
+    Unit {
+        byte_start: usize,
+        width: usize,
+        supports_partial_render: bool,
+    },
+    /// `count` single-column graphemes, one byte each.
+    SingleWidthRun { byte_start: usize, count: usize },
+}
+
+pub(crate) fn for_display_width_units(text: &str, mut visit: impl FnMut(DisplayWidthUnit)) {
+    let mut byte_start = 0usize;
     for chunk in DisplayChunks::new(text) {
         match chunk {
             DisplayChunk::Text(run) => {
-                for_normal_run_width_units(run, |width| visit(width, false));
+                for_normal_run_width_units(run, byte_start, &mut visit);
+                byte_start += run.len();
             }
-            DisplayChunk::Special(ch) => visit(display_char_width(ch), true),
+            DisplayChunk::Special(ch) => {
+                visit(DisplayWidthUnit::Unit {
+                    byte_start,
+                    width: display_char_width(ch),
+                    supports_partial_render: true,
+                });
+                byte_start += ch.len_utf8();
+            }
         }
+    }
+}
+
+/// A display column, plus an earlier byte from which rendering can resume.
+///
+/// When `byte` starts a display unit and the residual `column - byte_column`
+/// is nonzero, skipping the residual from `byte` renders the same cells as
+/// skipping `column` from the line start: the skip then ends inside the
+/// resumed text, so zero-width and partial-character handling are unchanged.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct DisplaySeek {
+    pub(crate) column: usize,
+    pub(crate) byte: usize,
+    pub(crate) byte_column: usize,
+}
+
+impl DisplaySeek {
+    pub(crate) const fn from_start(column: usize) -> Self {
+        Self {
+            column,
+            byte: 0,
+            byte_column: 0,
+        }
+    }
+
+    pub(crate) const fn residual_columns(self) -> usize {
+        self.column - self.byte_column
     }
 }
 
@@ -640,11 +692,57 @@ fn zero_width_prefix_len(text: &str) -> usize {
     byte_end
 }
 
-fn for_normal_run_width_units(text: &str, mut visit: impl FnMut(usize)) {
-    for grapheme in text.graphemes(true) {
-        let width = grapheme.width();
-        if width > 0 {
-            visit(width);
+/// Segments only around non-ASCII text. A printable-ASCII character is never
+/// an extending, prepended, pictographic, or regional-indicator character, so a
+/// boundary always precedes it and restarting segmentation there is exact. The
+/// last byte of an ASCII stretch may still begin a cluster with what follows.
+fn for_normal_run_width_units(
+    run: &str,
+    run_byte_start: usize,
+    visit: &mut impl FnMut(DisplayWidthUnit),
+) {
+    let mut offset = 0usize;
+    loop {
+        let text = &run[offset..];
+        let ascii = single_width_ascii_prefix_len(text, text.len());
+        let bulk = if ascii == text.len() {
+            ascii
+        } else {
+            ascii.saturating_sub(1)
+        };
+        if bulk > 0 {
+            visit(DisplayWidthUnit::SingleWidthRun {
+                byte_start: run_byte_start + offset,
+                count: bulk,
+            });
+        }
+        offset += bulk;
+        if offset == run.len() {
+            return;
+        }
+
+        let text = &run[offset..];
+        let mut resume = text.len();
+        for (index, grapheme) in text.grapheme_indices(true) {
+            if index > 0
+                && grapheme.len() == 1
+                && is_single_width_printable_ascii(grapheme.as_bytes()[0])
+            {
+                resume = index;
+                break;
+            }
+            let width = grapheme.width();
+            if width > 0 {
+                visit(DisplayWidthUnit::Unit {
+                    byte_start: run_byte_start + offset + index,
+                    width,
+                    supports_partial_render: false,
+                });
+            }
+        }
+        offset += resume;
+        if offset == run.len() {
+            return;
         }
     }
 }

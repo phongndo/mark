@@ -203,6 +203,9 @@ struct MeasurePatchArgs {
     /// Wrap diff lines and measure scrolling in visual rows.
     #[arg(long)]
     wrap_lines: bool,
+    /// Render the unified layout instead of split.
+    #[arg(long)]
+    unified: bool,
     /// Seed evenly spaced saved line annotations (included in model-open cost).
     #[arg(long, default_value_t = 0)]
     annotations: usize,
@@ -554,6 +557,7 @@ struct MeasureSuiteReport {
 #[derive(Debug, Serialize)]
 struct MeasureOptionsReport {
     line_wrapping: bool,
+    unified: bool,
     annotation_count: usize,
     annotation_words: usize,
     width: usize,
@@ -845,6 +849,7 @@ impl DiffBenchmarkSelection for MeasurePatchArgs {
     fn view_options(&self) -> mark_tui::DiffBenchmarkOptions {
         mark_tui::DiffBenchmarkOptions {
             line_wrapping: self.wrap_lines,
+            unified: self.unified,
             annotation_count: self.annotations,
             annotation_words: self.annotation_words,
             ..Default::default()
@@ -935,6 +940,7 @@ fn measure_fixtures(args: MeasureArgs) -> BenchResult<()> {
             max_scroll_steps: options.max_scroll_steps,
             samples: args.samples,
             line_wrapping: options.line_wrapping,
+            unified: options.unified,
             annotation_count: options.annotation_count,
             annotation_words: options.annotation_words,
             syntax_languages,
@@ -1669,6 +1675,7 @@ fn measure_one_diff_source(
             max_scroll_steps: options.max_scroll_steps,
             samples: selection.samples(),
             line_wrapping: options.line_wrapping,
+            unified: options.unified,
             annotation_count: options.annotation_count,
             annotation_words: options.annotation_words,
             syntax_languages,

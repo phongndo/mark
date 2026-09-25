@@ -3,11 +3,11 @@ use mark_syntax::HighlightedLine;
 use ratatui::prelude::{Color, Line, Span, Style};
 
 use crate::{
-    app::{DiffApp, split_cell_content_width, wrapped_line_start_columns},
+    app::{DiffApp, split_cell_content_width},
     controls::DiffLayoutMode,
     render::{
         style::{diff_base_bg, diff_indicator_span},
-        text::{display_width, fit_padded, format_count},
+        text::{fit_padded, format_count},
     },
     syntax::DiffSide,
     theme::DiffTheme,
@@ -17,7 +17,7 @@ use super::{
     split::{
         SplitCellRender, SplitGrepRender, SplitSide, highlight_wrapped_split_grep_line,
         split_cell_spans_at_scroll, split_cell_spans_at_scroll_with_focus_and_continuation,
-        wrapped_segment_scroll,
+        wrapped_segment_scroll, wrapped_side_seeks,
     },
     unified::{
         WrappedLineRender, render_unified_line_at_scroll, render_unified_line_wrapped_with_focus,
@@ -285,18 +285,24 @@ pub(crate) fn render_split_context_line_wrapped(
     let left_content_width = split_cell_content_width(left_width);
     let right_content_width = split_cell_content_width(right_width);
     let text = line.text_lossy();
-    let left_scrolls = wrapped_line_start_columns(&text, left_content_width);
-    let right_scrolls = wrapped_line_start_columns(&text, right_content_width);
-    let text_width = display_width(&text);
-    let rows = left_scrolls.len().max(right_scrolls.len());
+    let (left_scrolls, left_past_end) =
+        wrapped_side_seeks(Some(&text), left_content_width, window.clone());
+    let right_seeks;
+    let (right_scrolls, right_past_end) = if right_content_width == left_content_width {
+        (&left_scrolls, left_past_end)
+    } else {
+        right_seeks = wrapped_side_seeks(Some(&text), right_content_width, window.clone());
+        (&right_seeks.0, right_seeks.1)
+    };
+    let rows = left_scrolls.rows.max(right_scrolls.rows);
     let end = window.end.min(rows);
     let mut lines = Vec::with_capacity(end.saturating_sub(window.start));
     for wrap_index in window.start..end {
-        let left_scroll = wrapped_segment_scroll(&left_scrolls, text_width, wrap_index);
-        let right_scroll = wrapped_segment_scroll(&right_scrolls, text_width, wrap_index);
+        let left_scroll = wrapped_segment_scroll(&left_scrolls, left_past_end, wrap_index);
+        let right_scroll = wrapped_segment_scroll(right_scrolls, right_past_end, wrap_index);
         let visual_row = row_index.saturating_add(wrap_index);
         let mut spans = split_cell_spans_at_scroll_with_focus_and_continuation(
-            Some(line),
+            Some((line, &text)),
             syntax,
             &[],
             SplitCellRender {
@@ -310,7 +316,7 @@ pub(crate) fn render_split_context_line_wrapped(
             wrap_index > 0,
         );
         spans.extend(split_cell_spans_at_scroll_with_focus_and_continuation(
-            Some(line),
+            Some((line, &text)),
             syntax,
             &[],
             SplitCellRender {
@@ -330,8 +336,8 @@ pub(crate) fn render_split_context_line_wrapped(
             SplitGrepRender {
                 query: grep_filter,
                 width,
-                left_scroll,
-                right_scroll,
+                left_scroll: left_scroll.column,
+                right_scroll: right_scroll.column,
                 theme,
             },
         ));

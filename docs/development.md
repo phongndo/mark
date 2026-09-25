@@ -51,7 +51,8 @@ cargo run -p mark-bench --release --locked -- measure-patch change.diff \
 
 These measure complete TestBackend frames, including layout and buffer diffing,
 not terminal I/O or CLI-start-to-first-frame latency. Annotation setup belongs
-to model-open cost. Wrapped scrolling uses visual rows.
+to model-open cost. Wrapped scrolling uses visual rows. Runs use the split
+layout; add `--unified` to measure the unified one.
 
 For syntax-enabled runs, `initial_render_micros` is the first useful frame;
 `initial_syntax_ready_micros` is the additional wait and paint for highlighting.

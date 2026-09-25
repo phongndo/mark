@@ -1883,6 +1883,281 @@ fn line_wrapping_keeps_emoji_sequences_on_one_visual_row() {
 }
 
 #[test]
+fn bulk_ascii_width_units_match_grapheme_segmentation() {
+    use crate::render::text::{
+        DisplayWidthUnit, display_char_supports_partial_render, display_char_width,
+        for_display_width_units,
+    };
+    use unicode_segmentation::UnicodeSegmentation;
+
+    // Each atom stresses a rule that could join an ASCII byte to its neighbor.
+    const ATOMS: &[&str] = &[
+        "a",
+        "bc ",
+        "\t",
+        "\u{1}",
+        "\u{85}",
+        "\u{7f}",
+        "\u{301}",
+        "e\u{301}",
+        "\u{20e3}",
+        "\u{200d}",
+        "\u{fe0f}",
+        "❤",
+        "👩",
+        "🇺",
+        "🇸",
+        "क्ष",
+        "\u{94d}",
+        "界",
+        "\u{200b}",
+        "\r\n",
+        "ｶﾞ",
+        "#",
+    ];
+    fn reference_units(text: &str) -> Vec<(usize, usize, bool)> {
+        let mut units = Vec::new();
+        let mut run_start = 0;
+        let flush = |start: usize, run: &str, units: &mut Vec<(usize, usize, bool)>| {
+            units.extend(
+                run.grapheme_indices(true)
+                    .map(|(index, grapheme)| (start + index, grapheme.width()))
+                    .filter(|(_, width)| *width > 0)
+                    .map(|(byte, width)| (byte, width, false)),
+            );
+        };
+        for (index, ch) in text.char_indices() {
+            if display_char_supports_partial_render(ch) {
+                flush(run_start, &text[run_start..index], &mut units);
+                units.push((index, display_char_width(ch), true));
+                run_start = index + ch.len_utf8();
+            }
+        }
+        flush(run_start, &text[run_start..], &mut units);
+        units
+    }
+    fn reference_starts(text: &str, content_width: usize) -> Vec<usize> {
+        let mut starts = vec![0];
+        if content_width == 0 {
+            return starts;
+        }
+        let (mut line_width, mut consumed) = (0usize, 0usize);
+        for (_, width, partial) in reference_units(text) {
+            if partial {
+                let mut remaining = width;
+                while remaining > 0 {
+                    if line_width >= content_width {
+                        starts.push(consumed);
+                        line_width = 0;
+                    }
+                    let taken = remaining.min(content_width - line_width);
+                    line_width += taken;
+                    consumed += taken;
+                    remaining -= taken;
+                    if remaining > 0 {
+                        starts.push(consumed);
+                        line_width = 0;
+                    }
+                }
+                continue;
+            }
+            if line_width == content_width || (line_width > 0 && line_width + width > content_width)
+            {
+                starts.push(consumed);
+                line_width = 0;
+            }
+            line_width += width;
+            consumed += width;
+        }
+        starts
+    }
+
+    let mut state = 0x2545_f491_4f6c_dd1du64;
+    for case in 0..2_000 {
+        let mut text = String::new();
+        for _ in 0..(case % 40) {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            text.push_str(ATOMS[(state >> 33) as usize % ATOMS.len()]);
+        }
+        let mut units = Vec::new();
+        for_display_width_units(&text, |unit| match unit {
+            DisplayWidthUnit::Unit {
+                byte_start,
+                width,
+                supports_partial_render,
+            } => units.push((byte_start, width, supports_partial_render)),
+            DisplayWidthUnit::SingleWidthRun { byte_start, count } => {
+                assert!(count > 0);
+                units.extend((byte_start..byte_start + count).map(|byte| (byte, 1, false)));
+            }
+        });
+        assert_eq!(units, reference_units(&text), "{text:?}");
+        for width in [0, 1, 2, 3, 5, 8, 13] {
+            let expected = reference_starts(&text, width);
+            assert_eq!(
+                wrapped_line_start_columns(&text, width),
+                expected,
+                "{text:?} at {width}"
+            );
+            assert_eq!(wrapped_line_count(&text, width), expected.len());
+        }
+    }
+}
+
+#[test]
+fn ascii_wrapped_line_count_matches_row_starts() {
+    for len in 0..40 {
+        let text = "x".repeat(len);
+        for width in 1..9 {
+            assert_eq!(
+                wrapped_line_count(&text, width),
+                wrapped_line_start_columns(&text, width).len(),
+                "{len} at {width}"
+            );
+        }
+    }
+}
+
+#[test]
+fn wrapped_row_seeks_render_like_skipping_from_the_line_start() {
+    use crate::render::{
+        diff::{ContentSpanRender, append_content_spans_at_scroll},
+        text::DisplaySeek,
+    };
+    use unicode_segmentation::UnicodeSegmentation;
+
+    const ATOMS: &[&str] = &[
+        "ab",
+        "c",
+        " ",
+        "\t",
+        "\u{1}",
+        "\u{85}",
+        "e\u{301}",
+        "\u{301}",
+        "界",
+        "👩‍💻",
+        "🇺🇸",
+        "\u{200b}",
+        "\u{200d}",
+        "ｶﾞ",
+        "لا",
+        "क्ष",
+        "#\u{20e3}",
+    ];
+    let theme = DiffTheme::default();
+    let mut state = 0x7c3a_1f22_90d5_e411u64;
+    let mut next = |bound: usize| {
+        state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        (state >> 33) as usize % bound.max(1)
+    };
+    let render = |text: &str,
+                  syntax: Option<&HighlightedLine>,
+                  inline: &[InlineRange],
+                  width: usize,
+                  scroll: DisplaySeek| {
+        let mut spans = Vec::new();
+        append_content_spans_at_scroll(
+            &mut spans,
+            text,
+            ContentSpanRender {
+                syntax,
+                inline,
+                kind: DiffLineKind::Addition,
+                width,
+                theme,
+                scroll,
+            },
+        );
+        spans
+    };
+
+    for case in 0..600 {
+        let mut text = String::new();
+        for _ in 0..(case % 30) {
+            text.push_str(ATOMS[next(ATOMS.len())]);
+        }
+        let boundaries = text
+            .grapheme_indices(true)
+            .map(|(index, _)| index)
+            .chain(std::iter::once(text.len()))
+            .collect::<Vec<_>>();
+        let mut cuts = boundaries
+            .iter()
+            .copied()
+            .filter(|_| next(3) == 0)
+            .collect::<Vec<_>>();
+        cuts.push(text.len());
+        let mut segments = Vec::new();
+        let mut start = 0;
+        for end in cuts {
+            if end > start || (end == text.len() && segments.is_empty()) {
+                segments.push(mark_syntax::SyntaxSegment {
+                    byte_start: start,
+                    byte_end: end,
+                    class: [None, Some(SyntaxClass::Keyword), Some(SyntaxClass::String)][next(3)],
+                    scope_stack: Default::default(),
+                });
+                start = end;
+            }
+        }
+        let syntax = HighlightedLine {
+            fingerprint: mark_syntax::LineTextFingerprint::from_text(&text),
+            segments,
+            scope_table: Default::default(),
+        };
+        let mut inline = Vec::new();
+        let mut cursor = 0;
+        while cursor + 1 < boundaries.len() {
+            let start = cursor + next(4);
+            let end = start + 1 + next(3);
+            if end >= boundaries.len() {
+                break;
+            }
+            inline.push(InlineRange {
+                byte_start: boundaries[start],
+                byte_end: boundaries[end],
+            });
+            cursor = end + 1;
+        }
+
+        for content_width in [1, 2, 3, 5, 8, 13] {
+            let wrapped = wrapped_row_seeks(&text, content_width, 0..usize::MAX);
+            let window = wrapped_row_seeks(&text, content_width, 1..3);
+            assert_eq!(window.rows, wrapped.rows);
+            assert_eq!(wrapped.rows, wrapped_line_count(&text, content_width));
+            for row in 0..wrapped.rows + 1 {
+                let expected = (1..3).contains(&row).then(|| wrapped.get(row)).flatten();
+                assert_eq!(window.get(row), expected);
+            }
+            // Split rows past a side's end resume from `end`.
+            let seeks = (0..wrapped.rows).filter_map(|row| wrapped.get(row));
+            for seek in seeks.chain(wrapped.end) {
+                assert!(seek.byte <= text.len() && text.is_char_boundary(seek.byte));
+                assert!(seek.residual_columns() > 0 || seek.byte == 0);
+                let from_start = DisplaySeek::from_start(seek.column);
+                for (syntax, inline) in [
+                    (None, &[][..]),
+                    (Some(&syntax), &[][..]),
+                    (None, inline.as_slice()),
+                    (Some(&syntax), inline.as_slice()),
+                ] {
+                    assert_eq!(
+                        render(&text, syntax, inline, content_width, seek),
+                        render(&text, syntax, inline, content_width, from_start),
+                        "{text:?} width {content_width} seek {seek:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn file_header_truncates_path_before_delta() {
     let file = mark_diff::DiffFile {
         change: FileChange::from_status(

@@ -11,7 +11,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use crate::{
     render::{
         style::{diff_indicator_span, diff_sign_style, focused_diff_indicator_span},
-        text::{fit_padded_from, fit_with_width_from, spaces},
+        text::{DisplaySeek, fit_padded_from, fit_with_width_from, spaces},
     },
     syntax::InlineRange,
     theme::{
@@ -144,7 +144,7 @@ pub(crate) struct ContentSpanRender<'a> {
     pub(crate) kind: DiffLineKind,
     pub(crate) width: usize,
     pub(crate) theme: DiffTheme,
-    pub(crate) horizontal_scroll: usize,
+    pub(crate) scroll: DisplaySeek,
 }
 
 #[cfg(test)]
@@ -167,7 +167,7 @@ pub(crate) fn content_spans_at_scroll(
             kind,
             width,
             theme,
-            horizontal_scroll,
+            scroll: DisplaySeek::from_start(horizontal_scroll),
         },
     );
     spans
@@ -184,7 +184,7 @@ pub(crate) fn append_content_spans_at_scroll(
         kind,
         width,
         theme,
-        horizontal_scroll,
+        scroll,
     } = render;
     if width == 0 {
         return;
@@ -198,28 +198,30 @@ pub(crate) fn append_content_spans_at_scroll(
         valid_inline.as_ref()
     };
     let syntax = syntax.filter(|syntax| syntax_line_matches_text(syntax, text));
+    // Styled ranges keep full-line byte offsets; only rendering resumes later.
+    let seek_byte = scroll.byte;
+    let skip = scroll.residual_columns();
     if syntax.is_none() && inline.is_empty() {
         spans.push(Span::styled(
-            fit_padded_from(text, horizontal_scroll, width),
+            fit_padded_from(&text[seek_byte..], skip, width),
             line_style(kind, theme),
         ));
         return;
     }
 
     let span_capacity = content_span_capacity(syntax, inline.len());
-    let mut writer = ContentSpanWriter::new(
-        spans,
-        inline,
-        kind,
-        width,
-        theme,
-        horizontal_scroll,
-        span_capacity,
-    );
+    let mut writer = ContentSpanWriter::new(spans, inline, kind, width, theme, skip, span_capacity);
 
     if let Some(syntax) = syntax {
-        for segment in &syntax.segments {
-            let byte_start = segment.byte_start;
+        let first_segment = if seek_byte == 0 {
+            0
+        } else {
+            syntax
+                .segments
+                .partition_point(|segment| segment.byte_end <= seek_byte)
+        };
+        for segment in &syntax.segments[first_segment..] {
+            let byte_start = segment.byte_start.max(seek_byte);
             let byte_end = segment.byte_end;
             debug_assert!(byte_start <= byte_end);
             debug_assert!(byte_end <= text.len());
@@ -232,7 +234,7 @@ pub(crate) fn append_content_spans_at_scroll(
             }
         }
     } else {
-        writer.push_segment(text, 0, line_style(kind, theme));
+        writer.push_segment(&text[seek_byte..], seek_byte, line_style(kind, theme));
     }
 
     writer.finish();
