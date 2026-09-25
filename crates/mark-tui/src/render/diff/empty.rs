@@ -48,7 +48,7 @@ pub(crate) fn draw_empty_diff(frame: &mut Frame<'_>, app: &DiffApp, area: Rect) 
 }
 
 pub(crate) fn empty_diff_message(app: &DiffApp) -> (String, String) {
-    if app.filters.active() && !app.document.base_changeset.files.is_empty() {
+    if app.filters.active() && !app.document.changeset.files.is_empty() {
         return (
             "No files match the active filters.".to_owned(),
             action_hints(app, &[(GlobalAction::ClearFilters, "clear filters")]),
