@@ -3,7 +3,7 @@ use mark_syntax::{DiffBackground, HighlightedLine};
 use ratatui::prelude::{Color, Line, Style};
 
 use crate::{
-    app::{unified_content_width, wrapped_line_start_columns},
+    app::{unified_content_width, wrapped_row_seeks},
     render::{
         diff::{
             ContentSpanRender, append_content_spans_at_scroll, append_gutter_spans,
@@ -14,7 +14,7 @@ use crate::{
             highlighted_grep_text_line, scrolled_text_byte_start, unified_content_start_column,
         },
         style::diff_base_bg,
-        text::spaces,
+        text::{DisplaySeek, spaces},
     },
     syntax::InlineRange,
     theme::{DiffTheme, UNIFIED_GUTTER_WIDTH},
@@ -24,7 +24,7 @@ use crate::{
 struct UnifiedLineRender {
     width: usize,
     theme: DiffTheme,
-    horizontal_scroll: usize,
+    scroll: DisplaySeek,
     focused: bool,
     continuation: bool,
 }
@@ -60,12 +60,13 @@ pub(crate) fn render_unified_line_at_scroll_with_focus(
 ) -> Line<'static> {
     render_unified_line_segment_with_focus(
         line,
+        &line.text_lossy(),
         syntax,
         inline,
         UnifiedLineRender {
             width,
             theme,
-            horizontal_scroll,
+            scroll: DisplaySeek::from_start(horizontal_scroll),
             focused,
             continuation: false,
         },
@@ -95,24 +96,20 @@ pub(super) fn render_unified_line_wrapped_with_focus(
     } = render;
     let content_width = unified_content_width(width);
     let text = line.text_lossy();
-    let scrolls = wrapped_line_start_columns(&text, content_width);
-    let end = rows.end.min(scrolls.len());
+    let seeks = wrapped_row_seeks(&text, content_width, rows.clone());
+    let end = rows.end.min(seeks.rows);
     let mut lines = Vec::with_capacity(end.saturating_sub(rows.start));
-    for (wrap_index, horizontal_scroll) in scrolls
-        .iter()
-        .copied()
-        .enumerate()
-        .take(end)
-        .skip(rows.start)
-    {
+    for wrap_index in rows.start..end {
+        let scroll = seeks.get(wrap_index).unwrap_or_default();
         let rendered = render_unified_line_segment_with_focus(
             line,
+            &text,
             syntax,
             inline,
             UnifiedLineRender {
                 width,
                 theme,
-                horizontal_scroll,
+                scroll,
                 focused,
                 continuation: wrap_index > 0,
             },
@@ -120,9 +117,10 @@ pub(super) fn render_unified_line_wrapped_with_focus(
         lines.push(highlight_wrapped_unified_grep_line(
             rendered,
             line,
+            &text,
             grep_filter,
             width,
-            horizontal_scroll,
+            scroll.column,
             theme,
         ));
     }
@@ -131,6 +129,7 @@ pub(super) fn render_unified_line_wrapped_with_focus(
 
 fn render_unified_line_segment_with_focus(
     line: &DiffLine,
+    text: &str,
     syntax: Option<&HighlightedLine>,
     inline: &[InlineRange],
     render: UnifiedLineRender,
@@ -138,7 +137,7 @@ fn render_unified_line_segment_with_focus(
     let UnifiedLineRender {
         width,
         theme,
-        horizontal_scroll,
+        scroll,
         focused,
         continuation,
     } = render;
@@ -173,17 +172,16 @@ fn render_unified_line_segment_with_focus(
     if gutter_width > 0 {
         append_gutter_spans(&mut spans, gutter, sign, gutter_width, line.kind(), theme);
     }
-    let text = line.text_lossy();
     append_content_spans_at_scroll(
         &mut spans,
-        &text,
+        text,
         ContentSpanRender {
             syntax,
             inline,
             kind: line.kind(),
             width: content_width,
             theme,
-            horizontal_scroll,
+            scroll,
         },
     );
     Line::from(spans)
@@ -192,6 +190,7 @@ fn render_unified_line_segment_with_focus(
 fn highlight_wrapped_unified_grep_line(
     rendered: Line<'static>,
     line: &DiffLine,
+    text: &str,
     query: &str,
     width: usize,
     horizontal_scroll: usize,
@@ -206,7 +205,7 @@ fn highlight_wrapped_unified_grep_line(
         &rendered.spans,
         unified_content_start_column(width),
         width,
-        1 + scrolled_text_byte_start(&line.text_lossy(), horizontal_scroll),
+        1 + scrolled_text_byte_start(text, horizontal_scroll),
     )
     .into_iter()
     .collect();

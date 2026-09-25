@@ -5,6 +5,8 @@ pub struct DiffBenchmarkOptions {
     pub scroll_step: usize,
     pub max_scroll_steps: usize,
     pub line_wrapping: bool,
+    /// Render the unified layout instead of split.
+    pub unified: bool,
     pub annotation_count: usize,
     pub annotation_words: usize,
 }
@@ -17,6 +19,7 @@ impl Default for DiffBenchmarkOptions {
             scroll_step: 20,
             max_scroll_steps: 200,
             line_wrapping: false,
+            unified: false,
             annotation_count: 0,
             annotation_words: 20,
         }

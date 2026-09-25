@@ -57,9 +57,14 @@ impl DiffApp {
             DiffLayoutMode::Split => {
                 let left_width = self.viewport.viewport_width / 2;
                 let right_width = self.viewport.viewport_width.saturating_sub(left_width);
-                wrapped_line_count(text, split_cell_content_width(left_width)).max(
-                    wrapped_line_count(text, split_cell_content_width(right_width)),
-                )
+                let left_content_width = split_cell_content_width(left_width);
+                let right_content_width = split_cell_content_width(right_width);
+                let left_rows = wrapped_line_count(text, left_content_width);
+                if right_content_width == left_content_width {
+                    left_rows
+                } else {
+                    left_rows.max(wrapped_line_count(text, right_content_width))
+                }
             }
         }
     }
