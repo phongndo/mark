@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     path::PathBuf,
     sync::Arc,
 };
@@ -1300,17 +1300,28 @@ fn adapt_highlighted_text(
     let mut source_lines = source.split('\n');
     let document_lines = highlighted.lines();
     let mut lines = Vec::with_capacity(document_lines.len());
+    // Spans repeat a few interned stacks; classify each once per scope table.
+    let mut classes = HashMap::<ScopeStackRef, Option<SyntaxClass>>::new();
+    let mut classes_table = None;
     for line in document_lines {
         let text = source_lines.next().unwrap_or("");
         let spans = line.spans();
+        let table = Arc::as_ptr(line.scope_table());
+        if classes_table != Some(table) {
+            classes.clear();
+            classes_table = Some(table);
+        }
         let mut segments = Vec::with_capacity(spans.len());
         for span in spans {
             let range = span.range();
             let scope_stack = span.scope_stack();
+            let class = *classes.entry(scope_stack).or_insert_with(|| {
+                crate::scopes::classify_scope_stack(line.scope_names(scope_stack))
+            });
             segments.push(SyntaxSegment {
                 byte_start: range.start,
                 byte_end: range.end,
-                class: crate::scopes::classify_scope_stack(line.scope_names(scope_stack)),
+                class,
                 scope_stack,
             });
         }
