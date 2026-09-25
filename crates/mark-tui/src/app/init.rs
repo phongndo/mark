@@ -509,7 +509,6 @@ impl DiffApp {
         let mut app = Self {
             document: DocumentState {
                 options,
-                base_changeset: changeset.clone(),
                 changeset,
                 search_index,
                 total_stats,

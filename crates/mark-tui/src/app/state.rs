@@ -37,7 +37,6 @@ use super::OptionsMenuItem;
 #[derive(Debug)]
 pub(crate) struct DocumentState {
     pub(crate) options: DiffOptions,
-    pub(crate) base_changeset: Changeset,
     pub(crate) changeset: Changeset,
     pub(crate) search_index: Arc<DiffSearchIndex>,
     pub(crate) total_stats: DiffStats,

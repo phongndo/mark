@@ -48,17 +48,8 @@ impl DiffApp {
         paths: &[PathBuf],
         path_changeset: Changeset,
     ) -> MarkResult<()> {
-        let raw_patch_is_shared = Arc::ptr_eq(
-            &self.document.changeset.raw_patch,
-            &self.document.base_changeset.raw_patch,
-        );
         let raw_patch =
             splice_raw_patch_for_paths(&self.document.changeset, paths, &path_changeset)?;
-        let base_raw_patch = if raw_patch_is_shared {
-            Arc::clone(&raw_patch)
-        } else {
-            splice_raw_patch_for_paths(&self.document.base_changeset, paths, &path_changeset)?
-        };
         let review_transition = ReviewTransition::capture(self);
         self.close_annotation_target_mode();
         self.invalidate_diff_cache();
@@ -74,15 +65,9 @@ impl DiffApp {
         splice_diff_files_for_paths(
             &mut self.document.changeset.files,
             paths,
-            path_changeset.files.clone(),
-        );
-        self.document.changeset.raw_patch = raw_patch;
-        splice_diff_files_for_paths(
-            &mut self.document.base_changeset.files,
-            paths,
             path_changeset.files,
         );
-        self.document.base_changeset.raw_patch = base_raw_patch;
+        self.document.changeset.raw_patch = raw_patch;
         self.document.total_stats = self.document.changeset.stats();
         self.document.context_expansions.clear();
         self.document.trailing_context_lines.clear();
@@ -211,7 +196,6 @@ impl DiffApp {
             .scroll
             .min(self.max_commit_menu_scroll_for_rows(self.commit_menu_rows()));
         self.document.total_stats = total_stats;
-        self.document.base_changeset = changeset.clone();
         self.document.changeset = changeset;
         self.document.search_index = search_index;
         self.document.context_expansions.clear();
@@ -318,9 +302,7 @@ impl DiffApp {
         // after refs move even when their spelling is unchanged.
         invalidate_range_operand_revision_cache(&changeset.repo, &options);
         let options_changed = self.document.options != options;
-        if !options_changed
-            && self.document.base_changeset == changeset
-            && !self.full_file_mode_active()
+        if !options_changed && self.document.changeset == changeset && !self.full_file_mode_active()
         {
             self.jobs.live_updates.reset_reload();
             self.jobs.source_changed = false;
@@ -400,7 +382,6 @@ impl DiffApp {
             .scroll
             .min(self.max_commit_menu_scroll_for_rows(self.commit_menu_rows()));
         self.document.total_stats = changeset.stats();
-        self.document.base_changeset = changeset.clone();
         self.document.changeset = changeset;
         self.document.search_index = Arc::new(DiffSearchIndex::new(&self.document.changeset));
         self.document.context_expansions.clear();

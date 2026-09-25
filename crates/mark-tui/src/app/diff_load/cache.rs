@@ -78,7 +78,7 @@ impl DiffApp {
         }
 
         let options = self.document.options.clone();
-        let changeset = self.document.base_changeset.clone();
+        let changeset = self.document.changeset.clone();
         self.jobs
             .diff_cache
             .retain(|entry| entry.options != options);

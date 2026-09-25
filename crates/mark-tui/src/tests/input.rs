@@ -2615,7 +2615,7 @@ fn cached_diff_choice_switches_without_loading() {
 
     assert!(app.jobs.pending_diff_load.is_none());
     assert_eq!(app.document.options, show);
-    assert_eq!(app.document.base_changeset, cached_changeset);
+    assert_eq!(app.document.changeset, cached_changeset);
     assert_eq!(visible_paths(&app), vec!["show.rs"]);
 }
 
