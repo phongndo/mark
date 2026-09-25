@@ -83,6 +83,36 @@ fn parse_patch_bytes_keeps_non_utf8_payloads_as_line_spans() {
 }
 
 #[test]
+fn span_text_lossy_borrows_valid_lines_and_replaces_invalid_bytes() {
+    let patch = Arc::<[u8]>::from(
+        [
+            b"diff --git a/t.txt b/t.txt\n--- a/t.txt\n+++ b/t.txt\n@@ -1,2 +1,2 @@\n-plain ascii\n-"
+                .as_slice(),
+            "caf\u{e9} \u{754c}".as_bytes(),
+            b"\n+ok\xffend\n+\xc3\n",
+        ]
+        .concat(),
+    );
+    let files = parse_patch_bytes(patch);
+    let lines = &files[0].hunks()[0].lines;
+
+    let texts = lines
+        .iter()
+        .map(|line| line.text_lossy())
+        .collect::<Vec<_>>();
+    assert!(matches!(
+        texts[0],
+        std::borrow::Cow::Borrowed("plain ascii")
+    ));
+    assert!(matches!(
+        texts[1],
+        std::borrow::Cow::Borrowed("caf\u{e9} \u{754c}")
+    ));
+    assert_eq!(texts[2], "ok\u{fffd}end");
+    assert_eq!(texts[3], "\u{fffd}");
+}
+
+#[test]
 fn render_bytes_stat_matches_full_changeset_stat_for_patch() {
     let patch = Arc::<[u8]>::from(
             b"--- a/a.txt\n+++ b/a.txt\n@@ -1 +1,2 @@\n-old\n+new\n+next\n--- a/b.txt\n+++ b/b.txt\n@@ -2 +2 @@\n-left\n+right\n"

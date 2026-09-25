@@ -919,7 +919,19 @@ impl DiffLineText {
     pub fn to_string_lossy(&self) -> Cow<'_, str> {
         match &self.storage {
             DiffLineTextStorage::Owned(text) => Cow::Borrowed(text.as_str()),
-            DiffLineTextStorage::Span { .. } => String::from_utf8_lossy(self.as_bytes()),
+            DiffLineTextStorage::Span { .. } => {
+                // The lossy decoder walks ASCII a byte at a time; `from_utf8`
+                // has a word-at-a-time ASCII path but is slower on mixed
+                // text. `is_ascii` stops at the first non-ASCII byte.
+                let bytes = self.as_bytes();
+                if bytes.is_ascii()
+                    && let Ok(text) = std::str::from_utf8(bytes)
+                {
+                    Cow::Borrowed(text)
+                } else {
+                    String::from_utf8_lossy(bytes)
+                }
+            }
         }
     }
 
