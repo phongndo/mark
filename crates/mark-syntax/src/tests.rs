@@ -390,6 +390,32 @@ fn direct_highlighting_uses_syntaxmate() {
 }
 
 #[test]
+fn memoized_segment_classes_match_their_scope_stacks() {
+    let mut highlighter = SyntaxHighlighter::new();
+    let source = "```rust\nfn main() { let s = \"x\"; } // done\n```\n<a href=\"x\">*b* `c`</a>\n";
+    let highlighted = highlighter.highlight("markdown", source).unwrap();
+
+    let mut stacks = std::collections::HashSet::new();
+    for line in &highlighted.lines {
+        for segment in &line.segments {
+            stacks.insert(segment.scope_stack);
+            assert_eq!(
+                segment.class,
+                crate::scopes::classify_scope_stack(
+                    line.scope_table.stack_names(segment.scope_stack)
+                ),
+            );
+        }
+    }
+    let segments = highlighted
+        .lines
+        .iter()
+        .map(|line| line.segments.len())
+        .sum::<usize>();
+    assert!(stacks.len() > 3 && stacks.len() < segments, "{stacks:?}");
+}
+
+#[test]
 fn bundled_markdown_loads_private_yang_and_twig_dependencies() {
     let mut highlighter = SyntaxHighlighter::new();
     let source = "```yang\nmodule demo {\n namespace \"urn:demo\";\n}\n```\n```twig\n{% if user %}{{ user.name }}{% endif %}\n```";
