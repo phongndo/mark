@@ -304,13 +304,17 @@ pub(crate) fn enabled_language_set_from_config(config: &StoredSyntaxConfig) -> B
 }
 
 pub(crate) fn bundled_highlight_language_set() -> BTreeSet<String> {
-    syntaxmate::available_languages().into_iter().collect()
+    crate::catalog()
+        .languages()
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
 }
 
 pub(crate) fn core_enabled_language_set() -> BTreeSet<String> {
     core_language_set()
         .into_iter()
-        .filter(|language| syntaxmate::canonical_language(language).is_some())
+        .filter(|language| crate::canonical_language(language).is_some())
         .collect()
 }
 
@@ -379,15 +383,15 @@ fn canonical_language_name(language: &str) -> String {
     if CORE_LANGUAGES.contains(&language) {
         return language.to_owned();
     }
-    syntaxmate::canonical_language(language)
-        .or_else(|| syntaxmate::detect_language_from_path(language))
+    crate::canonical_language(language)
+        .or_else(|| crate::catalog().detect_path(language).map(str::to_owned))
         .unwrap_or_else(|| language.to_owned())
 }
 
 pub(crate) fn detect_language_name(path: &str) -> Option<String> {
     detect_language_from_basename(path)
         .map(str::to_owned)
-        .or_else(|| syntaxmate::detect_language_from_path(path))
+        .or_else(|| crate::catalog().detect_path(path).map(str::to_owned))
 }
 
 pub(crate) fn language_alias(language: &str) -> Option<&'static str> {
@@ -438,7 +442,7 @@ fn extension_mapping_match_len(filename: &str, extension: &str) -> Option<usize>
 }
 
 pub(crate) fn has_highlights(language: &str) -> bool {
-    syntaxmate::canonical_language(language).is_some()
+    crate::canonical_language(language).is_some()
 }
 
 #[cfg(test)]

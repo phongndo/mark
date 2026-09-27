@@ -81,6 +81,9 @@ retained memory when evaluating a cache; fewer allocations alone are not a win.
 The executable smoke and extended gates live in
 [scripts/ci/performance](../scripts/ci/performance).
 
+Recorded comparisons: [Syntaxmate 0.2.0 migration](performance/syntaxmate-0.2.0.md)
+(2026-09-27; includes raw samples and reproduction commands).
+
 For profile-guided builds, use [scripts/build-pgo](../scripts/build-pgo). It
 requires `llvm-profdata` from the Rust `llvm-tools` component. Retrain after
 material engine or allocator changes rather than assuming old profiles help.
