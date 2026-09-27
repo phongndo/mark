@@ -41,6 +41,12 @@ mappings, and theme adaptation. Keep engine fixes upstream rather than copying
 internals into Mark. [Theme provenance](../assets/themes/SOURCE.toml) and
 [scripts/ci/generated](../scripts/ci/generated) own asset pins and validation.
 
+[Scope adaptation](../crates/mark-syntax/src/scope_table.rs) retains one public
+token per distinct document scope stack. Mark caches resolved property-match
+flags for the base theme and user overrides in two bounded slots; Syntaxmate's
+diagnostic resolver does not cache those flags. Scope memory is estimated from
+exposed content and Mark's allocations, since engine storage is private.
+
 ## Live sessions
 
 [mark-session](../crates/mark-session/src/lib.rs) is a UI-independent transport

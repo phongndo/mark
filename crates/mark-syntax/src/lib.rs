@@ -1,6 +1,7 @@
 mod highlight;
 mod language;
 mod paths;
+mod scope_table;
 mod scopes;
 mod storage;
 #[cfg(test)]
@@ -17,6 +18,7 @@ pub use paths::{
     colorscheme_dir, config_path, load_settings, load_settings_with_annotation_targeting,
     settings_path, settings_read_path, settings_write_path,
 };
+pub use scope_table::{HighlightScopeTable, ScopeStackRef};
 #[cfg(feature = "diagnostics")]
 pub use syntaxmate::diagnostics::EngineCounters;
 pub use types::*;
@@ -30,11 +32,16 @@ pub(crate) use paths::*;
 pub(crate) use storage::*;
 
 pub fn canonical_language(language: &str) -> Option<String> {
-    syntaxmate::canonical_language(language)
+    catalog().canonical_language(language).map(str::to_owned)
 }
 
 pub fn has_language(language: &str) -> bool {
-    syntaxmate::canonical_language(language).is_some()
+    catalog().canonical_language(language).is_some()
+}
+
+pub(crate) fn catalog() -> &'static syntaxmate::Catalog {
+    static CATALOG: std::sync::OnceLock<syntaxmate::Catalog> = std::sync::OnceLock::new();
+    CATALOG.get_or_init(syntaxmate::Catalog::bundled)
 }
 
 pub fn classify_scope_name(scope: &str) -> Option<SyntaxClass> {

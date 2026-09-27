@@ -245,14 +245,35 @@ impl BuiltinTextMateTheme {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct TextMateTheme {
-    inner: syntaxmate::TextMateTheme,
+    inner: syntaxmate::Theme,
+    cache_id: u64,
 }
 
+impl PartialEq for TextMateTheme {
+    fn eq(&self, other: &Self) -> bool {
+        // Theme instances are immutable; clones keep the same identity.
+        self.cache_id == other.cache_id
+    }
+}
+
+impl Eq for TextMateTheme {}
+
 impl TextMateTheme {
+    fn new(inner: syntaxmate::Theme) -> Self {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+        Self {
+            inner,
+            cache_id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
+        }
+    }
+
     pub fn from_json(json: &str) -> Result<Self, String> {
-        syntaxmate::TextMateTheme::from_json(json).map(|inner| Self { inner })
+        syntaxmate::Theme::from_json(json)
+            .map(Self::new)
+            .map_err(|error| error.to_string())
     }
 
     pub fn from_syntax_rules(rules: &[SyntaxRuleOverride]) -> Result<Self, String> {
@@ -265,7 +286,9 @@ impl TextMateTheme {
                 font_style: rule.font_style.clone(),
             })
             .collect::<Vec<_>>();
-        syntaxmate::TextMateTheme::from_rules(&rules).map(|inner| Self { inner })
+        syntaxmate::Theme::from_rules(&rules)
+            .map(Self::new)
+            .map_err(|error| error.to_string())
     }
 
     pub fn name(&self) -> &str {
@@ -285,7 +308,7 @@ impl TextMateTheme {
         table: &HighlightScopeTable,
         stack: ScopeStackRef,
     ) -> ResolvedSyntaxStyle {
-        self.inner.resolve(table, stack)
+        self.resolve_style(table, stack).style
     }
 
     pub fn resolve_style(
@@ -293,7 +316,15 @@ impl TextMateTheme {
         table: &HighlightScopeTable,
         stack: ScopeStackRef,
     ) -> ResolvedThemeStyle {
-        self.inner.resolve_style(table, stack)
+        table.resolve_style(self.cache_id, stack, || {
+            table.scopes(stack).map_or_else(
+                || ResolvedThemeStyle {
+                    style: self.default_style(),
+                    ..Default::default()
+                },
+                |scopes| self.inner.resolve_style(scopes),
+            )
+        })
     }
 
     pub fn resolve_with_match<'a>(
@@ -301,7 +332,18 @@ impl TextMateTheme {
         table: &HighlightScopeTable,
         stack: ScopeStackRef,
     ) -> ThemeMatch<'a> {
-        self.inner.resolve_with_match(table, stack)
+        table.scopes(stack).map_or_else(
+            || ThemeMatch {
+                selector: None,
+                score: None,
+                source_order: None,
+                foreground_matched: false,
+                background_matched: false,
+                modifiers_matched: false,
+                style: self.default_style(),
+            },
+            |scopes| self.inner.resolve_with_match(scopes),
+        )
     }
 }
 
@@ -641,5 +683,49 @@ mod tests {
             })
         );
         assert!(style.modifiers.contains(SyntaxModifiers::BOLD));
+    }
+
+    #[test]
+    fn cached_property_matches_survive_theme_and_override_switches() {
+        let base = TextMateTheme::from_json(r##"{
+            "colors": {"editor.foreground": "#123456"},
+            "tokenColors": [{"scope": "keyword", "settings": {"foreground": "#123456", "fontStyle": "bold"}}]
+        }"##).unwrap();
+        let override_theme = TextMateTheme::from_syntax_rules(&[SyntaxRuleOverride {
+            scope: "keyword".to_owned(),
+            foreground: None,
+            background: Some("#abcdef".to_owned()),
+            font_style: Some(String::new()),
+        }])
+        .unwrap();
+        let other = github_light();
+        let (table, stack) =
+            HighlightScopeTable::from_scope_names(&["source.rust", "keyword.other.fn.rust"]);
+
+        // Resolving the base and override together, then cycling to another
+        // theme, must preserve explicit matches even when they equal defaults.
+        for theme in [
+            &base,
+            &override_theme,
+            &base,
+            &override_theme,
+            other,
+            &base,
+            &override_theme,
+        ] {
+            let diagnostic = theme.resolve_with_match(&table, stack);
+            for _ in 0..2 {
+                let cached = theme.resolve_style(&table, stack);
+                assert_eq!(cached.style, diagnostic.style);
+                assert_eq!(cached.foreground_matched, diagnostic.foreground_matched);
+                assert_eq!(cached.background_matched, diagnostic.background_matched);
+                assert_eq!(cached.modifiers_matched, diagnostic.modifiers_matched);
+            }
+        }
+        assert!(base.resolve_style(&table, stack).foreground_matched);
+        let overrides = override_theme.resolve_style(&table, stack);
+        assert!(!overrides.foreground_matched);
+        assert!(overrides.background_matched && overrides.modifiers_matched);
+        assert!(overrides.style.modifiers.is_empty());
     }
 }

@@ -416,6 +416,46 @@ fn memoized_segment_classes_match_their_scope_stacks() {
 }
 
 #[test]
+fn retained_scopes_survive_later_documents_and_the_tokenizer() {
+    let mut highlighter = SyntaxHighlighter::new();
+    let rust = highlighter
+        .highlight("rust", "fn main() {}\nlet x = 1;")
+        .unwrap();
+    let rust_line = rust.lines[0].clone();
+    let keyword = &rust_line.segments[0];
+    let before = rust_line
+        .scope_table
+        .stack_names(keyword.scope_stack)
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let html = highlighter
+        .highlight("html", "<div class=\"x\">hello</div>")
+        .unwrap();
+    highlighter
+        .highlight("rust", "// different document")
+        .unwrap();
+    drop(highlighter);
+    drop(rust);
+
+    assert_eq!(
+        rust_line
+            .scope_table
+            .stack_names(keyword.scope_stack)
+            .collect::<Vec<_>>(),
+        before
+    );
+    assert!(before.iter().any(|scope| scope == "keyword.other.fn.rust"));
+    let html_line = &html.lines[0];
+    assert!(
+        html_line
+            .scope_table
+            .stack_names(html_line.segments[0].scope_stack)
+            .any(|scope| scope == "text.html.basic")
+    );
+    assert_ne!(rust_line.scope_table, html_line.scope_table);
+}
+
+#[test]
 fn bundled_markdown_loads_private_yang_and_twig_dependencies() {
     let mut highlighter = SyntaxHighlighter::new();
     let source = "```yang\nmodule demo {\n namespace \"urn:demo\";\n}\n```\n```twig\n{% if user %}{{ user.name }}{% endif %}\n```";

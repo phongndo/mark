@@ -5,15 +5,13 @@ use std::{
 };
 
 use crate::{
-    detect_custom_language_from_path, detect_language_name, enabled_language_set_for_mode,
-    has_highlights, installed_language_set, language_vec_to_set, load_config, load_settings,
-    normalize_language_name,
+    HighlightScopeTable, ScopeStackRef, detect_custom_language_from_path, detect_language_name,
+    enabled_language_set_for_mode, has_highlights, installed_language_set, language_vec_to_set,
+    load_config, load_settings, normalize_language_name,
 };
 use mark_core::{MarkError, MarkResult};
 use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 use unicode_width::UnicodeWidthChar;
-
-pub use syntaxmate::{HighlightScopeTable, ScopeAtomId, ScopeStackRef};
 
 pub const DEFAULT_ANNOTATION_HINT_KEYS: &str = "asdfghjklqwertyuiopzxcvbnm";
 
@@ -89,7 +87,7 @@ impl HighlightedLine {
         Self {
             fingerprint: LineTextFingerprint::from_text(text),
             segments: Vec::new(),
-            scope_table: Arc::new(HighlightScopeTable::default()),
+            scope_table: HighlightScopeTable::empty_shared(),
         }
     }
 
@@ -149,7 +147,7 @@ pub(crate) const LEGACY_CONFIG_FILE: &str = "tree-sitter.json";
 pub(crate) const SETTINGS_FILE: &str = "config.toml";
 pub(crate) const LEGACY_SETTINGS_FILE: &str = "syntax.toml";
 pub(crate) fn bundled_grammar_version() -> &'static str {
-    syntaxmate::Catalog::bundled().bundle_version()
+    crate::catalog().bundle_version()
 }
 
 pub const DEFAULT_MAX_HIGHLIGHT_SOURCE_BYTES: usize = 1024 * 1024;
@@ -1249,7 +1247,7 @@ impl SyntaxHighlighter {
 
     fn load_tokenizer(&mut self, language: &str) -> MarkResult<String> {
         let normalized = normalize_language_name(language.to_owned());
-        let canonical = syntaxmate::canonical_language(&normalized)
+        let canonical = crate::canonical_language(&normalized)
             .ok_or_else(|| MarkError::Usage(format!("unknown TextMate grammar `{normalized}`")))?;
         if !self.tokenizers.contains_key(&canonical) {
             let limits = SyntaxLimits::default();
@@ -1300,23 +1298,23 @@ fn adapt_highlighted_text(
     let mut source_lines = source.split('\n');
     let document_lines = highlighted.lines();
     let mut lines = Vec::with_capacity(document_lines.len());
-    // Spans repeat a few interned stacks; classify each once per scope table.
-    let mut classes = HashMap::<ScopeStackRef, Option<SyntaxClass>>::new();
-    let mut classes_table = None;
+    // Syntaxmate IDs are document-local. Retain one token per distinct stack,
+    // and classify it once, without copying scope names for every segment.
+    let mut stacks = HashMap::new();
+    let mut scope_table = HighlightScopeTable::default();
     for line in document_lines {
         let text = source_lines.next().unwrap_or("");
-        let spans = line.spans();
-        let table = Arc::as_ptr(line.scope_table());
-        if classes_table != Some(table) {
-            classes.clear();
-            classes_table = Some(table);
-        }
-        let mut segments = Vec::with_capacity(spans.len());
-        for span in spans {
-            let range = span.range();
-            let scope_stack = span.scope_stack();
-            let class = *classes.entry(scope_stack).or_insert_with(|| {
-                crate::scopes::classify_scope_stack(line.scope_names(scope_stack))
+        let mut segments = Vec::with_capacity(line.tokens().len());
+        for token in line.tokens() {
+            let range = token.range();
+            let stack_id = token
+                .scope_stack()
+                .expect("Syntaxmate tokens have scope IDs");
+            let (scope_stack, class) = *stacks.entry(stack_id).or_insert_with(|| {
+                (
+                    scope_table.push(token.clone()),
+                    crate::scopes::classify_scope_stack(token.scopes()),
+                )
             });
             segments.push(SyntaxSegment {
                 byte_start: range.start,
@@ -1328,8 +1326,12 @@ fn adapt_highlighted_text(
         lines.push(HighlightedLine {
             fingerprint: LineTextFingerprint::from_text(text),
             segments,
-            scope_table: Arc::clone(line.scope_table()),
+            scope_table: HighlightScopeTable::empty_shared(),
         });
+    }
+    let scope_table = Arc::new(scope_table);
+    for line in &mut lines {
+        line.scope_table = Arc::clone(&scope_table);
     }
     HighlightedText { lines }
 }
