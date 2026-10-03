@@ -190,9 +190,8 @@ fn add_live_bytes_locked(size: u64) {
 }
 
 fn subtract_live_bytes_locked(size: u64) {
-    let _ = LIVE_BYTES.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |live| {
-        Some(live.saturating_sub(size))
-    });
+    let live = LIVE_BYTES.load(Ordering::Relaxed).saturating_sub(size);
+    LIVE_BYTES.store(live, Ordering::Relaxed);
 }
 
 fn lock_profile() -> ProfileLockGuard {

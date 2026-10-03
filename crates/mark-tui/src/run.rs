@@ -165,13 +165,7 @@ async fn run_diff_with_options_async(
     let mut live_diff = None;
     sync_live_diff(&mut live_diff, &mut app, run_options.live_updates);
     let mut session = if session_enabled {
-        match SessionRuntime::start(&app) {
-            Ok(session) => Some(session),
-            Err(error) => {
-                app.set_error_log(format!("live session unavailable: {error}"));
-                None
-            }
-        }
+        start_session(&mut app)
     } else {
         None
     };
@@ -184,6 +178,27 @@ async fn run_diff_with_options_async(
         session.as_mut(),
     )
     .await;
+    finish_diff_view(&mut app, &mut cleanup, result)
+}
+
+// Formatting stays out of the async body: rust-analyzer treats every
+// `fmt::Arguments` temporary there as held across `.await`, and their
+// `NonNull<()>` makes it reject the future as `!Send` even though rustc accepts it.
+fn start_session(app: &mut DiffApp) -> Option<SessionRuntime> {
+    match SessionRuntime::start(app) {
+        Ok(session) => Some(session),
+        Err(error) => {
+            app.set_error_log(format!("live session unavailable: {error}"));
+            None
+        }
+    }
+}
+
+fn finish_diff_view(
+    app: &mut DiffApp,
+    cleanup: &mut TerminalCleanup,
+    result: MarkResult<()>,
+) -> MarkResult<()> {
     let verdict_output = app
         .annotations_state
         .lifecycle

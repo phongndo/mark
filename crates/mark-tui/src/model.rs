@@ -319,13 +319,21 @@ struct UiModelIdentity(u64);
 
 impl UiModelIdentity {
     fn new() -> Self {
-        Self(
-            NEXT_UI_MODEL_IDENTITY
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |identity| {
-                    identity.checked_add(1)
-                })
-                .expect("UI model identity space exhausted"),
-        )
+        let mut identity = NEXT_UI_MODEL_IDENTITY.load(Ordering::Relaxed);
+        loop {
+            let next = identity
+                .checked_add(1)
+                .expect("UI model identity space exhausted");
+            match NEXT_UI_MODEL_IDENTITY.compare_exchange_weak(
+                identity,
+                next,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return Self(identity),
+                Err(current) => identity = current,
+            }
+        }
     }
 }
 
