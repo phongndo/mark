@@ -36,4 +36,4 @@ build:
 
 hooks:
     git config --unset core.hooksPath || true
-    hk install --global
+    hk install
