@@ -11,8 +11,8 @@ just setup
 
 The shell supplies the toolchain and check dependencies. Its `mark` command
 uses this checkout's debug binary, rebuilding when source changes. `just hooks`
-optionally installs **global** hk Git hooks; review [hk.pkl](../hk.pkl) for what
-runs on commit and push.
+installs this repository's hk Git hooks, which call the shell's `hk`, so commit
+and push from inside `nix develop`; review [hk.pkl](../hk.pkl) for what runs.
 
 Use `just --list` to discover tasks. [justfile](../justfile) and
 [scripts/ci/](../scripts/ci/) own the commands used locally and in Actions.
