@@ -31,7 +31,8 @@ nix profile add github:phongndo/mark
 
 Homebrew, the installer, and mise install release builds for macOS and Linux on
 `aarch64` and `x86_64`. Nix builds the latest `main` source for Linux and Apple
-silicon; use it on NixOS. Try it without installing with
+silicon; use it on NixOS. Lix and Nix before 2.30 spell `nix profile add` as
+`nix profile install`. Try Mark without installing with
 `nix run github:phongndo/mark -- diff`.
 
 Update with the same method used to install Mark:
