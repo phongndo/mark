@@ -1,5 +1,5 @@
 {
-  description = "mark development environment";
+  description = "mark, a fast terminal Git diff reviewer";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -15,7 +15,6 @@
       systems = [
         "aarch64-darwin"
         "aarch64-linux"
-        "x86_64-darwin"
         "x86_64-linux"
       ];
 
@@ -36,6 +35,51 @@
         );
     in
     {
+      packages = forAllSystems (
+        { pkgs, ... }:
+        let
+          inherit (pkgs) lib;
+          workspace = (lib.importTOML ./Cargo.toml).workspace.package;
+        in
+        rec {
+          mark = pkgs.rustPlatform.buildRustPackage {
+            pname = "mark";
+            inherit (workspace) version;
+
+            # Cargo builds only these paths. Add any new file that a crate
+            # embeds (include_str!, include_bytes!) from outside crates/.
+            src = lib.fileset.toSource {
+              root = ./.;
+              fileset = lib.fileset.unions [
+                ./Cargo.toml
+                ./Cargo.lock
+                ./crates
+                ./assets
+                ./scripts/install.sh
+              ];
+            };
+            cargoLock.lockFile = ./Cargo.lock;
+            cargoBuildFlags = [
+              "--package"
+              "mark-cli"
+            ];
+
+            nativeCheckInputs = [ pkgs.git ];
+            nativeInstallCheckInputs = [ pkgs.versionCheckHook ];
+            doInstallCheck = true;
+
+            meta = {
+              inherit (workspace) description;
+              homepage = workspace.repository;
+              license = lib.licenses.mit;
+              mainProgram = "mark";
+              platforms = lib.platforms.unix;
+            };
+          };
+          default = mark;
+        }
+      );
+
       formatter = forAllSystems (
         { pkgs, ... }:
         pkgs.writeShellApplication {
