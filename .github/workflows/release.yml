@@ -179,13 +179,25 @@ jobs:
           brew install phongndo/tap/mark-cli
           \`\`\`
 
-          Or with the portable installer, mise, or Nix:
+          With the install script:
 
           \`\`\`sh
           curl -fsSL https://raw.githubusercontent.com/phongndo/mark/main/scripts/install.sh | sh
+          \`\`\`
+
+          With mise:
+
+          \`\`\`sh
           mise use -g github:phongndo/mark
+          \`\`\`
+
+          With Nix:
+
+          \`\`\`sh
           nix profile add github:phongndo/mark
           \`\`\`
+
+          Update an existing install with \`mark update\`, however you installed it. See [Install](https://github.com/phongndo/mark#install).
           EOF
 
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
