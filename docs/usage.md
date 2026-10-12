@@ -110,3 +110,27 @@ mark syntax inspect src/lib.rs --line 42
 
 See [configuration](configuration.md#syntax-and-resource-limits) for custom
 mappings and highlighting limits.
+
+## Updating
+
+`mark update` updates Mark with the tool that installed it, printing the command
+first:
+
+| Installed with | `mark update` runs |
+| --- | --- |
+| Homebrew | `brew upgrade mark-cli` |
+| Install script | the install script, on the directory of the `mark` you ran or `--install-dir` |
+| mise | `mise upgrade github:phongndo/mark` |
+| Nix profile | `nix profile upgrade <name>`, with the name from `nix profile list` |
+
+Only install-script installs take `--target-version`, for a release or
+`nightly`. For mise and Nix, `mark update` prints how to pin a version with that
+tool instead; Homebrew installs only the latest release.
+
+A Mark from a NixOS, nix-darwin or Home Manager configuration is not in your Nix
+profile: update the configuration's Mark flake input (for example
+`nix flake update mark`) and rebuild. `nix run github:phongndo/mark -- diff`
+runs Mark without installing it.
+
+For other installs, such as `cargo install`, `mark update` prints how to update
+them instead.
