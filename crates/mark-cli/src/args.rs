@@ -160,7 +160,7 @@ examples:
     #[command(about = "Print the user config file path")]
     Config,
     #[command(
-        about = "Update this curl-installed mark binary from GitHub releases",
+        about = "Update mark with the tool that installed it",
         after_help = "\
 examples:
   mark update
@@ -828,6 +828,7 @@ pub(crate) struct PatchArgs {
 #[derive(Debug, Args)]
 pub(crate) struct UpdateArgs {
     /// Release version to install, or nightly, without or with the leading v.
+    /// Only install-script installs can choose a version.
     #[arg(long = "target-version", value_name = "VERSION")]
     pub(crate) version: Option<String>,
     /// Directory to update. Defaults to the directory containing the invoked mark.

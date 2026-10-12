@@ -15,34 +15,37 @@ requests in one focused interface.
 
 ## Install
 
-Homebrew on macOS or Linux:
+Mark runs on macOS and Linux, on `aarch64` and `x86_64`.
+
+### Homebrew
 
 ```sh
 brew install phongndo/tap/mark-cli
 ```
 
-Or use the portable installer, [mise](https://mise.jdx.dev/), or Nix:
+### Install script
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/phongndo/mark/main/scripts/install.sh | sh
+```
+
+### mise
+
+```sh
 mise use -g github:phongndo/mark
+```
+
+### Nix
+
+Builds the latest `main` for Linux and Apple silicon. With Lix or Nix before
+2.30, use `nix profile install`.
+
+```sh
 nix profile add github:phongndo/mark
 ```
 
-Homebrew, the installer, and mise install release builds for macOS and Linux on
-`aarch64` and `x86_64`. Nix builds the latest `main` source for Linux and Apple
-silicon; use it on NixOS. Lix and Nix before 2.30 spell `nix profile add` as
-`nix profile install`. Try Mark without installing with
-`nix run github:phongndo/mark -- diff`.
-
-Update with the same method used to install Mark:
-
-```sh
-brew upgrade mark-cli              # Homebrew
-mark update                        # portable installer
-mise upgrade github:phongndo/mark  # mise
-nix profile upgrade mark           # Nix
-```
+Update with `mark update`, however you installed it.
+[Updating](docs/usage.md#updating) covers what it runs and pinning a version.
 
 ## Quick start
 
