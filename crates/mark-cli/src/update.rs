@@ -99,6 +99,23 @@ impl ManagedUpdateInstall {
             Self::Asdf => "asdf",
         }
     }
+
+    /// How to update a mark that this manager installed. Keep these in sync
+    /// with the install methods in the README.
+    pub(crate) fn update_instructions(self) -> &'static str {
+        match self {
+            Self::Homebrew => "Update it with:\n  brew upgrade mark-cli",
+            Self::Mise => "Update it with:\n  mise upgrade github:phongndo/mark",
+            Self::Nix => {
+                "Update it with:\n  nix profile upgrade mark\n\nIf a NixOS, nix-darwin, or Home Manager configuration installs it, update its\nmark flake input and rebuild."
+            }
+            // mark-cli is not on crates.io, so Cargo installs come from Git.
+            Self::Cargo => {
+                "Update it by rerunning cargo install, for example:\n  cargo install --locked --git https://github.com/phongndo/mark mark-cli"
+            }
+            Self::Asdf => "Update it with the asdf plugin that installed it.",
+        }
+    }
 }
 
 pub(crate) fn check_update_install_dir(install_dir: &Path, binary: &OsStr) -> MarkResult<()> {
@@ -107,9 +124,10 @@ pub(crate) fn check_update_install_dir(install_dir: &Path, binary: &OsStr) -> Ma
     };
 
     Err(mark_core::MarkError::Usage(format!(
-        "mark update only supports curl-installed mark binaries.\n\nThis path looks {}-managed:\n  {}\n\nReinstall with:\n  curl -fsSL https://raw.githubusercontent.com/phongndo/mark/main/scripts/install.sh | sh\n\nUse --install-dir DIR only for curl-installed targets outside package-manager directories.",
+        "mark update only updates mark installed by the portable installer.\n\nThis mark looks {}-managed:\n  {}\n\n{}",
         manager.name(),
         install_dir.join(binary).display(),
+        manager.update_instructions(),
     )))
 }
 
@@ -265,12 +283,38 @@ mod tests {
 
     #[test]
     fn update_rejects_managed_install_dirs() {
-        let error = check_update_install_dir(Path::new("/Users/me/.cargo/bin"), OsStr::new("mark"))
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("Cargo-managed"));
-        assert!(error.contains("--install-dir DIR"));
-        assert!(!error.contains("--force-self-update"));
+        for (install_dir, manager, update_command) in [
+            ("/opt/homebrew/bin", "Homebrew", "brew upgrade mark-cli"),
+            (
+                "/Users/me/.local/share/mise/shims",
+                "mise",
+                "mise upgrade github:phongndo/mark",
+            ),
+            (
+                "/Users/me/.nix-profile/bin",
+                "Nix",
+                "nix profile upgrade mark",
+            ),
+            (
+                "/Users/me/.cargo/bin",
+                "Cargo",
+                "cargo install --locked --git https://github.com/phongndo/mark mark-cli",
+            ),
+            ("/Users/me/.asdf/shims", "asdf", "asdf plugin"),
+        ] {
+            let error = check_update_install_dir(Path::new(install_dir), OsStr::new("mark"))
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains(&format!("{manager}-managed:\n  {install_dir}/mark")),
+                "{error}"
+            );
+            assert!(error.contains(update_command), "{error}");
+            // A second, portable install would shadow or be shadowed by the managed one.
+            assert!(!error.contains("install.sh"), "{error}");
+            assert!(!error.contains("--install-dir"), "{error}");
+            assert!(!error.contains("--force-self-update"), "{error}");
+        }
 
         assert!(
             check_update_install_dir(Path::new("mark-unmanaged-test-bin"), OsStr::new("mark"))
