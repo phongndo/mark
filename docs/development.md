@@ -23,6 +23,8 @@ that cannot be inferred from a local run.
 Special verification paths:
 
 - Installer/update changes: `scripts/smoke-installer-update`.
+- Nix package changes, or files embedded from outside `crates/`:
+  `nix build .#mark`. The [flake](../flake.nix) builds from an explicit file set.
 - Error-pane and terminal recovery changes: `scripts/test-diff-error-pane`,
   run in a terminal.
 - Bundled agent workflow changes: [live agent evaluations](agent-review-evals.md).
