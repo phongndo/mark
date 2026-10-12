@@ -179,10 +179,12 @@ jobs:
           brew install phongndo/tap/mark-cli
           \`\`\`
 
-          Install with curl:
+          Or with the portable installer, mise, or Nix:
 
           \`\`\`sh
           curl -fsSL https://raw.githubusercontent.com/phongndo/mark/main/scripts/install.sh | sh
+          mise use -g github:phongndo/mark
+          nix profile add github:phongndo/mark
           \`\`\`
           EOF
 

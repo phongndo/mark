@@ -100,8 +100,9 @@ material engine or allocator changes rather than assuming old profiles help.
 
 Source qualification and packaging rules live in that workflow and
 [build-dist.yml](../.github/workflows/build-dist.yml). Asset names are an
-installer contract; change [install.sh](../scripts/install.sh) and packaging
-checks together if that contract changes.
+installer contract: [install.sh](../scripts/install.sh) and mise's GitHub
+backend select archives by their target triple. Change the installer and
+packaging checks together if that contract changes.
 
 The generated `mark-cli.rb` release asset is consumed by
 [phongndo/homebrew-tap](https://github.com/phongndo/homebrew-tap). For immediate
