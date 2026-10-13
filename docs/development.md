@@ -92,13 +92,17 @@ material engine or allocator changes rather than assuming old profiles help.
 
 ## Releases
 
-1. Bump the workspace version in [Cargo.toml](../Cargo.toml) and refresh
-   `Cargo.lock`.
-2. Merge and wait for a successful CI **push** run on that exact `main` commit.
-3. Push the matching `vX.Y.Z` tag, or dispatch the
-   [Release workflow](../.github/workflows/release.yml) from the current `main`.
+Bump the workspace version in [Cargo.toml](../Cargo.toml), refresh
+`Cargo.lock`, and merge. The [Release workflow](../.github/workflows/release.yml)
+runs on every push to `main` and acts when the version has no release yet: it
+waits for a successful CI **push** run on that exact commit, builds, tags, and
+publishes. If it fails, fix `main` and the next push retries, or dispatch it
+from the current `main`. The
+[Installs workflow](../.github/workflows/installs.yml) then installs the release
+with Homebrew, the install script, mise, and Nix on each platform and checks the
+version; it runs again daily.
 
-Source qualification and packaging rules live in that workflow and
+Source qualification and packaging rules live in the Release workflow and
 [build-dist.yml](../.github/workflows/build-dist.yml). Asset names are an
 installer contract: [install.sh](../scripts/install.sh) and mise's GitHub
 backend select archives by their target triple. Change the installer and
@@ -108,7 +112,7 @@ The generated `mark-cli.rb` release asset is consumed by
 [phongndo/homebrew-tap](https://github.com/phongndo/homebrew-tap). For immediate
 tap updates, put `HOMEBREW_TAP_TOKEN` in the `release` GitHub Environment: a
 fine-grained token scoped to that repository with Contents write permission.
-Without it, the tap's scheduled update is the fallback.
+Without it, the tap's hourly update is the fallback.
 
 The [Nightly workflow](../.github/workflows/nightly.yml) publishes the qualified
 `main` build as `vnightly`. Keep it a prerelease, not latest. To try it with the

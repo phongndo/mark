@@ -1,9 +1,13 @@
 name: Release
 
+# Publishes Cargo.toml's version when a push to main carries one that has no release yet, once
+# that commit's CI run passes (see "Releases" in docs/development.md). The Installs workflow then
+# installs it the ways the README documents. Dispatching it from main retries a failed release.
+
 on:
   push:
-    tags:
-      - "v*.*.*"
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       version:
@@ -26,7 +30,7 @@ jobs:
   prepare:
     name: Qualify release source
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 60
     outputs:
       release_tag: ${{ steps.release.outputs.release_tag }}
       source_sha: ${{ steps.release.outputs.source_sha }}
@@ -58,34 +62,23 @@ jobs:
             exit 1
           fi
 
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            release_tag="$GITHUB_REF_NAME"
-            if [[ ! "$release_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
-              echo "invalid release tag: $release_tag" >&2
-              exit 1
-            fi
-            git fetch --quiet origin "$DEFAULT_BRANCH"
-            if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/$DEFAULT_BRANCH"; then
-              echo "release commit $GITHUB_SHA is not reachable from $DEFAULT_BRANCH" >&2
-              exit 1
-            fi
-          else
-            expected_ref="refs/heads/$DEFAULT_BRANCH"
-            if [[ "$GITHUB_REF" != "$expected_ref" ]]; then
-              echo "manual releases must run from $expected_ref" >&2
-              exit 1
-            fi
+          expected_ref="refs/heads/$DEFAULT_BRANCH"
+          if [[ "$GITHUB_REF" != "$expected_ref" ]]; then
+            echo "releases must run from $expected_ref" >&2
+            exit 1
+          fi
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
             main_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$DEFAULT_BRANCH" --jq .object.sha)"
             if [[ "$GITHUB_SHA" != "$main_sha" ]]; then
               echo "manual release source $GITHUB_SHA is not the current $DEFAULT_BRANCH tip $main_sha" >&2
               exit 1
             fi
-            release_tag="v$version"
           fi
+          release_tag="v$version"
 
-          if [[ "${release_tag#v}" != "$version" ]]; then
-            echo "release tag $release_tag does not match mark-cli version $version" >&2
-            exit 1
+          if gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "$release_tag is already released; bump the version in Cargo.toml to release again."
+            exit 0
           fi
           if tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$release_tag" --jq .sha 2>/dev/null)" && \
              [[ "$tag_sha" != "$GITHUB_SHA" ]]; then
@@ -93,6 +86,17 @@ jobs:
             exit 1
           fi
 
+          # The push that started this run started CI too; wait for it to appear and finish.
+          for _ in {1..30}; do
+            ci_run="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/quality.yml/runs?head_sha=$GITHUB_SHA&event=push&branch=$DEFAULT_BRANCH" \
+              --jq '.workflow_runs[0].id // empty')"
+            [[ -n "$ci_run" ]] && break
+            sleep 10
+          done
+          if [[ -z "$ci_run" ]] || ! gh run watch "$ci_run" --repo "$GITHUB_REPOSITORY" --exit-status --interval 30 >/dev/null; then
+            echo "CI did not pass for $GITHUB_SHA on $DEFAULT_BRANCH" >&2
+            exit 1
+          fi
           gh api \
             "repos/$GITHUB_REPOSITORY/actions/workflows/quality.yml/runs?head_sha=$GITHUB_SHA&status=success&per_page=100" |
             scripts/ci/verify-workflow-run.py \
@@ -109,6 +113,7 @@ jobs:
   build:
     name: Build release assets
     needs: prepare
+    if: needs.prepare.outputs.release_tag != ''
     uses: ./.github/workflows/build-dist.yml
     with:
       channel: stable
@@ -211,14 +216,10 @@ jobs:
               --notes-file release-notes.md \
               --title "mark $VERSION"
           else
-            create_args=(--target "$SOURCE_SHA")
-            if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-              create_args=(--verify-tag)
-            fi
             gh release create "$RELEASE_TAG" \
               dist/*.tar.gz dist/*.sha256 dist/mark-cli.rb \
               --repo "$GITHUB_REPOSITORY" \
-              "${create_args[@]}" \
+              --target "$SOURCE_SHA" \
               --latest \
               --title "mark $VERSION" \
               --notes-file release-notes.md
@@ -233,10 +234,15 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -z "${GH_TOKEN:-}" ]]; then
-            echo "::notice::HOMEBREW_TAP_TOKEN is not configured; the tap's scheduled update will publish this formula"
+            echo "::notice::HOMEBREW_TAP_TOKEN is not configured; the tap's hourly update will publish this formula"
             exit 0
           fi
 
           gh api --method POST "repos/$TAP_REPOSITORY/dispatches" \
             -f event_type=mark-release \
             -f "client_payload[release_tag]=$RELEASE_TAG"
+
+  installs:
+    name: Check published installs
+    needs: publish
+    uses: ./.github/workflows/installs.yml
