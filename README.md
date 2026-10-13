@@ -35,6 +35,9 @@ curl -fsSL https://raw.githubusercontent.com/phongndo/mark/main/scripts/install.
 mise use -g github:phongndo/mark
 ```
 
+mise takes a release as the latest once it's a day old; name a newer version,
+such as `github:phongndo/mark@0.15.0`, to get it sooner.
+
 ### Nix
 
 Builds the latest `main` for Linux and Apple silicon. With Lix or Nix before

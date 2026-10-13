@@ -246,6 +246,17 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 if [ "$version" = "latest" ]; then
+  # GitHub redirects the latest release's page to its tag. Unlike the API, it isn't limited to 60
+  # requests an hour per address, which shared addresses such as CI runners exhaust.
+  latest_page="$(curl -fsSLI -o /dev/null -w '%{url_effective}' "https://github.com/$repo/releases/latest" 2>/dev/null || true)"
+  tag="${latest_page##*/releases/tag/}"
+  if [ "$tag" = "$latest_page" ] || ! is_mark_release_tag "$tag"; then
+    tag=""
+  fi
+fi
+
+if [ "$version" = "latest" ] && [ -z "$tag" ]; then
+  # The API can find the newest mark release when the latest release is something else.
   latest_json="$tmp_dir/latest.json"
   latest_url="https://api.github.com/repos/$repo/releases/latest"
   if ! curl_download "$latest_url" "$latest_json"; then
@@ -279,7 +290,7 @@ if [ "$version" = "latest" ]; then
     echo "mark $action: expected a release tagged like v0.2.0 with mark-$target assets" >&2
     exit 1
   fi
-else
+elif [ "$version" != "latest" ]; then
   case "$version" in
     v*) tag="$version" ;;
     *) tag="v$version" ;;

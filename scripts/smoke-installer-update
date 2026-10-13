@@ -152,8 +152,27 @@ http_not_found() {
   exit 22
 }
 
+latest_page_url="https://github.com/$MARK_SMOKE_REPO/releases/latest"
 api_url="https://api.github.com/repos/$MARK_SMOKE_REPO/releases/latest"
 releases_url="https://api.github.com/repos/$MARK_SMOKE_REPO/releases?per_page=100"
+
+if [ "$url" = "$latest_page_url" ]; then
+  printf 'https://github.com/%s/releases/tag/%s' "$MARK_SMOKE_REPO" "${MARK_SMOKE_LATEST_TAG:-$MARK_SMOKE_TAG}"
+  exit 0
+fi
+
+case "$url" in
+  https://api.github.com/*)
+    if [ "${MARK_SMOKE_API:-1}" = 0 ]; then
+      echo "fake curl: rate limited: $url" >&2
+      if [ -n "$write_format" ]; then
+        printf '403'
+        exit 0
+      fi
+      exit 22
+    fi
+    ;;
+esac
 installer_url="https://raw.githubusercontent.com/$MARK_SMOKE_REPO/main/scripts/install.sh"
 download_prefix="https://github.com/$MARK_SMOKE_REPO/releases/download/$MARK_SMOKE_TAG/"
 
@@ -202,10 +221,11 @@ esac
 SH
 chmod +x "$tmp_dir/bin/curl"
 
+# The release page's redirect finds the latest release without the API.
 MARK_INSTALLER= \
 MARK_INSTALLER_URL="https://raw.githubusercontent.com/$repo/main/scripts/install.sh" \
 MARK_REPO="$repo" \
-MARK_SMOKE_LATEST_TAG="other-tool-v0.1.1" \
+MARK_SMOKE_API=0 \
 MARK_SMOKE_INSTALLER="$repo_dir/scripts/install.sh" \
 MARK_SMOKE_RELEASE_DIR="$release_dir" \
 MARK_SMOKE_REPO="$repo" \
@@ -213,6 +233,7 @@ MARK_SMOKE_TAG="$tag" \
 PATH="$tmp_dir/bin:$PATH" \
   "$repo_dir/scripts/smoke-curl-install" "$version"
 
+# When the latest release is another tool's, the API finds mark's.
 MARK_REPO="$repo" \
 MARK_SMOKE_CURRENT_BINARY="$smoke_current_binary" \
 MARK_SMOKE_LATEST_TAG="other-tool-v0.1.1" \
