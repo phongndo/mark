@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use mark_diff::{DiffFile, DiffHunk};
 
@@ -18,8 +18,13 @@ struct CapturedComment {
     evidence: Option<ReviewAnchorEvidence>,
 }
 
+struct FileFingerprint {
+    display_path: String,
+    hash: String,
+}
+
 pub(crate) struct ReviewTransition {
-    file_fingerprints: BTreeMap<String, String>,
+    file_fingerprints: BTreeMap<String, FileFingerprint>,
     comments: Vec<CapturedComment>,
 }
 
@@ -55,13 +60,14 @@ impl ReviewTransition {
 
     pub(crate) fn apply(self, app: &mut DiffApp) {
         let current_files = file_fingerprints(app);
-        let changed = changed_files(&self.file_fingerprints, &current_files);
+        let changed = changed_paths(&self.file_fingerprints, &current_files);
         if changed.is_empty() {
             return;
         }
         let lifecycle = &mut app.annotations_state.lifecycle;
         lifecycle.pass = lifecycle.pass.saturating_add(1);
-        lifecycle.changed_files = changed.clone();
+        lifecycle.changed_files =
+            changed_display_paths(&changed, &self.file_fingerprints, &current_files);
         lifecycle
             .reviewed_files
             .retain(|path| !changed.contains(path));
@@ -378,7 +384,9 @@ fn hunk_fingerprint(hunk: &DiffHunk) -> String {
     hash.finish()
 }
 
-fn file_fingerprints(app: &DiffApp) -> BTreeMap<String, String> {
+/// Fingerprints keyed by every path alias, so comments anchored to either side
+/// of a renamed file see its changes.
+fn file_fingerprints(app: &DiffApp) -> BTreeMap<String, FileFingerprint> {
     let raw_segments = raw_file_segments(&app.document.changeset.raw_patch);
     let segments_match = raw_segments.len() == app.document.changeset.files.len();
     let mut fingerprints = BTreeMap::new();
@@ -396,13 +404,26 @@ fn file_fingerprints(app: &DiffApp) -> BTreeMap<String, String> {
         if segments_match {
             hash.update(raw_segments[index]);
         }
-        let fingerprint = hash.finish();
+        let hash = hash.finish();
+        let display_path = file.display_path();
         let aliases = [file.old_path(), file.new_path()];
         if file.old_path().is_none() && file.new_path().is_none() {
-            fingerprints.insert(file.display_path().to_owned(), fingerprint);
+            fingerprints.insert(
+                display_path.to_owned(),
+                FileFingerprint {
+                    display_path: display_path.to_owned(),
+                    hash,
+                },
+            );
         } else {
             for path in aliases.into_iter().flatten() {
-                fingerprints.insert(path.to_owned(), fingerprint.clone());
+                fingerprints.insert(
+                    path.to_owned(),
+                    FileFingerprint {
+                        display_path: display_path.to_owned(),
+                        hash: hash.clone(),
+                    },
+                );
             }
         }
     }
@@ -436,15 +457,35 @@ fn content_fingerprint(file: &DiffFile) -> String {
     hash.finish()
 }
 
-fn changed_files(
-    previous: &BTreeMap<String, String>,
-    current: &BTreeMap<String, String>,
-) -> std::collections::BTreeSet<String> {
+/// Path aliases whose file fingerprint differs between the two documents.
+fn changed_paths(
+    previous: &BTreeMap<String, FileFingerprint>,
+    current: &BTreeMap<String, FileFingerprint>,
+) -> BTreeSet<String> {
+    let hash = |fingerprints: &BTreeMap<String, FileFingerprint>, path: &str| {
+        fingerprints
+            .get(path)
+            .map(|fingerprint| fingerprint.hash.clone())
+    };
     previous
         .keys()
         .chain(current.keys())
-        .filter(|path| previous.get(*path) != current.get(*path))
+        .filter(|path| hash(previous, path) != hash(current, path))
         .cloned()
+        .collect()
+}
+
+/// One display path per changed file: the current file's when it still exists,
+/// otherwise the removed file's previous display path.
+fn changed_display_paths(
+    changed: &BTreeSet<String>,
+    previous: &BTreeMap<String, FileFingerprint>,
+    current: &BTreeMap<String, FileFingerprint>,
+) -> BTreeSet<String> {
+    changed
+        .iter()
+        .filter_map(|path| current.get(path).or_else(|| previous.get(path)))
+        .map(|fingerprint| fingerprint.display_path.clone())
         .collect()
 }
 
@@ -709,7 +750,7 @@ mod tests {
     }
 
     #[test]
-    fn renamed_file_changes_track_both_path_aliases() {
+    fn renamed_file_reports_its_display_path_once_and_reanchors_old_side() {
         let before = "diff --git a/old.rs b/new.rs\n--- a/old.rs\n+++ b/new.rs\n@@ -1,2 +1 @@\n context\n-target\n";
         let after = "diff --git a/old.rs b/new.rs\n--- a/old.rs\n+++ b/new.rs\n@@ -1,3 +1 @@\n-extra\n context\n-target\n";
         let mut source = app(before);
@@ -729,19 +770,14 @@ mod tests {
 
         transition.apply(&mut source);
 
-        assert!(
+        assert_eq!(
             source
                 .annotations_state
                 .lifecycle
                 .changed_files
-                .contains("old.rs")
-        );
-        assert!(
-            source
-                .annotations_state
-                .lifecycle
-                .changed_files
-                .contains("new.rs")
+                .iter()
+                .collect::<Vec<_>>(),
+            ["new.rs"]
         );
         let comment = source
             .annotations_state
