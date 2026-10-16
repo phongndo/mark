@@ -58,6 +58,18 @@ pub(crate) use unified::{render_unified_line_at_scroll, row_bg};
 pub(crate) use viewport::build_diff_viewport_lines;
 pub(crate) use wrapped::render_row_wrapped_with_focus;
 
+/// Columns before the text of a file-body notice row.
+pub(crate) const FILE_BODY_NOTICE_INDENT: usize = 2;
+
+/// The notice shown in place of hunks for a file without textual changes.
+pub(crate) fn file_body_notice(file: &mark_diff::DiffFile) -> &'static str {
+    if file.is_binary() {
+        "binary file"
+    } else {
+        "no textual changes"
+    }
+}
+
 pub(crate) fn draw_diff(frame: &mut Frame<'_>, app: &mut DiffApp, area: Rect) {
     if app.document.model.is_empty() {
         app.clear_code_selection_render();
@@ -201,14 +213,9 @@ pub(crate) fn render_row_with_focus(
             file_header_line(file, width, theme)
         }
         UiRow::FileBodyNotice(file_index) => {
-            let file = &app.document.changeset.files[file_index];
-            let message = if file.is_binary() {
-                "binary file"
-            } else {
-                "no textual changes"
-            };
+            let message = file_body_notice(&app.document.changeset.files[file_index]);
             Line::from(Span::styled(
-                fit_padded(&format!("  {message}"), width),
+                fit_padded(&format!("{:FILE_BODY_NOTICE_INDENT$}{message}", ""), width),
                 Style::default().fg(theme.muted),
             ))
         }

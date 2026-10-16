@@ -7,7 +7,7 @@ use crate::{
     controls::diff_line_grep_prefix,
     model::UiRow,
     render::{
-        diff::DiffCellColumns,
+        diff::{DiffCellColumns, FILE_BODY_NOTICE_INDENT, file_body_notice},
         headers::normalized_hunk_header_text,
         text::{skip_display_prefix, terminal_text},
     },
@@ -29,15 +29,10 @@ pub(crate) fn grep_highlight_targets_for_row(
             .files
             .get(file.get())
             .and_then(|file| {
-                let message = if file.is_binary() {
-                    "binary file"
-                } else {
-                    "no textual changes"
-                };
                 grep_highlight_target_for_columns(
-                    message.to_owned(),
+                    file_body_notice(file).to_owned(),
                     &line.spans,
-                    2.min(width),
+                    FILE_BODY_NOTICE_INDENT.min(width),
                     width,
                     0,
                 )
