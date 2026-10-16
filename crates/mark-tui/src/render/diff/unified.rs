@@ -6,8 +6,9 @@ use crate::{
     app::{unified_content_width, wrapped_row_seeks},
     render::{
         diff::{
-            ContentSpanRender, append_content_spans_at_scroll, append_gutter_spans,
-            content_span_capacity, diff_indicator_span_for_focus, unified_gutter_text,
+            ContentSpanRender, DiffCellColumns, append_content_spans_at_scroll,
+            append_gutter_spans, content_span_capacity, diff_indicator_span_for_focus,
+            unified_gutter_text,
         },
         grep::{
             diff_line_grep_highlight_text, grep_highlight_target_for_columns, grep_text_byte_start,
@@ -159,9 +160,11 @@ fn render_unified_line_segment_with_focus(
             DiffLineKind::Meta => " ",
         }
     };
-    let indicator_width = 1.min(width);
-    let gutter_width = UNIFIED_GUTTER_WIDTH.min(width.saturating_sub(indicator_width));
-    let content_width = unified_content_width(width);
+    let DiffCellColumns {
+        indicator: indicator_width,
+        gutter: gutter_width,
+        content: content_width,
+    } = DiffCellColumns::unified(width);
     let gutter = if continuation {
         spaces(UNIFIED_GUTTER_WIDTH.saturating_sub(1)).into_owned()
     } else {

@@ -13,12 +13,12 @@ use crate::{
         text::{DisplaySeek, display_width, spaces},
     },
     syntax::{DiffSide, InlineRange},
-    theme::{DiffTheme, GUTTER_WIDTH, line_gutter_bg},
+    theme::{DiffTheme, line_gutter_bg},
 };
 
 use super::{
-    ContentSpanRender, append_content_spans_at_scroll, append_gutter_spans, content_span_capacity,
-    diff_indicator_span_for_focus, empty_diff_fill_from, split_gutter_text,
+    ContentSpanRender, DiffCellColumns, append_content_spans_at_scroll, append_gutter_spans,
+    content_span_capacity, diff_indicator_span_for_focus, empty_diff_fill_from, split_gutter_text,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -453,9 +453,11 @@ fn append_split_cell_spans_at_scroll_with_focus_and_continuation(
 
     let Some((line, text)) = line else {
         let empty_kind = DiffLineKind::Context;
-        let indicator_width = 1.min(width);
-        let gutter_width = GUTTER_WIDTH.min(width.saturating_sub(indicator_width));
-        let content_width = split_cell_content_width(width);
+        let DiffCellColumns {
+            indicator: indicator_width,
+            gutter: gutter_width,
+            content: content_width,
+        } = DiffCellColumns::split(width);
         if indicator_width > 0 {
             spans.push(diff_indicator_span_for_focus(empty_kind, theme, focused));
         }
@@ -481,9 +483,11 @@ fn append_split_cell_spans_at_scroll_with_focus_and_continuation(
         return;
     };
 
-    let indicator_width = 1.min(width);
-    let gutter_width = GUTTER_WIDTH.min(width.saturating_sub(indicator_width));
-    let content_width = split_cell_content_width(width);
+    let DiffCellColumns {
+        indicator: indicator_width,
+        gutter: gutter_width,
+        content: content_width,
+    } = DiffCellColumns::split(width);
     let line_number = if continuation {
         None
     } else {

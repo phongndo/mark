@@ -7,10 +7,10 @@ use crate::{
     controls::diff_line_grep_prefix,
     model::UiRow,
     render::{
+        diff::DiffCellColumns,
         headers::normalized_hunk_header_text,
         text::{skip_display_prefix, terminal_text},
     },
-    theme::{GUTTER_WIDTH, UNIFIED_GUTTER_WIDTH},
 };
 
 use super::types::{GrepHighlightSpan, GrepHighlightTarget, SpanColumnPosition};
@@ -166,15 +166,11 @@ pub(crate) fn split_diff_line_grep_highlight_target(
 }
 
 pub(crate) fn unified_content_start_column(width: usize) -> usize {
-    let indicator_width = 1.min(width);
-    let gutter_width = UNIFIED_GUTTER_WIDTH.min(width.saturating_sub(indicator_width));
-    indicator_width + gutter_width
+    DiffCellColumns::unified(width).content_start()
 }
 
 pub(crate) fn split_content_start_column(width: usize) -> usize {
-    let indicator_width = 1.min(width);
-    let gutter_width = GUTTER_WIDTH.min(width.saturating_sub(indicator_width));
-    indicator_width + gutter_width
+    DiffCellColumns::split(width).content_start()
 }
 
 pub(crate) fn diff_line_grep_highlight_text(line: &DiffLine) -> String {

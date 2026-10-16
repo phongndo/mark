@@ -26,6 +26,39 @@ use crate::{
 
 use super::line_style;
 
+/// Widths of the indicator, line-number gutter and content columns of a diff
+/// cell, clamped so narrow cells drop content first, then gutter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DiffCellColumns {
+    pub(crate) indicator: usize,
+    pub(crate) gutter: usize,
+    pub(crate) content: usize,
+}
+
+impl DiffCellColumns {
+    pub(crate) fn new(width: usize, gutter_width: usize) -> Self {
+        let indicator = 1.min(width);
+        let gutter = gutter_width.min(width.saturating_sub(indicator));
+        Self {
+            indicator,
+            gutter,
+            content: width.saturating_sub(indicator + gutter),
+        }
+    }
+
+    pub(crate) fn unified(width: usize) -> Self {
+        Self::new(width, UNIFIED_GUTTER_WIDTH)
+    }
+
+    pub(crate) fn split(width: usize) -> Self {
+        Self::new(width, GUTTER_WIDTH)
+    }
+
+    pub(crate) fn content_start(self) -> usize {
+        self.indicator + self.gutter
+    }
+}
+
 pub(crate) fn diff_indicator_span_for_focus(
     kind: DiffLineKind,
     theme: DiffTheme,

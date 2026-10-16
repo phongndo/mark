@@ -1,10 +1,10 @@
 use super::EditorReloadRequest;
 use crate::{
     controls::DiffLayoutMode,
-    render::text::{
-        DisplaySeek, DisplayWidthUnit, for_display_width_units, single_width_ascii_width,
+    render::{
+        diff::DiffCellColumns,
+        text::{DisplaySeek, DisplayWidthUnit, for_display_width_units, single_width_ascii_width},
     },
-    theme::{GUTTER_WIDTH, UNIFIED_GUTTER_WIDTH},
 };
 use std::{
     ops::Range,
@@ -102,15 +102,11 @@ pub(crate) fn diff_content_width(layout: DiffLayoutMode, width: usize) -> usize 
 }
 
 pub(crate) fn unified_content_width(width: usize) -> usize {
-    let indicator_width = 1.min(width);
-    let gutter_width = UNIFIED_GUTTER_WIDTH.min(width.saturating_sub(indicator_width));
-    width.saturating_sub(indicator_width + gutter_width)
+    DiffCellColumns::unified(width).content
 }
 
 pub(crate) fn split_cell_content_width(width: usize) -> usize {
-    let indicator_width = 1.min(width);
-    let gutter_width = GUTTER_WIDTH.min(width.saturating_sub(indicator_width));
-    width.saturating_sub(indicator_width + gutter_width)
+    DiffCellColumns::split(width).content
 }
 
 pub(crate) fn wrapped_line_count(text: &str, content_width: usize) -> usize {
