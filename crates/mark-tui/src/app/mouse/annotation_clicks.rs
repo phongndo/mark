@@ -1,5 +1,5 @@
 use super::super::{DiffApp, HunkFocusScrollBehavior, annotation_scroll_for_block};
-use crate::annotation::{AnnotationDraft, AnnotationKey, AnnotationScope};
+use crate::annotation::{AnnotationDraft, AnnotationKey};
 use crate::render::annotations::annotation_compose_block_height;
 use crate::render::viewport_plan::{
     annotation_saved_key_at_bottom_border, annotation_saved_key_at_top_border,
@@ -45,17 +45,7 @@ impl DiffApp {
     }
 
     pub(crate) fn annotation_label(&self, key: &AnnotationKey) -> Option<String> {
-        let target = match key.scope {
-            AnnotationScope::File => "file".to_owned(),
-            AnnotationScope::Hunk {
-                old_start,
-                old_count,
-                new_start,
-                new_count,
-            } => format!("@@ -{old_start},{old_count} +{new_start},{new_count} @@"),
-            AnnotationScope::Line => format!("{}{}", key.side.label(), key.line),
-        };
-        Some(format!("{} {target}", key.path))
+        Some(key.menu_label())
     }
 
     pub(super) fn handle_annotation_submit_click(&mut self, viewport_row: u16) -> bool {

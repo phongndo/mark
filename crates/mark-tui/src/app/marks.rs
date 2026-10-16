@@ -115,7 +115,7 @@ impl DiffApp {
                 {
                     return None;
                 }
-                self.export_mark(key, &body)
+                Some(self.export_mark(key, &body))
             })
             .collect()
     }
@@ -217,7 +217,7 @@ impl DiffApp {
             })
     }
 
-    fn export_mark(&self, key: &AnnotationKey, body: &str) -> Option<MarkExport> {
+    fn export_mark(&self, key: &AnnotationKey, body: &str) -> MarkExport {
         let mut mark = MarkExport {
             path: key.path.clone(),
             scope: None,
@@ -251,7 +251,7 @@ impl DiffApp {
                 }
             },
         }
-        Some(mark)
+        mark
     }
 
     fn paired_old_line_for_new_annotation(&self, key: &AnnotationKey) -> Option<usize> {

@@ -46,7 +46,7 @@ impl DiffApp {
             return;
         }
 
-        let (targets, _) = self.annotation_hint_targets();
+        let targets = self.annotation_hint_targets();
         if targets.is_empty() {
             self.set_notice("no annotatable lines in viewport");
             return;
@@ -819,7 +819,7 @@ impl DiffApp {
         (targets, selected)
     }
 
-    fn annotation_hint_targets(&self) -> (Vec<AnnotationTarget>, usize) {
+    fn annotation_hint_targets(&self) -> Vec<AnnotationTarget> {
         let visible_rows = self.viewport.viewport_rows.clamp(1, usize::from(u16::MAX));
         let focused_hunk = self.focused_hunk_for_viewport(visible_rows);
         let focus_viewport_row = self.rendered_viewport_focus_row(visible_rows);
@@ -880,7 +880,7 @@ impl DiffApp {
             targets[index].hint = hint;
         }
 
-        (targets, 0)
+        targets
     }
 
     pub(crate) fn close_annotation_target_mode(&mut self) -> bool {

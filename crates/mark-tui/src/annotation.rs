@@ -238,6 +238,21 @@ impl AnnotationKey {
             AnnotationScope::Line => format!("{}{}", self.side.sign(), self.line),
         }
     }
+
+    /// Path-qualified label used to list a mark in the annotation menu.
+    pub(crate) fn menu_label(&self) -> String {
+        let target = match self.scope {
+            AnnotationScope::File => "file".to_owned(),
+            AnnotationScope::Hunk {
+                old_start,
+                old_count,
+                new_start,
+                new_count,
+            } => format!("@@ -{old_start},{old_count} +{new_start},{new_count} @@"),
+            AnnotationScope::Line => format!("{}{}", self.side.label(), self.line),
+        };
+        format!("{} {target}", self.path)
+    }
 }
 
 fn format_source_range(side: AnnotationSide, start: usize, count: usize) -> String {
