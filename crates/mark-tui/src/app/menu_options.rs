@@ -2,11 +2,10 @@ mod color_scheme;
 
 use super::{
     AppEffect, BUILTIN_THEMES, COMMON_OPTIONS_MENU_ITEMS, DiffApp, OptionsDraft, OptionsMenuItem,
-    SyntaxStartupMode, checkbox, color_scheme_label, context_expansion_label,
-    decoration_preference_label, layout_setting_from_override, layout_setting_label,
-    next_context_expansion, next_decoration_preference, next_layout_setting,
-    next_notification_mode, next_toast_corner, next_toast_max_visible, next_toast_timeout_ms,
-    notification_mode_label, on_off_search, option_label, previous_context_expansion,
+    SyntaxStartupMode, checkbox, color_scheme_label, decoration_preference_label,
+    layout_setting_from_override, layout_setting_label, next_decoration_preference,
+    next_layout_setting, next_notification_mode, next_toast_corner, next_toast_max_visible,
+    next_toast_timeout_ms, notification_mode_label, on_off_search, option_label,
     toast_corner_label, toast_timeout_label,
 };
 use crate::controls::branch_match_score;
@@ -23,7 +22,6 @@ impl DiffApp {
             layout: layout_setting_from_override(self.viewport.layout_override),
             full_file: self.viewport.full_file,
             live_updates_enabled: self.jobs.live_updates.enabled(),
-            context_expansion: self.config.theme.diff.context_expansion,
             syntax_enabled: self.config.syntax.is_some(),
             line_wrapping: self.viewport.line_wrapping,
             horizontal_scroll_locked: self.viewport.horizontal_scroll_locked,
@@ -160,9 +158,6 @@ impl DiffApp {
             OptionsMenuItem::LiveReload => {
                 on_off_search(self.overlays.options_menu_draft.live_updates_enabled)
             }
-            OptionsMenuItem::ContextExpansion => {
-                context_expansion_label(self.overlays.options_menu_draft.context_expansion)
-            }
             OptionsMenuItem::SyntaxHighlighting => {
                 on_off_search(self.overlays.options_menu_draft.syntax_enabled)
             }
@@ -210,12 +205,6 @@ impl DiffApp {
             }
             OptionsMenuItem::LiveReload => {
                 checkbox(self.overlays.options_menu_draft.live_updates_enabled)
-            }
-            OptionsMenuItem::ContextExpansion => {
-                format!(
-                    "[{}]",
-                    context_expansion_label(self.overlays.options_menu_draft.context_expansion)
-                )
             }
             OptionsMenuItem::SyntaxHighlighting => {
                 checkbox(self.overlays.options_menu_draft.syntax_enabled)
@@ -302,13 +291,6 @@ impl DiffApp {
                 self.overlays.options_menu_draft.live_updates_enabled =
                     !self.overlays.options_menu_draft.live_updates_enabled;
             }
-            OptionsMenuItem::ContextExpansion => {
-                self.overlays.options_menu_draft.context_expansion = if delta < 0 {
-                    previous_context_expansion(self.overlays.options_menu_draft.context_expansion)
-                } else {
-                    next_context_expansion(self.overlays.options_menu_draft.context_expansion)
-                };
-            }
             OptionsMenuItem::SyntaxHighlighting => {
                 self.overlays.options_menu_draft.syntax_enabled =
                     !self.overlays.options_menu_draft.syntax_enabled;
@@ -378,10 +360,6 @@ impl DiffApp {
                 .live_updates
                 .set_user_enabled(draft.live_updates_enabled);
             self.jobs.live_diff_failed_options = None;
-            self.runtime.dirty = true;
-        }
-        if draft.context_expansion != self.config.theme.diff.context_expansion {
-            self.config.theme.diff.context_expansion = draft.context_expansion;
             self.runtime.dirty = true;
         }
         if draft.color_scheme != self.config.color_scheme {

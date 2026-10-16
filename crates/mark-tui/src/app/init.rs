@@ -484,7 +484,6 @@ impl DiffApp {
             }
         };
         let syntax_limits = settings.limits;
-        let context_expansion = theme.diff.context_expansion;
         let theme_color_overrides = settings.colors.clone();
         let theme_transparent_background = settings.transparent_background_override;
         let syntax = match &syntax_mode {
@@ -573,7 +572,6 @@ impl DiffApp {
                     layout: layout_setting_from_override(layout_override),
                     full_file: settings.full_file,
                     live_updates_enabled: settings.live_reload,
-                    context_expansion,
                     syntax_enabled: syntax.is_some(),
                     line_wrapping: settings.line_wrapping,
                     horizontal_scroll_locked: false,

@@ -59,9 +59,8 @@ pub(crate) use core::{
     POST_EDITOR_QUIT_KEY_IGNORE, PendingDiffLoad, PendingDiffPrefetch, PendingFilterApply,
     PendingReviewLoad, PostFilterNavigation, RenderedDiffRow, SyntaxStartupMode,
     TRAILING_CONTEXT_WORKER_POLL, TrailingContextWorker, WrappedVisualLayout,
-    cacheable_diff_options, diff_choice_for_options, is_plain_char_key, next_context_expansion,
-    previous_context_expansion, rect_contains, show_context_expansion_controls,
-    show_rev_from_options,
+    cacheable_diff_options, diff_choice_for_options, is_plain_char_key, rect_contains,
+    show_context_expansion_controls, show_rev_from_options,
 };
 pub(crate) use diff_files::{
     WrappedRowSeeks, diff_content_width, diff_file_matches_path, diff_file_matches_path_scope,
@@ -82,11 +81,11 @@ pub(crate) use mouse::{MouseScroll, MouseScrollDirection};
 pub(crate) use options::{
     BUILTIN_THEMES, BuiltinTheme, COMMON_OPTIONS_MENU_ITEMS, OptionsDraft, OptionsMenuItem,
     checkbox, color_scheme_config, color_scheme_from_config, color_scheme_label,
-    context_expansion_label, decoration_preference_label, layout_override_from_setting,
-    layout_setting_from_override, layout_setting_label, next_decoration_preference,
-    next_layout_setting, next_notification_mode, next_toast_corner, next_toast_max_visible,
-    next_toast_timeout_ms, notification_mode_label, on_off_search, option_label,
-    persist_options_menu_draft_to_path, toast_corner_label, toast_timeout_label,
+    decoration_preference_label, layout_override_from_setting, layout_setting_from_override,
+    layout_setting_label, next_decoration_preference, next_layout_setting, next_notification_mode,
+    next_toast_corner, next_toast_max_visible, next_toast_timeout_ms, notification_mode_label,
+    on_off_search, option_label, persist_options_menu_draft_to_path, toast_corner_label,
+    toast_timeout_label,
 };
 #[cfg(test)]
 pub(crate) use runner::{drain_live_reloads, handle_event};

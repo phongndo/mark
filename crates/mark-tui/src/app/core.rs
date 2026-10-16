@@ -10,7 +10,6 @@ use crate::search::{DiffSearchIndex, DiffSearchResult};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use mark_core::MarkResult;
 use mark_diff::{Changeset, DiffOptions, DiffSource, DiffStats};
-use mark_syntax::DiffContextExpansion;
 use ratatui::layout::Rect;
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
@@ -318,25 +317,6 @@ pub(crate) fn cacheable_diff_options(options: &DiffOptions) -> bool {
             options.source,
             DiffSource::Patch(_) | DiffSource::Difftool { .. }
         )
-}
-
-pub(crate) fn next_context_expansion(expansion: DiffContextExpansion) -> DiffContextExpansion {
-    match expansion {
-        DiffContextExpansion::Lines(lines) if lines < 20 => DiffContextExpansion::Lines(20),
-        DiffContextExpansion::Lines(lines) if lines < 50 => DiffContextExpansion::Lines(50),
-        DiffContextExpansion::Lines(_) => DiffContextExpansion::Full,
-        DiffContextExpansion::Full => DiffContextExpansion::Lines(5),
-    }
-}
-
-pub(crate) fn previous_context_expansion(expansion: DiffContextExpansion) -> DiffContextExpansion {
-    match expansion {
-        DiffContextExpansion::Lines(lines) if lines <= 5 => DiffContextExpansion::Full,
-        DiffContextExpansion::Lines(lines) if lines <= 20 => DiffContextExpansion::Lines(5),
-        DiffContextExpansion::Lines(lines) if lines <= 50 => DiffContextExpansion::Lines(20),
-        DiffContextExpansion::Lines(_) => DiffContextExpansion::Lines(50),
-        DiffContextExpansion::Full => DiffContextExpansion::Lines(50),
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

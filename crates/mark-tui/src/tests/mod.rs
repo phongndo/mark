@@ -484,7 +484,6 @@ fn default_options_draft() -> OptionsDraft {
         layout: LayoutSetting::Dynamic,
         full_file: false,
         live_updates_enabled: true,
-        context_expansion: DiffContextExpansion::Lines(20),
         syntax_enabled: true,
         line_wrapping: false,
         horizontal_scroll_locked: false,

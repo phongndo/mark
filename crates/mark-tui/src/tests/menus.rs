@@ -1434,7 +1434,6 @@ context_expand = 7
             layout: LayoutSetting::Dynamic,
             full_file: true,
             live_updates_enabled: false,
-            context_expansion: DiffContextExpansion::Full,
             syntax_enabled: false,
             line_wrapping: true,
             horizontal_scroll_locked: true,
@@ -1637,7 +1636,6 @@ max_visible = 3
         layout: LayoutSetting::Split,
         full_file: true,
         live_updates_enabled: false,
-        context_expansion: DiffContextExpansion::Full,
         syntax_enabled: false,
         line_wrapping: true,
         horizontal_scroll_locked: true,
@@ -1652,7 +1650,6 @@ max_visible = 3
     for changed_item in [
         OptionsMenuItem::Layout,
         OptionsMenuItem::FullFile,
-        OptionsMenuItem::ContextExpansion,
         OptionsMenuItem::LineWrapping,
         OptionsMenuItem::SyntaxHighlighting,
         OptionsMenuItem::Decorations,
@@ -1693,13 +1690,21 @@ max_visible = 3
         diff.get("line_background").and_then(toml::Value::as_str),
         Some("none")
     );
+    // The options menu does not own context expansion, so saving other
+    // options must leave the user's diff context keys untouched.
     assert_eq!(
-        diff.get("context_expansion").and_then(toml::Value::as_str),
-        Some("full")
+        diff.get("context_expansion")
+            .and_then(toml::Value::as_integer),
+        Some(5)
     );
-    assert!(diff.get("context_lines").is_none());
-    assert!(diff.get("context_expand").is_none());
-    assert!(diff.get("expand_context").is_none());
+    assert_eq!(
+        diff.get("context_lines").and_then(toml::Value::as_integer),
+        Some(7)
+    );
+    assert_eq!(
+        diff.get("expand_context").and_then(toml::Value::as_integer),
+        Some(9)
+    );
     assert_eq!(
         notifications.get("mode").and_then(toml::Value::as_str),
         Some("debug")

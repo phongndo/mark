@@ -1,9 +1,7 @@
 use crate::controls::DiffLayoutMode;
 use crate::theme::DecorationPreference;
 use mark_core::{MarkError, MarkResult};
-use mark_syntax::{
-    DiffContextExpansion, LayoutSetting, NotificationMode, SyntaxThemeConfig, ToastCorner,
-};
+use mark_syntax::{LayoutSetting, NotificationMode, SyntaxThemeConfig, ToastCorner};
 use std::fs;
 use std::path::Path;
 
@@ -67,13 +65,6 @@ pub(crate) fn next_toast_timeout_ms(timeout_ms: u64, delta: isize) -> u64 {
 
 pub(crate) fn next_toast_max_visible(max_visible: usize, delta: isize) -> usize {
     cycle_ordered_choice(TOAST_MAX_VISIBLE_CHOICES, max_visible, delta)
-}
-
-pub(crate) fn context_expansion_label(expansion: DiffContextExpansion) -> String {
-    match expansion {
-        DiffContextExpansion::Lines(lines) => lines.to_string(),
-        DiffContextExpansion::Full => "full".to_owned(),
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -446,8 +437,6 @@ pub(crate) enum OptionsMenuItem {
     Layout,
     FullFile,
     LiveReload,
-    #[allow(dead_code)]
-    ContextExpansion,
     SyntaxHighlighting,
     LineWrapping,
     HorizontalScrollLock,
@@ -458,9 +447,6 @@ pub(crate) enum OptionsMenuItem {
     ToastTimeout,
     ToastMaxVisible,
 }
-
-// Construct the legacy-only variant so unused-option linting stays meaningful.
-const _: OptionsMenuItem = OptionsMenuItem::ContextExpansion;
 
 impl OptionsMenuItem {
     pub(crate) fn persists(self) -> bool {
@@ -492,7 +478,6 @@ pub(crate) fn option_label(item: OptionsMenuItem) -> &'static str {
         OptionsMenuItem::Layout => "Layout",
         OptionsMenuItem::FullFile => "Full file",
         OptionsMenuItem::LiveReload => "Live reload",
-        OptionsMenuItem::ContextExpansion => "Context expand",
         OptionsMenuItem::SyntaxHighlighting => "Syntax highlighting",
         OptionsMenuItem::LineWrapping => "Line wrapping",
         OptionsMenuItem::HorizontalScrollLock => "Horizontal scroll lock",
@@ -542,7 +527,6 @@ pub(crate) struct OptionsDraft {
     pub(crate) layout: LayoutSetting,
     pub(crate) full_file: bool,
     pub(crate) live_updates_enabled: bool,
-    pub(crate) context_expansion: DiffContextExpansion,
     pub(crate) syntax_enabled: bool,
     pub(crate) line_wrapping: bool,
     pub(crate) horizontal_scroll_locked: bool,
@@ -603,22 +587,6 @@ pub(crate) fn persist_options_menu_draft_to_path(
             "live_reload",
             toml_edit::Value::from(draft.live_updates_enabled),
         ),
-        OptionsMenuItem::ContextExpansion => {
-            remove_table_keys(
-                &mut document,
-                "diff",
-                &["context_lines", "context_expand", "expand_context"],
-            )?;
-            let value = match draft.context_expansion {
-                DiffContextExpansion::Lines(lines) => {
-                    toml_edit::Value::from(i64::try_from(lines).map_err(|_| {
-                        MarkError::Usage("context expansion is too large to persist".to_owned())
-                    })?)
-                }
-                DiffContextExpansion::Full => toml_edit::Value::from("full"),
-            };
-            set_table_value(&mut document, "diff", "context_expansion", value)?;
-        }
         OptionsMenuItem::SyntaxHighlighting => set_root_value(
             &mut document,
             "syntax_highlighting",
@@ -749,23 +717,6 @@ fn set_inline_table_value(
     } else {
         table.insert(key, value);
     }
-}
-
-fn remove_table_keys(
-    document: &mut toml_edit::DocumentMut,
-    table_name: &str,
-    keys: &[&str],
-) -> MarkResult<()> {
-    let Some(item) = document.get_mut(table_name) else {
-        return Ok(());
-    };
-    let table = item
-        .as_table_mut()
-        .ok_or_else(|| MarkError::Usage(format!("`{table_name}` must be a table")))?;
-    for key in keys {
-        table.remove(key);
-    }
-    Ok(())
 }
 
 fn set_item_value(item: &mut toml_edit::Item, mut value: toml_edit::Value) {
