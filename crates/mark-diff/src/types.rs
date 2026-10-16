@@ -466,25 +466,20 @@ impl DiffFile {
     }
 
     pub fn has_no_textual_changes(&self) -> bool {
-        matches!(&self.body, DiffFileBody::NoTextualChanges)
-            || matches!(&self.body, DiffFileBody::Text { hunks } if hunks.is_empty())
+        matches!(&self.body, DiffFileBody::Text { hunks } if hunks.is_empty())
     }
 
     pub fn hunks(&self) -> &[DiffHunk] {
         match &self.body {
             DiffFileBody::Text { hunks } => hunks,
-            DiffFileBody::Binary | DiffFileBody::NoTextualChanges => &[],
+            DiffFileBody::Binary => &[],
         }
     }
 
     pub fn hunks_mut(&mut self) -> &mut Vec<DiffHunk> {
-        if matches!(self.body, DiffFileBody::NoTextualChanges) {
-            self.body = DiffFileBody::Text { hunks: Vec::new() };
-        }
         match &mut self.body {
             DiffFileBody::Text { hunks } => hunks,
             DiffFileBody::Binary => panic!("binary diff files do not have text hunks"),
-            DiffFileBody::NoTextualChanges => unreachable!(),
         }
     }
 
@@ -499,7 +494,7 @@ impl DiffFile {
                             .map(DiffHunk::estimated_model_bytes)
                             .sum::<usize>()
                 }
-                DiffFileBody::Binary | DiffFileBody::NoTextualChanges => 0,
+                DiffFileBody::Binary => 0,
             })
     }
 }
@@ -656,17 +651,12 @@ impl FileChange {
     }
 }
 
+/// `Text` without hunks is a change with no textual diff, such as a pure
+/// rename or mode change.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DiffFileBody {
     Text { hunks: Vec<DiffHunk> },
     Binary,
-    NoTextualChanges,
-}
-
-impl Default for DiffFileBody {
-    fn default() -> Self {
-        Self::Text { hunks: Vec::new() }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

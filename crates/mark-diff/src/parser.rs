@@ -340,7 +340,7 @@ struct DiffFileBuilder {
     hunks: Vec<DiffHunk>,
     additions: usize,
     deletions: usize,
-    body: DiffFileBody,
+    is_binary: bool,
 }
 
 impl DiffFileBuilder {
@@ -354,7 +354,7 @@ impl DiffFileBuilder {
             hunks: Vec::new(),
             additions: 0,
             deletions: 0,
-            body: DiffFileBody::default(),
+            is_binary: false,
         }
     }
 
@@ -366,7 +366,7 @@ impl DiffFileBuilder {
             hunks: Vec::new(),
             additions: 0,
             deletions: 0,
-            body: DiffFileBody::default(),
+            is_binary: false,
         };
         builder.apply_header(old_header);
         builder.apply_header(new_header);
@@ -395,31 +395,29 @@ impl DiffFileBuilder {
                 self.status = FileStatus::TypeChanged;
             }
         } else if line.starts_with("Binary files ") || line == "GIT binary patch" {
-            self.body = DiffFileBody::Binary;
+            self.is_binary = true;
         } else if let Some(path) = line.strip_prefix("--- ") {
             let path = unified_header_path(path);
-            if path.as_ref() != "/dev/null" {
-                self.old_path = strip_prefix_path(path.as_ref(), "a/");
-            } else {
+            if path.as_ref() == "/dev/null" {
                 self.status = FileStatus::Added;
                 self.old_path = None;
+            } else {
+                self.old_path = Some(strip_prefix_path(path.as_ref(), "a/"));
             }
         } else if let Some(path) = line.strip_prefix("+++ ") {
             let path = unified_header_path(path);
-            if path.as_ref() != "/dev/null" {
-                self.new_path = strip_prefix_path(path.as_ref(), "b/");
-            } else {
+            if path.as_ref() == "/dev/null" {
                 self.status = FileStatus::Deleted;
                 self.new_path = None;
+            } else {
+                self.new_path = Some(strip_prefix_path(path.as_ref(), "b/"));
             }
         }
     }
 
     fn finish(self) -> DiffFile {
-        let body = if matches!(self.body, DiffFileBody::Binary) {
+        let body = if self.is_binary {
             DiffFileBody::Binary
-        } else if self.hunks.is_empty() {
-            DiffFileBody::NoTextualChanges
         } else {
             DiffFileBody::Text { hunks: self.hunks }
         };
@@ -442,11 +440,19 @@ pub(super) fn diff_git_paths(line: &str) -> (Option<String>, Option<String>) {
         && let Some((new, trailing)) = parse_quoted_git_path_token(rest.trim_start())
         && trailing.trim().is_empty()
     {
-        return (strip_prefix_path(&old, "a/"), strip_prefix_path(&new, "b/"));
+        return (
+            Some(strip_prefix_path(&old, "a/")),
+            Some(strip_prefix_path(&new, "b/")),
+        );
     }
 
     split_diff_git_paths(paths)
-        .map(|(old, new)| (strip_prefix_path(old, "a/"), strip_prefix_path(new, "b/")))
+        .map(|(old, new)| {
+            (
+                Some(strip_prefix_path(old, "a/")),
+                Some(strip_prefix_path(new, "b/")),
+            )
+        })
         .unwrap_or((None, None))
 }
 
@@ -471,8 +477,8 @@ fn split_diff_git_paths(paths: &str) -> Option<(&str, &str)> {
     fallback
 }
 
-pub(super) fn strip_prefix_path(path: &str, prefix: &str) -> Option<String> {
-    Some(path.strip_prefix(prefix).unwrap_or(path).to_owned())
+pub(super) fn strip_prefix_path(path: &str, prefix: &str) -> String {
+    path.strip_prefix(prefix).unwrap_or(path).to_owned()
 }
 
 pub(super) fn unified_header_path(path: &str) -> Cow<'_, str> {

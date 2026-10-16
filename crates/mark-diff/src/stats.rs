@@ -267,18 +267,12 @@ impl PatchFileStatBuilder {
             self.is_binary = true;
         } else if let Some(path) = line.strip_prefix("--- ") {
             let path = unified_header_path(path);
-            if path.as_ref() != "/dev/null" {
-                self.old_path = strip_prefix_path(path.as_ref(), "a/");
-            } else {
-                self.old_path = None;
-            }
+            self.old_path =
+                (path.as_ref() != "/dev/null").then(|| strip_prefix_path(path.as_ref(), "a/"));
         } else if let Some(path) = line.strip_prefix("+++ ") {
             let path = unified_header_path(path);
-            if path.as_ref() != "/dev/null" {
-                self.new_path = strip_prefix_path(path.as_ref(), "b/");
-            } else {
-                self.new_path = None;
-            }
+            self.new_path =
+                (path.as_ref() != "/dev/null").then(|| strip_prefix_path(path.as_ref(), "b/"));
         } else if let Some(path) = line.strip_prefix("rename from ") {
             self.old_path = Some(git_metadata_path(path));
         } else if let Some(path) = line.strip_prefix("rename to ") {
