@@ -7,11 +7,6 @@ use crate::syntax::{DiffSide, available_context_lines};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 
-#[cfg(test)]
-use super::write_osc52_clipboard;
-#[cfg(test)]
-use std::io::Write;
-
 #[derive(Serialize)]
 struct MarksExport<'a> {
     version: u32,
@@ -19,19 +14,6 @@ struct MarksExport<'a> {
 }
 
 impl DiffApp {
-    #[cfg(test)]
-    pub(crate) fn copy_marks_to_writer<W: Write>(&mut self, writer: &mut W) {
-        let Some(marks) = self.marks_clipboard_json() else {
-            self.set_warning_notice("no marks to copy");
-            return;
-        };
-
-        match write_osc52_clipboard(writer, &marks) {
-            Ok(()) => self.set_success_notice("marks copied"),
-            Err(error) => self.set_error_log(format!("marks copy failed: {error}")),
-        }
-    }
-
     pub(crate) fn marks_clipboard_json(&self) -> Option<String> {
         let mut marks = self.export_marks();
         if marks.is_empty() {

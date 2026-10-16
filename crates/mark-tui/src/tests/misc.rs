@@ -77,7 +77,8 @@ fn copy_error_log_writes_full_log_to_clipboard_sequence() {
     app.set_error_log("reload failed:\nfatal: bad revision");
     let mut output = Vec::new();
 
-    app.copy_error_log_to_writer(&mut output);
+    app.perform_app_action_with_clipboard(AppAction::CopyErrorLog, &mut output)
+        .expect("copy error log");
 
     assert_eq!(
         String::from_utf8(output).expect("OSC 52 sequence should be UTF-8"),

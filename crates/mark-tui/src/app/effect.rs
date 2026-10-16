@@ -145,10 +145,7 @@ impl DiffApp {
                 error_prefix,
             } => {
                 let mut stdout = io::stdout().lock();
-                match write_osc52_clipboard(&mut stdout, &text) {
-                    Ok(()) => self.set_success_notice(success_message),
-                    Err(error) => self.set_error_log(format!("{error_prefix}: {error}")),
-                }
+                self.copy_to_clipboard(&mut stdout, &text, success_message, &error_prefix);
                 Ok(())
             }
             AppEffect::PersistOptionsMenuDraft {

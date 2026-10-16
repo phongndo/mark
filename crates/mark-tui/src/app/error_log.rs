@@ -1,10 +1,5 @@
 use super::{DiffApp, ERROR_LOG_DEFAULT_HEIGHT, ERROR_LOG_MAX_HEIGHT, ERROR_LOG_MIN_HEIGHT};
 
-#[cfg(test)]
-use super::write_osc52_clipboard;
-#[cfg(test)]
-use std::io::Write;
-
 impl DiffApp {
     pub(crate) fn set_error_log(&mut self, text: impl Into<String>) {
         self.notifications.error_log = Some(text.into());
@@ -21,19 +16,6 @@ impl DiffApp {
             true
         } else {
             false
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn copy_error_log_to_writer<W: Write>(&mut self, writer: &mut W) {
-        let Some(error_log) = self.notifications.error_log.clone() else {
-            self.set_warning_notice("no error log to copy");
-            return;
-        };
-
-        match write_osc52_clipboard(writer, &error_log) {
-            Ok(()) => self.set_success_notice("error log copied"),
-            Err(error) => self.set_error_log(format!("error log copy failed: {error}")),
         }
     }
 

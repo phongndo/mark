@@ -638,7 +638,8 @@ fn copy_marks_writes_structured_json_to_clipboard_sequence() {
     );
     let mut output = Vec::new();
 
-    app.copy_marks_to_writer(&mut output);
+    app.perform_app_action_with_clipboard(AppAction::CopyMarks, &mut output)
+        .expect("copy marks");
 
     assert_eq!(app.marks_clipboard_json().as_deref(), Some(expected));
     assert_eq!(
@@ -1470,7 +1471,8 @@ fn copy_marks_without_marks_shows_notice_without_writing() {
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
     let mut output = Vec::new();
 
-    app.copy_marks_to_writer(&mut output);
+    app.perform_app_action_with_clipboard(AppAction::CopyMarks, &mut output)
+        .expect("copy marks");
 
     assert!(output.is_empty());
     assert_eq!(

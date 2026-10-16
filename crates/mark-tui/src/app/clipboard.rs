@@ -1,3 +1,8 @@
+use super::DiffApp;
+#[cfg(test)]
+use super::{AppAction, AppEffect};
+#[cfg(test)]
+use mark_core::MarkResult;
 use std::io::{self, Write};
 
 const BASE64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -32,4 +37,41 @@ fn base64_encode(bytes: &[u8]) -> String {
         }
     }
     encoded
+}
+
+impl DiffApp {
+    /// Runs an action like `perform_app_action`, but sends clipboard effects
+    /// to `clipboard` instead of the terminal so tests can inspect them.
+    #[cfg(test)]
+    pub(crate) fn perform_app_action_with_clipboard<W: Write>(
+        &mut self,
+        action: AppAction,
+        clipboard: &mut W,
+    ) -> MarkResult<()> {
+        let outcome = self.perform_app_action_with_effects(action)?;
+        for effect in outcome.into_effects() {
+            match effect {
+                AppEffect::CopyToClipboard {
+                    text,
+                    success_message,
+                    error_prefix,
+                } => self.copy_to_clipboard(clipboard, &text, success_message, &error_prefix),
+                effect => self.run_effect(effect)?,
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn copy_to_clipboard<W: Write>(
+        &mut self,
+        writer: &mut W,
+        text: &str,
+        success_message: String,
+        error_prefix: &str,
+    ) {
+        match write_osc52_clipboard(writer, text) {
+            Ok(()) => self.set_success_notice(success_message),
+            Err(error) => self.set_error_log(format!("{error_prefix}: {error}")),
+        }
+    }
 }

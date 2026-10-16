@@ -1297,18 +1297,18 @@ fn error_log_header_uses_configured_copy_command() {
 }
 
 #[test]
-fn copy_error_log_without_log_shows_notice_without_writing() {
+fn copy_error_log_without_log_is_ignored_without_writing() {
+    // Copying the error log is contextual to the visible log panel. Without a
+    // log the action stays silent so its key can fall through to other bindings.
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
     let mut output = Vec::new();
 
-    app.copy_error_log_to_writer(&mut output);
+    app.perform_app_action_with_clipboard(AppAction::CopyErrorLog, &mut output)
+        .expect("copy error log");
 
     assert!(output.is_empty());
-    assert_eq!(
-        app.notifications.toasts.latest_text(),
-        Some("no error log to copy")
-    );
+    assert!(app.notifications.toasts.is_empty());
 }
 
 #[test]
