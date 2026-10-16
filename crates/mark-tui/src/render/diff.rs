@@ -66,7 +66,6 @@ pub(crate) fn draw_diff(frame: &mut Frame<'_>, app: &mut DiffApp, area: Rect) {
     }
 
     let visible_rows = area.height as usize;
-    app.prepare_full_file_context_for_viewport(visible_rows);
     app.prepare_syntax_for_viewport(visible_rows);
     let width = area.width as usize;
     let lines = build_diff_viewport_lines(app, width, visible_rows);
