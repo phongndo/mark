@@ -12,7 +12,7 @@ use crate::{
         ProtocolError,
     },
     registry::private_socket,
-    transport::{read_frame, write_frame},
+    transport::{is_frame_too_large, read_frame, write_frame},
 };
 use crate::{
     protocol::{Request, Response, SessionRecord},
@@ -259,7 +259,7 @@ async fn handle_connection(
         Ok(Ok(Some(frame))) => frame,
         Ok(Ok(None)) => return Ok(()),
         Ok(Err(error)) if error.kind() == io::ErrorKind::InvalidData => {
-            let code = if error.to_string().contains("exceeds byte limit") {
+            let code = if is_frame_too_large(&error) {
                 "frame_too_large"
             } else {
                 "invalid_frame"

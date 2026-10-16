@@ -41,8 +41,26 @@ pub async fn write_frame<W: AsyncWrite + Unpin>(writer: &mut W, frame: &[u8]) ->
     writer.flush().await
 }
 
-pub fn frame_too_large() -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, "JSON frame exceeds byte limit")
+#[derive(Debug)]
+struct FrameTooLarge;
+
+impl std::fmt::Display for FrameTooLarge {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("JSON frame exceeds byte limit")
+    }
+}
+
+impl std::error::Error for FrameTooLarge {}
+
+fn frame_too_large() -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, FrameTooLarge)
+}
+
+/// Reports whether `error` came from a frame that exceeded its byte limit.
+pub fn is_frame_too_large(error: &io::Error) -> bool {
+    error
+        .get_ref()
+        .is_some_and(|inner| inner.is::<FrameTooLarge>())
 }
 
 #[cfg(test)]
@@ -60,18 +78,16 @@ mod tests {
         runtime.block_on(async {
             let (mut writer, mut reader) = tokio::io::duplex(32);
             writer.write_all(b"12345\n").await.unwrap();
-            assert_eq!(
-                read_frame(&mut reader, 4).await.unwrap_err().kind(),
-                io::ErrorKind::InvalidData
-            );
+            let error = read_frame(&mut reader, 4).await.unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+            assert!(is_frame_too_large(&error));
 
             let (mut writer, mut reader) = tokio::io::duplex(32);
             writer.write_all(b"{}").await.unwrap();
             writer.shutdown().await.unwrap();
-            assert_eq!(
-                read_frame(&mut reader, 4).await.unwrap_err().kind(),
-                io::ErrorKind::InvalidData
-            );
+            let error = read_frame(&mut reader, 4).await.unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+            assert!(!is_frame_too_large(&error));
         });
     }
 }
