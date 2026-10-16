@@ -121,7 +121,10 @@ impl DiffApp {
                 }
                 Ok(())
             }
-            AppEffect::Reload => self.reload(),
+            AppEffect::Reload => {
+                self.reload();
+                Ok(())
+            }
             AppEffect::OpenEditorShortcut => {
                 self.open_editor_shortcut(None);
                 Ok(())

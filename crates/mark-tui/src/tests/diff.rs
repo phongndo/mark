@@ -1725,7 +1725,7 @@ fn reload_invalidates_cached_diff_choices() {
     };
     app.cache_loaded_diff(show, changeset_with_files(&["show.rs"]));
 
-    app.reload().expect("reload should start");
+    app.reload();
 
     assert!(app.jobs.diff_cache.is_empty());
     assert!(app.jobs.pending_diff_prefetch.is_none());
