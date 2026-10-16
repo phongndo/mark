@@ -2,7 +2,10 @@ use std::collections::HashMap;
 
 use mark_diff::{Changeset, DiffFile, DiffLine, DiffLineKind};
 
-use crate::{model::UiRow, syntax::changed_block_around};
+use crate::{
+    model::UiRow,
+    syntax::{DiffSide, changed_block_around, path_for_side_or_other},
+};
 
 pub(crate) const ANNOTATION_CLOSE_BUTTON: &str = "[x]";
 pub(crate) const ANNOTATION_CLOSE_BUTTON_WIDTH: usize = 3;
@@ -166,10 +169,11 @@ impl AnnotationKey {
     }
 
     pub(crate) fn path_for_side(file: &DiffFile, side: AnnotationSide) -> Option<&str> {
-        match side {
-            AnnotationSide::Old => file.old_path().or(file.new_path()),
-            AnnotationSide::New => file.new_path().or(file.old_path()),
-        }
+        let side = match side {
+            AnnotationSide::Old => DiffSide::Old,
+            AnnotationSide::New => DiffSide::New,
+        };
+        path_for_side_or_other(file, side)
     }
 
     pub(crate) fn for_file(file: &DiffFile) -> Option<Self> {

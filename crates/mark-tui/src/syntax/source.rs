@@ -204,7 +204,9 @@ pub(crate) fn load_job_source(
     }
 }
 
-pub(crate) fn syntax_path(file: &mark_diff::DiffFile, side: DiffSide) -> Option<&str> {
+/// The path on `side`, falling back to the other side for added or deleted
+/// files. Syntax languages and annotation keys both resolve paths this way.
+pub(crate) fn path_for_side_or_other(file: &mark_diff::DiffFile, side: DiffSide) -> Option<&str> {
     match side {
         DiffSide::Old => file.old_path().or(file.new_path()),
         DiffSide::New => file.new_path().or(file.old_path()),

@@ -9,7 +9,7 @@ use super::{
     runtime::SyntaxRuntime,
     source::{
         SyntaxJob, SyntaxJobSource, build_full_file_line_map, build_hunk_source, full_file_source,
-        hash_text, syntax_path,
+        hash_text, path_for_side_or_other,
     },
     types::{
         DiffSide, SyntaxKey, SyntaxPosition, SyntaxSkipReason, SyntaxSourceId, SyntaxSourceKind,
@@ -51,7 +51,7 @@ impl SyntaxRuntime {
             self.skip(position, SyntaxSkipReason::InvalidPosition);
             return;
         };
-        let Some(path) = syntax_path(file_diff, side) else {
+        let Some(path) = path_for_side_or_other(file_diff, side) else {
             self.skip(position, SyntaxSkipReason::NoPath);
             return;
         };
@@ -177,7 +177,7 @@ impl SyntaxRuntime {
             self.skip_source(source_id, SyntaxSkipReason::InvalidPosition);
             return;
         };
-        let Some(path) = syntax_path(file_diff, side) else {
+        let Some(path) = path_for_side_or_other(file_diff, side) else {
             self.skip_source(source_id, SyntaxSkipReason::NoPath);
             return;
         };
