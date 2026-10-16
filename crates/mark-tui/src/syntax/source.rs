@@ -396,27 +396,9 @@ pub(crate) fn full_file_source(
     file: &mark_diff::DiffFile,
     side: DiffSide,
 ) -> Option<FullFileSource> {
-    if matches!(
-        options.source,
-        DiffSource::Patch(_) | DiffSource::Show(_) | DiffSource::Difftool { .. }
-    ) {
-        return None;
-    }
     if !repo.is_dir() {
         return None;
     }
-    let range_revision = if let DiffSource::Range { left, right } = &options.source {
-        let operand = match side {
-            DiffSide::Old => left,
-            DiffSide::New => right,
-        };
-        // Full-file sources append the diff path, so the operand must resolve
-        // to a tree-ish object. Blob objects and existing `REV:path` operands
-        // are valid range inputs, but cannot be extended with another path.
-        Some(range_operand_treeish_revision(repo, operand)?)
-    } else {
-        None
-    };
 
     let path: RepoRelativePath = file_path_for_side(file, side)?.into();
     let kind = match (&options.source, side) {
@@ -443,9 +425,17 @@ pub(crate) fn full_file_source(
             rev: head.clone(),
             path,
         },
-        (DiffSource::Range { .. }, DiffSide::Old | DiffSide::New) => {
+        (DiffSource::Range { left, right }, side) => {
+            let operand = match side {
+                DiffSide::Old => left,
+                DiffSide::New => right,
+            };
+            // Full-file sources append the diff path, so the operand must
+            // resolve to a tree-ish object. Blob objects and existing
+            // `REV:path` operands are valid range inputs, but cannot be
+            // extended with another path.
             FullFileSourceKind::GitRevision {
-                rev: range_revision.expect("range sources have a validated revision"),
+                rev: range_operand_treeish_revision(repo, operand)?,
                 path,
             }
         }
