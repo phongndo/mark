@@ -8,7 +8,7 @@ use crate::render::viewport_plan::{
 
 impl DiffApp {
     pub(super) fn diff_viewport_position(&self, column: u16, row: u16) -> Option<(u16, u16)> {
-        let area = self.viewport.rendered_diff_area?;
+        let area = self.runtime.hit_map.diff_area?;
         if area.width == 0
             || area.height == 0
             || column < area.x

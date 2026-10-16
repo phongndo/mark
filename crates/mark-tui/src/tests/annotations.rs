@@ -3349,7 +3349,7 @@ fn annotation_save_and_cancel_use_configured_keybindings() {
         .iter()
         .position(|line| line_text(line).contains("[↻]"))
         .expect("saved annotation edit footer") as u16
-        + app.viewport.rendered_diff_area.expect("diff area").y;
+        + app.runtime.hit_map.diff_area.expect("diff area").y;
     assert!(app.handle_diff_click(38, edit_row));
     assert!(app.annotations_state.annotation_draft.is_some());
     app.handle_annotation_input_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL));

@@ -66,7 +66,6 @@ pub(crate) struct ViewportState {
     pub(crate) wrapped_visual_layout: RefCell<Option<WrappedVisualLayout>>,
     pub(crate) manual_hunk_focus: Option<(FileIndex, HunkIndex)>,
     pub(crate) terminal_area: Rect,
-    pub(crate) rendered_diff_area: Option<Rect>,
 }
 
 impl ViewportState {
@@ -76,15 +75,6 @@ impl ViewportState {
         }
 
         self.terminal_area = area;
-        true
-    }
-
-    pub(crate) fn set_rendered_diff_area(&mut self, area: Option<Rect>) -> bool {
-        if self.rendered_diff_area == area {
-            return false;
-        }
-
-        self.rendered_diff_area = area;
         true
     }
 }

@@ -3081,7 +3081,7 @@ fn mouse_click_selects_line_and_enter_opens_annotation_input() {
         span.content.contains("[↻]") && span.style.fg == Some(app.config.theme.search_match_bg)
     }));
 
-    let diff_y = app.viewport.rendered_diff_area.expect("diff area").y;
+    let diff_y = app.runtime.hit_map.diff_area.expect("diff area").y;
     assert!(app.handle_diff_click(38, diff_y.saturating_add(edit_row as u16)));
     assert!(app.annotations_state.annotation_draft.is_some());
     app.handle_annotation_input_key(KeyEvent::new(KeyCode::Char('!'), KeyModifiers::NONE));

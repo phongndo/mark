@@ -531,7 +531,6 @@ impl DiffApp {
                 wrapped_visual_layout: RefCell::new(None),
                 manual_hunk_focus,
                 terminal_area: Rect::default(),
-                rendered_diff_area: None,
             },
             sidebar: FileSidebarState {
                 selected_file: FileIndex::new(0),
