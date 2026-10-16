@@ -89,6 +89,7 @@ jobs:
 
       - name: Verify nightly assets
         shell: bash
+        # 4 = the target count in build-dist.yml's matrix; keep them in sync.
         run: |
           set -euo pipefail
           [[ "$(find dist -maxdepth 1 -name '*.tar.gz' | wc -l)" -eq 4 ]]

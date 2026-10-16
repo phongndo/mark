@@ -30,6 +30,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # nightly.yml and release.yml verify one archive per target; update
+        # their expected count when adding or removing a target.
         include:
           - os: macos-14
             target: aarch64-apple-darwin
@@ -62,9 +64,11 @@ jobs:
       - name: Configure nightly metadata
         if: inputs.channel == 'nightly'
         shell: bash
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
         run: |
           echo "MARK_BUILD_CHANNEL=nightly" >> "$GITHUB_ENV"
-          echo "MARK_BUILD_COMMIT=${{ inputs.source_sha }}" >> "$GITHUB_ENV"
+          echo "MARK_BUILD_COMMIT=$SOURCE_SHA" >> "$GITHUB_ENV"
 
       - name: Build release binary
         run: cargo build --release -p mark-cli --locked --target ${{ matrix.target }}
@@ -75,12 +79,16 @@ jobs:
 
       - name: Package asset
         shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          TARGET: ${{ matrix.target }}
         run: |
           scripts/ci/package-dist \
-            "${{ inputs.release_tag }}" \
-            "${{ matrix.target }}" \
-            "target/${{ matrix.target }}/release/mark" \
-            "${{ inputs.source_sha }}"
+            "$RELEASE_TAG" \
+            "$TARGET" \
+            "target/$TARGET/release/mark" \
+            "$SOURCE_SHA"
 
       - name: Upload asset
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
