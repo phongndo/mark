@@ -37,7 +37,7 @@ bench="$target_dir/instrumented/release/mark-bench"
 
 echo "== training: whole-binary bench =="
 "$bench" measure --fixtures "$fixtures" --scenario huge-mixed-stress \
-    --json > /dev/null 2>&1 || true
+    --json > /dev/null
 
 echo "== merging profiles =="
 "$profdata" merge -o "$profile_dir/merged.profdata" "$profile_dir"
