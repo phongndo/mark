@@ -882,11 +882,33 @@ impl DiffLineText {
     }
 
     pub(crate) fn span(backing: DiffLineTextBacking, offset: usize, len: usize) -> Self {
+        Self::span_within(backing, offset, len, u32::MAX)
+    }
+
+    /// Spans store 32-bit positions to keep every diff line small. A line that
+    /// starts past `max` copies its bytes into its own backing; a line longer
+    /// than `max` falls back to owned text.
+    fn span_within(backing: DiffLineTextBacking, offset: usize, len: usize, max: u32) -> Self {
+        let fits = |value: usize| u32::try_from(value).ok().filter(|value| *value <= max);
+        let (backing, offset, len) = match (fits(offset), fits(len)) {
+            (Some(offset), Some(len)) => (backing, offset, len),
+            (None, Some(len)) => {
+                let bytes = backing
+                    .raw()
+                    .get(offset..offset.saturating_add(len as usize))
+                    .unwrap_or_default();
+                (DiffLineTextBacking::new(Arc::from(bytes)), 0, len)
+            }
+            (_, None) => {
+                let bytes = backing.raw().get(offset..offset.saturating_add(len));
+                return Self::owned(String::from_utf8_lossy(bytes.unwrap_or_default()));
+            }
+        };
         Self {
             storage: DiffLineTextStorage::Span {
                 backing,
-                offset: u32::try_from(offset).unwrap_or(u32::MAX),
-                len: u32::try_from(len).unwrap_or(u32::MAX),
+                offset,
+                len,
             },
         }
     }
@@ -1271,5 +1293,24 @@ impl DiffViewModel {
             .checked_sub(1)
             .and_then(|index| self.hunk_start_rows.get(index))
             .copied()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn line_text_beyond_span_range_keeps_its_bytes() {
+        let raw = Arc::<[u8]>::from(b"head\nfar\xff\nhuge-line".as_slice());
+        let backing = DiffLineTextBacking::new(Arc::clone(&raw));
+
+        let near = DiffLineText::span_within(backing.clone(), 0, 4, 4);
+        let far = DiffLineText::span_within(backing.clone(), 5, 4, 4);
+        let huge = DiffLineText::span_within(backing, 10, 9, 4);
+
+        assert_eq!(near.as_bytes(), b"head");
+        assert_eq!(far.as_bytes(), b"far\xff");
+        assert_eq!(huge.as_bytes(), b"huge-line");
     }
 }
