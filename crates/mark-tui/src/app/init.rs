@@ -14,7 +14,7 @@ use crate::controls::{
 use crate::keymap::Keymap;
 use crate::model::{
     ContextKey, ContextSourceEntry, ContextSourceKey, FileIndex, HunkIndex, UiModel,
-    UiModelBuildOptions, UiRow, line_after_hunk,
+    UiModelBuildOptions, line_after_hunk,
 };
 use crate::render::{snapshot::HitMap, text::display_width};
 use crate::review::ReviewCommentStore;
@@ -421,11 +421,7 @@ impl DiffApp {
         } else {
             DiffSearchIndex::empty()
         });
-        let manual_hunk_focus = model
-            .hunk_start_rows
-            .first()
-            .and_then(|row| model.row(row.get()).and_then(UiRow::hunk_key))
-            .map(|(file, hunk)| (FileIndex::new(file), HunkIndex::new(hunk)));
+        let manual_hunk_focus = model.first_hunk();
         let stats = changeset.stats();
         let total_stats = stats.clone();
         let branch_base = default_branch_base(&options, &changeset.repo);
