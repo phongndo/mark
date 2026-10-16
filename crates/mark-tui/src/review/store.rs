@@ -65,6 +65,10 @@ impl ReviewCommentStore {
         self.comments.iter().filter_map(Option::as_ref)
     }
 
+    pub(crate) fn comment(&self, id: &str) -> Option<&ReviewComment> {
+        self.comments.get(*self.by_id.get(id)?)?.as_ref()
+    }
+
     pub(crate) fn label(&self, key: &AnnotationKey) -> Option<&str> {
         self.anchors.get(key).map(|view| view.label.as_str())
     }
@@ -390,16 +394,19 @@ impl ReviewCommentStore {
         Ok(true)
     }
 
-    pub(crate) fn clear_agents(&mut self, file: Option<&str>) -> usize {
-        let ids = self
+    /// Removes agent comments, optionally only those in `file`, and returns
+    /// the anchor of each removed comment.
+    pub(crate) fn clear_agents(&mut self, file: Option<&str>) -> Vec<AnnotationKey> {
+        let (ids, anchors): (Vec<_>, Vec<_>) = self
             .comments()
             .filter(|comment| {
                 comment.origin == CommentOrigin::Agent
                     && file.is_none_or(|file| comment.anchor.path == file)
             })
-            .map(|comment| comment.id.clone())
-            .collect::<Vec<_>>();
-        self.remove_agent_ids(ids)
+            .map(|comment| (comment.id.clone(), comment.anchor.clone()))
+            .unzip();
+        self.remove_agent_ids(ids);
+        anchors
     }
 
     #[cfg(test)]

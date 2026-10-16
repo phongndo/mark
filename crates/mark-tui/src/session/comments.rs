@@ -233,8 +233,7 @@ pub(crate) fn remove(
     let anchor = app
         .annotations_state
         .annotations
-        .comments()
-        .find(|comment| comment.id == params.id)
+        .comment(&params.id)
         .map(|comment| comment.anchor.clone());
     let removed = match app
         .annotations_state
@@ -281,22 +280,10 @@ pub(crate) fn clear(
     let affected = app
         .annotations_state
         .annotations
-        .comments()
-        .filter(|comment| {
-            comment.origin == CommentOrigin::Agent
-                && params
-                    .file
-                    .as_ref()
-                    .is_none_or(|file| comment.anchor.path == *file)
-        })
-        .map(|comment| comment.anchor.clone())
-        .collect::<HashSet<_>>();
-    let removed = app
-        .annotations_state
-        .annotations
         .clear_agents(params.file.as_deref());
+    let removed = affected.len();
     if removed > 0 {
-        invalidate_comment_geometry(app, affected);
+        invalidate_comment_geometry(app, affected.into_iter().collect());
         app.runtime.dirty = true;
     }
     Ok(CommentRemovalResult {
@@ -313,8 +300,7 @@ pub(crate) fn disposition(
     let anchor = app
         .annotations_state
         .annotations
-        .comments()
-        .find(|comment| comment.id == params.id)
+        .comment(&params.id)
         .map(|comment| comment.anchor.clone())
         .ok_or_else(|| ProtocolError::new("comment_not_found", "comment does not exist"))?;
     app.annotations_state
