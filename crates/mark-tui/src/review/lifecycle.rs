@@ -31,7 +31,8 @@ pub(crate) struct FinalVerdict {
 pub(crate) struct ReviewLifecycleState {
     pub(crate) pass: u64,
     pub(crate) reviewed_files: BTreeSet<String>,
-    pub(crate) reviewed_hunks: BTreeSet<String>,
+    /// Display path and one-based hunk index.
+    pub(crate) reviewed_hunks: BTreeSet<(String, usize)>,
     pub(crate) changed_files: BTreeSet<String>,
     pub(crate) verdict: Option<FinalVerdict>,
 }
@@ -123,7 +124,7 @@ impl ReviewLifecycleState {
     }
 
     pub(crate) fn mark_hunk(&mut self, path: &str, hunk: usize) {
-        self.reviewed_hunks.insert(format!("{path}\0{hunk}"));
+        self.reviewed_hunks.insert((path.to_owned(), hunk));
     }
 
     pub(crate) fn set_file_reviewed(&mut self, path: &str, reviewed: bool) {
@@ -132,7 +133,7 @@ impl ReviewLifecycleState {
         } else {
             self.reviewed_files.remove(path);
             self.reviewed_hunks
-                .retain(|hunk| !hunk.starts_with(&format!("{path}\0")));
+                .retain(|(hunk_path, _)| hunk_path != path);
         }
     }
 
@@ -140,7 +141,7 @@ impl ReviewLifecycleState {
         if reviewed {
             self.mark_hunk(path, hunk);
         } else {
-            self.reviewed_hunks.remove(&format!("{path}\0{hunk}"));
+            self.reviewed_hunks.remove(&(path.to_owned(), hunk));
         }
     }
 
@@ -149,6 +150,6 @@ impl ReviewLifecycleState {
     }
 
     pub(crate) fn hunk_reviewed(&self, path: &str, hunk: usize) -> bool {
-        self.reviewed_hunks.contains(&format!("{path}\0{hunk}"))
+        self.reviewed_hunks.contains(&(path.to_owned(), hunk))
     }
 }

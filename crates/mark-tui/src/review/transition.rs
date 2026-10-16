@@ -71,10 +71,9 @@ impl ReviewTransition {
         lifecycle
             .reviewed_files
             .retain(|path| !changed.contains(path));
-        lifecycle.reviewed_hunks.retain(|key| {
-            key.split_once('\0')
-                .is_some_and(|(path, _)| !changed.contains(path))
-        });
+        lifecycle
+            .reviewed_hunks
+            .retain(|(path, _)| !changed.contains(path));
         lifecycle.verdict = None;
         let generation = app.document.generation;
         let (comments, previous_anchors): (Vec<_>, Vec<_>) = self
