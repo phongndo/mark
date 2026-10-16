@@ -192,18 +192,13 @@ pub(crate) fn load_job_source(
     match source {
         SyntaxJobSource::Hunk(source) => Ok((source.text, None, None)),
         SyntaxJobSource::FullFile(source) => {
-            let source_bytes =
-                full_file_source_size(&source).map_err(|_| SyntaxJobFailure::Unavailable)?;
-            if usize::try_from(source_bytes)
-                .ok()
-                .is_some_and(|bytes| bytes > limits.max_source_bytes)
-            {
-                return Err(SyntaxJobFailure::Unavailable);
-            }
+            // The limited loader rejects oversized sources while reading, so
+            // no separate size probe (and second git/fs round trip) is needed.
             let text = load_full_file_source_limited(&source, limits.max_source_bytes)
                 .map_err(|_| SyntaxJobFailure::Unavailable)?;
             let source_lines = validate_highlight_source_with_line_count(&text, limits)
                 .map_err(|_| SyntaxJobFailure::Unavailable)? as u64;
+            let source_bytes = text.len() as u64;
             Ok((text, Some(source_bytes), Some(source_lines)))
         }
     }
@@ -534,26 +529,6 @@ fn load_full_file_source_inner(
     Ok(source)
 }
 
-pub(crate) fn full_file_source_size(source: &FullFileSource) -> Result<u64, SyntaxSkipReason> {
-    match &source.kind {
-        FullFileSourceKind::Worktree { path } => worktree_file_size(&source.repo, path),
-        FullFileSourceKind::GitRevision { rev, path } => {
-            git_blob_size(&source.repo, &format!("{rev}:{path}"))
-        }
-        FullFileSourceKind::GitMergeBase { base, head, path } => {
-            let rev = git_merge_base(&source.repo, base, head)?;
-            git_blob_size(&source.repo, &format!("{rev}:{path}"))
-        }
-    }
-}
-
-pub(crate) fn worktree_file_size(repo: &Path, path: &str) -> Result<u64, SyntaxSkipReason> {
-    let path = resolved_worktree_file_path(repo, path)?;
-    fs::metadata(path)
-        .map(|metadata| metadata.len())
-        .map_err(|_| SyntaxSkipReason::NoSource)
-}
-
 fn read_worktree_file_limited(
     repo: &Path,
     path: &str,
@@ -712,22 +687,6 @@ fn ensure_not_cancelled(cancelled: Option<&AtomicBool>) -> Result<(), SyntaxSkip
     }
 }
 
-pub(crate) fn git_blob_size(repo: &Path, object: &str) -> Result<u64, SyntaxSkipReason> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(["cat-file", "-s", object])
-        .output()
-        .map_err(|_| SyntaxSkipReason::NoSource)?;
-    if !output.status.success() {
-        return Err(SyntaxSkipReason::NoSource);
-    }
-    String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .parse::<u64>()
-        .map_err(|_| SyntaxSkipReason::NoSource)
-}
-
 pub(crate) fn git_merge_base(
     repo: &Path,
     base: &str,
@@ -870,6 +829,33 @@ mod tests {
         );
 
         fs::remove_dir_all(repo).expect("test directory should be removed");
+    }
+
+    #[test]
+    fn full_file_job_source_reports_loaded_size_and_rejects_oversized_files() {
+        let repo = tempfile::tempdir().expect("test directory should be created");
+        fs::write(repo.path().join("main.rs"), "fn main() {}\n").expect("source should be written");
+        let source = || {
+            SyntaxJobSource::FullFile(FullFileSource {
+                repo: repo.path().to_owned().into(),
+                kind: FullFileSourceKind::Worktree {
+                    path: "main.rs".into(),
+                },
+            })
+        };
+        let limits = |max_source_bytes| SyntaxLimits {
+            max_source_bytes,
+            ..SyntaxLimits::default()
+        };
+
+        let (text, bytes, lines) =
+            load_job_source(source(), limits(13)).expect("source within the limit should load");
+        assert_eq!(text, "fn main() {}\n");
+        assert_eq!((bytes, lines), (Some(13), Some(1)));
+        assert!(matches!(
+            load_job_source(source(), limits(12)),
+            Err(SyntaxJobFailure::Unavailable)
+        ));
     }
 
     #[test]
