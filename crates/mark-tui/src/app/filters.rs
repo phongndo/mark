@@ -370,12 +370,7 @@ impl DiffApp {
         self.runtime.dirty = true;
     }
 
-    #[cfg(test)]
-    pub(crate) fn current_grep_match_row(&self) -> Option<usize> {
-        self.selected_grep_match_row()
-    }
-
-    pub(super) fn selected_grep_match_row(&self) -> Option<usize> {
+    pub(crate) fn selected_grep_match_row(&self) -> Option<usize> {
         if self.filters.grep_filter.is_empty() {
             return None;
         }

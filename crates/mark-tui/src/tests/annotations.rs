@@ -550,7 +550,7 @@ fn grep_jump_scrolls_past_annotation_blocks_to_show_match() {
     app.apply_filters(PostFilterNavigation::JumpToGrep);
 
     let match_row = app
-        .current_grep_match_row()
+        .selected_grep_match_row()
         .expect("grep match should be selected");
     let rendered_rows: Vec<_> = plan_diff_viewport_rows(&app, app.viewport.viewport_rows)
         .into_iter()

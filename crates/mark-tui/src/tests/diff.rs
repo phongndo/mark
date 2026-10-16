@@ -1362,7 +1362,7 @@ fn file_filter_edit_with_active_grep_preserves_current_grep_match() {
     }
 
     assert_eq!(visible_paths(&app), vec!["a.rs", "b.rs", "c.rs"]);
-    assert_eq!(app.current_grep_match_row(), Some(5));
+    assert_eq!(app.selected_grep_match_row(), Some(5));
     assert!((app.viewport.scroll..app.viewport.scroll + app.viewport.viewport_rows).contains(&5));
 }
 

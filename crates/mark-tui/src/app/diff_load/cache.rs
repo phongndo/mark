@@ -59,10 +59,6 @@ pub(crate) fn diff_cache_entry_with_annotation_candidates(
 
 impl DiffApp {
     pub(crate) fn invalidate_diff_cache(&mut self) {
-        self.clear_cached_diff_choices();
-    }
-
-    pub(crate) fn clear_cached_diff_choices(&mut self) {
         self.jobs.clear_cached_diff_choices();
     }
 

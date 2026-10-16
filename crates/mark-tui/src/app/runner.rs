@@ -337,7 +337,7 @@ pub(crate) fn sync_live_diff(
         *live_diff = None;
         app.jobs.live_diff_failed_options = None;
         app.jobs.live_updates.reset_reload();
-        app.clear_cached_diff_choices();
+        app.invalidate_diff_cache();
         return;
     }
 
@@ -371,7 +371,7 @@ pub(crate) fn sync_live_diff(
             *live_diff = None;
             app.jobs.live_diff_failed_options = Some(app.document.options.clone());
             app.jobs.live_updates.reset_reload();
-            app.clear_cached_diff_choices();
+            app.invalidate_diff_cache();
             let feature = if auto_reload {
                 "live reload"
             } else {
@@ -409,7 +409,7 @@ pub(crate) fn drain_live_reloads(
             LiveDiffReload::WatcherFailed(error) => {
                 app.jobs.live_diff_failed_options = Some(app.document.options.clone());
                 app.jobs.live_updates.reset_reload();
-                app.clear_cached_diff_choices();
+                app.invalidate_diff_cache();
                 let feature = if app.jobs.live_updates.allowed() {
                     "live reload watcher"
                 } else {

@@ -25,7 +25,6 @@ impl DiffApp {
         }
         self.invalidate_diff_cache();
         self.jobs.pending_review_load = None;
-        self.clear_cached_diff_choices();
         let (job_tx, job_rx) = oneshot::channel();
         let load_options = options.clone();
         let scoped_paths = scoped_paths(&self.document.options, &options, &pathspecs);

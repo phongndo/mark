@@ -7,7 +7,7 @@ use crate::runtime;
 impl DiffApp {
     pub(crate) fn start_diff_prefetches(&mut self) {
         if !self.diff_cache_invalidator_active() {
-            self.clear_cached_diff_choices();
+            self.invalidate_diff_cache();
             return;
         }
 
@@ -54,7 +54,7 @@ impl DiffApp {
 
     pub(in crate::app) fn start_next_diff_prefetch(&mut self) {
         if !self.diff_cache_invalidator_active() {
-            self.clear_cached_diff_choices();
+            self.invalidate_diff_cache();
             return;
         }
 

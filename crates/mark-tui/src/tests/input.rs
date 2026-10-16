@@ -1441,7 +1441,7 @@ fn full_file_toggle_resyncs_grep_selection_after_restoring_the_viewport_anchor()
         .diff_line_row(FILE_0, HUNK_1, LINE_0)
         .expect("second grep match should be rendered");
     app.set_scroll(second_match.get());
-    assert_eq!(app.current_grep_match_row(), Some(second_match.get()));
+    assert_eq!(app.selected_grep_match_row(), Some(second_match.get()));
 
     app.toggle_full_file();
 
@@ -1451,7 +1451,7 @@ fn full_file_toggle_resyncs_grep_selection_after_restoring_the_viewport_anchor()
         .diff_line_row(FILE_0, HUNK_1, LINE_0)
         .expect("second grep match should remain rendered");
     assert_eq!(
-        app.current_grep_match_row(),
+        app.selected_grep_match_row(),
         Some(restored_second_match.get())
     );
 
@@ -1461,7 +1461,7 @@ fn full_file_toggle_resyncs_grep_selection_after_restoring_the_viewport_anchor()
         .model
         .diff_line_row(FILE_0, HUNK_2, LINE_0)
         .expect("third grep match should remain rendered");
-    assert_eq!(app.current_grep_match_row(), Some(third_match.get()));
+    assert_eq!(app.selected_grep_match_row(), Some(third_match.get()));
 }
 
 #[test]
@@ -1486,7 +1486,7 @@ fn full_file_grep_does_not_navigate_to_a_hidden_hunk_header_match() {
 
     assert!(app.full_file_mode_active());
     assert!(app.filters.grep_matches.is_empty());
-    assert_eq!(app.current_grep_match_row(), None);
+    assert_eq!(app.selected_grep_match_row(), None);
 
     fs::remove_dir_all(repo).expect("repo directory should be removed");
 }
@@ -1781,7 +1781,7 @@ fn slash_filters_files_by_diff_content_and_escape_clears_filter() {
     assert_eq!(app.filters.grep_filter, "line 1");
     assert_eq!(visible_paths(&app), vec!["b.rs"]);
     assert_eq!(app.filters.grep_matches.len(), 1);
-    assert_eq!(app.current_grep_match_row(), Some(2));
+    assert_eq!(app.selected_grep_match_row(), Some(2));
     assert!(line_text(&filter_bar_line(&app, 40)).starts_with("/line 1"));
     assert!(!line_text(&statusline_header_line(&app, 120)).contains("/:line 1"));
     assert!(app.filters.filter_input.is_none());
@@ -1799,7 +1799,7 @@ fn slash_filters_files_by_diff_content_and_escape_clears_filter() {
 
     assert_eq!(app.filters.grep_filter, "");
     assert!(app.filters.grep_matches.is_empty());
-    assert_eq!(app.current_grep_match_row(), None);
+    assert_eq!(app.selected_grep_match_row(), None);
     assert_eq!(visible_paths(&app), vec!["a.rs", "b.rs", "c.rs"]);
     assert!(app.filters.filter_input.is_none());
 

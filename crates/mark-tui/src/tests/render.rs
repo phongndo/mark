@@ -1005,13 +1005,13 @@ fn n_and_p_navigate_grep_by_line_not_match_count() {
         app.filters.grep_matches,
         vec![ModelRow::new(2), ModelRow::new(3)]
     );
-    assert_eq!(app.current_grep_match_row(), Some(2));
+    assert_eq!(app.selected_grep_match_row(), Some(2));
     assert_eq!(app.viewport.scroll, 0);
 
     app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE))
         .expect("n should move to next matching line");
 
-    assert_eq!(app.current_grep_match_row(), Some(3));
+    assert_eq!(app.selected_grep_match_row(), Some(3));
     assert_eq!(
         app.viewport.scroll + viewport_center_offset(app.viewport.viewport_rows),
         3
@@ -1037,12 +1037,12 @@ fn wrapped_grep_selection_stays_on_visible_continuation_row() {
 
     app.set_scroll(continuation_scroll);
 
-    assert_eq!(app.current_grep_match_row(), Some(first.get()));
+    assert_eq!(app.selected_grep_match_row(), Some(first.get()));
 
     app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE))
         .expect("n should move to the next grep match");
 
-    assert_eq!(app.current_grep_match_row(), Some(second.get()));
+    assert_eq!(app.selected_grep_match_row(), Some(second.get()));
 }
 
 #[test]

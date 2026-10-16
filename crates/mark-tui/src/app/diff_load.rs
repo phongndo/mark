@@ -77,7 +77,7 @@ impl DiffApp {
                 return;
             }
         } else {
-            self.clear_cached_diff_choices();
+            self.invalidate_diff_cache();
         }
 
         let (tx, rx) = oneshot::channel();
