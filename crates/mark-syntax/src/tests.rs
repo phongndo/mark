@@ -139,7 +139,7 @@ fn tex_extension_uses_vscode_latex_language() {
         Some("latex")
     );
     assert!(
-        has_language("tex"),
+        has_highlights("tex"),
         "plain TeX remains explicitly selectable"
     );
 }

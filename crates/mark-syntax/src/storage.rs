@@ -70,9 +70,6 @@ pub(crate) fn save_config(config: &StoredSyntaxConfig) -> MarkResult<()> {
 }
 
 fn write_config(path: &Path, config: &StoredSyntaxConfig) -> MarkResult<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
     let contents = serde_json::to_vec_pretty(config)?;
     mark_core::path_utils::atomic_write(path, &contents)?;
     Ok(())
@@ -298,12 +295,12 @@ pub(crate) fn enabled_language_set_for_mode(
 }
 
 pub(crate) fn enabled_language_set_from_config(config: &StoredSyntaxConfig) -> BTreeSet<String> {
-    let mut enabled = language_vec_to_set(&config.languages);
+    let mut enabled = normalize_language_names(&config.languages);
     enabled.extend(core_enabled_language_set());
     enabled
 }
 
-pub(crate) fn bundled_highlight_language_set() -> BTreeSet<String> {
+pub(crate) fn installed_language_set() -> BTreeSet<String> {
     crate::catalog()
         .languages()
         .into_iter()
@@ -341,19 +338,6 @@ pub(crate) fn reject_core_language_removal(requested: &BTreeSet<String>) -> Mark
     )))
 }
 
-pub(crate) fn installed_language_set() -> BTreeSet<String> {
-    bundled_highlight_language_set()
-}
-
-pub(crate) fn language_vec_to_set(languages: &[String]) -> BTreeSet<String> {
-    languages
-        .iter()
-        .cloned()
-        .map(normalize_language_name)
-        .filter(|language| !language.is_empty())
-        .collect()
-}
-
 pub(crate) fn normalize_language_names(languages: &[String]) -> BTreeSet<String> {
     languages
         .iter()
@@ -388,7 +372,7 @@ fn canonical_language_name(language: &str) -> String {
         .unwrap_or_else(|| language.to_owned())
 }
 
-pub(crate) fn detect_language_name(path: &str) -> Option<String> {
+pub fn detect_language_from_path(path: &str) -> Option<String> {
     detect_language_from_basename(path)
         .map(str::to_owned)
         .or_else(|| crate::catalog().detect_path(path).map(str::to_owned))
@@ -442,7 +426,7 @@ fn extension_mapping_match_len(filename: &str, extension: &str) -> Option<usize>
 }
 
 pub(crate) fn has_highlights(language: &str) -> bool {
-    crate::canonical_language(language).is_some()
+    crate::catalog().canonical_language(language).is_some()
 }
 
 #[cfg(test)]

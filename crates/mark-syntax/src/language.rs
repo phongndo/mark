@@ -6,10 +6,9 @@ use crate::{
     SyntaxLanguageSelection, SyntaxLanguageState, SyntaxLanguageStatus, SyntaxRemoveResult,
     SyntaxUpdateResult, SyntaxUpdateSelection, bundled_grammar_version, core_enabled_language_set,
     core_language_set, enabled_language_set, enabled_language_set_for_mode, has_highlights,
-    installed_language_set, language_vec_to_set, load_config, load_settings,
-    normalize_custom_extension, normalize_custom_filename, normalize_language_name,
-    normalize_language_names, reject_core_language_removal, save_config, upsert_extension_mappings,
-    upsert_filename_mappings,
+    installed_language_set, load_config, load_settings, normalize_custom_extension,
+    normalize_custom_filename, normalize_language_name, normalize_language_names,
+    reject_core_language_removal, save_config, upsert_extension_mappings, upsert_filename_mappings,
 };
 use mark_core::{MarkError, MarkResult};
 
@@ -108,7 +107,7 @@ pub(crate) fn add_languages_to_config(
         validate_custom_mapping_options(options)?;
     }
 
-    let mut enabled = language_vec_to_set(&config.languages);
+    let mut enabled = normalize_language_names(&config.languages);
     let mut added = Vec::new();
     let mut already_enabled = Vec::new();
     let mut unavailable = Vec::new();
@@ -244,7 +243,7 @@ pub(crate) fn reject_unconfigured_core_language_removal(
 }
 
 fn has_user_config_for_language(config: &crate::StoredSyntaxConfig, language: &str) -> bool {
-    language_vec_to_set(&config.languages).contains(language)
+    normalize_language_names(&config.languages).contains(language)
         || mappings_include_language(&config.extensions, language)
         || mappings_include_language(&config.filenames, language)
 }
@@ -260,7 +259,7 @@ pub(crate) fn remove_languages_from_config(
     requested: &BTreeSet<String>,
 ) -> SyntaxRemoveResult {
     let core = core_language_set();
-    let mut enabled = language_vec_to_set(&config.languages);
+    let mut enabled = normalize_language_names(&config.languages);
     let mut removed = Vec::new();
     let mut missing = Vec::new();
     let mut kept_core = BTreeSet::new();
@@ -326,7 +325,7 @@ pub(crate) fn clean_language_config(
             language.is_empty() || !keep_language(&language)
         })
         .count();
-    let mut languages = language_vec_to_set(&config.languages);
+    let mut languages = normalize_language_names(&config.languages);
     languages.retain(|language| keep_language(language));
     let enabled_languages_kept = languages.len();
 
@@ -412,7 +411,7 @@ pub(crate) fn update_all_language_set(
     config: &crate::StoredSyntaxConfig,
     installed: &BTreeSet<String>,
 ) -> BTreeSet<String> {
-    let mut languages = language_vec_to_set(&config.languages);
+    let mut languages = normalize_language_names(&config.languages);
     languages.extend(installed.iter().cloned());
     languages
 }

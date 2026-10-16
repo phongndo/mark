@@ -31,7 +31,7 @@ pub(crate) fn classify_scope_stack<'a>(
     }
 }
 
-pub fn classify_scope_name(scope: &str) -> Option<SyntaxClass> {
+pub(crate) fn classify_scope_name(scope: &str) -> Option<SyntaxClass> {
     let first = scope.split('.').next().unwrap_or(scope);
     match first {
         "comment" => Some(SyntaxClass::Comment),
