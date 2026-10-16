@@ -7,10 +7,10 @@ use crate::{
     controls::diff_line_grep_prefix,
     model::UiRow,
     render::{
+        diff::{DiffCellColumns, FILE_BODY_NOTICE_INDENT, file_body_notice},
         headers::normalized_hunk_header_text,
         text::{skip_display_prefix, terminal_text},
     },
-    theme::{GUTTER_WIDTH, UNIFIED_GUTTER_WIDTH},
 };
 
 use super::types::{GrepHighlightSpan, GrepHighlightTarget, SpanColumnPosition};
@@ -29,15 +29,10 @@ pub(crate) fn grep_highlight_targets_for_row(
             .files
             .get(file.get())
             .and_then(|file| {
-                let message = if file.is_binary() {
-                    "binary file"
-                } else {
-                    "no textual changes"
-                };
                 grep_highlight_target_for_columns(
-                    message.to_owned(),
+                    file_body_notice(file).to_owned(),
                     &line.spans,
-                    2.min(width),
+                    FILE_BODY_NOTICE_INDENT.min(width),
                     width,
                     0,
                 )
@@ -78,16 +73,15 @@ pub(crate) fn grep_highlight_targets_for_row(
             .and_then(|file| file.hunks().get(hunk.get()))
             .and_then(|hunk| hunk.lines.get(line_index.get()))
             .and_then(|diff_line| {
-                let content_start = unified_content_start_column(width);
+                let grep_text = diff_line_grep_highlight_text(diff_line);
+                let text_byte_start =
+                    grep_text_byte_start(&grep_text, app.viewport.horizontal_scroll);
                 grep_highlight_target_for_columns(
-                    diff_line_grep_highlight_text(diff_line),
+                    grep_text,
                     &line.spans,
-                    content_start,
+                    unified_content_start_column(width),
                     width,
-                    diff_line_grep_rendered_text_byte_start(
-                        diff_line,
-                        app.viewport.horizontal_scroll,
-                    ),
+                    text_byte_start,
                 )
             })
             .into_iter()
@@ -116,7 +110,7 @@ pub(crate) fn grep_highlight_targets_for_row(
                 .and_then(|index| hunk.lines.get(index.get()))
                 .and_then(|diff_line| {
                     split_diff_line_grep_highlight_target(
-                        diff_line,
+                        &diff_line_grep_highlight_text(diff_line),
                         &line.spans,
                         0,
                         left_width,
@@ -130,7 +124,7 @@ pub(crate) fn grep_highlight_targets_for_row(
                 .and_then(|index| hunk.lines.get(index.get()))
                 .and_then(|diff_line| {
                     split_diff_line_grep_highlight_target(
-                        diff_line,
+                        &diff_line_grep_highlight_text(diff_line),
                         &line.spans,
                         left_width,
                         right_width,
@@ -149,7 +143,7 @@ pub(crate) fn grep_highlight_targets_for_row(
 }
 
 pub(crate) fn split_diff_line_grep_highlight_target(
-    line: &DiffLine,
+    grep_text: &str,
     spans: &[Span<'_>],
     cell_start: usize,
     cell_width: usize,
@@ -158,24 +152,20 @@ pub(crate) fn split_diff_line_grep_highlight_target(
     let content_start = cell_start.saturating_add(split_content_start_column(cell_width));
     let content_end = cell_start.saturating_add(cell_width);
     grep_highlight_target_for_columns(
-        diff_line_grep_highlight_text(line),
+        grep_text.to_owned(),
         spans,
         content_start,
         content_end,
-        diff_line_grep_rendered_text_byte_start(line, horizontal_scroll),
+        grep_text_byte_start(grep_text, horizontal_scroll),
     )
 }
 
 pub(crate) fn unified_content_start_column(width: usize) -> usize {
-    let indicator_width = 1.min(width);
-    let gutter_width = UNIFIED_GUTTER_WIDTH.min(width.saturating_sub(indicator_width));
-    indicator_width + gutter_width
+    DiffCellColumns::unified(width).content_start()
 }
 
 pub(crate) fn split_content_start_column(width: usize) -> usize {
-    let indicator_width = 1.min(width);
-    let gutter_width = GUTTER_WIDTH.min(width.saturating_sub(indicator_width));
-    indicator_width + gutter_width
+    DiffCellColumns::split(width).content_start()
 }
 
 pub(crate) fn diff_line_grep_highlight_text(line: &DiffLine) -> String {
@@ -186,16 +176,11 @@ pub(crate) fn diff_line_grep_highlight_text(line: &DiffLine) -> String {
     text
 }
 
-pub(crate) fn diff_line_grep_rendered_text_byte_start(
-    line: &DiffLine,
-    horizontal_scroll: usize,
-) -> usize {
-    1 + scrolled_text_byte_start(&line.text_lossy(), horizontal_scroll)
-}
-
-pub(crate) fn scrolled_text_byte_start(text: &str, horizontal_scroll: usize) -> usize {
-    let text = terminal_text(text);
-    text.len() - skip_display_prefix(&text, horizontal_scroll).0.len()
+/// Byte offset in `grep_text` (from [`diff_line_grep_highlight_text`]) where
+/// content scrolled by `horizontal_scroll` display columns begins.
+pub(crate) fn grep_text_byte_start(grep_text: &str, horizontal_scroll: usize) -> usize {
+    let content = grep_text.get(1..).unwrap_or_default();
+    grep_text.len() - skip_display_prefix(content, horizontal_scroll).0.len()
 }
 
 pub(crate) fn grep_highlight_target_for_columns(

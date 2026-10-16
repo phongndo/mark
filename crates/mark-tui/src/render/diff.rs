@@ -30,11 +30,11 @@ mod unified;
 mod viewport;
 mod wrapped;
 pub(crate) use content::{
-    ContentSpanRender, append_content_spans_at_scroll, append_gutter_spans, content_span_capacity,
-    diff_indicator_span_for_focus, empty_diff_fill_from,
+    ContentSpanRender, DiffCellColumns, append_content_spans_at_scroll, append_gutter_spans,
+    content_span_capacity, empty_diff_fill_from,
 };
 #[cfg(test)]
-pub(crate) use content::{content_spans_at_scroll, inline_bg, syntax_fg};
+pub(crate) use content::{content_spans_at_scroll, inline_bg};
 use content::{split_gutter_text, unified_gutter_text};
 #[cfg(test)]
 pub(crate) use context::render_split_context_line_wrapped;
@@ -58,6 +58,18 @@ pub(crate) use unified::{render_unified_line_at_scroll, row_bg};
 pub(crate) use viewport::build_diff_viewport_lines;
 pub(crate) use wrapped::render_row_wrapped_with_focus;
 
+/// Columns before the text of a file-body notice row.
+pub(crate) const FILE_BODY_NOTICE_INDENT: usize = 2;
+
+/// The notice shown in place of hunks for a file without textual changes.
+pub(crate) fn file_body_notice(file: &mark_diff::DiffFile) -> &'static str {
+    if file.is_binary() {
+        "binary file"
+    } else {
+        "no textual changes"
+    }
+}
+
 pub(crate) fn draw_diff(frame: &mut Frame<'_>, app: &mut DiffApp, area: Rect) {
     if app.document.model.is_empty() {
         app.clear_code_selection_render();
@@ -66,7 +78,6 @@ pub(crate) fn draw_diff(frame: &mut Frame<'_>, app: &mut DiffApp, area: Rect) {
     }
 
     let visible_rows = area.height as usize;
-    app.prepare_full_file_context_for_viewport(visible_rows);
     app.prepare_syntax_for_viewport(visible_rows);
     let width = area.width as usize;
     let lines = build_diff_viewport_lines(app, width, visible_rows);
@@ -202,14 +213,9 @@ pub(crate) fn render_row_with_focus(
             file_header_line(file, width, theme)
         }
         UiRow::FileBodyNotice(file_index) => {
-            let file = &app.document.changeset.files[file_index];
-            let message = if file.is_binary() {
-                "binary file"
-            } else {
-                "no textual changes"
-            };
+            let message = file_body_notice(&app.document.changeset.files[file_index]);
             Line::from(Span::styled(
-                fit_padded(&format!("  {message}"), width),
+                fit_padded(&format!("{:FILE_BODY_NOTICE_INDENT$}{message}", ""), width),
                 Style::default().fg(theme.muted),
             ))
         }

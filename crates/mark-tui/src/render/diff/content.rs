@@ -1,5 +1,8 @@
 use mark_diff::DiffLineKind;
-use mark_syntax::{DiffBackground, HighlightedLine, SyntaxClass, SyntaxSegment};
+use mark_syntax::{
+    DiffBackground, HighlightedLine, SyntaxClass, SyntaxSegment,
+    theme::{RgbColor, SyntaxModifiers},
+};
 use ratatui::prelude::{Color, Modifier, Span, Style};
 use std::{
     borrow::Cow,
@@ -10,7 +13,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
     render::{
-        style::{diff_indicator_span, diff_sign_style, focused_diff_indicator_span},
+        style::diff_sign_style,
         text::{DisplaySeek, fit_padded_from, fit_with_width_from, spaces},
     },
     syntax::InlineRange,
@@ -23,15 +26,36 @@ use crate::{
 
 use super::line_style;
 
-pub(crate) fn diff_indicator_span_for_focus(
-    kind: DiffLineKind,
-    theme: DiffTheme,
-    focused: bool,
-) -> Span<'static> {
-    if focused {
-        focused_diff_indicator_span(kind, theme)
-    } else {
-        diff_indicator_span(kind, theme)
+/// Widths of the indicator, line-number gutter and content columns of a diff
+/// cell, clamped so narrow cells drop content first, then gutter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DiffCellColumns {
+    pub(crate) indicator: usize,
+    pub(crate) gutter: usize,
+    pub(crate) content: usize,
+}
+
+impl DiffCellColumns {
+    pub(crate) fn new(width: usize, gutter_width: usize) -> Self {
+        let indicator = 1.min(width);
+        let gutter = gutter_width.min(width.saturating_sub(indicator));
+        Self {
+            indicator,
+            gutter,
+            content: width.saturating_sub(indicator + gutter),
+        }
+    }
+
+    pub(crate) fn unified(width: usize) -> Self {
+        Self::new(width, UNIFIED_GUTTER_WIDTH)
+    }
+
+    pub(crate) fn split(width: usize) -> Self {
+        Self::new(width, GUTTER_WIDTH)
+    }
+
+    pub(crate) fn content_start(self) -> usize {
+        self.indicator + self.gutter
     }
 }
 
@@ -545,7 +569,7 @@ pub(crate) fn syntax_style(
     theme: DiffTheme,
 ) -> Style {
     let mut style = line_style(kind, theme);
-    if let Some(color) = class.and_then(|class| syntax_fg(class, theme)) {
+    if let Some(color) = class.and_then(|class| theme.syntax.color(class)) {
         style = style.fg(color);
     }
     style
@@ -577,7 +601,7 @@ fn segment_syntax_style(
     if (matched.foreground_matched || !theme.foreground_overridden)
         && let Some(color) = resolved.foreground
     {
-        style = style.fg(Color::Rgb(color.red, color.green, color.blue));
+        style = style.fg(rgb(color));
     }
     // Diff row backgrounds deliberately win over token backgrounds. Context
     // rows retain the TextMate background unless transparency was requested.
@@ -586,23 +610,9 @@ fn segment_syntax_style(
         && matched.background_matched
         && let Some(color) = resolved.background
     {
-        style = style.bg(Color::Rgb(color.red, color.green, color.blue));
+        style = style.bg(rgb(color));
     }
-    let modifiers = resolved.modifiers;
-    if !modifiers.is_empty() {
-        if modifiers.contains(mark_syntax::theme::SyntaxModifiers::BOLD) {
-            style = style.add_modifier(Modifier::BOLD);
-        }
-        if modifiers.contains(mark_syntax::theme::SyntaxModifiers::ITALIC) {
-            style = style.add_modifier(Modifier::ITALIC);
-        }
-        if modifiers.contains(mark_syntax::theme::SyntaxModifiers::UNDERLINED) {
-            style = style.add_modifier(Modifier::UNDERLINED);
-        }
-        if modifiers.contains(mark_syntax::theme::SyntaxModifiers::CROSSED_OUT) {
-            style = style.add_modifier(Modifier::CROSSED_OUT);
-        }
-    }
+    style = style.add_modifier(modifiers(resolved.modifiers));
     // Existing class-based user overrides are coarse by design and apply last.
     if let Some(color) = segment
         .class
@@ -648,39 +658,44 @@ fn apply_scope_override(
         return style;
     };
     if foreground_matched && let Some(color) = resolved.foreground {
-        style = style.fg(Color::Rgb(color.red, color.green, color.blue));
+        style = style.fg(rgb(color));
     }
     if background_matched
         && kind == DiffLineKind::Context
         && !theme.transparent_background
         && let Some(color) = resolved.background
     {
-        style = style.bg(Color::Rgb(color.red, color.green, color.blue));
+        style = style.bg(rgb(color));
     }
     if modifiers_matched {
-        let all = Modifier::BOLD | Modifier::ITALIC | Modifier::UNDERLINED | Modifier::CROSSED_OUT;
-        style = style.remove_modifier(all);
-        for (syntax_modifier, modifier) in [
-            (mark_syntax::theme::SyntaxModifiers::BOLD, Modifier::BOLD),
-            (
-                mark_syntax::theme::SyntaxModifiers::ITALIC,
-                Modifier::ITALIC,
-            ),
-            (
-                mark_syntax::theme::SyntaxModifiers::UNDERLINED,
-                Modifier::UNDERLINED,
-            ),
-            (
-                mark_syntax::theme::SyntaxModifiers::CROSSED_OUT,
-                Modifier::CROSSED_OUT,
-            ),
-        ] {
-            if resolved.modifiers.contains(syntax_modifier) {
-                style = style.add_modifier(modifier);
-            }
-        }
+        style = style
+            .remove_modifier(THEME_MODIFIERS)
+            .add_modifier(modifiers(resolved.modifiers));
     }
     style
+}
+
+fn rgb(color: RgbColor) -> Color {
+    Color::Rgb(color.red, color.green, color.blue)
+}
+
+/// Every terminal modifier a TextMate theme's font style can set.
+const THEME_MODIFIERS: Modifier = Modifier::BOLD
+    .union(Modifier::ITALIC)
+    .union(Modifier::UNDERLINED)
+    .union(Modifier::CROSSED_OUT);
+
+/// The terminal modifiers for a TextMate theme's font style.
+fn modifiers(syntax: SyntaxModifiers) -> Modifier {
+    [
+        (SyntaxModifiers::BOLD, Modifier::BOLD),
+        (SyntaxModifiers::ITALIC, Modifier::ITALIC),
+        (SyntaxModifiers::UNDERLINED, Modifier::UNDERLINED),
+        (SyntaxModifiers::CROSSED_OUT, Modifier::CROSSED_OUT),
+    ]
+    .into_iter()
+    .filter(|(flag, _)| syntax.contains(*flag))
+    .fold(Modifier::empty(), |all, (_, modifier)| all | modifier)
 }
 
 fn log_theme_comparison(
@@ -720,10 +735,7 @@ pub(crate) fn inline_style(style: Style, kind: DiffLineKind, theme: DiffTheme) -
     }
 
     match kind {
-        DiffLineKind::Addition => style
-            .bg(inline_bg(kind, theme))
-            .add_modifier(Modifier::BOLD),
-        DiffLineKind::Deletion => style
+        DiffLineKind::Addition | DiffLineKind::Deletion => style
             .bg(inline_bg(kind, theme))
             .add_modifier(Modifier::BOLD),
         DiffLineKind::Context | DiffLineKind::Meta => style,
@@ -738,10 +750,6 @@ pub(crate) fn inline_bg(kind: DiffLineKind, theme: DiffTheme) -> Color {
         (_, DiffLineKind::Deletion) => theme.deletion_inline_bg,
         _ => Color::Reset,
     }
-}
-
-pub(crate) fn syntax_fg(class: SyntaxClass, theme: DiffTheme) -> Option<Color> {
-    theme.syntax.color(class)
 }
 
 #[cfg(test)]

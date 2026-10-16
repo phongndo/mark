@@ -44,10 +44,6 @@ impl DiffApp {
         format!("{label} · {}", key.target_label())
     }
 
-    pub(crate) fn annotation_label(&self, key: &AnnotationKey) -> Option<String> {
-        Some(key.menu_label())
-    }
-
     pub(super) fn handle_annotation_submit_click(&mut self, viewport_row: u16) -> bool {
         let Some(draft) = self.annotations_state.annotation_draft.as_ref() else {
             return false;

@@ -1,8 +1,8 @@
 use ratatui::{
     Frame,
-    layout::{Alignment, Rect},
+    layout::Rect,
     prelude::{Line, Modifier, Span, Style},
-    widgets::{Block, BorderType, Clear, Padding, Paragraph},
+    widgets::{Block, Clear, Paragraph},
 };
 use unicode_width::UnicodeWidthStr;
 
@@ -11,12 +11,11 @@ use crate::{
     render::{
         selector_menu::{
             centered_floating_rect, floating_menu_fits_terminal, floating_menu_max_inner_height,
-            floating_menu_max_width, selector_border_color, selector_empty_line,
-            selector_input_line, selector_menu_list_rows, selector_menu_outer_height,
-            selector_menu_outer_width, selector_row_style, selector_separator_line,
-            selector_title_color,
+            floating_menu_max_width, selector_empty_line, selector_input_line, selector_menu_block,
+            selector_menu_list_rows, selector_menu_outer_height, selector_menu_outer_width,
+            selector_row_style, selector_separator_line,
         },
-        style::base_bg,
+        style::{base_bg, file_sidebar_style},
         text::{fit_padded, status_code, terminal_text},
     },
     theme::DiffTheme,
@@ -126,25 +125,7 @@ fn annotation_menu_visible_items(inner_height: u16) -> usize {
 }
 
 pub(crate) fn annotation_menu_block(theme: DiffTheme) -> Block<'static> {
-    let bg = base_bg(theme);
-    if !theme.decorations.show_borders() {
-        return Block::default()
-            .style(Style::default().bg(bg))
-            .padding(Padding::horizontal(1));
-    }
-    Block::bordered()
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(selector_border_color(theme)).bg(bg))
-        .style(Style::default().bg(bg))
-        .padding(Padding::horizontal(1))
-        .title(Line::from(Span::styled(
-            " Annotations ",
-            Style::default()
-                .fg(selector_title_color(theme))
-                .bg(bg)
-                .add_modifier(Modifier::BOLD),
-        )))
-        .title_alignment(Alignment::Center)
+    selector_menu_block(theme, " Annotations ", base_bg(theme))
 }
 
 fn annotation_menu_width(app: &DiffApp, items: &[AnnotationMenuItem]) -> u16 {
@@ -176,7 +157,7 @@ fn annotation_menu_item_lines(
     let status = Span::styled(
         fit_padded(status_code(item.status), 2),
         style
-            .fg(status_color(item.status, theme))
+            .patch(file_sidebar_style(item.status, theme))
             .add_modifier(Modifier::BOLD),
     );
     let header = fit_padded(&terminal_text(&item.label), width.saturating_sub(3));
@@ -192,15 +173,4 @@ fn annotation_menu_item_lines(
             style,
         )),
     ]
-}
-
-fn status_color(status: mark_diff::FileStatus, theme: DiffTheme) -> ratatui::prelude::Color {
-    match status {
-        mark_diff::FileStatus::Added | mark_diff::FileStatus::Copied => theme.addition_fg,
-        mark_diff::FileStatus::Deleted => theme.deletion_fg,
-        mark_diff::FileStatus::Modified
-        | mark_diff::FileStatus::Renamed
-        | mark_diff::FileStatus::TypeChanged => theme.hunk,
-        mark_diff::FileStatus::Unknown => theme.muted,
-    }
 }

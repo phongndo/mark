@@ -1,8 +1,8 @@
 use ratatui::{
     Frame,
-    layout::{Alignment, Rect},
+    layout::Rect,
     prelude::{Color, Line, Modifier, Span, Style},
-    widgets::{Block, BorderType, Padding},
+    widgets::Block,
 };
 use unicode_width::UnicodeWidthStr;
 
@@ -14,10 +14,10 @@ use crate::{
         selector_menu::{
             ScrollableSelectorMenu, SelectorMenuInput, SelectorMenuLinesRequest,
             centered_floating_rect, floating_menu_fits_terminal, floating_menu_max_inner_height,
-            floating_menu_max_width, render_scrollable_selector_menu, selector_border_color,
-            selector_disabled_line, selector_entry_line, selector_highlight_color,
+            floating_menu_max_width, render_scrollable_selector_menu, selector_disabled_line,
+            selector_entry_line, selector_highlight_color, selector_menu_block,
             selector_menu_lines, selector_menu_list_rows, selector_menu_outer_height,
-            selector_scrollbar_needed, selector_title_color, selector_width_with_scrollbar,
+            selector_scrollbar_needed, selector_width_with_scrollbar,
         },
         style::{base_bg, header_bg},
         text::{fit_padded, fit_with_ellipsis},
@@ -28,10 +28,6 @@ use mark_diff::BranchName;
 
 pub(crate) fn branch_menu_list_visible_rows(app: &DiffApp, area: Rect) -> Option<usize> {
     let menu = app.refs.branch_menu_open()?;
-    if app.refs.comparison_branches.is_empty() {
-        return None;
-    }
-
     let menu_area = branch_menu_area(app, area)?;
     let inner = branch_menu_block(app.config.theme, menu).inner(menu_area);
     let pinned_rows = u16::from(app.selected_branch_menu_choice(menu).is_some());
@@ -39,10 +35,6 @@ pub(crate) fn branch_menu_list_visible_rows(app: &DiffApp, area: Rect) -> Option
 }
 
 pub(crate) fn commit_menu_list_visible_rows(app: &DiffApp, area: Rect) -> Option<usize> {
-    if !app.refs.commit_menu_is_open() || app.refs.comparison_commits.is_empty() {
-        return None;
-    }
-
     let menu_area = commit_menu_area(app, area)?;
     let inner = commit_menu_block(app.config.theme).inner(menu_area);
     let pinned_rows = u16::from(app.selected_commit_menu_choice().is_some());
@@ -50,10 +42,6 @@ pub(crate) fn commit_menu_list_visible_rows(app: &DiffApp, area: Rect) -> Option
 }
 
 pub(crate) fn color_scheme_picker_list_visible_rows(app: &DiffApp, area: Rect) -> Option<usize> {
-    if !app.overlays.color_scheme_picker_is_open() {
-        return None;
-    }
-
     let picker_area = color_scheme_picker_area(app, area)?;
     let inner = color_scheme_picker_block(app.config.theme).inner(picker_area);
     Some(selector_menu_list_rows(inner.height, 1))
@@ -136,51 +124,15 @@ pub(crate) fn branch_menu_area(app: &DiffApp, area: Rect) -> Option<Rect> {
 }
 
 pub(crate) fn branch_menu_block(theme: DiffTheme, menu: BranchMenu) -> Block<'static> {
-    let bg = base_bg(theme);
     let title = match menu {
         BranchMenu::Head => " Head Branch ",
         BranchMenu::Base => " Base Branch ",
     };
-    if !theme.decorations.show_borders() {
-        return Block::default()
-            .style(Style::default().bg(bg))
-            .padding(Padding::horizontal(1));
-    }
-    Block::bordered()
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(selector_border_color(theme)).bg(bg))
-        .style(Style::default().bg(bg))
-        .padding(Padding::horizontal(1))
-        .title(Line::from(Span::styled(
-            title,
-            Style::default()
-                .fg(selector_title_color(theme))
-                .bg(bg)
-                .add_modifier(Modifier::BOLD),
-        )))
-        .title_alignment(Alignment::Center)
+    selector_menu_block(theme, title, base_bg(theme))
 }
 
 pub(crate) fn commit_menu_block(theme: DiffTheme) -> Block<'static> {
-    let bg = base_bg(theme);
-    if !theme.decorations.show_borders() {
-        return Block::default()
-            .style(Style::default().bg(bg))
-            .padding(Padding::horizontal(1));
-    }
-    Block::bordered()
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(selector_border_color(theme)).bg(bg))
-        .style(Style::default().bg(bg))
-        .padding(Padding::horizontal(1))
-        .title(Line::from(Span::styled(
-            " Show ",
-            Style::default()
-                .fg(selector_title_color(theme))
-                .bg(bg)
-                .add_modifier(Modifier::BOLD),
-        )))
-        .title_alignment(Alignment::Center)
+    selector_menu_block(theme, " Show ", base_bg(theme))
 }
 
 const COMMIT_MENU_SHA_COL_WIDTH: usize = 8;

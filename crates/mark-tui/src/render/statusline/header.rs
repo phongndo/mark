@@ -49,11 +49,10 @@ pub(crate) fn statusline_header_line(app: &DiffApp, width: usize) -> Line<'stati
     let mut spans = Vec::new();
 
     push_statusline_left_spans(&mut spans, app, &mut left_width);
-    let left_used = width.saturating_sub(right_width).saturating_sub(left_width);
-    let gap = width.saturating_sub(left_used).saturating_sub(right_width);
-    if gap > 0 {
+    // The left side's unused width is the gap before the right side.
+    if left_width > 0 {
         spans.push(Span::styled(
-            " ".repeat(gap),
+            " ".repeat(left_width),
             Style::default().bg(statusline_bg(app.config.theme)),
         ));
     }

@@ -2,9 +2,11 @@ use mark_diff::DiffFile;
 use mark_session::{ProtocolError, RangeTarget, ReviewAnchor, ReviewAnchorScope, SourceRange};
 
 use crate::{
-    annotation::{AnnotationKey, AnnotationScope, AnnotationSide},
+    annotation::{AnnotationKey, AnnotationScope, AnnotationSide, diff_file_has_path},
     app::DiffApp,
 };
+
+use super::find_file;
 
 pub(crate) fn validate(
     app: &DiffApp,
@@ -76,20 +78,14 @@ pub(crate) fn to_protocol(app: &DiffApp, key: &AnnotationKey) -> ReviewAnchor {
             new_start,
             new_count,
         } => {
-            anchor.hunk = app.document.changeset.files.iter().find_map(|file| {
-                (file.old_path() == Some(key.path.as_str())
-                    || file.new_path() == Some(key.path.as_str()))
-                .then(|| {
-                    file.hunks().iter().position(|hunk| {
-                        hunk.old_start() == old_start
-                            && hunk.old_count() == old_count
-                            && hunk.new_start() == new_start
-                            && hunk.new_count() == new_count
-                    })
-                })
-                .flatten()
-                .map(|index| index + 1)
-            });
+            anchor.hunk = app
+                .document
+                .changeset
+                .files
+                .iter()
+                .filter(|file| diff_file_has_path(file, &key.path))
+                .find_map(|file| key.hunk_index_in(file))
+                .map(|index| index + 1);
             if anchor.hunk.is_none() {
                 anchor.range = Some(RangeTarget {
                     old: source_range(old_start, old_count),
@@ -103,28 +99,6 @@ pub(crate) fn to_protocol(app: &DiffApp, key: &AnnotationKey) -> ReviewAnchor {
         },
     }
     anchor
-}
-
-fn find_file<'a>(app: &'a DiffApp, path: &str) -> Result<&'a DiffFile, ProtocolError> {
-    let mut matches = app
-        .document
-        .changeset
-        .files
-        .iter()
-        .filter(|file| file.old_path() == Some(path) || file.new_path() == Some(path));
-    let file = matches.next().ok_or_else(|| {
-        ProtocolError::new(
-            "path_not_found",
-            format!("file is not in the loaded changeset: {path}"),
-        )
-    })?;
-    if matches.next().is_some() {
-        return Err(ProtocolError::new(
-            "ambiguous_path",
-            format!("path matches multiple files in the changeset: {path}"),
-        ));
-    }
-    Ok(file)
 }
 
 fn validate_line(
@@ -173,18 +147,19 @@ fn validate_range(file: &DiffFile, range: &RangeTarget) -> Result<AnnotationKey,
         .map(|range| validate_source_range(file, AnnotationSide::New, range))
         .transpose()?;
     let (side, line) = new
-        .map(|(_, end, _)| (AnnotationSide::New, end))
-        .or_else(|| old.map(|(_, end, _)| (AnnotationSide::Old, end)))
+        .map(|end| (AnnotationSide::New, end))
+        .or_else(|| old.map(|end| (AnnotationSide::Old, end)))
         .expect("range has one side");
     AnnotationKey::for_file_line(file, side, line)
         .ok_or_else(|| ProtocolError::new("anchor_not_found", "range has no source path"))
 }
 
+/// Validates that every line of `range` exists on `side` and returns its end line.
 fn validate_source_range(
     file: &DiffFile,
     side: AnnotationSide,
     range: SourceRange,
-) -> Result<(usize, usize, usize), ProtocolError> {
+) -> Result<usize, ProtocolError> {
     let count = range
         .end
         .checked_sub(range.start)
@@ -212,7 +187,7 @@ fn validate_source_range(
             "every line in a comment range must exist in the loaded diff",
         ));
     }
-    Ok((range.start, range.end, count))
+    Ok(range.end)
 }
 
 fn source_range(start: usize, count: usize) -> Option<SourceRange> {

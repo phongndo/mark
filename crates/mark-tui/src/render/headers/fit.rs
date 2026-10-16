@@ -16,28 +16,13 @@ pub(crate) fn header_spans(
     width: usize,
     styles: HeaderStyles,
 ) -> Vec<Span<'static>> {
-    if width == 0 {
-        return Vec::new();
-    }
-
-    let delta_width = delta_parts_width(delta_parts);
-    if delta_width >= width {
-        let mut spans = Vec::new();
-        push_fitted_delta_spans(&mut spans, delta_parts, width, styles);
-        return spans;
-    }
-
-    let delta_gap = usize::from(delta_width > 0);
-    let left_width = width.saturating_sub(delta_width).saturating_sub(delta_gap);
-    let fitted = fitted_prefixed_parts(prefix, body, left_width);
-    let mut spans = Vec::new();
-    let left_used = push_prefixed_spans(&mut spans, fitted, styles);
-    let gap = width.saturating_sub(left_used).saturating_sub(delta_width);
-    if gap > 0 {
-        spans.push(Span::styled(" ".repeat(gap), styles.fill));
-    }
-    push_delta_spans(&mut spans, delta_parts, styles);
-    spans
+    header_spans_with_left(delta_parts, width, styles, |spans, left_width| {
+        push_prefixed_spans(
+            spans,
+            fitted_prefixed_parts(prefix, body, left_width),
+            styles,
+        )
+    })
 }
 
 pub(crate) fn hunk_header_spans_with_delta(
@@ -47,22 +32,34 @@ pub(crate) fn hunk_header_spans_with_delta(
     width: usize,
     styles: HeaderStyles,
 ) -> Vec<Span<'static>> {
+    header_spans_with_left(delta_parts, width, styles, |spans, left_width| {
+        push_header_prefix_and_body_spans(spans, prefix_parts, body, left_width, styles)
+    })
+}
+
+/// Lays out a header as left-aligned content and right-aligned delta parts.
+/// `push_left` fits the left content into the given width and returns the
+/// width it used; the delta parts alone are fitted when nothing else fits.
+fn header_spans_with_left(
+    delta_parts: &[DeltaPart],
+    width: usize,
+    styles: HeaderStyles,
+    push_left: impl FnOnce(&mut Vec<Span<'static>>, usize) -> usize,
+) -> Vec<Span<'static>> {
     if width == 0 {
         return Vec::new();
     }
 
+    let mut spans = Vec::new();
     let delta_width = delta_parts_width(delta_parts);
     if delta_width >= width {
-        let mut spans = Vec::new();
         push_fitted_delta_spans(&mut spans, delta_parts, width, styles);
         return spans;
     }
 
     let delta_gap = usize::from(delta_width > 0);
     let left_width = width.saturating_sub(delta_width).saturating_sub(delta_gap);
-    let mut spans = Vec::new();
-    let left_used =
-        push_header_prefix_and_body_spans(&mut spans, prefix_parts, body, left_width, styles);
+    let left_used = push_left(&mut spans, left_width);
     let gap = width.saturating_sub(left_used).saturating_sub(delta_width);
     if gap > 0 {
         spans.push(Span::styled(" ".repeat(gap), styles.fill));
@@ -84,7 +81,7 @@ pub(crate) fn push_header_prefix_and_body_spans(
 
     let prefix_width = header_span_parts_width(prefix_parts);
     if prefix_width >= width {
-        return push_fitted_header_span_parts(spans, prefix_parts, width, true);
+        return push_fitted_header_span_parts(spans, prefix_parts, width);
     }
 
     let mut used = push_header_span_parts(spans, prefix_parts);
@@ -125,14 +122,13 @@ pub(crate) fn push_fitted_header_span_parts(
     spans: &mut Vec<Span<'static>>,
     parts: &[HeaderSpanPart],
     width: usize,
-    ellipsis: bool,
 ) -> usize {
     if width == 0 {
         return 0;
     }
 
     let source_width = header_span_parts_width(parts);
-    if !ellipsis || source_width <= width {
+    if source_width <= width {
         return push_fitted_header_span_part_prefix(spans, parts, width);
     }
 

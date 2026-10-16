@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use mark_diff::DiffFile;
 use serde::Serialize;
 
 use crate::app::DiffApp;
@@ -30,7 +31,8 @@ pub(crate) struct FinalVerdict {
 pub(crate) struct ReviewLifecycleState {
     pub(crate) pass: u64,
     pub(crate) reviewed_files: BTreeSet<String>,
-    pub(crate) reviewed_hunks: BTreeSet<String>,
+    /// Display path and one-based hunk index.
+    pub(crate) reviewed_hunks: BTreeSet<(String, usize)>,
     pub(crate) changed_files: BTreeSet<String>,
     pub(crate) verdict: Option<FinalVerdict>,
 }
@@ -69,17 +71,16 @@ impl DiffApp {
         self.runtime.dirty = true;
     }
 
-    pub(crate) fn toggle_reviewed_progress(&mut self) {
+    /// The file under the viewport focus row (or the selected file), with the
+    /// one-based index of the hunk the focus row belongs to, if any.
+    pub(crate) fn focused_file_and_hunk(&self) -> Option<(usize, &DiffFile, Option<usize>)> {
         let focus_row = self.viewport_focus_row();
         let file_index = self
             .document
             .model
             .file_at_row(focus_row)
             .unwrap_or(self.sidebar.selected_file.get());
-        let Some(file) = self.document.changeset.files.get(file_index) else {
-            return;
-        };
-        let path = file.display_path().to_owned();
+        let file = self.document.changeset.files.get(file_index)?;
         let hunk = self
             .document
             .model
@@ -87,6 +88,14 @@ impl DiffApp {
             .and_then(|row| row.typed_hunk_key())
             .filter(|(candidate, _)| candidate.get() == file_index)
             .map(|(_, hunk)| hunk.get() + 1);
+        Some((file_index, file, hunk))
+    }
+
+    pub(crate) fn toggle_reviewed_progress(&mut self) {
+        let Some((_, file, hunk)) = self.focused_file_and_hunk() else {
+            return;
+        };
+        let path = file.display_path().to_owned();
         let reviewed = if let Some(hunk) = hunk {
             let reviewed = !self.annotations_state.lifecycle.hunk_reviewed(&path, hunk);
             self.annotations_state
@@ -110,12 +119,12 @@ impl DiffApp {
 }
 
 impl ReviewLifecycleState {
-    pub(crate) fn mark_file(&mut self, path: &str) {
+    fn mark_file(&mut self, path: &str) {
         self.reviewed_files.insert(path.to_owned());
     }
 
-    pub(crate) fn mark_hunk(&mut self, path: &str, hunk: usize) {
-        self.reviewed_hunks.insert(format!("{path}\0{hunk}"));
+    fn mark_hunk(&mut self, path: &str, hunk: usize) {
+        self.reviewed_hunks.insert((path.to_owned(), hunk));
     }
 
     pub(crate) fn set_file_reviewed(&mut self, path: &str, reviewed: bool) {
@@ -124,7 +133,7 @@ impl ReviewLifecycleState {
         } else {
             self.reviewed_files.remove(path);
             self.reviewed_hunks
-                .retain(|hunk| !hunk.starts_with(&format!("{path}\0")));
+                .retain(|(hunk_path, _)| hunk_path != path);
         }
     }
 
@@ -132,7 +141,7 @@ impl ReviewLifecycleState {
         if reviewed {
             self.mark_hunk(path, hunk);
         } else {
-            self.reviewed_hunks.remove(&format!("{path}\0{hunk}"));
+            self.reviewed_hunks.remove(&(path.to_owned(), hunk));
         }
     }
 
@@ -141,6 +150,6 @@ impl ReviewLifecycleState {
     }
 
     pub(crate) fn hunk_reviewed(&self, path: &str, hunk: usize) -> bool {
-        self.reviewed_hunks.contains(&format!("{path}\0{hunk}"))
+        self.reviewed_hunks.contains(&(path.to_owned(), hunk))
     }
 }

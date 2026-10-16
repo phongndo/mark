@@ -9,29 +9,22 @@ use mark_session::{
 
 use crate::{app::DiffApp, model::UiRow};
 
-use super::{COMMENT_PAGE_RESERVE_BYTES, RESPONSE_RESULT_BUDGET_BYTES, runtime::SessionRuntime};
+use super::{
+    COMMENT_PAGE_RESERVE_BYTES, RESPONSE_RESULT_BUDGET_BYTES, find_file, parse_cursor,
+    runtime::SessionRuntime,
+};
 
 const MAX_HUNK_HEADER_BYTES: usize = 256;
 const DEFAULT_LINE_CONTEXT: usize = 3;
 
 pub(crate) fn focus(app: &DiffApp) -> Option<Focus> {
-    let focus_row = app.viewport_focus_row();
-    let row = app.document.model.row(focus_row);
-    let file_index = app
-        .document
-        .model
-        .file_at_row(focus_row)
-        .unwrap_or(app.sidebar.selected_file.get());
-    let file = app.document.changeset.files.get(file_index)?;
-    let hunk = row
-        .and_then(UiRow::typed_hunk_key)
-        .filter(|(file, _)| file.get() == file_index)
-        .map(|(_, hunk)| hunk.get() + 1)
-        .or_else(|| {
-            app.focused_hunk_for_viewport(app.viewport.viewport_rows)
-                .filter(|(file, _)| file.get() == file_index)
-                .map(|(_, hunk)| hunk.get() + 1)
-        });
+    let (file_index, file, hunk) = app.focused_file_and_hunk()?;
+    let row = app.document.model.row(app.viewport_focus_row());
+    let hunk = hunk.or_else(|| {
+        app.focused_hunk_for_viewport(app.viewport.viewport_rows)
+            .filter(|(file, _)| file.get() == file_index)
+            .map(|(_, hunk)| hunk.get() + 1)
+    });
     let (old_line, new_line) = row
         .and_then(|row| focus_coordinates(app, row))
         .unwrap_or((None, None));
@@ -251,12 +244,11 @@ fn patch_with_cache(
     if cache.as_ref().is_none_or(|cached| {
         cached.generation != app.document.generation
             || cached.file_path != file_path
-            || cached.selection != selection
+            || cached.plan.selection != selection
     }) {
         *cache = Some(PatchCache {
             generation: app.document.generation,
             file_path: file_path.to_owned(),
-            selection,
             plan: PatchPlan::build(file, selection)?,
         });
     }
@@ -321,27 +313,6 @@ fn file_summary(app: &DiffApp, file: &DiffFile) -> FileSummary {
         hunks_truncated: file.hunks().len() > hunks.len(),
         hunks,
     }
-}
-
-fn find_file<'a>(app: &'a DiffApp, path: &str) -> Result<&'a DiffFile, ProtocolError> {
-    let mut matches = app.document.changeset.files.iter().filter(|file| {
-        file.old_path() == Some(path)
-            || file.new_path() == Some(path)
-            || file.display_path() == path
-    });
-    let file = matches.next().ok_or_else(|| {
-        ProtocolError::new(
-            "path_not_found",
-            format!("file is not in the loaded changeset: {path}"),
-        )
-    })?;
-    if matches.next().is_some() {
-        return Err(ProtocolError::new(
-            "ambiguous_path",
-            format!("path matches multiple files in the changeset: {path}"),
-        ));
-    }
-    Ok(file)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -418,7 +389,6 @@ fn patch_selection(file: &DiffFile, params: &PatchParams) -> Result<PatchSelecti
 pub(super) struct PatchCache {
     generation: u64,
     file_path: String,
-    selection: PatchSelection,
     plan: PatchPlan,
 }
 
@@ -679,17 +649,6 @@ impl BoundedPatch {
     }
 }
 
-fn parse_cursor(cursor: Option<&str>) -> Result<usize, ProtocolError> {
-    cursor
-        .map(|cursor| {
-            cursor.parse::<usize>().map_err(|_| {
-                ProtocolError::new("invalid_cursor", "cursor is not a valid continuation token")
-            })
-        })
-        .transpose()
-        .map(Option::unwrap_or_default)
-}
-
 fn truncate_utf8(text: &str, max_bytes: usize) -> String {
     let end = previous_char_boundary(text, text.len().min(max_bytes));
     text[..end].to_owned()
@@ -830,7 +789,9 @@ mod tests {
             .lifecycle
             .changed_files
             .insert("src/lib.rs".to_owned());
-        app.annotations_state.lifecycle.mark_hunk("src/lib.rs", 1);
+        app.annotations_state
+            .lifecycle
+            .set_hunk_reviewed("src/lib.rs", 1, true);
 
         let result = review(
             &app,

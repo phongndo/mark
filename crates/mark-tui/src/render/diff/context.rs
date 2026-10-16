@@ -9,15 +9,16 @@ use crate::{
         style::{diff_base_bg, diff_indicator_span},
         text::{fit_padded, format_count},
     },
-    syntax::DiffSide,
+    syntax::{DiffSide, HighlightedLineRef},
     theme::DiffTheme,
 };
 
 use super::{
     split::{
-        SplitCellRender, SplitGrepRender, SplitSide, highlight_wrapped_split_grep_line,
-        split_cell_spans_at_scroll, split_cell_spans_at_scroll_with_focus_and_continuation,
-        wrapped_segment_scroll, wrapped_side_seeks,
+        SplitCellRender, SplitCellSpanRender, SplitGrepRender, SplitGrepText, SplitSide,
+        highlight_wrapped_split_grep_line, split_cell_spans_at_scroll,
+        split_cell_spans_at_scroll_with_focus_and_continuation, wrapped_segment_scroll,
+        wrapped_side_seeks,
     },
     unified::{
         WrappedLineRender, render_unified_line_at_scroll, render_unified_line_wrapped_with_focus,
@@ -125,18 +126,14 @@ pub(crate) fn context_action_line(
     Line::from(spans)
 }
 
-pub(crate) fn render_context_line(
+/// The full-file context row as a diff line, with its syntax highlighting.
+fn context_diff_line(
     app: &mut DiffApp,
     file: usize,
     old_line: usize,
     new_line: usize,
-    row_index: usize,
-    width: usize,
-) -> Line<'static> {
-    let theme = app.config.theme;
-    let horizontal_scroll = app.viewport.horizontal_scroll;
-    let side = app.context_source_side(file);
-    let syntax = side.and_then(|side| {
+) -> (DiffLine, Option<HighlightedLineRef>) {
+    let syntax = app.context_source_side(file).and_then(|side| {
         let line_number = match side {
             DiffSide::Old => old_line,
             DiffSide::New => new_line,
@@ -148,13 +145,26 @@ pub(crate) fn render_context_line(
         new_line,
         app.rendered_context_line_text(file, old_line, new_line),
     );
+    (diff_line, syntax)
+}
+
+pub(crate) fn render_context_line(
+    app: &mut DiffApp,
+    file: usize,
+    old_line: usize,
+    new_line: usize,
+    row_index: usize,
+    width: usize,
+) -> Line<'static> {
+    let theme = app.config.theme;
+    let horizontal_scroll = app.viewport.horizontal_scroll;
+    let (diff_line, syntax) = context_diff_line(app, file, old_line, new_line);
 
     match app.viewport.layout {
         DiffLayoutMode::Unified => render_unified_line_at_scroll(
             &diff_line,
             syntax.as_deref(),
             &[],
-            row_index,
             width,
             theme,
             horizontal_scroll,
@@ -180,19 +190,7 @@ pub(crate) fn render_context_line_wrapped(
     rows: std::ops::Range<usize>,
 ) -> Vec<Line<'static>> {
     let theme = app.config.theme;
-    let side = app.context_source_side(file);
-    let syntax = side.and_then(|side| {
-        let line_number = match side {
-            DiffSide::Old => old_line,
-            DiffSide::New => new_line,
-        };
-        app.syntax_file_line(file, side, line_number)
-    });
-    let diff_line = DiffLine::context(
-        old_line,
-        new_line,
-        app.rendered_context_line_text(file, old_line, new_line),
-    );
+    let (diff_line, syntax) = context_diff_line(app, file, old_line, new_line);
 
     match app.viewport.layout {
         DiffLayoutMode::Unified => render_unified_line_wrapped_with_focus(
@@ -296,43 +294,38 @@ pub(crate) fn render_split_context_line_wrapped(
     };
     let rows = left_scrolls.rows.max(right_scrolls.rows);
     let end = window.end.min(rows);
+    let grep = SplitGrepText::new(grep_filter, Some(line), Some(line));
     let mut lines = Vec::with_capacity(end.saturating_sub(window.start));
     for wrap_index in window.start..end {
         let left_scroll = wrapped_segment_scroll(&left_scrolls, left_past_end, wrap_index);
         let right_scroll = wrapped_segment_scroll(right_scrolls, right_past_end, wrap_index);
         let visual_row = row_index.saturating_add(wrap_index);
+        let cell = |side, width, scroll| SplitCellSpanRender {
+            cell: SplitCellRender {
+                side,
+                row_index: visual_row,
+                width,
+                theme,
+            },
+            scroll,
+            focused: false,
+            continuation: wrap_index > 0,
+        };
         let mut spans = split_cell_spans_at_scroll_with_focus_and_continuation(
             Some((line, &text)),
             syntax,
             &[],
-            SplitCellRender {
-                side: SplitSide::Old,
-                row_index: visual_row,
-                width: left_width,
-                theme,
-            },
-            left_scroll,
-            false,
-            wrap_index > 0,
+            cell(SplitSide::Old, left_width, left_scroll),
         );
         spans.extend(split_cell_spans_at_scroll_with_focus_and_continuation(
             Some((line, &text)),
             syntax,
             &[],
-            SplitCellRender {
-                side: SplitSide::New,
-                row_index: visual_row,
-                width: right_width,
-                theme,
-            },
-            right_scroll,
-            false,
-            wrap_index > 0,
+            cell(SplitSide::New, right_width, right_scroll),
         ));
         lines.push(highlight_wrapped_split_grep_line(
             Line::from(spans),
-            Some(line),
-            Some(line),
+            &grep,
             SplitGrepRender {
                 query: grep_filter,
                 width,

@@ -39,7 +39,7 @@ pub(crate) fn draw_error_log(frame: &mut Frame<'_>, app: &DiffApp, area: Rect) {
     }
 
     frame.render_widget(
-        Paragraph::new(Text::from(error_log.to_owned()))
+        Paragraph::new(Text::from(error_log))
             .style(Style::default().fg(app.config.theme.foreground).bg(bg))
             .wrap(Wrap { trim: false }),
         body_area,

@@ -1,7 +1,7 @@
 use ratatui::prelude::Line;
 
 use crate::{
-    annotation::AnnotationKey,
+    annotation::{AnnotationDraft, AnnotationKey},
     app::DiffApp,
     controls::DiffLayoutMode,
     model::{FileIndex, HunkIndex, UiRow},
@@ -59,63 +59,17 @@ fn build_unwrapped_viewport_lines(
         if app.annotation_cursor_at_visual_scroll(visual_row) {
             line = highlighted_annotation_row(line, row, layout, width, theme);
         }
-        for (hint, scope, side, existing) in
-            app.annotation_target_hints_at_visual_scroll(visual_row)
-        {
-            line = apply_annotation_target_hint(
-                line,
-                layout,
-                width,
-                AnnotationTargetHint {
-                    scope,
-                    side,
-                    hint,
-                    existing_annotation: existing,
-                    uppercase: app.config.syntax_settings.annotations.uppercase_hints,
-                },
-                theme,
-            );
-        }
-        lines.push(line);
+        lines.push(apply_annotation_target_hints(app, line, visual_row, width));
 
         if has_annotation_blocks {
-            for key in app.annotation_keys_at_model_row(visual_row, row) {
-                if let Some(draft) = draft
-                    .as_ref()
-                    .filter(|d| d.model_row_index == visual_row && d.key == key)
-                {
-                    let label = app.annotation_block_label(&draft.key, true);
-                    push_annotation_block(
-                        &mut lines,
-                        render_annotation_compose_block(draft, width, theme, Some(&label)),
-                        visible_rows,
-                    );
-                } else if let Some(text) = app.annotations_state.annotations.get(&key)
-                    && draft.as_ref().is_none_or(|d| d.key != key)
-                {
-                    let label = app.annotation_block_label(&key, false);
-                    let block_scroll = annotation_saved_block_scroll(app, &key);
-                    let focused = app.annotation_cursor_focuses_saved_key(&key);
-                    push_annotation_block(
-                        &mut lines,
-                        highlight_saved_annotation_block(
-                            render_annotation_saved_block(
-                                text,
-                                width,
-                                theme,
-                                Some(&label),
-                                app.annotations_state.annotations.is_human_only(&key),
-                            ),
-                            width,
-                            theme,
-                            focused,
-                        )
-                        .into_iter()
-                        .skip(block_scroll),
-                        visible_rows,
-                    );
-                }
-            }
+            push_annotation_blocks(
+                app,
+                &mut lines,
+                draft.as_ref(),
+                (visual_row, row),
+                width,
+                visible_rows,
+            );
         }
     }
 
@@ -158,66 +112,20 @@ fn build_wrapped_viewport_lines(
             if app.annotation_cursor_at_model_row(row_index) {
                 line = highlighted_annotation_row(line, row, layout, width, theme);
             }
-            for (hint, scope, side, existing) in
-                app.annotation_target_hints_at_visual_scroll(visual_row)
-            {
-                line = apply_annotation_target_hint(
-                    line,
-                    layout,
-                    width,
-                    AnnotationTargetHint {
-                        scope,
-                        side,
-                        hint,
-                        existing_annotation: existing,
-                        uppercase: app.config.syntax_settings.annotations.uppercase_hints,
-                    },
-                    theme,
-                );
-            }
-            lines.push(line);
+            lines.push(apply_annotation_target_hints(app, line, visual_row, width));
             visual_row = visual_row.saturating_add(1);
             if lines.len() >= visible_rows {
                 break;
             }
             if is_last_wrap && has_annotation_blocks {
-                for key in app.annotation_keys_at_model_row(row_index, row) {
-                    if let Some(draft) = draft
-                        .as_ref()
-                        .filter(|d| d.model_row_index == row_index && d.key == key)
-                    {
-                        let label = app.annotation_block_label(&draft.key, true);
-                        push_annotation_block(
-                            &mut lines,
-                            render_annotation_compose_block(draft, width, theme, Some(&label)),
-                            visible_rows,
-                        );
-                    } else if let Some(text) = app.annotations_state.annotations.get(&key)
-                        && draft.as_ref().is_none_or(|d| d.key != key)
-                    {
-                        let label = app.annotation_block_label(&key, false);
-                        let block_scroll = annotation_saved_block_scroll(app, &key);
-                        let focused = app.annotation_cursor_focuses_saved_key(&key);
-                        push_annotation_block(
-                            &mut lines,
-                            highlight_saved_annotation_block(
-                                render_annotation_saved_block(
-                                    text,
-                                    width,
-                                    theme,
-                                    Some(&label),
-                                    app.annotations_state.annotations.is_human_only(&key),
-                                ),
-                                width,
-                                theme,
-                                focused,
-                            )
-                            .into_iter()
-                            .skip(block_scroll),
-                            visible_rows,
-                        );
-                    }
-                }
+                push_annotation_blocks(
+                    app,
+                    &mut lines,
+                    draft.as_ref(),
+                    (row_index, row),
+                    width,
+                    visible_rows,
+                );
             }
         }
         row_offset = 0;
@@ -225,6 +133,76 @@ fn build_wrapped_viewport_lines(
     }
     lines.truncate(visible_rows);
     lines
+}
+
+fn apply_annotation_target_hints(
+    app: &DiffApp,
+    mut line: Line<'static>,
+    visual_row: usize,
+    width: usize,
+) -> Line<'static> {
+    for (hint, scope, side, existing) in app.annotation_target_hints_at_visual_scroll(visual_row) {
+        line = apply_annotation_target_hint(
+            line,
+            app.viewport.layout,
+            width,
+            AnnotationTargetHint {
+                scope,
+                side,
+                hint,
+                existing_annotation: existing,
+                uppercase: app.config.syntax_settings.annotations.uppercase_hints,
+            },
+            app.config.theme,
+        );
+    }
+    line
+}
+
+/// Pushes the draft or saved annotation blocks anchored to `model_row`.
+fn push_annotation_blocks(
+    app: &DiffApp,
+    lines: &mut Vec<Line<'static>>,
+    draft: Option<&AnnotationDraft>,
+    (model_row, row): (usize, UiRow),
+    width: usize,
+    visible_rows: usize,
+) {
+    let theme = app.config.theme;
+    for key in app.annotation_keys_at_model_row(model_row, row) {
+        if let Some(draft) = draft.filter(|d| d.model_row_index == model_row && d.key == key) {
+            let label = app.annotation_block_label(&draft.key, true);
+            push_annotation_block(
+                lines,
+                render_annotation_compose_block(draft, width, theme, Some(&label)),
+                visible_rows,
+            );
+        } else if let Some(text) = app.annotations_state.annotations.get(&key)
+            && draft.is_none_or(|d| d.key != key)
+        {
+            let label = app.annotation_block_label(&key, false);
+            let block_scroll = annotation_saved_block_scroll(app, &key);
+            let focused = app.annotation_cursor_focuses_saved_key(&key);
+            push_annotation_block(
+                lines,
+                highlight_saved_annotation_block(
+                    render_annotation_saved_block(
+                        text,
+                        width,
+                        theme,
+                        Some(&label),
+                        app.annotations_state.annotations.is_human_only(&key),
+                    ),
+                    width,
+                    theme,
+                    focused,
+                )
+                .into_iter()
+                .skip(block_scroll),
+                visible_rows,
+            );
+        }
+    }
 }
 
 fn highlighted_annotation_row(

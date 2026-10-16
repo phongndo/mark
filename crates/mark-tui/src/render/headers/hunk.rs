@@ -4,7 +4,7 @@ use ratatui::prelude::{Color, Line, Span, Style};
 use crate::{
     render::{
         headers::{HeaderStyles, compact_delta_parts, hunk_header_spans_with_delta},
-        style::{diff_base_bg, diff_indicator_span, focused_diff_indicator_span},
+        style::{diff_base_bg, diff_indicator_span_for_focus},
     },
     theme::DiffTheme,
 };
@@ -80,11 +80,11 @@ fn hunk_header_line_with_focus_and_context(
     let content_bg = diff_base_bg(theme);
     let content_width = width.saturating_sub(1);
     let mut spans = Vec::new();
-    spans.push(if focused {
-        focused_diff_indicator_span(DiffLineKind::Meta, theme)
-    } else {
-        diff_indicator_span(DiffLineKind::Meta, theme)
-    });
+    spans.push(diff_indicator_span_for_focus(
+        DiffLineKind::Meta,
+        theme,
+        focused,
+    ));
     if content_width > 0 {
         spans.push(Span::styled(" ", Style::default().bg(content_bg)));
         if content_width > 1 {

@@ -59,10 +59,12 @@ pub(crate) fn filter_status_line(app: &DiffApp, width: usize) -> Line<'static> {
         push_grep_filter_bar_spans(app, &mut spans, &mut left_width);
     }
 
-    let left_used = width.saturating_sub(right_width).saturating_sub(left_width);
-    let gap = width.saturating_sub(left_used).saturating_sub(right_width);
-    if gap > 0 {
-        spans.push(Span::styled(" ".repeat(gap), Style::default().bg(bg)));
+    // The left side's unused width is the gap before the right side.
+    if left_width > 0 {
+        spans.push(Span::styled(
+            " ".repeat(left_width),
+            Style::default().bg(bg),
+        ));
     }
     if let Some(right) = right
         && right_width > 0

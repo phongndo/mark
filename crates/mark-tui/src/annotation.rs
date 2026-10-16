@@ -200,6 +200,25 @@ impl AnnotationKey {
         ))
     }
 
+    /// Index of the hunk in `file` that a hunk-scoped key was created from.
+    pub(crate) fn hunk_index_in(&self, file: &DiffFile) -> Option<usize> {
+        let AnnotationScope::Hunk {
+            old_start,
+            old_count,
+            new_start,
+            new_count,
+        } = self.scope
+        else {
+            return None;
+        };
+        file.hunks().iter().position(|hunk| {
+            hunk.old_start() == old_start
+                && hunk.old_count() == old_count
+                && hunk.new_start() == new_start
+                && hunk.new_count() == new_count
+        })
+    }
+
     fn new(path: &str, side: AnnotationSide, line: usize, scope: AnnotationScope) -> Self {
         Self {
             path: path.to_owned(),
@@ -273,6 +292,11 @@ fn preferred_file_path_and_side(file: &DiffFile) -> Option<(&str, AnnotationSide
     file.new_path()
         .map(|path| (path, AnnotationSide::New))
         .or_else(|| file.old_path().map(|path| (path, AnnotationSide::Old)))
+}
+
+/// Whether `path` names `file`: either side of a rename, or its display path.
+pub(crate) fn diff_file_has_path(file: &DiffFile, path: &str) -> bool {
+    file.old_path() == Some(path) || file.new_path() == Some(path) || file.display_path() == path
 }
 
 pub(crate) fn paired_old_line_for_addition(

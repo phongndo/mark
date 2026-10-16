@@ -4,6 +4,7 @@ use super::{
 };
 use crate::annotation::{
     AnnotationDraft, AnnotationKey, AnnotationKeyIndex, AnnotationScope, AnnotationSide,
+    diff_file_has_path,
 };
 use crate::editor::{configured_editor, open_text_in_editor};
 use crate::keymap::{AnnotationMenuAction, GlobalAction, MenuAction};
@@ -143,7 +144,7 @@ impl DiffApp {
         true
     }
 
-    fn forget_annotation_layout(&mut self, key: &AnnotationKey) {
+    pub(crate) fn forget_annotation_layout(&mut self, key: &AnnotationKey) {
         self.annotations_state.annotation_block_scroll = None;
         self.annotations_state
             .annotation_rows
@@ -156,7 +157,7 @@ impl DiffApp {
             .remove(key);
     }
 
-    fn forget_all_annotation_layout(&mut self) {
+    pub(crate) fn forget_all_annotation_layout(&mut self) {
         self.annotations_state.annotation_block_scroll = None;
         self.annotations_state.annotation_rows.borrow_mut().clear();
         *self.annotations_state.annotation_keys_by_row.borrow_mut() = None;
@@ -201,10 +202,7 @@ impl DiffApp {
                     .changeset
                     .files
                     .iter()
-                    .find(|file| {
-                        file.old_path() == Some(key.path.as_str())
-                            || file.new_path() == Some(key.path.as_str())
-                    })
+                    .find(|file| diff_file_has_path(file, &key.path))
                     .map(|file| file.status())
                     .unwrap_or(FileStatus::Unknown);
                 Some(AnnotationMenuItem {
@@ -212,9 +210,7 @@ impl DiffApp {
                     model_row,
                     anchor_scroll: self.annotation_anchor_visual_scroll(model_row),
                     status,
-                    label: self
-                        .annotation_label(key)
-                        .unwrap_or_else(|| format!("{}", key.line)),
+                    label: key.menu_label(),
                     preview: text
                         .lines()
                         .find(|line| !line.trim().is_empty())
@@ -596,18 +592,8 @@ impl DiffApp {
     ) -> Option<usize> {
         match key.scope {
             AnnotationScope::File => return self.document.model.file_start_row(file_index.get()),
-            AnnotationScope::Hunk {
-                old_start,
-                old_count,
-                new_start,
-                new_count,
-            } => {
-                let hunk = file.hunks().iter().position(|hunk| {
-                    hunk.old_start() == old_start
-                        && hunk.old_count() == old_count
-                        && hunk.new_start() == new_start
-                        && hunk.new_count() == new_count
-                })?;
+            AnnotationScope::Hunk { .. } => {
+                let hunk = key.hunk_index_in(file)?;
                 let hunk_index = HunkIndex::new(hunk);
                 return self
                     .document

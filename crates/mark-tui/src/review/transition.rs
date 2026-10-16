@@ -1,9 +1,9 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use mark_diff::{DiffFile, DiffHunk};
 
 use crate::{
-    annotation::{AnnotationKey, AnnotationScope, AnnotationSide},
+    annotation::{AnnotationKey, AnnotationScope, AnnotationSide, diff_file_has_path},
     app::DiffApp,
     review::{ReviewAnchorEvidence, ReviewComment},
 };
@@ -13,11 +13,18 @@ const MAX_TRANSITION_EVIDENCE_BYTES: usize = 2 * 1024 * 1024;
 
 struct CapturedComment {
     comment: ReviewComment,
-    evidence: ReviewAnchorEvidence,
+    /// `None` when the evidence did not fit the transition budget, so a later
+    /// transition recaptures it instead of re-anchoring against nothing.
+    evidence: Option<ReviewAnchorEvidence>,
+}
+
+struct FileFingerprint {
+    display_path: String,
+    hash: String,
 }
 
 pub(crate) struct ReviewTransition {
-    file_fingerprints: BTreeMap<String, String>,
+    file_fingerprints: BTreeMap<String, FileFingerprint>,
     comments: Vec<CapturedComment>,
 }
 
@@ -30,16 +37,18 @@ impl ReviewTransition {
             .comments()
             .map(|comment| {
                 let mut comment = comment.clone();
-                let mut evidence = comment
+                let evidence = comment
                     .original_anchor_evidence
                     .take()
                     .unwrap_or_else(|| anchor_evidence(app, &comment.anchor));
                 let bytes = anchor_evidence_bytes(&evidence);
-                if evidence_bytes.saturating_add(bytes) > MAX_TRANSITION_EVIDENCE_BYTES {
-                    evidence = ReviewAnchorEvidence::default();
-                } else {
-                    evidence_bytes = evidence_bytes.saturating_add(bytes);
-                }
+                let evidence =
+                    if evidence_bytes.saturating_add(bytes) > MAX_TRANSITION_EVIDENCE_BYTES {
+                        None
+                    } else {
+                        evidence_bytes = evidence_bytes.saturating_add(bytes);
+                        Some(evidence)
+                    };
                 CapturedComment { comment, evidence }
             })
             .collect();
@@ -51,34 +60,53 @@ impl ReviewTransition {
 
     pub(crate) fn apply(self, app: &mut DiffApp) {
         let current_files = file_fingerprints(app);
-        let changed = changed_files(&self.file_fingerprints, &current_files);
+        let changed = changed_paths(&self.file_fingerprints, &current_files);
         if changed.is_empty() {
             return;
         }
         let lifecycle = &mut app.annotations_state.lifecycle;
         lifecycle.pass = lifecycle.pass.saturating_add(1);
-        lifecycle.changed_files = changed.clone();
+        lifecycle.changed_files =
+            changed_display_paths(&changed, &self.file_fingerprints, &current_files);
         lifecycle
             .reviewed_files
             .retain(|path| !changed.contains(path));
-        lifecycle.reviewed_hunks.retain(|key| {
-            key.split_once('\0')
-                .is_some_and(|(path, _)| !changed.contains(path))
-        });
+        lifecycle
+            .reviewed_hunks
+            .retain(|(path, _)| !changed.contains(path));
         lifecycle.verdict = None;
         let generation = app.document.generation;
-        let comments = self
+        let (comments, previous_anchors): (Vec<_>, Vec<_>) = self
             .comments
             .into_iter()
             .map(|captured| {
-                let anchor_changed = changed.contains(&captured.comment.anchor.path);
-                restore_comment(app, captured, generation, anchor_changed)
+                let previous_anchor = captured.comment.anchor.clone();
+                let anchor_changed = changed.contains(&previous_anchor.path);
+                let comment = restore_comment(app, captured, generation, anchor_changed);
+                (comment, previous_anchor)
             })
-            .collect();
-        let restore_result = app.annotations_state.annotations.restore_comments(comments);
-        invalidate_annotation_geometry(app);
+            .unzip();
+        let store = &mut app.annotations_state.annotations;
+        // A comment re-anchored onto a renamed path can exceed the store's path
+        // or byte limits. The previous anchors fit, so keep those comments at
+        // their previous anchor as stale rather than dropping any review notes.
+        // The store is left untouched when restoring fails.
+        let restore_result = store.restore_comments(comments.clone()).or_else(|_| {
+            let comments = comments
+                .into_iter()
+                .zip(previous_anchors)
+                .map(|(mut comment, previous_anchor)| {
+                    if comment.anchor.path != previous_anchor.path {
+                        comment.anchor = previous_anchor;
+                        comment.lifecycle = super::CommentLifecycle::Stale;
+                    }
+                    comment
+                })
+                .collect();
+            store.restore_comments(comments)
+        });
+        app.forget_all_annotation_layout();
         if restore_result.is_err() {
-            app.annotations_state.annotations = Default::default();
             app.set_error_log("could not re-anchor review comments after reload");
         }
     }
@@ -89,17 +117,7 @@ pub(crate) fn reset_review(app: &mut DiffApp) {
     app.annotations_state.lifecycle = Default::default();
     app.annotations_state.annotation_draft = None;
     app.annotations_state.sticky_annotation_draft = false;
-    invalidate_annotation_geometry(app);
-}
-
-fn invalidate_annotation_geometry(app: &mut DiffApp) {
-    app.annotations_state.annotation_block_scroll = None;
-    app.annotations_state.annotation_rows.borrow_mut().clear();
-    *app.annotations_state.annotation_keys_by_row.borrow_mut() = None;
-    app.annotations_state
-        .annotation_heights
-        .borrow_mut()
-        .clear();
+    app.forget_all_annotation_layout();
 }
 
 fn restore_comment(
@@ -112,9 +130,8 @@ fn restore_comment(
         mut comment,
         evidence,
     } = captured;
-    let (anchor, lifecycle) = if !anchor_changed {
-        (comment.anchor.clone(), comment.lifecycle)
-    } else {
+    let (anchor, lifecycle) = if anchor_changed {
+        let evidence = evidence.clone().unwrap_or_default();
         reanchor(app, &comment.anchor, &evidence).unwrap_or_else(|| {
             let lifecycle = if find_file(app, &comment.anchor.path).is_some() {
                 super::CommentLifecycle::Stale
@@ -123,11 +140,13 @@ fn restore_comment(
             };
             (comment.anchor.clone(), lifecycle)
         })
+    } else {
+        (comment.anchor.clone(), comment.lifecycle)
     };
     comment.anchor = anchor;
     comment.lifecycle = lifecycle;
     comment.document_generation = generation;
-    comment.original_anchor_evidence = Some(evidence);
+    comment.original_anchor_evidence = evidence;
     comment
 }
 
@@ -221,25 +240,13 @@ fn anchor_evidence(app: &DiffApp, anchor: &AnnotationKey) -> ReviewAnchorEvidenc
             },
             hunk_fingerprint: None,
         },
-        AnnotationScope::Hunk {
-            old_start,
-            old_count,
-            new_start,
-            new_count,
-        } => ReviewAnchorEvidence {
+        AnnotationScope::Hunk { .. } => ReviewAnchorEvidence {
             file_fingerprint,
             old_lines: Vec::new(),
             new_lines: Vec::new(),
-            hunk_fingerprint: file
-                .hunks()
-                .iter()
-                .find(|hunk| {
-                    hunk.old_start() == old_start
-                        && hunk.old_count() == old_count
-                        && hunk.new_start() == new_start
-                        && hunk.new_count() == new_count
-                })
-                .map(hunk_fingerprint),
+            hunk_fingerprint: anchor
+                .hunk_index_in(file)
+                .map(|index| hunk_fingerprint(&file.hunks()[index])),
         },
     }
 }
@@ -339,7 +346,7 @@ fn find_file<'a>(app: &'a DiffApp, path: &str) -> Option<&'a DiffFile> {
         .changeset
         .files
         .iter()
-        .find(|file| file.old_path() == Some(path) || file.new_path() == Some(path))
+        .find(|file| diff_file_has_path(file, path))
 }
 
 fn hunk_fingerprint(hunk: &DiffHunk) -> String {
@@ -354,7 +361,9 @@ fn hunk_fingerprint(hunk: &DiffHunk) -> String {
     hash.finish()
 }
 
-fn file_fingerprints(app: &DiffApp) -> BTreeMap<String, String> {
+/// Fingerprints keyed by every path alias, so comments anchored to either side
+/// of a renamed file see its changes.
+fn file_fingerprints(app: &DiffApp) -> BTreeMap<String, FileFingerprint> {
     let raw_segments = raw_file_segments(&app.document.changeset.raw_patch);
     let segments_match = raw_segments.len() == app.document.changeset.files.len();
     let mut fingerprints = BTreeMap::new();
@@ -372,13 +381,26 @@ fn file_fingerprints(app: &DiffApp) -> BTreeMap<String, String> {
         if segments_match {
             hash.update(raw_segments[index]);
         }
-        let fingerprint = hash.finish();
+        let hash = hash.finish();
+        let display_path = file.display_path();
         let aliases = [file.old_path(), file.new_path()];
         if file.old_path().is_none() && file.new_path().is_none() {
-            fingerprints.insert(file.display_path().to_owned(), fingerprint);
+            fingerprints.insert(
+                display_path.to_owned(),
+                FileFingerprint {
+                    display_path: display_path.to_owned(),
+                    hash,
+                },
+            );
         } else {
             for path in aliases.into_iter().flatten() {
-                fingerprints.insert(path.to_owned(), fingerprint.clone());
+                fingerprints.insert(
+                    path.to_owned(),
+                    FileFingerprint {
+                        display_path: display_path.to_owned(),
+                        hash: hash.clone(),
+                    },
+                );
             }
         }
     }
@@ -412,15 +434,35 @@ fn content_fingerprint(file: &DiffFile) -> String {
     hash.finish()
 }
 
-fn changed_files(
-    previous: &BTreeMap<String, String>,
-    current: &BTreeMap<String, String>,
-) -> std::collections::BTreeSet<String> {
+/// Path aliases whose file fingerprint differs between the two documents.
+fn changed_paths(
+    previous: &BTreeMap<String, FileFingerprint>,
+    current: &BTreeMap<String, FileFingerprint>,
+) -> BTreeSet<String> {
+    let hash = |fingerprints: &BTreeMap<String, FileFingerprint>, path: &str| {
+        fingerprints
+            .get(path)
+            .map(|fingerprint| fingerprint.hash.clone())
+    };
     previous
         .keys()
         .chain(current.keys())
-        .filter(|path| previous.get(*path) != current.get(*path))
+        .filter(|path| hash(previous, path) != hash(current, path))
         .cloned()
+        .collect()
+}
+
+/// One display path per changed file: the current file's when it still exists,
+/// otherwise the removed file's previous display path.
+fn changed_display_paths(
+    changed: &BTreeSet<String>,
+    previous: &BTreeMap<String, FileFingerprint>,
+    current: &BTreeMap<String, FileFingerprint>,
+) -> BTreeSet<String> {
+    changed
+        .iter()
+        .filter_map(|path| current.get(path).or_else(|| previous.get(path)))
+        .map(|fingerprint| fingerprint.display_path.clone())
         .collect()
 }
 
@@ -492,7 +534,10 @@ mod tests {
     #[test]
     fn unchanged_transition_preserves_live_review_state() {
         let mut source = app(&patch("new"));
-        source.annotations_state.lifecycle.mark_file("src/lib.rs");
+        source
+            .annotations_state
+            .lifecycle
+            .set_file_reviewed("src/lib.rs", true);
         source.annotations_state.lifecycle.verdict = Some(FinalVerdict {
             kind: VerdictKind::Approve,
             summary: Some("ready".to_owned()),
@@ -519,7 +564,10 @@ mod tests {
         let before = "diff --git a/src/lib.rs b/src/lib.rs\nold mode 100644\nnew mode 100755\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1 @@\n-old\n+new\n";
         let after = "diff --git a/src/lib.rs b/src/lib.rs\nold mode 100644\nnew mode 100700\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1 @@\n-old\n+new\n";
         let mut source = app(before);
-        source.annotations_state.lifecycle.mark_file("src/lib.rs");
+        source
+            .annotations_state
+            .lifecycle
+            .set_file_reviewed("src/lib.rs", true);
         source.annotations_state.lifecycle.verdict = Some(FinalVerdict {
             kind: VerdictKind::Approve,
             summary: None,
@@ -685,7 +733,7 @@ mod tests {
     }
 
     #[test]
-    fn renamed_file_changes_track_both_path_aliases() {
+    fn renamed_file_reports_its_display_path_once_and_reanchors_old_side() {
         let before = "diff --git a/old.rs b/new.rs\n--- a/old.rs\n+++ b/new.rs\n@@ -1,2 +1 @@\n context\n-target\n";
         let after = "diff --git a/old.rs b/new.rs\n--- a/old.rs\n+++ b/new.rs\n@@ -1,3 +1 @@\n-extra\n context\n-target\n";
         let mut source = app(before);
@@ -705,19 +753,14 @@ mod tests {
 
         transition.apply(&mut source);
 
-        assert!(
+        assert_eq!(
             source
                 .annotations_state
                 .lifecycle
                 .changed_files
-                .contains("old.rs")
-        );
-        assert!(
-            source
-                .annotations_state
-                .lifecycle
-                .changed_files
-                .contains("new.rs")
+                .iter()
+                .collect::<Vec<_>>(),
+            ["new.rs"]
         );
         let comment = source
             .annotations_state
@@ -777,7 +820,10 @@ mod tests {
             .annotations
             .insert_human(key.clone(), "question".to_owned(), 0)
             .unwrap();
-        source.annotations_state.lifecycle.mark_file("src/lib.rs");
+        source
+            .annotations_state
+            .lifecycle
+            .set_file_reviewed("src/lib.rs", true);
         source.annotations_state.lifecycle.pass = 4;
         source.annotations_state.annotation_draft = Some(AnnotationDraft {
             key: key.clone(),
@@ -814,6 +860,113 @@ mod tests {
         let evidence = anchor_evidence(&source, &anchor);
 
         assert!(evidence.new_lines.is_empty());
+    }
+
+    #[test]
+    fn reanchor_past_store_limits_keeps_human_comments() {
+        let other = "diff --git a/b.rs b/b.rs\n--- a/b.rs\n+++ b/b.rs\n@@ -1 +1 @@\n-old\n+new\n";
+        let before = format!(
+            "diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n@@ -1 +1 @@\n-old\n+new\n{other}"
+        );
+        let long_path = format!("{}.rs", "x".repeat(mark_session::MAX_PATH_BYTES));
+        let after = format!(
+            "diff --git a/a.rs b/{long_path}\n--- a/a.rs\n+++ b/{long_path}\n@@ -1 +1 @@\n-old\n+new\n{other}"
+        );
+        let mut source = app(&before);
+        let renamed = AnnotationKey::for_file(&source.document.changeset.files[0]).unwrap();
+        let unchanged = AnnotationKey::for_file_line(
+            &source.document.changeset.files[1],
+            AnnotationSide::New,
+            1,
+        )
+        .unwrap();
+        for key in [&renamed, &unchanged] {
+            source
+                .annotations_state
+                .annotations
+                .insert_human(key.clone(), "keep me".to_owned(), 0)
+                .unwrap();
+        }
+        let transition = ReviewTransition::capture(&source);
+        replace_document(&mut source, app(&after));
+
+        transition.apply(&mut source);
+
+        let comments = source
+            .annotations_state
+            .annotations
+            .comments()
+            .map(|comment| (comment.anchor.clone(), comment.lifecycle))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            comments,
+            [
+                (renamed, CommentLifecycle::Stale),
+                (unchanged, CommentLifecycle::Open),
+            ]
+        );
+    }
+
+    #[test]
+    fn evidence_dropped_for_the_transition_budget_is_recaptured_later() {
+        let line = "x".repeat(MAX_ANCHOR_EVIDENCE_BYTES / 2);
+        let line_count = MAX_TRANSITION_EVIDENCE_BYTES / line.len() + 1;
+        let body = (0..line_count)
+            .map(|index| format!("+{index}{line}\n"))
+            .collect::<String>();
+        let other = |text: &str| {
+            format!(
+                "diff --git a/b.rs b/b.rs\n--- a/b.rs\n+++ b/b.rs\n@@ -1 +1 @@\n-old\n+{text}\n"
+            )
+        };
+        let file = |prefix: &str| {
+            let added = line_count + usize::from(!prefix.is_empty());
+            format!(
+                "diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n@@ -0,0 +1,{added} @@\n{prefix}{body}"
+            )
+        };
+        let mut source = app(&format!("{}{}", file(""), other("one")));
+        let keys = (1..=line_count)
+            .map(|line| {
+                AnnotationKey::for_file_line(
+                    &source.document.changeset.files[0],
+                    AnnotationSide::New,
+                    line,
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+        for key in &keys {
+            source
+                .annotations_state
+                .annotations
+                .insert_human(key.clone(), "question".to_owned(), 0)
+                .unwrap();
+        }
+        let transition = ReviewTransition::capture(&source);
+        replace_document(&mut source, app(&format!("{}{}", file(""), other("two"))));
+        transition.apply(&mut source);
+        for key in &keys[..line_count / 2] {
+            source.annotations_state.annotations.remove_human(key);
+        }
+
+        let transition = ReviewTransition::capture(&source);
+        replace_document(
+            &mut source,
+            app(&format!("{}{}", file("+inserted\n"), other("two"))),
+        );
+        transition.apply(&mut source);
+
+        let anchors = source
+            .annotations_state
+            .annotations
+            .comments()
+            .map(|comment| (comment.lifecycle, comment.anchor.line))
+            .collect::<Vec<_>>();
+        let expected = (line_count / 2 + 1..=line_count)
+            .map(|line| (CommentLifecycle::Moved, line + 1))
+            .collect::<Vec<_>>();
+        assert_eq!(anchors, expected);
     }
 
     #[test]

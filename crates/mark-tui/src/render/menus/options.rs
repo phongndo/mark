@@ -1,8 +1,8 @@
 use ratatui::{
     Frame,
-    layout::{Alignment, Rect},
-    prelude::{Line, Modifier, Span, Style},
-    widgets::{Block, BorderType, Padding},
+    layout::Rect,
+    prelude::{Line, Span},
+    widgets::Block,
 };
 use unicode_width::UnicodeWidthStr;
 
@@ -12,11 +12,10 @@ use crate::{
         selector_menu::{
             ScrollableSelectorMenu, SelectorMenuInput, SelectorMenuLinesRequest,
             centered_floating_rect, floating_menu_fits_terminal, floating_menu_max_inner_height,
-            floating_menu_max_width, render_scrollable_selector_menu, selector_border_color,
-            selector_disabled_line, selector_entry_line, selector_menu_lines,
-            selector_menu_list_rows, selector_menu_outer_height, selector_menu_outer_width,
-            selector_row_style, selector_scrollbar_needed, selector_title_color,
-            selector_width_with_scrollbar,
+            floating_menu_max_width, render_scrollable_selector_menu, selector_disabled_line,
+            selector_entry_line, selector_menu_block, selector_menu_lines, selector_menu_list_rows,
+            selector_menu_outer_height, selector_menu_outer_width, selector_row_style,
+            selector_scrollbar_needed, selector_width_with_scrollbar,
         },
         style::base_bg,
         text::fit_padded,
@@ -103,25 +102,7 @@ pub(crate) fn options_menu_area(
 }
 
 pub(crate) fn options_menu_block(theme: DiffTheme) -> Block<'static> {
-    let bg = base_bg(theme);
-    if !theme.decorations.show_borders() {
-        return Block::default()
-            .style(Style::default().bg(bg))
-            .padding(Padding::horizontal(1));
-    }
-    Block::bordered()
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(selector_border_color(theme)).bg(bg))
-        .style(Style::default().bg(bg))
-        .padding(Padding::horizontal(1))
-        .title(Line::from(Span::styled(
-            " Settings ",
-            Style::default()
-                .fg(selector_title_color(theme))
-                .bg(bg)
-                .add_modifier(Modifier::BOLD),
-        )))
-        .title_alignment(Alignment::Center)
+    selector_menu_block(theme, " Settings ", base_bg(theme))
 }
 
 fn options_menu_width(app: &DiffApp, items: &[OptionsMenuItem]) -> u16 {
@@ -251,25 +232,7 @@ pub(crate) fn color_scheme_picker_area(app: &DiffApp, area: Rect) -> Option<Rect
 }
 
 pub(crate) fn color_scheme_picker_block(theme: DiffTheme) -> Block<'static> {
-    let bg = base_bg(theme);
-    if !theme.decorations.show_borders() {
-        return Block::default()
-            .style(Style::default().bg(bg))
-            .padding(Padding::horizontal(1));
-    }
-    Block::bordered()
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(selector_border_color(theme)).bg(bg))
-        .style(Style::default().bg(bg))
-        .padding(Padding::horizontal(1))
-        .title(Line::from(Span::styled(
-            " Theme ",
-            Style::default()
-                .fg(selector_title_color(theme))
-                .bg(bg)
-                .add_modifier(Modifier::BOLD),
-        )))
-        .title_alignment(Alignment::Center)
+    selector_menu_block(theme, " Theme ", base_bg(theme))
 }
 
 fn color_scheme_picker_width(app: &DiffApp) -> u16 {

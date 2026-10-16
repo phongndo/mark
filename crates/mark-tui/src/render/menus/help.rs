@@ -1,8 +1,8 @@
 use ratatui::{
     Frame,
-    layout::{Alignment, Rect},
+    layout::Rect,
     prelude::{Color, Line, Modifier, Span, Style},
-    widgets::{Block, BorderType, Padding},
+    widgets::Block,
 };
 use unicode_width::UnicodeWidthStr;
 
@@ -13,10 +13,9 @@ use crate::{
         selector_menu::{
             ScrollableSelectorMenu, SelectorMenuInput, SelectorMenuLinesRequest,
             centered_floating_rect, floating_menu_fits_terminal, floating_menu_max_inner_height,
-            floating_menu_max_width, render_scrollable_selector_menu, selector_border_color,
+            floating_menu_max_width, render_scrollable_selector_menu, selector_menu_block,
             selector_menu_lines, selector_menu_list_rows, selector_menu_outer_height,
-            selector_menu_outer_width, selector_scrollbar_needed, selector_title_color,
-            selector_width_with_scrollbar,
+            selector_menu_outer_width, selector_scrollbar_needed, selector_width_with_scrollbar,
         },
         style::base_bg,
         text::{fit_padded, fit_with_ellipsis},
@@ -119,25 +118,7 @@ pub(crate) fn draw_help_menu(frame: &mut Frame<'_>, app: &DiffApp, area: Rect) {
 }
 
 pub(crate) fn help_menu_block(theme: DiffTheme) -> Block<'static> {
-    let bg = help_menu_bg(theme);
-    if !theme.decorations.show_borders() {
-        return Block::default()
-            .style(Style::default().bg(bg))
-            .padding(Padding::horizontal(1));
-    }
-    Block::bordered()
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(selector_border_color(theme)).bg(bg))
-        .style(Style::default().bg(bg))
-        .padding(Padding::horizontal(1))
-        .title(Line::from(Span::styled(
-            " Keybindings ",
-            Style::default()
-                .fg(selector_title_color(theme))
-                .bg(bg)
-                .add_modifier(Modifier::BOLD),
-        )))
-        .title_alignment(Alignment::Center)
+    selector_menu_block(theme, " Keybindings ", help_menu_bg(theme))
 }
 
 pub(crate) fn help_menu_bg(theme: DiffTheme) -> Color {
@@ -146,7 +127,7 @@ pub(crate) fn help_menu_bg(theme: DiffTheme) -> Color {
 
 #[cfg(test)]
 pub(crate) fn help_menu_title_color(theme: DiffTheme) -> Color {
-    selector_title_color(theme)
+    crate::render::selector_menu::selector_title_color(theme)
 }
 
 pub(crate) fn help_menu_section_color(theme: DiffTheme) -> Color {

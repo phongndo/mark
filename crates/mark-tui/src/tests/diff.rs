@@ -336,7 +336,7 @@ fn changing_diff_source_starts_a_fresh_live_review() {
         .unwrap();
     app.annotations_state
         .lifecycle
-        .mark_file(app.document.changeset.files[0].display_path());
+        .set_file_reviewed(app.document.changeset.files[0].display_path(), true);
     app.annotations_state.lifecycle.pass = 3;
     let options = DiffOptions {
         source: DiffSource::Show("HEAD".into()),

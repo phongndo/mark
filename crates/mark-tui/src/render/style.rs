@@ -36,7 +36,14 @@ pub(crate) fn diff_indicator_span(kind: DiffLineKind, theme: DiffTheme) -> Span<
     )
 }
 
-pub(crate) fn focused_diff_indicator_span(kind: DiffLineKind, theme: DiffTheme) -> Span<'static> {
+pub(crate) fn diff_indicator_span_for_focus(
+    kind: DiffLineKind,
+    theme: DiffTheme,
+    focused: bool,
+) -> Span<'static> {
+    if !focused {
+        return diff_indicator_span(kind, theme);
+    }
     Span::styled(
         theme.decorations.diff_indicator(),
         focused_diff_indicator_style(kind, theme),

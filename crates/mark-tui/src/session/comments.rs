@@ -17,7 +17,10 @@ use crate::{
     },
 };
 
-use super::{COMMENT_PAGE_RESERVE_BYTES, RESPONSE_RESULT_BUDGET_BYTES, anchors};
+use super::{
+    COMMENT_PAGE_RESERVE_BYTES, RESPONSE_RESULT_BUDGET_BYTES, anchors, find_file, parse_cursor,
+    require_generation,
+};
 
 pub(crate) struct CommentPage {
     pub(crate) comments: Vec<CommentView>,
@@ -214,17 +217,6 @@ fn comment_matches(
         }
 }
 
-fn parse_cursor(cursor: Option<&str>) -> Result<usize, ProtocolError> {
-    cursor
-        .map(|cursor| {
-            cursor.parse::<usize>().map_err(|_| {
-                ProtocolError::new("invalid_cursor", "cursor is not a valid continuation token")
-            })
-        })
-        .transpose()
-        .map(Option::unwrap_or_default)
-}
-
 pub(crate) fn remove(
     app: &mut DiffApp,
     params: CommentRemoveParams,
@@ -233,8 +225,7 @@ pub(crate) fn remove(
     let anchor = app
         .annotations_state
         .annotations
-        .comments()
-        .find(|comment| comment.id == params.id)
+        .comment(&params.id)
         .map(|comment| comment.anchor.clone());
     let removed = match app
         .annotations_state
@@ -281,22 +272,10 @@ pub(crate) fn clear(
     let affected = app
         .annotations_state
         .annotations
-        .comments()
-        .filter(|comment| {
-            comment.origin == CommentOrigin::Agent
-                && params
-                    .file
-                    .as_ref()
-                    .is_none_or(|file| comment.anchor.path == *file)
-        })
-        .map(|comment| comment.anchor.clone())
-        .collect::<HashSet<_>>();
-    let removed = app
-        .annotations_state
-        .annotations
         .clear_agents(params.file.as_deref());
+    let removed = affected.len();
     if removed > 0 {
-        invalidate_comment_geometry(app, affected);
+        invalidate_comment_geometry(app, affected.into_iter().collect());
         app.runtime.dirty = true;
     }
     Ok(CommentRemovalResult {
@@ -313,8 +292,7 @@ pub(crate) fn disposition(
     let anchor = app
         .annotations_state
         .annotations
-        .comments()
-        .find(|comment| comment.id == params.id)
+        .comment(&params.id)
         .map(|comment| comment.anchor.clone())
         .ok_or_else(|| ProtocolError::new("comment_not_found", "comment does not exist"))?;
     app.annotations_state
@@ -342,13 +320,9 @@ pub(crate) fn set_progress(
     if params.file.is_empty() || params.file.len() > mark_session::MAX_PATH_BYTES {
         return Err(ProtocolError::new("invalid_path", "invalid progress path"));
     }
-    let file = app
-        .document
-        .changeset
-        .files
-        .iter()
-        .find(|file| file.display_path() == params.file)
-        .ok_or_else(|| ProtocolError::new("path_not_found", "file is not in the changeset"))?;
+    let file = find_file(app, &params.file)?;
+    // Progress is keyed by display path, whichever alias the request used.
+    let path = file.display_path().to_owned();
     if let Some(hunk) = params.hunk {
         if hunk == 0 || hunk > file.hunks().len() {
             return Err(ProtocolError::new(
@@ -358,11 +332,11 @@ pub(crate) fn set_progress(
         }
         app.annotations_state
             .lifecycle
-            .set_hunk_reviewed(&params.file, hunk, params.reviewed);
+            .set_hunk_reviewed(&path, hunk, params.reviewed);
     } else {
         app.annotations_state
             .lifecycle
-            .set_file_reviewed(&params.file, params.reviewed);
+            .set_file_reviewed(&path, params.reviewed);
     }
     app.runtime.dirty = true;
     Ok(ProgressResult {
@@ -493,19 +467,6 @@ fn validate_text(
     Ok(())
 }
 
-fn require_generation(app: &DiffApp, generation: u64) -> Result<(), ProtocolError> {
-    if generation == app.document.generation {
-        return Ok(());
-    }
-    Err(ProtocolError::new(
-        "stale_generation",
-        format!(
-            "request generation {generation} does not match current generation {}",
-            app.document.generation
-        ),
-    ))
-}
-
 fn comment_view(app: &DiffApp, comment: &ReviewComment) -> CommentView {
     CommentView {
         id: comment.id.clone(),
@@ -544,13 +505,8 @@ fn comment_view(app: &DiffApp, comment: &ReviewComment) -> CommentView {
 }
 
 fn invalidate_comment_geometry(app: &mut DiffApp, anchors: HashSet<AnnotationKey>) {
-    app.annotations_state.annotation_block_scroll = None;
-    *app.annotations_state.annotation_keys_by_row.borrow_mut() = None;
-    let mut rows = app.annotations_state.annotation_rows.borrow_mut();
-    let mut heights = app.annotations_state.annotation_heights.borrow_mut();
-    for anchor in anchors {
-        rows.remove(&anchor);
-        heights.remove(&anchor);
+    for anchor in &anchors {
+        app.forget_annotation_layout(anchor);
     }
 }
 
@@ -849,6 +805,35 @@ mod tests {
 
         assert_eq!(error.code, "comment_limit");
         assert_eq!(app.annotations_state.annotations.len(), 50);
+    }
+
+    #[test]
+    fn progress_accepts_the_old_path_of_a_renamed_file() {
+        let patch =
+            "diff --git a/old.rs b/new.rs\n--- a/old.rs\n+++ b/new.rs\n@@ -1 +1 @@\n-old\n+new\n";
+        let mut app = DiffApp::new(
+            DiffOptions::default(),
+            Changeset {
+                repo: RepoRoot::new("/repo"),
+                title: "test".to_owned(),
+                files: mark_diff::parse_patch(patch),
+                raw_patch: Arc::from(patch.as_bytes()),
+            },
+            DiffLayoutMode::Unified,
+        );
+
+        set_progress(
+            &mut app,
+            ProgressSetParams {
+                generation: 0,
+                file: "old.rs".to_owned(),
+                hunk: Some(1),
+                reviewed: true,
+            },
+        )
+        .unwrap();
+
+        assert!(app.annotations_state.lifecycle.hunk_reviewed("new.rs", 1));
     }
 
     #[test]
