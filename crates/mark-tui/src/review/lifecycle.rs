@@ -119,11 +119,11 @@ impl DiffApp {
 }
 
 impl ReviewLifecycleState {
-    pub(crate) fn mark_file(&mut self, path: &str) {
+    fn mark_file(&mut self, path: &str) {
         self.reviewed_files.insert(path.to_owned());
     }
 
-    pub(crate) fn mark_hunk(&mut self, path: &str, hunk: usize) {
+    fn mark_hunk(&mut self, path: &str, hunk: usize) {
         self.reviewed_hunks.insert((path.to_owned(), hunk));
     }
 

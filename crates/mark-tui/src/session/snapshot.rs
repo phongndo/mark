@@ -789,7 +789,9 @@ mod tests {
             .lifecycle
             .changed_files
             .insert("src/lib.rs".to_owned());
-        app.annotations_state.lifecycle.mark_hunk("src/lib.rs", 1);
+        app.annotations_state
+            .lifecycle
+            .set_hunk_reviewed("src/lib.rs", 1, true);
 
         let result = review(
             &app,

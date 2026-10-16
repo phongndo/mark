@@ -534,7 +534,10 @@ mod tests {
     #[test]
     fn unchanged_transition_preserves_live_review_state() {
         let mut source = app(&patch("new"));
-        source.annotations_state.lifecycle.mark_file("src/lib.rs");
+        source
+            .annotations_state
+            .lifecycle
+            .set_file_reviewed("src/lib.rs", true);
         source.annotations_state.lifecycle.verdict = Some(FinalVerdict {
             kind: VerdictKind::Approve,
             summary: Some("ready".to_owned()),
@@ -561,7 +564,10 @@ mod tests {
         let before = "diff --git a/src/lib.rs b/src/lib.rs\nold mode 100644\nnew mode 100755\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1 @@\n-old\n+new\n";
         let after = "diff --git a/src/lib.rs b/src/lib.rs\nold mode 100644\nnew mode 100700\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1 @@\n-old\n+new\n";
         let mut source = app(before);
-        source.annotations_state.lifecycle.mark_file("src/lib.rs");
+        source
+            .annotations_state
+            .lifecycle
+            .set_file_reviewed("src/lib.rs", true);
         source.annotations_state.lifecycle.verdict = Some(FinalVerdict {
             kind: VerdictKind::Approve,
             summary: None,
@@ -814,7 +820,10 @@ mod tests {
             .annotations
             .insert_human(key.clone(), "question".to_owned(), 0)
             .unwrap();
-        source.annotations_state.lifecycle.mark_file("src/lib.rs");
+        source
+            .annotations_state
+            .lifecycle
+            .set_file_reviewed("src/lib.rs", true);
         source.annotations_state.lifecycle.pass = 4;
         source.annotations_state.annotation_draft = Some(AnnotationDraft {
             key: key.clone(),

@@ -577,6 +577,7 @@ fn review_comment_bytes_with_summary(comment: &ReviewComment, summary: &str) -> 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct StoreLimitError;
 
+#[cfg(test)]
 impl std::ops::Index<&AnnotationKey> for ReviewCommentStore {
     type Output = String;
 

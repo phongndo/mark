@@ -147,18 +147,19 @@ fn validate_range(file: &DiffFile, range: &RangeTarget) -> Result<AnnotationKey,
         .map(|range| validate_source_range(file, AnnotationSide::New, range))
         .transpose()?;
     let (side, line) = new
-        .map(|(_, end, _)| (AnnotationSide::New, end))
-        .or_else(|| old.map(|(_, end, _)| (AnnotationSide::Old, end)))
+        .map(|end| (AnnotationSide::New, end))
+        .or_else(|| old.map(|end| (AnnotationSide::Old, end)))
         .expect("range has one side");
     AnnotationKey::for_file_line(file, side, line)
         .ok_or_else(|| ProtocolError::new("anchor_not_found", "range has no source path"))
 }
 
+/// Validates that every line of `range` exists on `side` and returns its end line.
 fn validate_source_range(
     file: &DiffFile,
     side: AnnotationSide,
     range: SourceRange,
-) -> Result<(usize, usize, usize), ProtocolError> {
+) -> Result<usize, ProtocolError> {
     let count = range
         .end
         .checked_sub(range.start)
@@ -186,7 +187,7 @@ fn validate_source_range(
             "every line in a comment range must exist in the loaded diff",
         ));
     }
-    Ok((range.start, range.end, count))
+    Ok(range.end)
 }
 
 fn source_range(start: usize, count: usize) -> Option<SourceRange> {
