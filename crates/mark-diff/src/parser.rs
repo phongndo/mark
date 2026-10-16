@@ -22,11 +22,16 @@ pub fn parse_patch(patch: &str) -> Vec<DiffFile> {
             continue;
         }
 
+        if current_hunk
+            .as_ref()
+            .is_some_and(DiffHunkBuilder::is_complete)
+            && !line.starts_with('\\')
+        {
+            finish_hunk(&mut current, &mut current_hunk);
+        }
+
         if header_line.starts_with("--- ")
-            && (current.is_none()
-                || current_hunk
-                    .as_ref()
-                    .is_some_and(DiffHunkBuilder::is_complete))
+            && starts_unified_file(current.as_ref(), current_hunk.as_ref())
             && let Some(new_header) = lines
                 .peek()
                 .copied()
@@ -251,11 +256,19 @@ fn parse_patch_bytes_range_limited(
             continue;
         }
 
+        // A complete hunk has consumed every row its header announced. Only a
+        // `\ No newline` marker still belongs to it; anything else, such as a
+        // `git format-patch` signature, is trailing junk or the next header.
+        if current_hunk
+            .as_ref()
+            .is_some_and(DiffHunkBuilder::is_complete)
+            && !line.bytes.starts_with(b"\\")
+        {
+            finish_hunk(&mut current, &mut current_hunk);
+        }
+
         if header_bytes.starts_with(b"--- ")
-            && (current.is_none()
-                || current_hunk
-                    .as_ref()
-                    .is_some_and(DiffHunkBuilder::is_complete))
+            && starts_unified_file(current.as_ref(), current_hunk.as_ref())
             && let Some(new_header_bytes) = lines
                 .peek()
                 .map(|line| patch_header_bytes(line.bytes))
@@ -303,6 +316,12 @@ fn parse_patch_bytes_range_limited(
     finish_file(&mut files, &mut current);
     check_parsed_limits(&files, limits)?;
     Ok(files)
+}
+
+/// Whether a `---`/`+++` pair starts a new file rather than naming the current
+/// one. Inside an open hunk the pair is a deletion and an addition row.
+fn starts_unified_file(file: Option<&DiffFileBuilder>, hunk: Option<&DiffHunkBuilder>) -> bool {
+    hunk.is_none() && file.is_none_or(|file| !file.hunks.is_empty())
 }
 
 fn check_parsed_limits(files: &[DiffFile], limits: DiffLimits) -> Result<(), DiffLimitExceeded> {
