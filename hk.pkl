@@ -97,33 +97,9 @@ local full = new Mapping<String, Step | Group> {
   }
 }
 
-local ci = new Mapping<String, Step | Group> {
-  ["cargo-check"] {
-    profiles = List("ci")
-    glob = rustImpactGlobs
-    check = "cargo check --workspace --all-targets --all-features --locked"
-    exclusive = true
-  }
-
-  ["cargo-test"] {
-    profiles = List("ci")
-    glob = rustImpactGlobs
-    check = "cargo test --workspace --all-targets --all-features --locked"
-    exclusive = true
-  }
-
-  ["cargo-build"] {
-    profiles = List("ci")
-    glob = rustImpactGlobs
-    check = "cargo build --workspace --all-targets --all-features --locked"
-    exclusive = true
-  }
-}
-
 local all = new Mapping<String, Step | Group> {
   ...fast
   ...full
-  ...ci
 }
 
 // Pre-push quality gates are mandatory, not profile-gated. Hook-local

@@ -1,6 +1,8 @@
 #[cfg(unix)]
 use std::{io, path::Path, sync::Arc, time::Duration};
 
+#[cfg(unix)]
+use tokio::io::AsyncReadExt;
 use tokio::sync::{mpsc, oneshot};
 
 #[cfg(unix)]
@@ -10,7 +12,7 @@ use crate::{
         ProtocolError,
     },
     registry::private_socket,
-    transport::{read_frame, write_frame},
+    transport::{is_frame_too_large, read_frame, write_frame},
 };
 use crate::{
     protocol::{Request, Response, SessionRecord},
@@ -23,6 +25,10 @@ const MAX_CONNECTED_CLIENTS: usize = 32;
 const CLIENT_FRAME_TIMEOUT: Duration = Duration::from_secs(30);
 #[cfg(unix)]
 const CLIENT_RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
+#[cfg(unix)]
+const BUSY_REPLY_TIMEOUT: Duration = Duration::from_secs(1);
+#[cfg(unix)]
+const ACCEPT_RETRY_DELAY: Duration = Duration::from_millis(100);
 
 #[derive(Debug)]
 pub struct SessionCommand {
@@ -39,20 +45,11 @@ pub struct ServerHandle {
 }
 
 #[cfg(unix)]
-impl ServerHandle {
-    pub fn is_finished(&self) -> bool {
-        self.task.is_finished()
-    }
-
-    pub fn abort(&self) {
-        self.task.abort();
-    }
-}
-
-#[cfg(unix)]
 impl Drop for ServerHandle {
     fn drop(&mut self) {
         self.task.abort();
+        // Remove the registration here rather than in the task: the runtime
+        // may never poll the aborted task again before the process exits.
         let _ = self.registry.remove_session(&self.session_id);
     }
 }
@@ -60,15 +57,6 @@ impl Drop for ServerHandle {
 #[cfg(not(unix))]
 #[derive(Debug)]
 pub struct ServerHandle;
-
-#[cfg(not(unix))]
-impl ServerHandle {
-    pub fn is_finished(&self) -> bool {
-        true
-    }
-
-    pub fn abort(&self) {}
-}
 
 #[cfg(unix)]
 pub fn spawn_server(
@@ -80,12 +68,8 @@ pub fn spawn_server(
     let handle_registry = registry.clone();
     let handle_session_id = record.session_id.clone();
     let task = tokio::spawn(async move {
-        let result = run_server(registry, record, commands, startup_tx).await;
-        if let Err(error) = result {
-            // Startup errors are sent over `startup_tx`; errors after startup
-            // close the endpoint and are observed by clients and registry scans.
-            let _ = error;
-        }
+        // Startup errors are reported over `startup_tx`.
+        let _ = run_server(registry, record, commands, startup_tx).await;
     });
     (
         ServerHandle {
@@ -116,18 +100,10 @@ async fn run_server(
     commands: mpsc::Sender<SessionCommand>,
     startup_tx: oneshot::Sender<Result<(), String>>,
 ) -> io::Result<()> {
-    let session_dir = match registry.prepare_session(&record.session_id) {
-        Ok(path) => path,
-        Err(error) => {
-            let _ = startup_tx.send(Err(error.to_string()));
-            return Err(error);
-        }
-    };
-    let _registration = Registration {
-        registry: registry.clone(),
-        session_id: record.session_id.clone(),
-        _session_dir: session_dir,
-    };
+    if let Err(error) = registry.prepare_session(&record.session_id) {
+        let _ = startup_tx.send(Err(error.to_string()));
+        return Err(error);
+    }
     let socket_path = Path::new(&record.endpoint);
     if socket_path != registry.socket_path(&record.session_id)? {
         let error = io::Error::new(io::ErrorKind::InvalidInput, "invalid session endpoint");
@@ -154,10 +130,13 @@ async fn run_server(
 
     let clients = Arc::new(tokio::sync::Semaphore::new(MAX_CONNECTED_CLIENTS));
     loop {
-        let (stream, _) = listener.accept().await?;
+        let (stream, _) = accept_retrying(|| listener.accept(), ACCEPT_RETRY_DELAY).await;
         let permit = match Arc::clone(&clients).try_acquire_owned() {
             Ok(permit) => permit,
-            Err(_) => continue,
+            Err(_) => {
+                tokio::spawn(reject_busy_connection(stream));
+                continue;
+            }
         };
         let commands = commands.clone();
         tokio::spawn(async move {
@@ -167,18 +146,42 @@ async fn run_server(
     }
 }
 
+/// Waits for the next connection, retrying failed accepts.
+///
+/// Accept failures on a bound listener (descriptor exhaustion, aborted
+/// connections, memory pressure) are transient. Returning them would stop the
+/// server and unregister a session whose TUI is still running.
 #[cfg(unix)]
-struct Registration {
-    registry: Registry,
-    session_id: String,
-    _session_dir: std::path::PathBuf,
+async fn accept_retrying<T, F, Fut>(mut accept: F, retry_delay: Duration) -> T
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = io::Result<T>>,
+{
+    loop {
+        match accept().await {
+            Ok(accepted) => return accepted,
+            Err(_) => tokio::time::sleep(retry_delay).await,
+        }
+    }
 }
 
 #[cfg(unix)]
-impl Drop for Registration {
-    fn drop(&mut self) {
-        let _ = self.registry.remove_session(&self.session_id);
-    }
+async fn reject_busy_connection(mut stream: tokio::net::UnixStream) {
+    let response = Response::failure(
+        "",
+        ProtocolError::new("server_busy", "session has too many connected clients"),
+    );
+    let Ok(bytes) = serde_json::to_vec(&response) else {
+        return;
+    };
+    let _ = tokio::time::timeout(BUSY_REPLY_TIMEOUT, async {
+        // Drain the request first: closing a Unix socket with unread data
+        // resets the connection, and the client would lose the reply.
+        let mut request = (&mut stream).take(MAX_REQUEST_FRAME_BYTES as u64 + 1);
+        tokio::io::copy(&mut request, &mut tokio::io::sink()).await?;
+        write_frame(&mut stream, &bytes).await
+    })
+    .await;
 }
 
 #[cfg(unix)]
@@ -212,7 +215,7 @@ async fn handle_connection(
         Ok(Ok(Some(frame))) => frame,
         Ok(Ok(None)) => return Ok(()),
         Ok(Err(error)) if error.kind() == io::ErrorKind::InvalidData => {
-            let code = if error.to_string().contains("exceeds byte limit") {
+            let code = if is_frame_too_large(&error) {
                 "frame_too_large"
             } else {
                 "invalid_frame"
@@ -340,5 +343,30 @@ mod tests {
 
             assert_eq!(error.kind(), io::ErrorKind::TimedOut);
         });
+    }
+
+    #[test]
+    fn accept_failures_are_retried_instead_of_stopping_the_server() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let mut attempts = 0;
+        let accepted = runtime.block_on(accept_retrying(
+            || {
+                attempts += 1;
+                let result = if attempts < 3 {
+                    Err(io::Error::from_raw_os_error(
+                        rustix::io::Errno::MFILE.raw_os_error(),
+                    ))
+                } else {
+                    Ok(attempts)
+                };
+                std::future::ready(result)
+            },
+            Duration::from_millis(1),
+        ));
+
+        assert_eq!(accepted, 3);
     }
 }

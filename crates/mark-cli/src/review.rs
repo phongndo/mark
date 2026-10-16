@@ -4,6 +4,12 @@ use mark_core::MarkError;
 
 use crate::CliResult;
 
+mod options;
+
+pub(crate) use options::{
+    compare_options, diff_options, difftool_options, patch_options, review_options, show_options,
+};
+
 pub(crate) struct ReviewRequest {
     pub(crate) options: mark_command::DiffOptions,
     pub(crate) live_updates: bool,

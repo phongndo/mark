@@ -25,6 +25,17 @@ pub(crate) fn inspect(args: SyntaxInspectArgs) -> CliResult<()> {
     .map_err(|error| mark_core::MarkError::Usage(format!("invalid syntax_rules: {error}")))?;
     let mut highlighter = mark_syntax::SyntaxHighlighter::new();
     let highlighted = highlighter.highlight(&language, &source)?;
+    if let Some(line) = args
+        .line
+        .filter(|line| *line == 0 || *line > highlighted.lines.len())
+    {
+        return Err(mark_core::MarkError::Usage(format!(
+            "line {line} is outside {} (1..={})",
+            args.path.display(),
+            highlighted.lines.len()
+        ))
+        .into());
+    }
     let source_lines = source.split('\n').collect::<Vec<_>>();
     let inspector = Inspector {
         args: &args,

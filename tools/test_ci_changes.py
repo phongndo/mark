@@ -31,11 +31,18 @@ class CiChangesTests(unittest.TestCase):
         result = changes.classify_paths(["README.md", "docs/configuration.md"])
         self.assertFalse(any(result.values()))
 
-    def test_theme_assets_select_generated_contracts(self):
+    def test_theme_assets_select_rust_and_generated_contracts(self):
         result = changes.classify_paths(["assets/themes/github-dark.json"])
         self.assertEqual(
             {lane for lane, selected in result.items() if selected},
-            {"generated", "performance"},
+            {"rust", "generated", "performance"},
+        )
+
+    def test_embedded_skill_assets_select_rust(self):
+        result = changes.classify_paths(["assets/skills/agent-review/SKILL.md"])
+        self.assertEqual(
+            {lane for lane, selected in result.items() if selected},
+            {"rust"},
         )
 
     def test_syntax_adapter_change_selects_rust_and_performance(self):

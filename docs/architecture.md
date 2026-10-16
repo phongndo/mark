@@ -27,8 +27,7 @@ terminal pauses and I/O out of domain mutation and event routing.
 ## Concurrency
 
 Use the lazy process-wide [CPU pool](../crates/mark-runtime/src/lib.rs) rather
-than per-operation pools. Async callers use `run_cpu` so CPU work cannot block
-a Tokio worker. Syntax work retains a [dedicated queue](../crates/mark-tui/src/syntax/queue.rs)
+than per-operation pools, and keep CPU-bound work off Tokio workers. Syntax work retains a [dedicated queue](../crates/mark-tui/src/syntax/queue.rs)
 because visible work must outrank speculative prefetch, not compete through
 unprioritized work stealing.
 

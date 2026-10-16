@@ -15,16 +15,16 @@ fn diff_output(stat: bool) -> mark_command::DiffOutput {
     }
 }
 
-pub(crate) fn diff_options(args: DiffArgs) -> MarkResult<mark_command::DiffOptions> {
-    Ok(mark_command::DiffOptions {
-        repo: args.repo.repo.map(Into::into),
+pub(crate) fn diff_options(args: &DiffArgs) -> mark_command::DiffOptions {
+    mark_command::DiffOptions {
+        repo: args.repo.repo.clone().map(Into::into),
         source: mark_command::DiffSource::Worktree,
         local_untracked: mark_command::UntrackedMode::from_include(!args.no_untracked),
         output: diff_output(args.display.stat),
-    })
+    }
 }
 
-pub(crate) fn compare_options(args: CompareArgs) -> MarkResult<mark_command::DiffOptions> {
+pub(crate) fn compare_options(args: &CompareArgs) -> MarkResult<mark_command::DiffOptions> {
     let source = match args.revs.as_slice() {
         [base] => mark_command::DiffSource::Base(base.clone().into()),
         [left, right] => mark_command::DiffSource::Range {
@@ -39,51 +39,51 @@ pub(crate) fn compare_options(args: CompareArgs) -> MarkResult<mark_command::Dif
     };
 
     Ok(mark_command::DiffOptions {
-        repo: args.repo.repo.map(Into::into),
+        repo: args.repo.repo.clone().map(Into::into),
         source,
         local_untracked: mark_command::UntrackedMode::from_include(!args.no_untracked),
         output: diff_output(args.display.stat),
     })
 }
 
-pub(crate) fn show_options(args: ShowArgs) -> MarkResult<mark_command::DiffOptions> {
-    Ok(mark_command::DiffOptions {
-        repo: args.repo.repo.map(Into::into),
+pub(crate) fn show_options(args: &ShowArgs) -> mark_command::DiffOptions {
+    mark_command::DiffOptions {
+        repo: args.repo.repo.clone().map(Into::into),
         source: mark_command::DiffSource::Show(
-            args.rev.unwrap_or_else(|| "HEAD".to_owned()).into(),
+            args.rev.clone().unwrap_or_else(|| "HEAD".to_owned()).into(),
         ),
         local_untracked: mark_command::UntrackedMode::Exclude,
         output: diff_output(args.display.stat),
-    })
+    }
 }
 
-pub(crate) fn review_options(args: ReviewArgs) -> MarkResult<mark_command::DiffOptions> {
-    mark_command::review_diff_options(args.repo.repo, &args.target, args.display.stat)
+pub(crate) fn review_options(args: &ReviewArgs) -> MarkResult<mark_command::DiffOptions> {
+    mark_command::review_diff_options(args.repo.repo.clone(), &args.target, args.display.stat)
 }
 
-pub(crate) fn difftool_options(args: DifftoolArgs) -> MarkResult<mark_command::DiffOptions> {
-    Ok(mark_command::DiffOptions {
-        repo: args.repo.repo.map(Into::into),
+pub(crate) fn difftool_options(args: &DifftoolArgs) -> mark_command::DiffOptions {
+    mark_command::DiffOptions {
+        repo: args.repo.repo.clone().map(Into::into),
         source: mark_command::DiffSource::Difftool {
-            left: args.left.into(),
-            right: args.right.into(),
-            path: args.path.map(Into::into),
+            left: args.left.clone().into(),
+            right: args.right.clone().into(),
+            path: args.path.clone().map(Into::into),
         },
         local_untracked: mark_command::UntrackedMode::Exclude,
         output: diff_output(args.display.stat),
-    })
+    }
 }
 
-pub(crate) fn patch_options(args: PatchArgs) -> MarkResult<mark_command::DiffOptions> {
+pub(crate) fn patch_options(args: &PatchArgs) -> MarkResult<mark_command::DiffOptions> {
     Ok(mark_command::DiffOptions {
-        repo: args.repo.repo.map(Into::into),
-        source: patch_source(args.path)?,
+        repo: args.repo.repo.clone().map(Into::into),
+        source: patch_source(args.path.clone())?,
         local_untracked: mark_command::UntrackedMode::Exclude,
         output: diff_output(args.display.stat),
     })
 }
 
-pub(crate) fn patch_source(path: PathBuf) -> MarkResult<mark_command::DiffSource> {
+fn patch_source(path: PathBuf) -> MarkResult<mark_command::DiffSource> {
     if path == Path::new("-") {
         let max_patch_bytes = mark_diff::DiffLimits::from_env().max_patch_bytes;
         let patch = mark_diff::read_patch_input_limited(io::stdin().lock(), max_patch_bytes)?;
@@ -114,14 +114,14 @@ mod tests {
 
     #[test]
     fn diff_always_selects_all_local_changes() {
-        let options = diff_options(DiffArgs::default()).expect("diff options should build");
+        let options = diff_options(&DiffArgs::default());
         assert_eq!(options.source, mark_command::DiffSource::Worktree);
     }
 
     #[test]
     fn compare_one_revision_selects_the_current_workspace() {
         let options =
-            compare_options(compare_args(&["main"])).expect("compare options should build");
+            compare_options(&compare_args(&["main"])).expect("compare options should build");
         assert_eq!(
             options.source,
             mark_command::DiffSource::Base("main".into())
@@ -130,7 +130,7 @@ mod tests {
 
     #[test]
     fn compare_two_revisions_selects_an_exact_comparison() {
-        let options = compare_options(compare_args(&["main", "feature"]))
+        let options = compare_options(&compare_args(&["main", "feature"]))
             .expect("compare options should build");
         assert_eq!(
             options.source,

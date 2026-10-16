@@ -4,23 +4,20 @@ use std::{
     fs,
     io::{Read, Write},
     os::unix::fs::PermissionsExt,
+    path::Path,
     time::Duration,
 };
 
 use mark_session::{
-    Client, METHOD_SESSION_GET, PROTOCOL_VERSION, Registry, Request, Response,
+    Client, METHOD_SESSION_GET, PROTOCOL_VERSION, ProtocolError, Registry, Request, Response,
     SESSION_COMMAND_CHANNEL_CAPACITY, SessionRecord, current_process_identity, spawn_server,
 };
 use tokio::sync::mpsc;
 
-#[test]
-fn one_request_round_trip_and_cleanup() {
-    let temp = tempfile::tempdir().unwrap();
-    let registry = Registry::at(temp.path().join("mark"));
-    let repo = temp.path().join("repo");
+fn session_record(registry: &Registry, root: &Path, session_id: &str) -> SessionRecord {
+    let repo = root.join("repo");
     fs::create_dir(&repo).unwrap();
-    let session_id = "round-trip";
-    let record = SessionRecord {
+    SessionRecord {
         session_id: session_id.to_owned(),
         process_id: std::process::id(),
         process_identity: current_process_identity(),
@@ -33,7 +30,15 @@ fn one_request_round_trip_and_cleanup() {
             .unwrap()
             .display()
             .to_string(),
-    };
+    }
+}
+
+#[test]
+fn one_request_round_trip_and_cleanup() {
+    let temp = tempfile::tempdir().unwrap();
+    let registry = Registry::at(temp.path().join("mark"));
+    let session_id = "round-trip";
+    let record = session_record(&registry, temp.path(), session_id);
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
@@ -99,4 +104,73 @@ fn one_request_round_trip_and_cleanup() {
         std::thread::sleep(Duration::from_millis(1));
     }
     assert!(!registry.session_dir(session_id).unwrap().exists());
+}
+
+#[test]
+fn connections_over_capacity_receive_a_busy_error() {
+    let temp = tempfile::tempdir().unwrap();
+    let registry = Registry::at(temp.path().join("mark"));
+    let session_id = "busy";
+    let record = session_record(&registry, temp.path(), session_id);
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap();
+    let (tx, _rx) = mpsc::channel(SESSION_COMMAND_CHANNEL_CAPACITY);
+    let (_handle, startup) = runtime.block_on(async { spawn_server(registry.clone(), record, tx) });
+    runtime
+        .block_on(startup)
+        .expect("startup signal")
+        .expect("server startup");
+
+    // Occupy every client slot with connections that never send a frame.
+    let socket_path = registry.socket_path(session_id).unwrap();
+    let _idle = (0..32)
+        .map(|_| std::os::unix::net::UnixStream::connect(&socket_path).unwrap())
+        .collect::<Vec<_>>();
+
+    let response = Client::new(&socket_path)
+        .with_timeout(Duration::from_secs(2))
+        .request(&Request::new(
+            "request-1",
+            METHOD_SESSION_GET,
+            serde_json::json!({}),
+        ))
+        .unwrap();
+
+    assert!(!response.ok);
+    assert_eq!(response.error.unwrap().code, "server_busy");
+}
+
+#[test]
+fn client_surfaces_server_errors_sent_before_the_request_id_was_parsed() {
+    let temp = tempfile::tempdir().unwrap();
+    let socket_path = temp.path().join("session.sock");
+    let listener = std::os::unix::net::UnixListener::bind(&socket_path).unwrap();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = Vec::new();
+        stream.read_to_end(&mut request).unwrap();
+        let response = Response::failure(
+            "",
+            ProtocolError::new("invalid_request", "invalid JSON request"),
+        );
+        let mut bytes = serde_json::to_vec(&response).unwrap();
+        bytes.push(b'\n');
+        stream.write_all(&bytes).unwrap();
+    });
+
+    let response = Client::new(&socket_path)
+        .with_timeout(Duration::from_secs(2))
+        .request(&Request::new(
+            "request-1",
+            METHOD_SESSION_GET,
+            serde_json::json!({}),
+        ))
+        .unwrap();
+    server.join().unwrap();
+
+    assert!(!response.ok);
+    assert_eq!(response.error.unwrap().code, "invalid_request");
 }

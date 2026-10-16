@@ -3,13 +3,13 @@ use crate::{
     args::{self, Cli, Command},
     config,
     pager::pager,
-    review::{ReviewRequest, run_review},
+    review::{
+        ReviewRequest, compare_options, diff_options, difftool_options, patch_options,
+        review_options, run_review, show_options,
+    },
     session::session,
     skill::skill,
-    syntax::{
-        compare_options, diff_options, difftool_options, patch_options, review_options,
-        show_options, syntax,
-    },
+    syntax::syntax,
     update::update,
 };
 
@@ -17,13 +17,23 @@ pub(crate) fn run_cli(cli: Cli) -> CliResult<()> {
     match cli.command {
         None => Ok(()),
         Some(Command::Config) => config::config(),
-        Some(Command::Diff(args)) => run_review_command(args),
-        Some(Command::Compare(args)) => run_review_command(args),
-        Some(Command::Difftool(args)) => run_review_command(args),
+        Some(Command::Diff(args)) => {
+            run_review_command(&args.display, args.watch.watch, diff_options(&args))
+        }
+        Some(Command::Compare(args)) => {
+            run_review_command(&args.display, args.watch.watch, compare_options(&args)?)
+        }
+        Some(Command::Difftool(args)) => {
+            run_review_command(&args.display, args.watch.watch, difftool_options(&args))
+        }
         Some(Command::Pager(args)) => pager(args),
-        Some(Command::Show(args)) => run_review_command(args),
-        Some(Command::Review(args)) => run_review_command(args),
-        Some(Command::Patch(args)) => run_review_command(args),
+        Some(Command::Show(args)) => run_review_command(&args.display, false, show_options(&args)),
+        Some(Command::Review(args)) => {
+            run_review_command(&args.display, false, review_options(&args)?)
+        }
+        Some(Command::Patch(args)) => {
+            run_review_command(&args.display, false, patch_options(&args)?)
+        }
         Some(Command::Session { command }) => session(command),
         Some(Command::Skill { command }) => skill(command),
         Some(Command::Syntax { command }) => syntax(command),
@@ -31,119 +41,16 @@ pub(crate) fn run_cli(cli: Cli) -> CliResult<()> {
     }
 }
 
-trait ReviewCommand {
-    fn into_review_request(self) -> CliResult<ReviewRequest>;
-}
-
-fn run_review_command(command: impl ReviewCommand) -> CliResult<()> {
-    run_review(command.into_review_request()?)
-}
-
-fn review_request(
-    options: mark_command::DiffOptions,
+fn run_review_command(
+    display: &args::DisplayArgs,
     live_updates: bool,
-    syntax_enabled: bool,
-    empty_diff_fill: Option<bool>,
-    decorations: Option<mark_tui::DecorationPreference>,
-) -> ReviewRequest {
-    ReviewRequest {
+    options: mark_command::DiffOptions,
+) -> CliResult<()> {
+    run_review(ReviewRequest {
         options,
         live_updates,
-        syntax_enabled,
-        empty_diff_fill,
-        decorations,
-    }
-}
-
-impl ReviewCommand for args::DiffArgs {
-    fn into_review_request(self) -> CliResult<ReviewRequest> {
-        let live_updates = self.watch.watch;
-        let syntax_enabled = self.display.syntax_enabled();
-        let empty_diff_fill = self.display.empty_diff_fill_override();
-        let decorations = self.display.decoration_override();
-        Ok(review_request(
-            diff_options(self)?,
-            live_updates,
-            syntax_enabled,
-            empty_diff_fill,
-            decorations,
-        ))
-    }
-}
-
-impl ReviewCommand for args::CompareArgs {
-    fn into_review_request(self) -> CliResult<ReviewRequest> {
-        let live_updates = self.watch.watch;
-        let syntax_enabled = self.display.syntax_enabled();
-        let empty_diff_fill = self.display.empty_diff_fill_override();
-        let decorations = self.display.decoration_override();
-        Ok(review_request(
-            compare_options(self)?,
-            live_updates,
-            syntax_enabled,
-            empty_diff_fill,
-            decorations,
-        ))
-    }
-}
-
-impl ReviewCommand for args::ShowArgs {
-    fn into_review_request(self) -> CliResult<ReviewRequest> {
-        let syntax_enabled = self.display.syntax_enabled();
-        let empty_diff_fill = self.display.empty_diff_fill_override();
-        let decorations = self.display.decoration_override();
-        Ok(review_request(
-            show_options(self)?,
-            false,
-            syntax_enabled,
-            empty_diff_fill,
-            decorations,
-        ))
-    }
-}
-
-impl ReviewCommand for args::ReviewArgs {
-    fn into_review_request(self) -> CliResult<ReviewRequest> {
-        let syntax_enabled = self.display.syntax_enabled();
-        let empty_diff_fill = self.display.empty_diff_fill_override();
-        let decorations = self.display.decoration_override();
-        Ok(review_request(
-            review_options(self)?,
-            false,
-            syntax_enabled,
-            empty_diff_fill,
-            decorations,
-        ))
-    }
-}
-
-impl ReviewCommand for args::DifftoolArgs {
-    fn into_review_request(self) -> CliResult<ReviewRequest> {
-        let live_updates = self.watch.watch;
-        let syntax_enabled = self.display.syntax_enabled();
-        let empty_diff_fill = self.display.empty_diff_fill_override();
-        let decorations = self.display.decoration_override();
-        Ok(review_request(
-            difftool_options(self)?,
-            live_updates,
-            syntax_enabled,
-            empty_diff_fill,
-            decorations,
-        ))
-    }
-}
-
-impl ReviewCommand for args::PatchArgs {
-    fn into_review_request(self) -> CliResult<ReviewRequest> {
-        let syntax_enabled = self.display.syntax_enabled();
-        let empty_diff_fill = self.display.empty_diff_fill_override();
-        let decorations = self.display.decoration_override();
-        Ok(review_request(
-            patch_options(self)?,
-            false,
-            syntax_enabled,
-            empty_diff_fill,
-            decorations,
-        ))
-    }
+        syntax_enabled: display.syntax_enabled(),
+        empty_diff_fill: display.empty_diff_fill_override(),
+        decorations: display.decoration_override(),
+    })
 }

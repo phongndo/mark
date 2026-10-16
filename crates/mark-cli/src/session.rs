@@ -427,17 +427,13 @@ fn parse_reload_request(arguments: &[String]) -> CliResult<ReloadRequest> {
 }
 
 fn comment_anchor(file: String, target: CommentTargetArgs) -> CliResult<ReviewAnchor> {
+    // Clap rejects combined hunk, line, and range targets, and requires every
+    // range start to have an end.
     let has_range = target.old_start.is_some() || target.new_start.is_some();
-    let target_count = usize::from(target.hunk.is_some())
-        + usize::from(target.old_line.is_some())
-        + usize::from(target.new_line.is_some())
-        + usize::from(has_range);
-    if target_count > 1 {
-        return Err(MarkError::Usage(
-            "comment targets are mutually exclusive: hunk, old line, new line, or range".to_owned(),
-        )
-        .into());
-    }
+    let file_scope = target.hunk.is_none()
+        && target.old_line.is_none()
+        && target.new_line.is_none()
+        && !has_range;
     let range = if has_range {
         Some(RangeTarget {
             old: source_range(target.old_start, target.old_end, "old")?,
@@ -448,7 +444,7 @@ fn comment_anchor(file: String, target: CommentTargetArgs) -> CliResult<ReviewAn
     };
     Ok(ReviewAnchor {
         file,
-        scope: (target_count == 0).then_some(ReviewAnchorScope::File),
+        scope: file_scope.then_some(ReviewAnchorScope::File),
         hunk: target.hunk,
         old_line: target.old_line,
         new_line: target.new_line,
@@ -461,17 +457,16 @@ fn source_range(
     end: Option<usize>,
     side: &str,
 ) -> CliResult<Option<SourceRange>> {
-    match (start, end) {
-        (None, None) => Ok(None),
-        (Some(start), Some(end)) if start > 0 && end >= start => {
-            Ok(Some(SourceRange { start, end }))
-        }
-        (Some(_), Some(_)) => Err(MarkError::Usage(format!(
+    let (Some(start), Some(end)) = (start, end) else {
+        return Ok(None);
+    };
+    if start == 0 || end < start {
+        return Err(MarkError::Usage(format!(
             "{side} range must be positive and end at or after start"
         ))
-        .into()),
-        _ => Err(MarkError::Usage(format!("{side} range requires both start and end")).into()),
+        .into());
     }
+    Ok(Some(SourceRange { start, end }))
 }
 
 fn current_generation(selected: &SessionListing) -> CliResult<u64> {
