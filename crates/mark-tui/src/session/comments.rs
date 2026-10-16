@@ -540,13 +540,8 @@ fn comment_view(app: &DiffApp, comment: &ReviewComment) -> CommentView {
 }
 
 fn invalidate_comment_geometry(app: &mut DiffApp, anchors: HashSet<AnnotationKey>) {
-    app.annotations_state.annotation_block_scroll = None;
-    *app.annotations_state.annotation_keys_by_row.borrow_mut() = None;
-    let mut rows = app.annotations_state.annotation_rows.borrow_mut();
-    let mut heights = app.annotations_state.annotation_heights.borrow_mut();
-    for anchor in anchors {
-        rows.remove(&anchor);
-        heights.remove(&anchor);
+    for anchor in &anchors {
+        app.forget_annotation_layout(anchor);
     }
 }
 

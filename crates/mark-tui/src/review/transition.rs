@@ -106,7 +106,7 @@ impl ReviewTransition {
                 .collect();
             store.restore_comments(comments)
         });
-        invalidate_annotation_geometry(app);
+        app.forget_all_annotation_layout();
         if restore_result.is_err() {
             app.set_error_log("could not re-anchor review comments after reload");
         }
@@ -118,17 +118,7 @@ pub(crate) fn reset_review(app: &mut DiffApp) {
     app.annotations_state.lifecycle = Default::default();
     app.annotations_state.annotation_draft = None;
     app.annotations_state.sticky_annotation_draft = false;
-    invalidate_annotation_geometry(app);
-}
-
-fn invalidate_annotation_geometry(app: &mut DiffApp) {
-    app.annotations_state.annotation_block_scroll = None;
-    app.annotations_state.annotation_rows.borrow_mut().clear();
-    *app.annotations_state.annotation_keys_by_row.borrow_mut() = None;
-    app.annotations_state
-        .annotation_heights
-        .borrow_mut()
-        .clear();
+    app.forget_all_annotation_layout();
 }
 
 fn restore_comment(

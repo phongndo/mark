@@ -144,7 +144,7 @@ impl DiffApp {
         true
     }
 
-    fn forget_annotation_layout(&mut self, key: &AnnotationKey) {
+    pub(crate) fn forget_annotation_layout(&mut self, key: &AnnotationKey) {
         self.annotations_state.annotation_block_scroll = None;
         self.annotations_state
             .annotation_rows
@@ -157,7 +157,7 @@ impl DiffApp {
             .remove(key);
     }
 
-    fn forget_all_annotation_layout(&mut self) {
+    pub(crate) fn forget_all_annotation_layout(&mut self) {
         self.annotations_state.annotation_block_scroll = None;
         self.annotations_state.annotation_rows.borrow_mut().clear();
         *self.annotations_state.annotation_keys_by_row.borrow_mut() = None;
