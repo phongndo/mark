@@ -5,6 +5,7 @@ use mark_session::{
     ProtocolError, ReloadParams, ReloadRequest, ReloadResult, Response, SessionCommand,
 };
 
+use super::{require_generation, value};
 use crate::{app::DiffApp, runtime};
 
 pub(crate) fn handle(app: &mut DiffApp, command: SessionCommand) {
@@ -22,17 +23,8 @@ pub(crate) fn handle(app: &mut DiffApp, command: SessionCommand) {
             return;
         }
     };
-    if params.generation != app.document.generation {
-        let _ = command.reply.send(Response::failure(
-            id,
-            ProtocolError::new(
-                "stale_generation",
-                format!(
-                    "request generation {} does not match current generation {}",
-                    params.generation, app.document.generation
-                ),
-            ),
-        ));
+    if let Err(error) = require_generation(app, params.generation) {
+        let _ = command.reply.send(Response::failure(id, error));
         return;
     }
     let (source, pathspecs) = match reload_options(params.request) {
@@ -72,15 +64,9 @@ pub(crate) fn handle(app: &mut DiffApp, command: SessionCommand) {
 }
 
 fn success_response(id: String, result: impl serde::Serialize) -> Response {
-    match serde_json::to_value(result) {
+    match value(result) {
         Ok(result) => Response::success(id, result),
-        Err(error) => Response::failure(
-            id,
-            ProtocolError::new(
-                "internal_error",
-                format!("could not encode reload response: {error}"),
-            ),
-        ),
+        Err(error) => Response::failure(id, error),
     }
 }
 

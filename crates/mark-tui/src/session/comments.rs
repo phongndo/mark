@@ -17,7 +17,10 @@ use crate::{
     },
 };
 
-use super::{COMMENT_PAGE_RESERVE_BYTES, RESPONSE_RESULT_BUDGET_BYTES, anchors, find_file};
+use super::{
+    COMMENT_PAGE_RESERVE_BYTES, RESPONSE_RESULT_BUDGET_BYTES, anchors, find_file, parse_cursor,
+    require_generation,
+};
 
 pub(crate) struct CommentPage {
     pub(crate) comments: Vec<CommentView>,
@@ -212,17 +215,6 @@ fn comment_matches(
             ProtocolOrigin::Agent => comment.origin == CommentOrigin::Agent,
             ProtocolOrigin::Human => comment.origin == CommentOrigin::Human,
         }
-}
-
-fn parse_cursor(cursor: Option<&str>) -> Result<usize, ProtocolError> {
-    cursor
-        .map(|cursor| {
-            cursor.parse::<usize>().map_err(|_| {
-                ProtocolError::new("invalid_cursor", "cursor is not a valid continuation token")
-            })
-        })
-        .transpose()
-        .map(Option::unwrap_or_default)
 }
 
 pub(crate) fn remove(
@@ -473,19 +465,6 @@ fn validate_text(
         ));
     }
     Ok(())
-}
-
-fn require_generation(app: &DiffApp, generation: u64) -> Result<(), ProtocolError> {
-    if generation == app.document.generation {
-        return Ok(());
-    }
-    Err(ProtocolError::new(
-        "stale_generation",
-        format!(
-            "request generation {generation} does not match current generation {}",
-            app.document.generation
-        ),
-    ))
 }
 
 fn comment_view(app: &DiffApp, comment: &ReviewComment) -> CommentView {

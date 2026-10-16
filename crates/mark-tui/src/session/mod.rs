@@ -17,6 +17,39 @@ const COMMENT_PAGE_RESERVE_BYTES: usize = 4 * 1024;
 pub(crate) use controller::handle;
 pub(crate) use runtime::SessionRuntime;
 
+fn parse_cursor(cursor: Option<&str>) -> Result<usize, ProtocolError> {
+    cursor
+        .map(|cursor| {
+            cursor.parse::<usize>().map_err(|_| {
+                ProtocolError::new("invalid_cursor", "cursor is not a valid continuation token")
+            })
+        })
+        .transpose()
+        .map(Option::unwrap_or_default)
+}
+
+fn require_generation(app: &DiffApp, generation: u64) -> Result<(), ProtocolError> {
+    if generation == app.document.generation {
+        return Ok(());
+    }
+    Err(ProtocolError::new(
+        "stale_generation",
+        format!(
+            "request generation {generation} does not match current generation {}",
+            app.document.generation
+        ),
+    ))
+}
+
+fn value(value: impl serde::Serialize) -> Result<serde_json::Value, ProtocolError> {
+    serde_json::to_value(value).map_err(|error| {
+        ProtocolError::new(
+            "internal_error",
+            format!("could not encode session response: {error}"),
+        )
+    })
+}
+
 /// The one loaded file that `path` names, rejecting unknown and ambiguous paths.
 fn find_file<'a>(app: &'a DiffApp, path: &str) -> Result<&'a DiffFile, ProtocolError> {
     let mut matches = app

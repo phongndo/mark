@@ -12,7 +12,8 @@ use mark_session::{
 use serde::de::DeserializeOwned;
 
 use super::{
-    RESPONSE_RESULT_BUDGET_BYTES, comments, navigation, reload, runtime::SessionRuntime, snapshot,
+    RESPONSE_RESULT_BUDGET_BYTES, comments, navigation, parse_cursor, reload,
+    runtime::SessionRuntime, snapshot, value,
 };
 use crate::app::DiffApp;
 
@@ -190,19 +191,7 @@ fn changed_files_page(
     changed_files: &std::collections::BTreeSet<String>,
     params: ContextParams,
 ) -> Result<ChangedFilesPage, ProtocolError> {
-    let start = params
-        .changed_files_cursor
-        .as_deref()
-        .map(|cursor| {
-            cursor.parse::<usize>().map_err(|_| {
-                ProtocolError::new(
-                    "invalid_cursor",
-                    "changed-files cursor is not a valid continuation token",
-                )
-            })
-        })
-        .transpose()?
-        .unwrap_or_default();
+    let start = parse_cursor(params.changed_files_cursor.as_deref())?;
     if start > changed_files.len() {
         return Err(ProtocolError::new(
             "invalid_cursor",
@@ -240,15 +229,6 @@ fn params<T: DeserializeOwned>(request: &Request) -> Result<T, ProtocolError> {
         ProtocolError::new(
             "invalid_params",
             format!("invalid parameters for {}: {error}", request.method),
-        )
-    })
-}
-
-fn value(value: impl serde::Serialize) -> Result<serde_json::Value, ProtocolError> {
-    serde_json::to_value(value).map_err(|error| {
-        ProtocolError::new(
-            "internal_error",
-            format!("could not encode session response: {error}"),
         )
     })
 }

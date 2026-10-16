@@ -10,7 +10,8 @@ use mark_session::{
 use crate::{app::DiffApp, model::UiRow};
 
 use super::{
-    COMMENT_PAGE_RESERVE_BYTES, RESPONSE_RESULT_BUDGET_BYTES, find_file, runtime::SessionRuntime,
+    COMMENT_PAGE_RESERVE_BYTES, RESPONSE_RESULT_BUDGET_BYTES, find_file, parse_cursor,
+    runtime::SessionRuntime,
 };
 
 const MAX_HUNK_HEADER_BYTES: usize = 256;
@@ -656,17 +657,6 @@ impl BoundedPatch {
         self.page_end = piece_start.saturating_add(local_end);
         self.stopped = local_end < text.len() || self.content.len() >= self.max;
     }
-}
-
-fn parse_cursor(cursor: Option<&str>) -> Result<usize, ProtocolError> {
-    cursor
-        .map(|cursor| {
-            cursor.parse::<usize>().map_err(|_| {
-                ProtocolError::new("invalid_cursor", "cursor is not a valid continuation token")
-            })
-        })
-        .transpose()
-        .map(Option::unwrap_or_default)
 }
 
 fn truncate_utf8(text: &str, max_bytes: usize) -> String {
