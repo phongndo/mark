@@ -23,10 +23,9 @@ use crate::{
 };
 
 impl DiffApp {
-    pub(crate) fn reload(&mut self) -> MarkResult<()> {
+    pub(crate) fn reload(&mut self) {
         self.invalidate_diff_cache();
         self.start_uncached_diff_load(self.document.options.clone(), "reload failed");
-        Ok(())
     }
 
     pub(crate) fn replace_changeset(&mut self, changeset: Changeset) {

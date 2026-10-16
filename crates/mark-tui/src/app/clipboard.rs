@@ -1,3 +1,8 @@
+use super::DiffApp;
+#[cfg(test)]
+use super::{AppAction, AppEffect};
+#[cfg(test)]
+use mark_core::MarkResult;
 use std::io::{self, Write};
 
 const BASE64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -34,35 +39,39 @@ fn base64_encode(bytes: &[u8]) -> String {
     encoded
 }
 
-pub(crate) fn json_string(text: &str) -> String {
-    let mut out = String::with_capacity(text.len() + 2);
-    out.push('"');
-    for character in text.chars() {
-        match character {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            '\u{08}' => out.push_str("\\b"),
-            '\u{0c}' => out.push_str("\\f"),
-            character if character <= '\u{1f}' => {
-                out.push_str("\\u00");
-                let value = character as u8;
-                out.push(hex_digit(value >> 4));
-                out.push(hex_digit(value & 0x0f));
+impl DiffApp {
+    /// Runs an action like `perform_app_action`, but sends clipboard effects
+    /// to `clipboard` instead of the terminal so tests can inspect them.
+    #[cfg(test)]
+    pub(crate) fn perform_app_action_with_clipboard<W: Write>(
+        &mut self,
+        action: AppAction,
+        clipboard: &mut W,
+    ) -> MarkResult<()> {
+        let outcome = self.perform_app_action_with_effects(action)?;
+        for effect in outcome.into_effects() {
+            match effect {
+                AppEffect::CopyToClipboard {
+                    text,
+                    success_message,
+                    error_prefix,
+                } => self.copy_to_clipboard(clipboard, &text, success_message, &error_prefix),
+                effect => self.run_effect(effect)?,
             }
-            character => out.push(character),
         }
+        Ok(())
     }
-    out.push('"');
-    out
-}
 
-fn hex_digit(value: u8) -> char {
-    match value {
-        0..=9 => (b'0' + value) as char,
-        10..=15 => (b'a' + (value - 10)) as char,
-        _ => '0',
+    pub(super) fn copy_to_clipboard<W: Write>(
+        &mut self,
+        writer: &mut W,
+        text: &str,
+        success_message: String,
+        error_prefix: &str,
+    ) {
+        match write_osc52_clipboard(writer, text) {
+            Ok(()) => self.set_success_notice(success_message),
+            Err(error) => self.set_error_log(format!("{error_prefix}: {error}")),
+        }
     }
 }

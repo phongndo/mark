@@ -1362,7 +1362,7 @@ fn file_filter_edit_with_active_grep_preserves_current_grep_match() {
     }
 
     assert_eq!(visible_paths(&app), vec!["a.rs", "b.rs", "c.rs"]);
-    assert_eq!(app.current_grep_match_row(), Some(5));
+    assert_eq!(app.selected_grep_match_row(), Some(5));
     assert!((app.viewport.scroll..app.viewport.scroll + app.viewport.viewport_rows).contains(&5));
 }
 
@@ -1725,7 +1725,7 @@ fn reload_invalidates_cached_diff_choices() {
     };
     app.cache_loaded_diff(show, changeset_with_files(&["show.rs"]));
 
-    app.reload().expect("reload should start");
+    app.reload();
 
     assert!(app.jobs.diff_cache.is_empty());
     assert!(app.jobs.pending_diff_prefetch.is_none());

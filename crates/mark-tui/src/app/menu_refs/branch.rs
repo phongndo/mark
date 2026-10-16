@@ -34,7 +34,7 @@ impl DiffApp {
         self.close_commit_menu();
         self.refs.branch_menu.reset_input();
         self.refs.branch_menu.selected = self
-            .branch_ref(menu)
+            .selected_branch_menu_choice(menu)
             .and_then(|branch| {
                 self.filtered_branches()
                     .iter()
@@ -226,7 +226,10 @@ impl DiffApp {
     }
 
     pub(crate) fn selected_branch_menu_choice(&self, menu: BranchMenu) -> Option<&str> {
-        self.branch_ref(menu)
+        match menu {
+            BranchMenu::Head => self.refs.branch_head.as_deref(),
+            BranchMenu::Base => self.refs.branch_base.as_deref(),
+        }
     }
 
     pub(crate) fn selectable_branch_count(&self, menu: BranchMenu) -> usize {
@@ -311,15 +314,8 @@ impl DiffApp {
         )
     }
 
-    pub(crate) fn branch_ref(&self, menu: BranchMenu) -> Option<&str> {
-        match menu {
-            BranchMenu::Head => self.refs.branch_head.as_deref(),
-            BranchMenu::Base => self.refs.branch_base.as_deref(),
-        }
-    }
-
     pub(crate) fn branch_selector_text(&self, menu: BranchMenu) -> Option<String> {
-        let branch = self.branch_ref(menu)?;
+        let branch = self.selected_branch_menu_choice(menu)?;
         let label = self.branch_label(menu, branch);
         let indicator = self.config.theme.decorations.dropdown_indicator();
         if indicator.is_empty() {

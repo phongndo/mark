@@ -550,7 +550,7 @@ fn grep_jump_scrolls_past_annotation_blocks_to_show_match() {
     app.apply_filters(PostFilterNavigation::JumpToGrep);
 
     let match_row = app
-        .current_grep_match_row()
+        .selected_grep_match_row()
         .expect("grep match should be selected");
     let rendered_rows: Vec<_> = plan_diff_viewport_rows(&app, app.viewport.viewport_rows)
         .into_iter()
@@ -638,7 +638,8 @@ fn copy_marks_writes_structured_json_to_clipboard_sequence() {
     );
     let mut output = Vec::new();
 
-    app.copy_marks_to_writer(&mut output);
+    app.perform_app_action_with_clipboard(AppAction::CopyMarks, &mut output)
+        .expect("copy marks");
 
     assert_eq!(app.marks_clipboard_json().as_deref(), Some(expected));
     assert_eq!(
@@ -1470,7 +1471,8 @@ fn copy_marks_without_marks_shows_notice_without_writing() {
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
     let mut output = Vec::new();
 
-    app.copy_marks_to_writer(&mut output);
+    app.perform_app_action_with_clipboard(AppAction::CopyMarks, &mut output)
+        .expect("copy marks");
 
     assert!(output.is_empty());
     assert_eq!(
@@ -3347,7 +3349,7 @@ fn annotation_save_and_cancel_use_configured_keybindings() {
         .iter()
         .position(|line| line_text(line).contains("[↻]"))
         .expect("saved annotation edit footer") as u16
-        + app.viewport.rendered_diff_area.expect("diff area").y;
+        + app.runtime.hit_map.diff_area.expect("diff area").y;
     assert!(app.handle_diff_click(38, edit_row));
     assert!(app.annotations_state.annotation_draft.is_some());
     app.handle_annotation_input_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL));

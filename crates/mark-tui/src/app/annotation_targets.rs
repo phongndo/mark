@@ -27,6 +27,12 @@ enum CursorTargetDeltaResult {
 }
 
 impl DiffApp {
+    /// Viewport height as the renderer sees it: at least one row and
+    /// representable as a terminal coordinate.
+    fn renderable_viewport_rows(&self) -> usize {
+        self.viewport.viewport_rows.clamp(1, usize::from(u16::MAX))
+    }
+
     pub(crate) fn open_annotation_target_mode(&mut self) {
         self.open_annotation_target_mode_with_sticky(false);
     }
@@ -46,7 +52,7 @@ impl DiffApp {
             return;
         }
 
-        let (targets, _) = self.annotation_hint_targets();
+        let targets = self.annotation_hint_targets();
         if targets.is_empty() {
             self.set_notice("no annotatable lines in viewport");
             return;
@@ -550,7 +556,7 @@ impl DiffApp {
         plan_diff_viewport_rows_at_scroll(
             self,
             self.viewport.scroll,
-            self.viewport.viewport_rows.clamp(1, usize::from(u16::MAX)),
+            self.renderable_viewport_rows(),
         )
         .into_iter()
         .filter_map(|slot| {
@@ -584,7 +590,7 @@ impl DiffApp {
     }
 
     fn cursor_target_near_viewport_focus(&self) -> Option<AnnotationTarget> {
-        let visible_rows = self.viewport.viewport_rows.clamp(1, usize::from(u16::MAX));
+        let visible_rows = self.renderable_viewport_rows();
         let focus_viewport_row = self.rendered_viewport_focus_row(visible_rows);
         plan_diff_viewport_rows(self, visible_rows)
             .into_iter()
@@ -606,7 +612,7 @@ impl DiffApp {
     }
 
     fn annotation_target_near_viewport_focus(&self) -> Option<AnnotationTarget> {
-        let visible_rows = self.viewport.viewport_rows.clamp(1, usize::from(u16::MAX));
+        let visible_rows = self.renderable_viewport_rows();
         let focused_hunk = self.focused_hunk_for_viewport(visible_rows);
         let focus_viewport_row = self.rendered_viewport_focus_row(visible_rows);
         plan_diff_viewport_rows(self, visible_rows)
@@ -740,7 +746,7 @@ impl DiffApp {
             return (targets, 0);
         }
 
-        let visible_rows = self.viewport.viewport_rows.clamp(1, usize::from(u16::MAX));
+        let visible_rows = self.renderable_viewport_rows();
         let focused_hunk = self.focused_hunk_for_viewport(visible_rows);
         let focus_viewport_row = self.rendered_viewport_focus_row(visible_rows);
         for (viewport_row, slot) in plan_diff_viewport_rows(self, visible_rows)
@@ -819,8 +825,8 @@ impl DiffApp {
         (targets, selected)
     }
 
-    fn annotation_hint_targets(&self) -> (Vec<AnnotationTarget>, usize) {
-        let visible_rows = self.viewport.viewport_rows.clamp(1, usize::from(u16::MAX));
+    fn annotation_hint_targets(&self) -> Vec<AnnotationTarget> {
+        let visible_rows = self.renderable_viewport_rows();
         let focused_hunk = self.focused_hunk_for_viewport(visible_rows);
         let focus_viewport_row = self.rendered_viewport_focus_row(visible_rows);
         let mut seen = HashSet::new();
@@ -880,7 +886,7 @@ impl DiffApp {
             targets[index].hint = hint;
         }
 
-        (targets, 0)
+        targets
     }
 
     pub(crate) fn close_annotation_target_mode(&mut self) -> bool {
@@ -1178,7 +1184,7 @@ impl DiffApp {
         plan_diff_viewport_rows_at_scroll(
             self,
             self.viewport.scroll,
-            self.viewport.viewport_rows.clamp(1, usize::from(u16::MAX)),
+            self.renderable_viewport_rows(),
         )
         .into_iter()
         .any(|slot| {
@@ -1194,7 +1200,7 @@ impl DiffApp {
     }
 
     fn reveal_saved_annotation_block(&mut self, current: &AnnotationTarget) -> bool {
-        let viewport_rows = self.viewport.viewport_rows.clamp(1, usize::from(u16::MAX));
+        let viewport_rows = self.renderable_viewport_rows();
         if viewport_rows < 2 {
             return false;
         }
@@ -1343,18 +1349,15 @@ impl DiffApp {
         target: &AnnotationTarget,
         annotation_height_prefixes: &[(usize, usize)],
     ) -> usize {
-        let target_is_rendered = plan_diff_viewport_rows(
-            self,
-            self.viewport.viewport_rows.clamp(1, usize::from(u16::MAX)),
-        )
-        .into_iter()
-        .any(|slot| {
-            matches!(
-                slot.kind,
-                ViewportSlotKind::DiffVisual { model_row, .. }
-                    if model_row == target.model_row_index
-            )
-        });
+        let target_is_rendered = plan_diff_viewport_rows(self, self.renderable_viewport_rows())
+            .into_iter()
+            .any(|slot| {
+                matches!(
+                    slot.kind,
+                    ViewportSlotKind::DiffVisual { model_row, .. }
+                        if model_row == target.model_row_index
+                )
+            });
         // Planning above may materialize a sparse wrapped block. Keep the
         // wrapped continuation offset separate from annotation block prefixes.
         let wrapped_offset = if target_is_rendered {
@@ -1604,7 +1607,7 @@ impl DiffApp {
             return false;
         };
         let model_row = target.model_row_index;
-        let viewport_rows = self.viewport.viewport_rows.clamp(1, usize::from(u16::MAX));
+        let viewport_rows = self.renderable_viewport_rows();
         let target_scroll = self.scroll_for_model_row(model_row);
         let viewport_row = if target_scroll < self.viewport.scroll {
             0
@@ -1626,7 +1629,7 @@ impl DiffApp {
     }
 
     pub(in crate::app) fn keep_annotation_cursor_inside_scroll_region(&mut self, moving_up: bool) {
-        let viewport_rows = self.viewport.viewport_rows.clamp(1, usize::from(u16::MAX));
+        let viewport_rows = self.renderable_viewport_rows();
         let scroll_off = ANNOTATION_CURSOR_SCROLL_OFF.min(viewport_rows.saturating_sub(1) / 2);
         let top_row = scroll_off;
         let bottom_row = viewport_rows.saturating_sub(1).saturating_sub(scroll_off);
@@ -1682,7 +1685,7 @@ impl DiffApp {
         plan_diff_viewport_rows_at_scroll(
             self,
             self.viewport.scroll,
-            self.viewport.viewport_rows.clamp(1, usize::from(u16::MAX)),
+            self.renderable_viewport_rows(),
         )
         .into_iter()
         .enumerate()

@@ -121,7 +121,10 @@ impl DiffApp {
                 }
                 Ok(())
             }
-            AppEffect::Reload => self.reload(),
+            AppEffect::Reload => {
+                self.reload();
+                Ok(())
+            }
             AppEffect::OpenEditorShortcut => {
                 self.open_editor_shortcut(None);
                 Ok(())
@@ -142,20 +145,13 @@ impl DiffApp {
                 error_prefix,
             } => {
                 let mut stdout = io::stdout().lock();
-                match write_osc52_clipboard(&mut stdout, &text) {
-                    Ok(()) => self.set_success_notice(success_message),
-                    Err(error) => self.set_error_log(format!("{error_prefix}: {error}")),
-                }
+                self.copy_to_clipboard(&mut stdout, &text, success_message, &error_prefix);
                 Ok(())
             }
             AppEffect::PersistOptionsMenuDraft {
                 draft,
                 changed_item,
             } => {
-                if !changed_item.persists() {
-                    return Ok(());
-                }
-
                 #[cfg(test)]
                 {
                     self.config.last_persisted_options_menu_draft = Some((draft, changed_item));

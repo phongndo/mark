@@ -74,7 +74,7 @@ fn n_and_p_navigate_grep_matches_when_grep_filter_is_active() {
     app.apply_filters(PostFilterNavigation::JumpToGrep);
 
     assert_eq!(app.filters.grep_matches.len(), 3);
-    assert_eq!(app.current_grep_match_row(), Some(2));
+    assert_eq!(app.selected_grep_match_row(), Some(2));
     let row = app.document.model.row(2).unwrap();
     let rendered = render_row(&mut app, 2, row, 40);
     assert!(
@@ -99,7 +99,7 @@ fn n_and_p_navigate_grep_matches_when_grep_filter_is_active() {
 
     app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE))
         .expect("n should move to next grep match");
-    assert_eq!(app.current_grep_match_row(), Some(5));
+    assert_eq!(app.selected_grep_match_row(), Some(5));
     assert_eq!(
         app.viewport.scroll + viewport_center_offset(app.viewport.viewport_rows),
         5
@@ -107,7 +107,7 @@ fn n_and_p_navigate_grep_matches_when_grep_filter_is_active() {
 
     app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE))
         .expect("p should move to previous grep match");
-    assert_eq!(app.current_grep_match_row(), Some(2));
+    assert_eq!(app.selected_grep_match_row(), Some(2));
     assert_eq!(
         app.viewport.scroll + viewport_center_offset(app.viewport.viewport_rows),
         2
@@ -124,12 +124,12 @@ fn grep_match_stays_centered_after_viewport_rows_are_known() {
     app.apply_filters(PostFilterNavigation::JumpToGrep);
 
     assert_eq!(app.viewport.viewport_rows, 1);
-    assert_eq!(app.current_grep_match_row(), Some(7));
+    assert_eq!(app.selected_grep_match_row(), Some(7));
     assert_eq!(app.viewport.scroll, 7);
 
     app.set_viewport_rows(5);
 
-    assert_eq!(app.current_grep_match_row(), Some(7));
+    assert_eq!(app.selected_grep_match_row(), Some(7));
     assert_eq!(
         app.viewport.scroll + viewport_center_offset(app.viewport.viewport_rows),
         7

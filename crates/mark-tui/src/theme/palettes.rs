@@ -3,7 +3,6 @@ use ratatui::prelude::Color;
 
 use super::{Base16Scheme, DecorationStyle, DiffTheme, RgbColor};
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct CatppuccinPalette {
     rosewater: RgbColor,
@@ -152,7 +151,6 @@ impl CatppuccinPalette {
     };
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct GruvboxPalette {
     bg0_h: RgbColor,
@@ -249,7 +247,6 @@ impl GruvboxPalette {
     };
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct GithubPalette {
     fg_default: RgbColor,

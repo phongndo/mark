@@ -11,9 +11,17 @@ pub(crate) enum ComponentEventResult {
     Quit,
 }
 
-pub(crate) trait EventComponent<E, Ctx: ?Sized>: Sync {
-    fn id(&self) -> ComponentId;
+impl ComponentEventResult {
+    pub(crate) fn consumed_if(consumed: bool) -> Self {
+        if consumed {
+            Self::Consumed
+        } else {
+            Self::Ignored
+        }
+    }
+}
 
+pub(crate) trait EventComponent<E, Ctx: ?Sized>: Sync {
     fn handle_event(&self, event: E, ctx: &mut Ctx) -> MarkResult<ComponentEventResult>;
 }
 
@@ -26,7 +34,6 @@ where
     C: EventComponent<E, Ctx>,
 {
     for layer in layers.iter().rev() {
-        let _component_id = layer.id();
         let result = layer.handle_event(event, ctx)?;
         if !matches!(result, ComponentEventResult::Ignored) {
             return Ok(result);
@@ -42,13 +49,6 @@ pub(crate) enum ComponentId {
     FilterBar,
     ErrorLogPanel,
     Toasts,
-    AnnotationTarget,
-    AnnotationDraftBindings,
-    QuitKey,
-    EditorShortcut,
-    MouseScrollReset,
-    FilterInput,
-    AnnotationInput,
     HelpMenu,
     MarksConfirm,
     BranchMenu,
@@ -58,14 +58,6 @@ pub(crate) enum ComponentId {
     ColorSchemePicker,
     OptionsMenu,
     AnnotationMenu,
-    ErrorLog,
-    Prefix,
-    GlobalAction,
-    OpenMenuKey,
-    ErrorLogResize,
-    Navigation,
-    OpenMenuScroll,
-    FileSidebarResize,
     DiffView,
 }
 

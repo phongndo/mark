@@ -283,11 +283,11 @@ pub(crate) struct UiModel {
     pub(crate) rows: Vec<UiRow>,
     row_count: usize,
     row_segments: Vec<RowSegment>,
-    pub(crate) file_start_rows: Vec<Option<ModelRow>>,
-    pub(crate) file_row_starts: Vec<(FileIndex, ModelRow)>,
+    file_start_rows: Vec<Option<ModelRow>>,
+    file_row_starts: Vec<(FileIndex, ModelRow)>,
     pub(crate) visible_files: Vec<FileIndex>,
-    pub(crate) hunk_start_rows: Vec<ModelRow>,
-    pub(crate) hunk_row_starts: Vec<((FileIndex, HunkIndex), ModelRow)>,
+    /// Sorted by both hunk key and start row.
+    hunk_row_starts: Vec<((FileIndex, HunkIndex), ModelRow)>,
     hunk_row_ends: Vec<ModelRow>,
     /// Compact content blocks let annotation navigation skip model chrome.
     annotation_candidate_blocks: AnnotationCandidateIndex,
@@ -1078,7 +1078,6 @@ impl UiModel {
         let mut rows = Vec::with_capacity(estimated_rows);
         let mut file_start_rows = vec![None; changeset.files.len()];
         let mut file_row_starts = Vec::with_capacity(visible_files.len());
-        let mut hunk_start_rows = Vec::with_capacity(total_hunks);
         let mut hunk_row_starts = Vec::with_capacity(total_hunks);
         let mut hunk_row_ends = Vec::with_capacity(total_hunks);
 
@@ -1179,7 +1178,6 @@ impl UiModel {
 
                 let hunk_start_row = rows.len();
                 let hunk_start_row = ModelRow::new(hunk_start_row);
-                hunk_start_rows.push(hunk_start_row);
                 hunk_row_starts.push(((file_index, hunk_index), hunk_start_row));
                 // Full-file mode omits patch-only chrome, including @@ headers.
                 if show_context_controls {
@@ -1267,7 +1265,6 @@ impl UiModel {
             file_start_rows,
             file_row_starts,
             visible_files: visible_files.to_vec(),
-            hunk_start_rows,
             hunk_row_starts,
             hunk_row_ends,
             annotation_candidate_blocks: AnnotationCandidateIndex::eager(
@@ -1309,7 +1306,6 @@ impl UiModel {
             Vec::with_capacity(base_segment_capacity.saturating_add(split_segment_capacity));
         let mut file_start_rows = vec![None; changeset.files.len()];
         let mut file_row_starts = Vec::with_capacity(visible_files.len());
-        let mut hunk_start_rows = Vec::with_capacity(total_hunks);
         let mut hunk_row_starts = Vec::with_capacity(total_hunks);
         let mut hunk_row_ends = Vec::with_capacity(total_hunks);
 
@@ -1449,7 +1445,6 @@ impl UiModel {
                 }
 
                 let hunk_start_row = ModelRow::new(row_count);
-                hunk_start_rows.push(hunk_start_row);
                 hunk_row_starts.push(((file_index, hunk_index), hunk_start_row));
                 if show_context_controls {
                     push_row_segment(
@@ -1551,7 +1546,6 @@ impl UiModel {
             file_start_rows,
             file_row_starts,
             visible_files: visible_files.to_vec(),
-            hunk_start_rows,
             hunk_row_starts,
             hunk_row_ends,
             annotation_candidate_blocks: AnnotationCandidateIndex::sparse(),
@@ -1589,11 +1583,6 @@ impl UiModel {
                 self.visible_files
                     .len()
                     .saturating_mul(std::mem::size_of::<FileIndex>()),
-            )
-            .saturating_add(
-                self.hunk_start_rows
-                    .len()
-                    .saturating_mul(std::mem::size_of::<ModelRow>()),
             )
             .saturating_add(
                 self.hunk_row_starts
@@ -1798,14 +1787,6 @@ impl UiModel {
         })
     }
 
-    pub(crate) fn cache_key(&self) -> usize {
-        if self.rows.is_empty() {
-            self.row_segments.as_ptr() as usize
-        } else {
-            self.rows.as_ptr() as usize
-        }
-    }
-
     pub(crate) fn file_start_row(&self, file: usize) -> Option<usize> {
         self.file_start_rows
             .get(file)
@@ -1815,11 +1796,12 @@ impl UiModel {
     }
 
     pub(crate) fn file_row_range(&self, file: FileIndex) -> Option<Range<usize>> {
+        let start_row = self.file_start_rows.get(file.get()).copied().flatten()?;
         let position = self
             .file_row_starts
-            .iter()
-            .position(|(candidate, _)| *candidate == file)?;
-        let start = self.file_row_starts.get(position)?.1.get();
+            .binary_search_by_key(&start_row, |(_, row)| *row)
+            .ok()?;
+        let start = start_row.get();
         let end = self
             .file_row_starts
             .get(position.saturating_add(1))
@@ -1861,8 +1843,10 @@ impl UiModel {
     }
 
     pub(crate) fn typed_next_hunk_row(&self, row: ModelRow) -> Option<ModelRow> {
-        let index = self.hunk_start_rows.partition_point(|start| *start <= row);
-        self.hunk_start_rows.get(index).copied()
+        let index = self
+            .hunk_row_starts
+            .partition_point(|(_, start)| *start <= row);
+        self.hunk_row_starts.get(index).map(|(_, start)| *start)
     }
 
     pub(crate) fn previous_hunk_row(&self, row: usize) -> Option<usize> {
@@ -1871,11 +1855,17 @@ impl UiModel {
     }
 
     pub(crate) fn typed_previous_hunk_row(&self, row: ModelRow) -> Option<ModelRow> {
-        let index = self.hunk_start_rows.partition_point(|start| *start < row);
+        let index = self
+            .hunk_row_starts
+            .partition_point(|(_, start)| *start < row);
         index
             .checked_sub(1)
-            .and_then(|index| self.hunk_start_rows.get(index))
-            .copied()
+            .and_then(|index| self.hunk_row_starts.get(index))
+            .map(|(_, start)| *start)
+    }
+
+    pub(crate) fn first_hunk(&self) -> Option<(FileIndex, HunkIndex)> {
+        self.hunk_row_starts.first().map(|(key, _)| *key)
     }
 
     pub(crate) fn hunk_start_row(&self, file: usize, hunk: usize) -> Option<usize> {

@@ -7,7 +7,7 @@ use ratatui::{
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
-    app::{DiffApp, OptionsMenuItem, color_scheme_label, option_label},
+    app::{COMMON_OPTIONS_MENU_ITEMS, DiffApp, OptionsMenuItem, color_scheme_label, option_label},
     render::{
         selector_menu::{
             ScrollableSelectorMenu, SelectorMenuInput, SelectorMenuLinesRequest,
@@ -43,7 +43,7 @@ pub(crate) fn draw_options_menu(frame: &mut Frame<'_>, app: &DiffApp, area: Rect
                 input: &app.overlays.options_menu.input,
                 input_cursor: app.overlays.options_menu.input_cursor,
                 matched: items.len(),
-                total: app.options_menu_items().len(),
+                total: COMMON_OPTIONS_MENU_ITEMS.len(),
                 theme: app.config.theme,
             },
             inner,

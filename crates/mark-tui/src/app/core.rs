@@ -10,8 +10,8 @@ use crate::search::{DiffSearchIndex, DiffSearchResult};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use mark_core::MarkResult;
 use mark_diff::{Changeset, DiffOptions, DiffSource, DiffStats};
-use mark_syntax::DiffContextExpansion;
 use ratatui::layout::Rect;
+use serde::Serialize;
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::{
@@ -249,21 +249,30 @@ impl std::fmt::Debug for FilterWorker {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub(crate) enum MarkScope {
     File,
     Hunk,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// One mark in the copied marks JSON. Field order is the output order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct MarkExport {
     pub(crate) path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) scope: Option<MarkScope>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) old_line: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) new_line: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) old_start: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) old_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) new_start: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) new_count: Option<usize>,
     pub(crate) body: String,
 }
@@ -318,25 +327,6 @@ pub(crate) fn cacheable_diff_options(options: &DiffOptions) -> bool {
             options.source,
             DiffSource::Patch(_) | DiffSource::Difftool { .. }
         )
-}
-
-pub(crate) fn next_context_expansion(expansion: DiffContextExpansion) -> DiffContextExpansion {
-    match expansion {
-        DiffContextExpansion::Lines(lines) if lines < 20 => DiffContextExpansion::Lines(20),
-        DiffContextExpansion::Lines(lines) if lines < 50 => DiffContextExpansion::Lines(50),
-        DiffContextExpansion::Lines(_) => DiffContextExpansion::Full,
-        DiffContextExpansion::Full => DiffContextExpansion::Lines(5),
-    }
-}
-
-pub(crate) fn previous_context_expansion(expansion: DiffContextExpansion) -> DiffContextExpansion {
-    match expansion {
-        DiffContextExpansion::Lines(lines) if lines <= 5 => DiffContextExpansion::Full,
-        DiffContextExpansion::Lines(lines) if lines <= 20 => DiffContextExpansion::Lines(5),
-        DiffContextExpansion::Lines(lines) if lines <= 50 => DiffContextExpansion::Lines(20),
-        DiffContextExpansion::Lines(_) => DiffContextExpansion::Lines(50),
-        DiffContextExpansion::Full => DiffContextExpansion::Lines(50),
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -417,7 +407,7 @@ pub(crate) struct WrappedVisualLayout {
     pub(crate) layout: DiffLayoutMode,
     pub(crate) viewport_width: usize,
     pub(crate) model_rows: usize,
-    pub(crate) model_rows_ptr: usize,
+    pub(crate) model_identity: u64,
     /// Exact visual starts for eager layouts. Sparse layouts leave this empty.
     pub(crate) row_starts: Vec<usize>,
     pub(crate) row_start_stride: usize,
@@ -432,7 +422,7 @@ impl WrappedVisualLayout {
         self.layout == app.viewport.layout
             && self.viewport_width == app.viewport.viewport_width
             && self.model_rows == app.document.model.len()
-            && self.model_rows_ptr == app.document.model.cache_key()
+            && self.model_identity == app.document.model.identity()
     }
 }
 

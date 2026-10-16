@@ -1,13 +1,12 @@
 mod color_scheme;
 
 use super::{
-    AppEffect, BUILTIN_THEMES, COMMON_OPTIONS_MENU_ITEMS, DiffApp, OptionsDraft, OptionsMenuItem,
-    SyntaxStartupMode, checkbox, color_scheme_label, context_expansion_label,
-    decoration_preference_label, layout_setting_from_override, layout_setting_label,
-    next_context_expansion, next_decoration_preference, next_layout_setting,
-    next_notification_mode, next_toast_corner, next_toast_max_visible, next_toast_timeout_ms,
-    notification_mode_label, on_off_search, option_label, previous_context_expansion,
-    toast_corner_label, toast_timeout_label,
+    AppEffect, COMMON_OPTIONS_MENU_ITEMS, DiffApp, OptionsDraft, OptionsMenuItem,
+    SyntaxStartupMode, checkbox, color_scheme_label, decoration_preference_label,
+    layout_setting_from_override, layout_setting_label, next_color_scheme,
+    next_decoration_preference, next_layout_setting, next_notification_mode, next_toast_corner,
+    next_toast_max_visible, next_toast_timeout_ms, notification_mode_label, on_off_search,
+    option_label, toast_corner_label, toast_timeout_label,
 };
 use crate::controls::branch_match_score;
 use crate::selector::{SelectorController, SelectorMovement};
@@ -23,7 +22,6 @@ impl DiffApp {
             layout: layout_setting_from_override(self.viewport.layout_override),
             full_file: self.viewport.full_file,
             live_updates_enabled: self.jobs.live_updates.enabled(),
-            context_expansion: self.config.theme.diff.context_expansion,
             syntax_enabled: self.config.syntax.is_some(),
             line_wrapping: self.viewport.line_wrapping,
             horizontal_scroll_locked: self.viewport.horizontal_scroll_locked,
@@ -34,7 +32,7 @@ impl DiffApp {
             toast_timeout_ms: self.config.syntax_settings.notifications.timeout_ms(),
             toast_max_visible: self.config.syntax_settings.notifications.max_visible(),
         };
-        let len = self.options_menu_items().len();
+        let len = COMMON_OPTIONS_MENU_ITEMS.len();
         self.overlays
             .options_menu
             .set_selected(self.overlays.options_menu.selected, len);
@@ -104,12 +102,8 @@ impl DiffApp {
         }
     }
 
-    pub(crate) fn options_menu_items(&self) -> &'static [OptionsMenuItem] {
-        COMMON_OPTIONS_MENU_ITEMS
-    }
-
     pub(crate) fn filtered_options_menu_items(&self) -> Vec<OptionsMenuItem> {
-        let items = self.options_menu_items();
+        let items = COMMON_OPTIONS_MENU_ITEMS;
         let query = self.overlays.options_menu.input.trim().to_ascii_lowercase();
         if query.is_empty() {
             return items.to_vec();
@@ -160,9 +154,6 @@ impl DiffApp {
             OptionsMenuItem::LiveReload => {
                 on_off_search(self.overlays.options_menu_draft.live_updates_enabled)
             }
-            OptionsMenuItem::ContextExpansion => {
-                context_expansion_label(self.overlays.options_menu_draft.context_expansion)
-            }
             OptionsMenuItem::SyntaxHighlighting => {
                 on_off_search(self.overlays.options_menu_draft.syntax_enabled)
             }
@@ -210,12 +201,6 @@ impl DiffApp {
             }
             OptionsMenuItem::LiveReload => {
                 checkbox(self.overlays.options_menu_draft.live_updates_enabled)
-            }
-            OptionsMenuItem::ContextExpansion => {
-                format!(
-                    "[{}]",
-                    context_expansion_label(self.overlays.options_menu_draft.context_expansion)
-                )
             }
             OptionsMenuItem::SyntaxHighlighting => {
                 checkbox(self.overlays.options_menu_draft.syntax_enabled)
@@ -302,13 +287,6 @@ impl DiffApp {
                 self.overlays.options_menu_draft.live_updates_enabled =
                     !self.overlays.options_menu_draft.live_updates_enabled;
             }
-            OptionsMenuItem::ContextExpansion => {
-                self.overlays.options_menu_draft.context_expansion = if delta < 0 {
-                    previous_context_expansion(self.overlays.options_menu_draft.context_expansion)
-                } else {
-                    next_context_expansion(self.overlays.options_menu_draft.context_expansion)
-                };
-            }
             OptionsMenuItem::SyntaxHighlighting => {
                 self.overlays.options_menu_draft.syntax_enabled =
                     !self.overlays.options_menu_draft.syntax_enabled;
@@ -326,13 +304,8 @@ impl DiffApp {
                     next_decoration_preference(self.overlays.options_menu_draft.decorations, delta);
             }
             OptionsMenuItem::ColorScheme => {
-                let choices = BUILTIN_THEMES;
-                let current = choices
-                    .iter()
-                    .position(|choice| *choice == self.overlays.options_menu_draft.color_scheme)
-                    .unwrap_or_default();
-                let next = (current as isize + delta).rem_euclid(choices.len() as isize) as usize;
-                self.overlays.options_menu_draft.color_scheme = choices[next];
+                self.overlays.options_menu_draft.color_scheme =
+                    next_color_scheme(self.overlays.options_menu_draft.color_scheme, delta);
             }
             OptionsMenuItem::NotificationMode => {
                 self.overlays.options_menu_draft.notification_mode =
@@ -378,10 +351,6 @@ impl DiffApp {
                 .live_updates
                 .set_user_enabled(draft.live_updates_enabled);
             self.jobs.live_diff_failed_options = None;
-            self.runtime.dirty = true;
-        }
-        if draft.context_expansion != self.config.theme.diff.context_expansion {
-            self.config.theme.diff.context_expansion = draft.context_expansion;
             self.runtime.dirty = true;
         }
         if draft.color_scheme != self.config.color_scheme {

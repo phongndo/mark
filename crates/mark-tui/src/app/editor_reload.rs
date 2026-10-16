@@ -574,12 +574,10 @@ impl DiffApp {
                         self.queue_editor_scoped_reload(request);
                         self.set_notice("editor closed; refreshing edited file");
                     }
-                    EditorReloadBehavior::Sync => match self.reload() {
-                        Ok(()) => self.set_notice("editor closed; reloading"),
-                        Err(error) => {
-                            self.set_error_log(format!("editor closed; reload failed: {error}"))
-                        }
-                    },
+                    EditorReloadBehavior::Sync => {
+                        self.reload();
+                        self.set_notice("editor closed; reloading");
+                    }
                 }
             }
             Ok(status) => {

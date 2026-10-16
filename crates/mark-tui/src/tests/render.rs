@@ -1005,13 +1005,13 @@ fn n_and_p_navigate_grep_by_line_not_match_count() {
         app.filters.grep_matches,
         vec![ModelRow::new(2), ModelRow::new(3)]
     );
-    assert_eq!(app.current_grep_match_row(), Some(2));
+    assert_eq!(app.selected_grep_match_row(), Some(2));
     assert_eq!(app.viewport.scroll, 0);
 
     app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE))
         .expect("n should move to next matching line");
 
-    assert_eq!(app.current_grep_match_row(), Some(3));
+    assert_eq!(app.selected_grep_match_row(), Some(3));
     assert_eq!(
         app.viewport.scroll + viewport_center_offset(app.viewport.viewport_rows),
         3
@@ -1037,12 +1037,12 @@ fn wrapped_grep_selection_stays_on_visible_continuation_row() {
 
     app.set_scroll(continuation_scroll);
 
-    assert_eq!(app.current_grep_match_row(), Some(first.get()));
+    assert_eq!(app.selected_grep_match_row(), Some(first.get()));
 
     app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE))
         .expect("n should move to the next grep match");
 
-    assert_eq!(app.current_grep_match_row(), Some(second.get()));
+    assert_eq!(app.selected_grep_match_row(), Some(second.get()));
 }
 
 #[test]
@@ -1297,18 +1297,18 @@ fn error_log_header_uses_configured_copy_command() {
 }
 
 #[test]
-fn copy_error_log_without_log_shows_notice_without_writing() {
+fn copy_error_log_without_log_is_ignored_without_writing() {
+    // Copying the error log is contextual to the visible log panel. Without a
+    // log the action stays silent so its key can fall through to other bindings.
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
     let mut output = Vec::new();
 
-    app.copy_error_log_to_writer(&mut output);
+    app.perform_app_action_with_clipboard(AppAction::CopyErrorLog, &mut output)
+        .expect("copy error log");
 
     assert!(output.is_empty());
-    assert_eq!(
-        app.notifications.toasts.latest_text(),
-        Some("no error log to copy")
-    );
+    assert!(app.notifications.toasts.is_empty());
 }
 
 #[test]
@@ -3081,7 +3081,7 @@ fn mouse_click_selects_line_and_enter_opens_annotation_input() {
         span.content.contains("[↻]") && span.style.fg == Some(app.config.theme.search_match_bg)
     }));
 
-    let diff_y = app.viewport.rendered_diff_area.expect("diff area").y;
+    let diff_y = app.runtime.hit_map.diff_area.expect("diff area").y;
     assert!(app.handle_diff_click(38, diff_y.saturating_add(edit_row as u16)));
     assert!(app.annotations_state.annotation_draft.is_some());
     app.handle_annotation_input_key(KeyEvent::new(KeyCode::Char('!'), KeyModifiers::NONE));
