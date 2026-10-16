@@ -40,8 +40,19 @@ impl SyntaxRuntime {
             match result.side {
                 Ok(success) => {
                     let memory_bytes = success.side.memory_bytes();
-                    self.cache
-                        .insert_with_weight(result.key, Arc::new(success.side), memory_bytes);
+                    if !self.cache.insert_with_weight(
+                        result.key,
+                        Arc::new(success.side),
+                        memory_bytes,
+                    ) {
+                        // The result can never be cached, so re-requesting it
+                        // on the next redraw would highlight it forever.
+                        if self.handle_uncacheable_result(result.key) {
+                            drain.changed = true;
+                            drain.changed_keys.push(result.key);
+                        }
+                        continue;
+                    }
                     self.stats.jobs_completed = self.stats.jobs_completed.saturating_add(1);
                     if let Some(source_bytes) = success.source_bytes {
                         self.stats.source_bytes_queued =
@@ -81,6 +92,25 @@ impl SyntaxRuntime {
             }
         }
         drain
+    }
+
+    /// Records a result that exceeds the whole cache budget. Returns whether
+    /// a redraw can make progress: an oversized full file falls back to hunk
+    /// sources, while an oversized hunk is skipped as too large.
+    fn handle_uncacheable_result(&mut self, key: SyntaxKey) -> bool {
+        match key.source.kind {
+            SyntaxSourceKind::FullFile => {
+                self.handle_unavailable_source(key);
+                self.skip_source(key.source, SyntaxSkipReason::TooLarge);
+                true
+            }
+            SyntaxSourceKind::HunkSide { .. } => {
+                for position in self.positions_for_key(key) {
+                    self.skip(position, SyntaxSkipReason::TooLarge);
+                }
+                false
+            }
+        }
     }
 
     pub(crate) fn handle_unavailable_source(&mut self, key: SyntaxKey) {
