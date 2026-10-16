@@ -27,6 +27,8 @@ const CLIENT_FRAME_TIMEOUT: Duration = Duration::from_secs(30);
 const CLIENT_RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
 #[cfg(unix)]
 const BUSY_REPLY_TIMEOUT: Duration = Duration::from_secs(1);
+#[cfg(unix)]
+const ACCEPT_RETRY_DELAY: Duration = Duration::from_millis(100);
 
 #[derive(Debug)]
 pub struct SessionCommand {
@@ -158,7 +160,7 @@ async fn run_server(
 
     let clients = Arc::new(tokio::sync::Semaphore::new(MAX_CONNECTED_CLIENTS));
     loop {
-        let (stream, _) = listener.accept().await?;
+        let (stream, _) = accept_retrying(|| listener.accept(), ACCEPT_RETRY_DELAY).await;
         let permit = match Arc::clone(&clients).try_acquire_owned() {
             Ok(permit) => permit,
             Err(_) => {
@@ -171,6 +173,25 @@ async fn run_server(
             let _permit = permit;
             let _ = handle_connection(stream, commands).await;
         });
+    }
+}
+
+/// Waits for the next connection, retrying failed accepts.
+///
+/// Accept failures on a bound listener (descriptor exhaustion, aborted
+/// connections, memory pressure) are transient. Returning them would stop the
+/// server and unregister a session whose TUI is still running.
+#[cfg(unix)]
+async fn accept_retrying<T, F, Fut>(mut accept: F, retry_delay: Duration) -> T
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = io::Result<T>>,
+{
+    loop {
+        match accept().await {
+            Ok(accepted) => return accepted,
+            Err(_) => tokio::time::sleep(retry_delay).await,
+        }
     }
 }
 
@@ -366,5 +387,28 @@ mod tests {
 
             assert_eq!(error.kind(), io::ErrorKind::TimedOut);
         });
+    }
+
+    #[test]
+    fn accept_failures_are_retried_instead_of_stopping_the_server() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let mut attempts = 0;
+        let accepted = runtime.block_on(accept_retrying(
+            || {
+                attempts += 1;
+                let result = if attempts < 3 {
+                    Err(io::Error::from_raw_os_error(rustix::io::Errno::MFILE.raw_os_error()))
+                } else {
+                    Ok(attempts)
+                };
+                std::future::ready(result)
+            },
+            Duration::from_millis(1),
+        ));
+
+        assert_eq!(accepted, 3);
     }
 }
