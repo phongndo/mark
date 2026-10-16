@@ -9,10 +9,6 @@ use mark_git::{
 
 use crate::{DiffOptions, DiffSource, PatchSource, difftool::difftool_display_path};
 
-pub(super) fn validate_options(_options: &DiffOptions) -> MarkResult<()> {
-    Ok(())
-}
-
 pub(super) fn git_diff_args(options: &DiffOptions, repo: &Path) -> MarkResult<Vec<String>> {
     if let DiffSource::Show(rev) = &options.source {
         return git_show_args(repo, rev);

@@ -8,7 +8,7 @@ fn range_diff_reports_unknown_revision() {
     init_repo(&repo);
 
     let error = render(DiffOptions {
-        repo: Some(repo.clone().into()),
+        repo: Some(repo.into()),
         source: DiffSource::Range {
             left: "HEAD".into(),
             right: "missing-branch".into(),
@@ -37,7 +37,7 @@ fn range_diff_accepts_pathspec_right_operand() {
     fs::write(repo.join("src/other.rs"), "two\n").expect("other file should change");
 
     let options = DiffOptions {
-        repo: Some(repo.clone().into()),
+        repo: Some(repo.into()),
         source: DiffSource::Range {
             left: "HEAD".into(),
             right: "src/lib.rs".into(),
@@ -123,7 +123,7 @@ fn range_diff_accepts_treeish_revisions() {
     assert!(patch.contains("+changed"));
 
     let stat = render(DiffOptions {
-        repo: Some(repo.clone().into()),
+        repo: Some(repo.into()),
         source: DiffSource::Range {
             left: "HEAD~1^{tree}".into(),
             right: "HEAD".into(),
@@ -152,7 +152,7 @@ fn range_diff_accepts_multi_object_left_revision() {
     git(["merge", "-q", "--no-ff", "side", "-m", "merge"], &repo);
 
     let stat = render(DiffOptions {
-        repo: Some(repo.clone().into()),
+        repo: Some(repo.into()),
         source: DiffSource::Range {
             left: "HEAD^@".into(),
             right: "HEAD".into(),
@@ -183,7 +183,7 @@ fn range_diff_accepts_rev_path_tree_revisions() {
     git(["commit", "-q", "-m", "change source"], &repo);
 
     let patch = render(DiffOptions {
-        repo: Some(repo.clone().into()),
+        repo: Some(repo.into()),
         source: DiffSource::Range {
             left: "HEAD~1:src".into(),
             right: "HEAD:src".into(),
@@ -213,7 +213,7 @@ fn range_diff_accepts_rev_path_blob_revisions() {
     git(["commit", "-q", "-m", "change file"], &repo);
 
     let options = DiffOptions {
-        repo: Some(repo.clone().into()),
+        repo: Some(repo.into()),
         source: DiffSource::Range {
             left: "HEAD~1:file.txt".into(),
             right: "HEAD:file.txt".into(),

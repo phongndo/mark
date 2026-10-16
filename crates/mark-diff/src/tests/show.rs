@@ -70,7 +70,7 @@ fn show_source_stat_peels_annotated_tag() {
 
     let stat = String::from_utf8(
         render_bytes(DiffOptions {
-            repo: Some(repo.clone().into()),
+            repo: Some(repo.into()),
             source: DiffSource::Show("v1.0".into()),
             local_untracked: crate::UntrackedMode::Exclude,
             output: crate::DiffOutput::Stat,
@@ -106,7 +106,7 @@ fn show_source_patch_peels_annotated_tag() {
 
     let patch = String::from_utf8(
         render_bytes(DiffOptions {
-            repo: Some(repo.clone().into()),
+            repo: Some(repo.into()),
             source: DiffSource::Show("v1.0".into()),
             local_untracked: crate::UntrackedMode::Exclude,
             output: crate::DiffOutput::Patch,
@@ -132,7 +132,7 @@ fn show_source_stat_preserves_valid_revspec() {
 
     let stat = String::from_utf8(
         render_bytes(DiffOptions {
-            repo: Some(repo.clone().into()),
+            repo: Some(repo.into()),
             source: DiffSource::Show("HEAD^!".into()),
             local_untracked: crate::UntrackedMode::Exclude,
             output: crate::DiffOutput::Stat,

@@ -17,7 +17,7 @@ fn base_branch_diff_includes_committed_index_and_untracked_changes() {
     fs::write(repo.join("untracked.txt"), "untracked\n").expect("untracked file should be written");
 
     let changeset = load_review_ref(&DiffOptions {
-        repo: Some(repo.clone().into()),
+        repo: Some(repo.into()),
         source: DiffSource::Base("main".into()),
         ..DiffOptions::default()
     })
@@ -42,7 +42,7 @@ fn base_branch_diff_reports_unknown_base_revision() {
     init_repo(&repo);
 
     let error = render(DiffOptions {
-        repo: Some(repo.clone().into()),
+        repo: Some(repo.into()),
         source: DiffSource::Base("missing-branch".into()),
         ..DiffOptions::default()
     })
@@ -60,7 +60,7 @@ fn base_branch_diff_keeps_commitish_validation() {
     init_repo(&repo);
 
     let error = render(DiffOptions {
-        repo: Some(repo.clone().into()),
+        repo: Some(repo.into()),
         source: DiffSource::Base("HEAD^{tree}".into()),
         ..DiffOptions::default()
     })
@@ -84,7 +84,7 @@ fn load_review_ref_path_limits_tracked_and_untracked_files() {
     fs::write(repo.join("other.txt"), "other changed\n").expect("other file should change");
     fs::write(repo.join("new.txt"), "new\n").expect("untracked file should be written");
     let options = DiffOptions {
-        repo: Some(repo.clone().into()),
+        repo: Some(repo.into()),
         ..DiffOptions::default()
     };
 
@@ -124,7 +124,7 @@ fn load_review_ref_paths_preserves_scoped_rename_metadata() {
         .collect::<String>();
     fs::write(repo.join("new.txt"), changed).expect("new file should be changed");
     let options = DiffOptions {
-        repo: Some(repo.clone().into()),
+        repo: Some(repo.into()),
         ..DiffOptions::default()
     };
 

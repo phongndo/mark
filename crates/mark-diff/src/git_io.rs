@@ -154,19 +154,17 @@ fn git_numstat_stats_with_index(
     }
 
     let mut child = command.spawn()?;
-    let stats = match if let Some(stdout) = child.stdout.take() {
-        crate::read_to_end_limited(stdout, max_output_bytes)
-            .and_then(|bytes| parse_numstat(bytes.as_slice()).map_err(Into::into))
-    } else {
-        Ok(PatchStats::default())
-    } {
+    let stdout = child.stdout.take().expect("git stdout is piped");
+    let stats = match crate::read_to_end_limited(stdout, max_output_bytes)
+        .and_then(|bytes| parse_numstat(bytes.as_slice()).map_err(Into::into))
+    {
         Ok(stats) => stats,
         Err(error) => {
             abort_git_child(child, stderr);
             return Err(error);
         }
     };
-    wait_for_git_child(child, stderr, "failed to render git diff")?;
+    wait_for_git_child(child, stderr, "failed to render git diff stats")?;
     Ok(stats)
 }
 
@@ -225,10 +223,6 @@ impl StderrCapture {
             stderr.extend_from_slice(b"\n[git stderr truncated]");
         }
         Ok(stderr)
-    }
-
-    pub(super) fn discard(mut self) {
-        drop(self.file.take());
     }
 }
 
@@ -290,7 +284,7 @@ fn wait_for_git_child(
 fn abort_git_child(mut child: process::Child, stderr: StderrCapture) {
     let _ = child.kill();
     let _ = child.wait();
-    stderr.discard();
+    drop(stderr);
 }
 
 pub(super) fn git_numstat_stats_with_untracked(
@@ -395,7 +389,7 @@ impl Drop for TempIndex {
 }
 
 fn create_temp_index(repo: &Path) -> MarkResult<TempIndex> {
-    let source = git_path(repo, "index")?;
+    let source = mark_git::git_path(repo, "index")?;
     for attempt in 0..16 {
         let path = temp_index_path(&source, attempt)?;
         let mut temp = match create_private_temp_file(&path) {
@@ -443,29 +437,6 @@ fn initialize_empty_index(repo: &Path, index: &Path) -> MarkResult<()> {
         ));
     }
     Ok(())
-}
-
-fn git_path(repo: &Path, path: &str) -> MarkResult<PathBuf> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(["rev-parse", "--git-path", path])
-        .output()?;
-    if !output.status.success() {
-        return Err(git_error("failed to resolve git path", &output));
-    }
-
-    let path = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    if path.is_empty() {
-        return Err(MarkError::Usage("git path was empty".to_owned()));
-    }
-
-    let path = PathBuf::from(path);
-    if path.is_absolute() {
-        Ok(path)
-    } else {
-        Ok(repo.join(path))
-    }
 }
 
 fn create_private_temp_file(path: &Path) -> std::io::Result<fs::File> {
