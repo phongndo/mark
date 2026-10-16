@@ -172,7 +172,7 @@ fn show_source_renders_merge_commit_as_parseable_parent_diffs() {
     git(["add", "base.txt"], &repo);
     git(["commit", "-q", "--no-edit"], &repo);
 
-    let changeset = load(DiffOptions {
+    let changeset = load_review_ref_with_raw_patch(&DiffOptions {
         repo: Some(repo.clone().into()),
         source: DiffSource::Show("HEAD".into()),
         local_untracked: crate::UntrackedMode::Exclude,

@@ -26,22 +26,14 @@ use git_io::{
 pub use parser::{parse_patch, parse_patch_bytes, parse_patch_bytes_limited};
 #[cfg(test)]
 use stats::parse_patch_stats;
-use stats::{patch_stats, render_patch_stats, terminal_safe_text};
+use stats::{patch_stats, render_patch_stats};
 pub use types::{
     BranchName, Changeset, CommitSha, DiffFile, DiffFileBody, DiffHunk, DiffLimitExceeded,
-    DiffLimits, DiffLine, DiffLineKind, DiffOptions, DiffOutput, DiffPath, DiffRowRef, DiffSource,
-    DiffStats, DiffViewModel, DisplayPath, FileChange, FileStatus, HunkLineRanges, LineSpan,
-    NewLineNumber, OldLineNumber, PatchLabel, PatchSource, PullRequestId, RefName, RemoteName,
-    RepoArg, RepoRelativePath, RepoRoot, RevSpec, ReviewId, UntrackedMode, WorktreePath,
+    DiffLimits, DiffLine, DiffLineKind, DiffOptions, DiffOutput, DiffPath, DiffSource, DiffStats,
+    DisplayPath, FileChange, FileStatus, HunkLineRanges, NewLineNumber, OldLineNumber, PatchLabel,
+    PatchSource, PullRequestId, RefName, RemoteName, RepoArg, RepoRelativePath, RepoRoot, RevSpec,
+    ReviewId, UntrackedMode, WorktreePath,
 };
-
-pub fn load(options: DiffOptions) -> MarkResult<Changeset> {
-    load_changeset(&options, true)
-}
-
-pub fn load_review(options: DiffOptions) -> MarkResult<Changeset> {
-    load_review_ref(&options)
-}
 
 pub fn load_review_ref(options: &DiffOptions) -> MarkResult<Changeset> {
     load_changeset(options, false)
@@ -54,20 +46,12 @@ pub fn load_review_ref_with_raw_patch(options: &DiffOptions) -> MarkResult<Chang
     load_changeset(options, true)
 }
 
-pub fn load_review_ref_limited(options: &DiffOptions, limits: DiffLimits) -> MarkResult<Changeset> {
-    load_changeset_limited(options, false, limits)
-}
-
 pub fn load_review_ref_with_patch_bytes(options: &DiffOptions) -> MarkResult<(Changeset, u64)> {
     load_changeset_with_patch_bytes(options, false)
 }
 
 pub fn load_review_ref_path(options: &DiffOptions, path: &Path) -> MarkResult<Changeset> {
     load_changeset_paths(options, &[path.to_path_buf()], false)
-}
-
-pub fn load_review_ref_paths(options: &DiffOptions, paths: &[PathBuf]) -> MarkResult<Changeset> {
-    load_changeset_paths(options, paths, false)
 }
 
 pub fn load_review_ref_paths_with_raw_patch(
@@ -291,7 +275,7 @@ pub fn render_to_writer(options: DiffOptions, writer: impl Write) -> MarkResult<
     render_to_writer_ref(&options, writer)
 }
 
-pub fn render_to_writer_ref(options: &DiffOptions, mut writer: impl Write) -> MarkResult<()> {
+fn render_to_writer_ref(options: &DiffOptions, mut writer: impl Write) -> MarkResult<()> {
     if options.is_stat() {
         writer.write_all(&render_stat_bytes(options)?)?;
         return Ok(());
@@ -450,28 +434,6 @@ fn patch_source_bytes(
     };
     check_patch_byte_limit(patch.len(), max_patch_bytes)?;
     Ok(patch)
-}
-
-pub fn render_stat(changeset: &Changeset) -> String {
-    let mut output = String::new();
-    for file in &changeset.files {
-        output.push_str(&format!(
-            "{:>6} {:>6} {}\n",
-            file.additions,
-            file.deletions,
-            terminal_safe_text(file.display_path())
-        ));
-    }
-    let stats = changeset.stats();
-    output.push_str(&format!(
-        "\n{} files changed, {} insertions(+), {} deletions(-)",
-        stats.files, stats.additions, stats.deletions
-    ));
-    if stats.binary_files > 0 {
-        output.push_str(&format!(", {} binary", stats.binary_files));
-    }
-    output.push('\n');
-    output
 }
 
 #[cfg(test)]

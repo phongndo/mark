@@ -22,7 +22,7 @@ fn render_bytes_stat_matches_full_changeset_stat_for_repo_source() {
     };
 
     let streamed = String::from_utf8(render_bytes(options.clone()).unwrap()).unwrap();
-    let full = render_stat(&load_review_ref(&options).unwrap());
+    let full = render_changeset_stat(&load_review_ref(&options).unwrap());
 
     assert_eq!(streamed, full);
     fs::remove_dir_all(test_dir).expect("test directory should be removed");

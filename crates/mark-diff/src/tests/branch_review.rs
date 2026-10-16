@@ -131,7 +131,7 @@ fn load_review_ref_paths_preserves_scoped_rename_metadata() {
     let new_only = load_review_ref_path(&options, Path::new("new.txt")).unwrap();
     assert_eq!(new_only.files[0].status(), FileStatus::Added);
 
-    let paired = load_review_ref_paths(
+    let paired = load_review_ref_paths_with_raw_patch(
         &options,
         &[PathBuf::from("old.txt"), PathBuf::from("new.txt")],
     )
