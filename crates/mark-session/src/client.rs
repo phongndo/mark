@@ -94,7 +94,10 @@ impl Client {
                 "session returned an unsupported protocol",
             ));
         }
-        if response.id != request.id {
+        // The server rejects frames it cannot parse before it knows the
+        // request ID, so those failures carry an empty ID.
+        let unparsed_request_failure = response.id.is_empty() && !response.ok;
+        if response.id != request.id && !unparsed_request_failure {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "session response ID does not match the request",

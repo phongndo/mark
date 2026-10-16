@@ -8,7 +8,7 @@ use std::{
 };
 
 use mark_session::{
-    Client, METHOD_SESSION_GET, PROTOCOL_VERSION, Registry, Request, Response,
+    Client, METHOD_SESSION_GET, PROTOCOL_VERSION, ProtocolError, Registry, Request, Response,
     SESSION_COMMAND_CHANNEL_CAPACITY, SessionRecord, current_process_identity, spawn_server,
 };
 use tokio::sync::mpsc;
@@ -99,4 +99,36 @@ fn one_request_round_trip_and_cleanup() {
         std::thread::sleep(Duration::from_millis(1));
     }
     assert!(!registry.session_dir(session_id).unwrap().exists());
+}
+
+#[test]
+fn client_surfaces_server_errors_sent_before_the_request_id_was_parsed() {
+    let temp = tempfile::tempdir().unwrap();
+    let socket_path = temp.path().join("session.sock");
+    let listener = std::os::unix::net::UnixListener::bind(&socket_path).unwrap();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = Vec::new();
+        stream.read_to_end(&mut request).unwrap();
+        let response = Response::failure(
+            "",
+            ProtocolError::new("invalid_request", "invalid JSON request"),
+        );
+        let mut bytes = serde_json::to_vec(&response).unwrap();
+        bytes.push(b'\n');
+        stream.write_all(&bytes).unwrap();
+    });
+
+    let response = Client::new(&socket_path)
+        .with_timeout(Duration::from_secs(2))
+        .request(&Request::new(
+            "request-1",
+            METHOD_SESSION_GET,
+            serde_json::json!({}),
+        ))
+        .unwrap();
+    server.join().unwrap();
+
+    assert!(!response.ok);
+    assert_eq!(response.error.unwrap().code, "invalid_request");
 }
