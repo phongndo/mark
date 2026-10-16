@@ -5,6 +5,7 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
+    time::Duration,
 };
 
 use mark_core::{MarkError, MarkResult};
@@ -17,6 +18,9 @@ use crate::theme::LIVE_RELOAD_DEBOUNCE;
 
 const LIVE_DIFF_CONTROL_CHANNEL_CAPACITY: usize = 64;
 const LIVE_DIFF_RELOAD_CHANNEL_CAPACITY: usize = 4;
+/// Longest a burst of changes may postpone a reload. Without it, a file that
+/// is written more often than the debounce interval would never reload.
+const LIVE_RELOAD_MAX_WAIT: Duration = Duration::from_secs(1);
 
 pub(crate) struct LiveDiff {
     pub(crate) options: DiffOptions,
@@ -509,8 +513,18 @@ enum LiveDiffQuietOutcome {
 async fn wait_for_live_diff_quiet_period(
     control_rx: &mut Receiver<LiveDiffCommand>,
 ) -> LiveDiffQuietOutcome {
+    wait_for_quiet_period(control_rx, LIVE_RELOAD_DEBOUNCE, LIVE_RELOAD_MAX_WAIT).await
+}
+
+async fn wait_for_quiet_period(
+    control_rx: &mut Receiver<LiveDiffCommand>,
+    debounce: Duration,
+    max_wait: Duration,
+) -> LiveDiffQuietOutcome {
+    let deadline = tokio::time::Instant::now() + max_wait;
     loop {
-        match tokio::time::timeout(LIVE_RELOAD_DEBOUNCE, control_rx.recv()).await {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        match tokio::time::timeout(debounce.min(remaining), control_rx.recv()).await {
             Ok(Some(LiveDiffCommand::Changed)) => continue,
             Ok(Some(LiveDiffCommand::WatcherFailed(error))) => {
                 return LiveDiffQuietOutcome::WatcherFailed(error);
@@ -528,6 +542,36 @@ pub(crate) fn watcher_error(context: &str, error: notify::Error) -> MarkError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn continuous_changes_cannot_postpone_reload_past_max_wait() {
+        let (tx, mut rx) = mpsc::channel(LIVE_DIFF_CONTROL_CHANNEL_CAPACITY);
+        let writer = tokio::spawn(async move {
+            let stop = tokio::time::Instant::now() + Duration::from_secs(3);
+            while tokio::time::Instant::now() < stop {
+                if tx.send(LiveDiffCommand::Changed).await.is_err() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        });
+
+        let start = tokio::time::Instant::now();
+        let outcome = wait_for_quiet_period(
+            &mut rx,
+            Duration::from_millis(50),
+            Duration::from_millis(200),
+        )
+        .await;
+
+        assert!(matches!(outcome, LiveDiffQuietOutcome::Reload));
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "a steady stream of changes postponed the reload for {:?}",
+            start.elapsed()
+        );
+        writer.abort();
+    }
 
     #[test]
     fn paused_live_diff_records_and_flushes_pending_reload() {

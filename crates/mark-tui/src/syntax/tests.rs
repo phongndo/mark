@@ -122,6 +122,68 @@ fn drain_records_syntax_latency_buckets() {
 }
 
 #[test]
+fn drain_skips_results_heavier_than_the_whole_cache_budget() {
+    // An entry heavier than the byte budget used to evict itself while drain
+    // still reported a change, so every redraw re-queued the same hunk.
+    let key = syntax_key(0);
+    let position = SyntaxPosition {
+        generation: 0,
+        file: 0,
+        hunk: 0,
+        side: DiffSide::New,
+    };
+    let (result_tx, result_rx) = mpsc::channel(1);
+    result_tx
+        .try_send(SyntaxResult {
+            key,
+            language: "rust".to_owned(),
+            source_kind: SyntaxSourceKind::HunkSide { hunk: 0 },
+            priority: SyntaxPriority::Visible,
+            queue_latency_micros: 0,
+            run_latency_micros: 0,
+            side: Ok(source::SyntaxSuccess {
+                side: HighlightedSide {
+                    lines: vec![mark_syntax::HighlightedLine::new("fn main() {}")],
+                },
+                source_bytes: None,
+                source_lines: None,
+            }),
+        })
+        .expect("result channel should accept the oversized result");
+
+    let mut syntax = SyntaxRuntime {
+        languages: SyntaxLanguageSet::from_enabled_languages(&[]),
+        limits: SyntaxLimits::default(),
+        result_rx,
+        queue: SyntaxWorkerQueue::new(1, 0, usize::MAX),
+        cache: LruCache::new_weighted(8, 1),
+        pending: HashSet::from([key]),
+        source_keys: HashMap::new(),
+        position_keys: HashMap::from([(position, key)]),
+        line_maps: HashMap::new(),
+        skipped: HashMap::new(),
+        skipped_sources: HashSet::new(),
+        unavailable_full_files: HashSet::new(),
+        failed: HashSet::new(),
+        stats: SyntaxBenchmarkReport::default(),
+        workers: Vec::new(),
+    };
+
+    let drain = syntax.drain(0, 1);
+
+    assert!(
+        !drain.changed,
+        "an uncacheable hunk must not trigger a redraw"
+    );
+    assert_eq!(syntax.cache.len(), 0);
+    assert_eq!(
+        syntax.skipped.get(&position),
+        Some(&SyntaxSkipReason::TooLarge)
+    );
+    assert_eq!(syntax.stats.skips_too_large, 1);
+}
+
+#[test]
 fn rejected_visible_job_preserves_pending_prefetch_jobs() {
     // The visible jobs alone can prevent admission, even after evicting all
     // prefetch jobs. A failed push must not silently lose a pending key.
@@ -285,11 +347,7 @@ fn queue_admission_preserves_budget_and_reports_every_eviction() {
                     Err(SyntaxQueueError::Full) => assert_eq!(after, before),
                     Err(error) => panic!("unexpected rejection: {error:?}"),
                     Ok(push) => {
-                        let evicted = push
-                            .dropped
-                            .into_iter()
-                            .chain(push.dropped_more)
-                            .collect::<HashSet<_>>();
+                        let evicted = push.dropped.into_iter().collect::<HashSet<_>>();
                         let missing = before
                             .0
                             .iter()

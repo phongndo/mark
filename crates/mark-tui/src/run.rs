@@ -22,7 +22,7 @@ use crate::{
         DiffApp, LiveUpdatesState, MAX_LIVE_GREP_MATCHES, PostFilterNavigation, SyntaxStartupMode,
         max_scroll_for_viewport, run_loop, sync_live_diff,
     },
-    controls::{DiffLayoutMode, default_layout_for_width, filtered_file_indices},
+    controls::{DiffLayoutMode, default_layout_for_width},
     model::UiModel,
     render::draw,
     review::VerdictDestination,
@@ -34,6 +34,10 @@ use crate::{
         AllocationBenchmarkStage, DecorationPreference, DiffBenchmarkOptions, DiffBenchmarkReport,
     },
 };
+
+mod legacy_filter;
+
+use legacy_filter::filtered_file_indices;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DiffRunOptions {
@@ -52,39 +56,6 @@ impl Default for DiffRunOptions {
             decorations: None,
         }
     }
-}
-
-pub fn run() -> MarkResult<()> {
-    run_diff(DiffOptions::default())
-}
-
-pub fn run_diff(options: DiffOptions) -> MarkResult<()> {
-    run_diff_with_options(options, DiffRunOptions::default())
-}
-
-pub fn run_diff_with_live_updates(options: DiffOptions, live_updates: bool) -> MarkResult<()> {
-    run_diff_with_options(
-        options,
-        DiffRunOptions {
-            live_updates,
-            ..DiffRunOptions::default()
-        },
-    )
-}
-
-pub fn run_diff_with_live_updates_and_syntax(
-    options: DiffOptions,
-    live_updates: bool,
-    syntax_enabled: bool,
-) -> MarkResult<()> {
-    run_diff_with_options(
-        options,
-        DiffRunOptions {
-            live_updates,
-            syntax_enabled,
-            ..DiffRunOptions::default()
-        },
-    )
 }
 
 pub fn run_diff_with_options(options: DiffOptions, run_options: DiffRunOptions) -> MarkResult<()> {

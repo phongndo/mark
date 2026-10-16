@@ -6,7 +6,9 @@ use memchr::{memchr, memchr2, memmem};
 use rayon::prelude::*;
 
 use crate::{
-    controls::diff_line_grep_prefix,
+    controls::{
+        ascii_case_insensitive_bytes_equal, diff_line_grep_prefix, fuzzy_subsequence_score,
+    },
     model::{DiffLineIndex, FileIndex, HunkIndex, ModelRow, UiModel},
     render::{
         headers::{hunk_header_context, normalized_hunk_header_text},
@@ -379,17 +381,14 @@ impl DiffSearchIndex {
     }
 
     pub(crate) fn max_line_width(&self) -> usize {
-        self.max_line_width_from(self.files.iter())
+        Self::max_line_width_from(self.files.iter())
     }
 
     pub(crate) fn max_line_width_for_files(&self, files: &[FileIndex]) -> usize {
-        self.max_line_width_from(files.iter().filter_map(|file| self.files.get(file.get())))
+        Self::max_line_width_from(files.iter().filter_map(|file| self.files.get(file.get())))
     }
 
-    fn max_line_width_from<'a>(
-        &self,
-        files: impl IntoIterator<Item = &'a FileSearchIndex>,
-    ) -> usize {
+    fn max_line_width_from<'a>(files: impl IntoIterator<Item = &'a FileSearchIndex>) -> usize {
         files
             .into_iter()
             .map(|file| file.max_line_width)
@@ -500,27 +499,6 @@ fn file_match_score(query: &str, text: &str) -> Option<(usize, usize)> {
     fuzzy_subsequence_score(query, text).map(|score| (3, score))
 }
 
-fn fuzzy_subsequence_score(query: &str, text: &str) -> Option<usize> {
-    let mut last_match: Option<usize> = None;
-    let mut score = 0usize;
-    let mut search_start = 0usize;
-
-    for character in query.chars() {
-        let remaining = text.get(search_start..)?;
-        let offset = remaining.find(character)?;
-        let index = search_start + offset;
-        if let Some(previous) = last_match {
-            score = score.saturating_add(index.saturating_sub(previous + 1));
-        } else {
-            score = score.saturating_add(index);
-        }
-        last_match = Some(index);
-        search_start = index + character.len_utf8();
-    }
-
-    Some(score)
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct GrepMatcher {
     query: Vec<u8>,
@@ -626,14 +604,6 @@ fn find_ascii_case_insensitive(
         search_start = candidate_start.saturating_add(1);
     }
     None
-}
-
-fn ascii_case_insensitive_bytes_equal(candidate: &[u8], lowercase_query: &[u8]) -> bool {
-    candidate.len() == lowercase_query.len()
-        && candidate
-            .iter()
-            .zip(lowercase_query)
-            .all(|(candidate, query)| candidate.to_ascii_lowercase() == *query)
 }
 
 fn byte_equal_for_mode(candidate: u8, query: u8, case_sensitive: bool) -> bool {

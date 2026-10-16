@@ -1,23 +1,18 @@
 use super::*;
 
 #[test]
-fn text_matcher_preserves_case_and_prefix_matching() {
+fn text_matcher_preserves_case_matching() {
     let lowercase = TextMatcher::new("line").expect("matcher should be created");
-    assert!(lowercase.matches("LINE"));
     assert_eq!(lowercase.match_ranges("LINE").len(), 1);
 
     let uppercase = TextMatcher::new("Line").expect("matcher should be created");
-    assert!(!uppercase.matches("line"));
+    assert!(uppercase.match_ranges("line").is_empty());
 
     let unicode = TextMatcher::new("éclair").expect("matcher should be created");
     assert!(!unicode.case_sensitive);
-    assert!(unicode.matches("éclair"));
-    assert!(unicode.matches("éCLAIR"));
-    assert!(!unicode.matches("Éclair"));
-
-    let addition = DiffLine::addition(1, "changed".to_owned());
-    let prefixed = TextMatcher::new("+changed").expect("matcher should be created");
-    assert!(diff_line_grep_text_matches(&addition, &prefixed));
+    assert_eq!(unicode.match_ranges("éclair").len(), 1);
+    assert_eq!(unicode.match_ranges("éCLAIR").len(), 1);
+    assert!(unicode.match_ranges("Éclair").is_empty());
 }
 
 #[test]

@@ -11,7 +11,9 @@ mod types;
 pub(crate) use inline::{
     InlineCharClass, compute_hunk_inline_emphasis, inline_ascii_class, inline_tokens,
 };
-pub(crate) use inline::{InlineHunkEmphasisCache, InlineHunkKey, InlineRange, InlineRanges};
+pub(crate) use inline::{
+    InlineHunkEmphasisCache, InlineHunkKey, InlineRange, InlineRanges, changed_block_around,
+};
 pub(crate) use lru::LruCache;
 pub(crate) use queue::{SyntaxPriority, SyntaxQueueError, SyntaxWorkerQueue};
 pub(crate) use runtime::SyntaxRuntime;
@@ -27,7 +29,8 @@ pub(crate) use source::{
 pub(crate) use source::{
     available_context_lines, context_source_byte_limit, count_context_source_lines_cancellable,
     full_file_source, invalidate_range_operand_revision_cache, load_full_file_source_limited,
-    load_full_file_source_limited_cancellable, split_context_source_lines, unified_syntax_side,
+    load_full_file_source_limited_cancellable, path_for_side_or_other, split_context_source_lines,
+    unified_syntax_side,
 };
 pub(crate) use types::{
     DiffSide, HighlightedLineRef, HighlightedSide, SyntaxKey, SyntaxPosition, SyntaxSkipReason,

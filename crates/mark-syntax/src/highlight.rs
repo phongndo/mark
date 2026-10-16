@@ -1,10 +1,5 @@
-use crate::detect_language_name;
 #[cfg(test)]
 use crate::{HighlightedLine, SyntaxClass, SyntaxSegment};
-
-pub fn detect_language_from_path(path: &str) -> Option<String> {
-    detect_language_name(path)
-}
 
 #[cfg(test)]
 pub(crate) fn push_source_segment(

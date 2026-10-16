@@ -139,7 +139,7 @@ fn tex_extension_uses_vscode_latex_language() {
         Some("latex")
     );
     assert!(
-        has_language("tex"),
+        has_highlights("tex"),
         "plain TeX remains explicitly selectable"
     );
 }
@@ -1208,6 +1208,32 @@ fn clean_cache_preserves_valid_bundled_language_configuration() {
         let result = clean_cache().unwrap();
         assert_eq!(result.stale_records_removed, 0);
         assert_eq!(load_config().unwrap(), config);
+    });
+
+    remove_temp_dir(&dir);
+}
+
+#[test]
+fn explicit_language_sets_ignore_the_user_syntax_config() {
+    let dir = unique_temp_dir("explicit-language-set");
+
+    with_xdg_config_home(&dir, || {
+        save_config(&StoredSyntaxConfig {
+            extensions: vec![StoredLanguageMapping {
+                pattern: "custom".to_owned(),
+                language: "rust".to_owned(),
+            }],
+            ..StoredSyntaxConfig::default()
+        })
+        .unwrap();
+
+        let languages = SyntaxLanguageSet::from_enabled_languages(&["rust".to_owned()]);
+
+        assert_eq!(languages.language_for_path("lib.custom"), None);
+        assert_eq!(
+            languages.language_for_path("lib.rs").as_deref(),
+            Some("rust")
+        );
     });
 
     remove_temp_dir(&dir);

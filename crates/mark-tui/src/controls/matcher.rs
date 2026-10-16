@@ -1,4 +1,4 @@
-use mark_diff::{Changeset, DiffLine, DiffLineKind, DiffStats};
+use mark_diff::{Changeset, DiffLineKind, DiffStats};
 
 use crate::model::FileIndex;
 
@@ -60,31 +60,11 @@ impl TextMatcher {
         })
     }
 
-    pub(crate) fn matches(&self, text: &str) -> bool {
-        if self.case_sensitive {
-            text.contains(&self.query)
-        } else {
-            text_match_ascii_case_insensitive(text, &self.lowercase_query)
-        }
-    }
-
     pub(crate) fn match_ranges(&self, text: &str) -> Vec<std::ops::Range<usize>> {
         if self.case_sensitive {
             text_match_ranges(text, &self.query)
         } else {
             text_match_ranges_ascii_case_insensitive(text, &self.lowercase_query)
-        }
-    }
-
-    pub(crate) fn matches_prefixed(&self, prefix: char, text: &str) -> bool {
-        if self.matches(text) {
-            return true;
-        }
-
-        if self.case_sensitive {
-            prefixed_text_starts_with(prefix, text, &self.query)
-        } else {
-            prefixed_text_starts_with_ascii_case_insensitive(prefix, text, &self.lowercase_query)
         }
     }
 }
@@ -118,10 +98,6 @@ pub(crate) fn text_match_ranges_ascii_case_insensitive(
     ranges
 }
 
-pub(crate) fn text_match_ascii_case_insensitive(text: &str, lowercase_query: &str) -> bool {
-    text_match_range_ascii_case_insensitive(text, lowercase_query, 0).is_some()
-}
-
 pub(crate) fn text_match_range_ascii_case_insensitive(
     text: &str,
     lowercase_query: &str,
@@ -148,137 +124,12 @@ pub(crate) fn text_match_range_ascii_case_insensitive(
     None
 }
 
-pub(crate) fn prefixed_text_starts_with(prefix: char, text: &str, query: &str) -> bool {
-    let mut prefix_buffer = [0; 4];
-    let prefix = prefix.encode_utf8(&mut prefix_buffer);
-    query.len() <= prefix.len() + text.len()
-        && prefixed_text_bytes_equal(prefix.as_bytes(), text.as_bytes(), query.as_bytes(), false)
-}
-
-pub(crate) fn prefixed_text_starts_with_ascii_case_insensitive(
-    prefix: char,
-    text: &str,
-    lowercase_query: &str,
-) -> bool {
-    let mut prefix_buffer = [0; 4];
-    let prefix = prefix.encode_utf8(&mut prefix_buffer);
-    lowercase_query.len() <= prefix.len() + text.len()
-        && prefixed_text_bytes_equal(
-            prefix.as_bytes(),
-            text.as_bytes(),
-            lowercase_query.as_bytes(),
-            true,
-        )
-}
-
-pub(crate) fn prefixed_text_bytes_equal(
-    prefix: &[u8],
-    text: &[u8],
-    query: &[u8],
-    ignore_ascii_case: bool,
-) -> bool {
-    query.iter().enumerate().all(|(index, query_byte)| {
-        let candidate = if index < prefix.len() {
-            prefix[index]
-        } else {
-            text[index - prefix.len()]
-        };
-        if ignore_ascii_case {
-            candidate.to_ascii_lowercase() == *query_byte
-        } else {
-            candidate == *query_byte
-        }
-    })
-}
-
 pub(crate) fn ascii_case_insensitive_bytes_equal(candidate: &[u8], lowercase_query: &[u8]) -> bool {
     candidate.len() == lowercase_query.len()
         && candidate
             .iter()
             .zip(lowercase_query)
             .all(|(candidate, query)| candidate.to_ascii_lowercase() == *query)
-}
-
-pub(crate) fn filtered_file_indices(
-    base: &Changeset,
-    file_filter: &str,
-    grep_filter: &str,
-) -> Vec<usize> {
-    let grep_matcher = TextMatcher::new(grep_filter);
-    base.files
-        .iter()
-        .enumerate()
-        .filter(|file| file_matches_file_filter(file, file_filter))
-        .filter(|file| file_matches_grep_filter(file, grep_matcher.as_ref()))
-        .map(|(index, _)| index)
-        .collect()
-}
-
-pub(crate) fn file_matches_file_filter(
-    (_, file): &(usize, &mark_diff::DiffFile),
-    query: &str,
-) -> bool {
-    let query = query.trim().to_ascii_lowercase();
-    if query.is_empty() {
-        return true;
-    }
-
-    file_filter_texts(file)
-        .into_iter()
-        .any(|text| branch_match_score(&query, &text).is_some())
-}
-
-pub(crate) fn file_filter_texts(file: &mark_diff::DiffFile) -> Vec<String> {
-    let mut texts = Vec::with_capacity(4);
-    texts.push(file.display_path().to_owned());
-    if let Some(old_path) = file.old_path()
-        && old_path != file.display_path()
-    {
-        texts.push(old_path.to_owned());
-    }
-    if let Some(new_path) = file.new_path()
-        && new_path != file.display_path()
-    {
-        texts.push(new_path.to_owned());
-    }
-    texts.push(file.status().label().to_owned());
-    texts
-}
-
-pub(crate) fn file_matches_grep_filter(
-    (_, file): &(usize, &mark_diff::DiffFile),
-    matcher: Option<&TextMatcher>,
-) -> bool {
-    let Some(matcher) = matcher else {
-        return true;
-    };
-
-    file_grep_text_matches(file, matcher)
-}
-
-pub(crate) fn file_grep_text_matches(file: &mark_diff::DiffFile, matcher: &TextMatcher) -> bool {
-    matcher.matches(file.display_path())
-        || file.old_path().is_some_and(|path| matcher.matches(path))
-        || file.new_path().is_some_and(|path| matcher.matches(path))
-        || matcher.matches(file.status().label())
-        || file
-            .hunks()
-            .iter()
-            .any(|hunk| hunk_grep_text_matches(hunk, matcher))
-        || (file.is_binary() && matcher.matches("binary file"))
-        || (file.has_no_textual_changes() && matcher.matches("no textual changes"))
-}
-
-pub(crate) fn hunk_grep_text_matches(hunk: &mark_diff::DiffHunk, matcher: &TextMatcher) -> bool {
-    matcher.matches(&hunk.header)
-        || hunk
-            .lines
-            .iter()
-            .any(|line| diff_line_grep_text_matches(line, matcher))
-}
-
-pub(crate) fn diff_line_grep_text_matches(line: &DiffLine, matcher: &TextMatcher) -> bool {
-    matcher.matches_prefixed(diff_line_grep_prefix(line.kind()), &line.text_lossy())
 }
 
 pub(crate) fn diff_line_grep_prefix(kind: DiffLineKind) -> char {

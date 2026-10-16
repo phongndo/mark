@@ -5,9 +5,10 @@ use std::{
 };
 
 use crate::{
-    HighlightScopeTable, ScopeStackRef, detect_custom_language_from_path, detect_language_name,
-    enabled_language_set_for_mode, has_highlights, installed_language_set, language_vec_to_set,
-    load_config, load_settings, normalize_language_name,
+    HighlightScopeTable, ScopeStackRef, detect_custom_language_from_path,
+    detect_language_from_path, enabled_language_set_for_mode, has_highlights,
+    installed_language_set, load_config, load_settings, normalize_language_name,
+    normalize_language_names,
 };
 use mark_core::{MarkError, MarkResult};
 use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
@@ -1179,12 +1180,16 @@ impl SyntaxLanguageSet {
         })
     }
 
+    /// A self-contained set of `languages` with built-in path detection only.
+    ///
+    /// Benchmarks and tests pass explicit languages to get reproducible
+    /// results, so this does not read the user's syntax config or its custom
+    /// extension and filename mappings.
     pub fn from_enabled_languages(languages: &[String]) -> Self {
-        let config = load_config().unwrap_or_default();
         Self {
-            enabled: language_vec_to_set(languages),
-            extensions: config.extensions,
-            filenames: config.filenames,
+            enabled: normalize_language_names(languages),
+            extensions: Vec::new(),
+            filenames: Vec::new(),
         }
     }
 
@@ -1205,7 +1210,7 @@ impl SyntaxLanguageSet {
             }
         }
 
-        let language = normalize_language_name(detect_language_name(path)?);
+        let language = normalize_language_name(detect_language_from_path(path)?);
         self.is_highlight_ready(&language).then_some(language)
     }
 
@@ -1228,19 +1233,17 @@ impl SyntaxHighlighter {
     }
 
     pub fn highlight(&mut self, language: &str, source: &str) -> MarkResult<HighlightedText> {
-        if !self.tokenizers.contains_key(language) {
-            let canonical = self.load_tokenizer(language)?;
-            let highlighted = self
-                .tokenizers
-                .get_mut(&canonical)
-                .expect("tokenizer loaded before highlighting")
-                .tokenize(source);
-            return Ok(adapt_highlighted_text(source, &highlighted));
-        }
+        let canonical;
+        let key = if self.tokenizers.contains_key(language) {
+            language
+        } else {
+            canonical = self.load_tokenizer(language)?;
+            canonical.as_str()
+        };
         let highlighted = self
             .tokenizers
-            .get_mut(language)
-            .expect("tokenizer exists for language key")
+            .get_mut(key)
+            .expect("tokenizer loaded before highlighting")
             .tokenize(source);
         Ok(adapt_highlighted_text(source, &highlighted))
     }

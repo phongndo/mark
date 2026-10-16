@@ -35,9 +35,8 @@ pub(crate) struct SyntaxWorkerQueueState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SyntaxQueuePush {
-    pub(crate) dropped: Option<SyntaxKey>,
-    pub(crate) dropped_more: Vec<SyntaxKey>,
-    pub(crate) dropped_overflow: bool,
+    /// Pending prefetch jobs evicted to admit the pushed job.
+    pub(crate) dropped: Vec<SyntaxKey>,
     pub(crate) depth: usize,
 }
 
@@ -107,8 +106,7 @@ impl SyntaxWorkerQueue {
             }
         }
 
-        let mut dropped = None;
-        let mut dropped_more = Vec::new();
+        let mut dropped = Vec::new();
         while state.len() >= self.inner.capacity
             || state.queued_bytes.saturating_add(job.queued_source_bytes)
                 > self.inner.capacity_bytes
@@ -121,11 +119,7 @@ impl SyntaxWorkerQueue {
                     state.queued_bytes = state
                         .queued_bytes
                         .saturating_sub(evicted.queued_source_bytes);
-                    if dropped.is_none() {
-                        dropped = Some(evicted.key);
-                    } else {
-                        dropped_more.push(evicted.key);
-                    }
+                    dropped.push(evicted.key);
                 }
                 SyntaxPriority::Prefetch => return Err(SyntaxQueueError::Full),
             }
@@ -144,12 +138,7 @@ impl SyntaxWorkerQueue {
         state.queued_bytes = state.queued_bytes.saturating_add(queued);
         let depth = state.len();
         self.inner.ready.notify_one();
-        Ok(SyntaxQueuePush {
-            dropped,
-            dropped_more,
-            dropped_overflow: false,
-            depth,
-        })
+        Ok(SyntaxQueuePush { dropped, depth })
     }
 
     pub(crate) fn promote(&self, key: SyntaxKey) -> bool {

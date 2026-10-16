@@ -51,9 +51,14 @@ where
         self.insert_with_weight(key, value, 0);
     }
 
-    pub(crate) fn insert_with_weight(&mut self, key: K, value: V, weight: usize) {
-        if self.capacity == 0 {
-            return;
+    /// Inserts `value` unless it can never fit the cache budget.
+    ///
+    /// An entry heavier than the whole byte budget would immediately evict
+    /// itself (and every other entry). Refusing it lets callers record the
+    /// result as uncacheable instead of re-requesting it forever.
+    pub(crate) fn insert_with_weight(&mut self, key: K, value: V, weight: usize) -> bool {
+        if self.capacity == 0 || weight > self.capacity_bytes {
+            return false;
         }
 
         let last_used = self.next_tick();
@@ -67,7 +72,7 @@ where
             entry.last_used = last_used;
             entry.weight = weight;
             self.evict_over_budget();
-            return;
+            return true;
         }
 
         self.total_bytes = self.total_bytes.saturating_add(weight);
@@ -80,6 +85,7 @@ where
             },
         );
         self.evict_over_budget();
+        true
     }
 
     pub(crate) fn total_weight(&self) -> usize {
