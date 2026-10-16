@@ -9,10 +9,6 @@ use mark_git::{
 
 use crate::{DiffOptions, DiffSource, PatchSource, difftool::difftool_display_path};
 
-pub(super) fn validate_options(_options: &DiffOptions) -> MarkResult<()> {
-    Ok(())
-}
-
 pub(super) fn git_diff_args(options: &DiffOptions, repo: &Path) -> MarkResult<Vec<String>> {
     if let DiffSource::Show(rev) = &options.source {
         return git_show_args(repo, rev);
@@ -67,6 +63,13 @@ fn git_show_args(repo: &Path, rev: &str) -> MarkResult<Vec<String>> {
 }
 
 pub(super) fn append_pathspecs(args: &mut Vec<String>, paths: &[PathBuf]) {
+    // A range whose right operand is a pathspec already ends in `-- <spec>`.
+    // Git would read a second `--` as a literal pathspec and union every
+    // spec, returning the whole range. Git cannot intersect pathspecs, so the
+    // requested paths, which name files from this review, replace it.
+    if let Some(separator) = args.iter().position(|arg| arg == "--") {
+        args.truncate(separator);
+    }
     args.push("--".to_owned());
     args.extend(paths.iter().map(|path| path.to_string_lossy().into_owned()));
 }
@@ -118,7 +121,7 @@ fn append_range_args(
     right: &str,
 ) -> MarkResult<()> {
     args.push("--end-of-options".to_owned());
-    let left = existing_object_revision(repo, left, "")?;
+    let left = existing_object_revision(repo, left)?;
 
     if revision_expression_exists(repo, right)? {
         args.push(left);
@@ -129,7 +132,7 @@ fn append_range_args(
         args.push(right.to_owned());
     } else {
         args.push(left);
-        args.push(existing_object_revision(repo, right, "")?);
+        args.push(existing_object_revision(repo, right)?);
     }
 
     Ok(())

@@ -27,7 +27,7 @@ fn stderr_capture_temp_file_is_private() {
         & 0o777;
 
     assert_eq!(mode, 0o600);
-    stderr.discard();
+    drop(stderr);
     assert!(!path.exists());
 }
 

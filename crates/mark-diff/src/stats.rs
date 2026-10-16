@@ -9,7 +9,7 @@ use mark_core::{MarkError, MarkResult};
 use crate::{
     DiffOptions, DiffSource, DiffStats, PatchSource,
     difftool::patch_line_parts,
-    git_args::{git_diff_numstat_args, should_include_untracked, validate_options},
+    git_args::{git_diff_numstat_args, should_include_untracked},
     git_io::{git_numstat_stats, git_numstat_stats_with_untracked},
     parser::{
         diff_git_paths, git_metadata_path, parse_hunk_header, strip_prefix_path,
@@ -85,7 +85,6 @@ pub(super) fn terminal_safe_text(text: &str) -> Cow<'_, str> {
 
 pub(super) fn patch_stats(options: &DiffOptions) -> MarkResult<PatchStats> {
     if let DiffSource::Patch(source) = &options.source {
-        validate_options(options)?;
         return patch_source_stats(source);
     }
 
@@ -98,7 +97,6 @@ pub(super) fn patch_stats(options: &DiffOptions) -> MarkResult<PatchStats> {
     }
 
     let repo = mark_git::repository_root(options.repo.as_deref())?;
-    validate_options(options)?;
     let args = git_diff_numstat_args(options, &repo)?;
     let max_output_bytes = crate::DiffLimits::from_env().max_patch_bytes;
     if should_include_untracked(options) {
@@ -114,8 +112,9 @@ fn patch_source_stats(source: &PatchSource) -> MarkResult<PatchStats> {
         PatchSource::File(path) => {
             parse_patch_stats_limited(fs::File::open(path)?, max_patch_bytes)
         }
-        PatchSource::Stdin(patch) => parse_patch_stats_limited(patch.as_ref(), max_patch_bytes),
-        PatchSource::Text { patch, .. } | PatchSource::Review { patch, .. } => {
+        PatchSource::Stdin(patch)
+        | PatchSource::Text { patch, .. }
+        | PatchSource::Review { patch, .. } => {
             parse_patch_stats_limited(patch.as_ref(), max_patch_bytes)
         }
     }
@@ -267,18 +266,12 @@ impl PatchFileStatBuilder {
             self.is_binary = true;
         } else if let Some(path) = line.strip_prefix("--- ") {
             let path = unified_header_path(path);
-            if path.as_ref() != "/dev/null" {
-                self.old_path = strip_prefix_path(path.as_ref(), "a/");
-            } else {
-                self.old_path = None;
-            }
+            self.old_path =
+                (path.as_ref() != "/dev/null").then(|| strip_prefix_path(path.as_ref(), "a/"));
         } else if let Some(path) = line.strip_prefix("+++ ") {
             let path = unified_header_path(path);
-            if path.as_ref() != "/dev/null" {
-                self.new_path = strip_prefix_path(path.as_ref(), "b/");
-            } else {
-                self.new_path = None;
-            }
+            self.new_path =
+                (path.as_ref() != "/dev/null").then(|| strip_prefix_path(path.as_ref(), "b/"));
         } else if let Some(path) = line.strip_prefix("rename from ") {
             self.old_path = Some(git_metadata_path(path));
         } else if let Some(path) = line.strip_prefix("rename to ") {

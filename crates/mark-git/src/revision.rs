@@ -5,50 +5,6 @@ use std::{
 
 use mark_core::{MarkError, MarkResult};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RevisionStatus {
-    Exists,
-    Missing,
-    Unknown,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RevisionKind {
-    Commit,
-    Object,
-}
-
-pub fn revision_status(repo: Option<&Path>, rev: &str, kind: RevisionKind) -> RevisionStatus {
-    match kind {
-        RevisionKind::Commit => commit_revision_status(repo, rev),
-        RevisionKind::Object => match revision_expression_exists_optional(repo, rev) {
-            Some(true) => RevisionStatus::Exists,
-            Some(false) => missing_revision_status(repo),
-            None => RevisionStatus::Unknown,
-        },
-    }
-}
-
-fn commit_revision_status(repo: Option<&Path>, rev: &str) -> RevisionStatus {
-    let Some(object) = resolve_revision_optional(repo, rev) else {
-        return missing_revision_status(repo);
-    };
-
-    match revision_object_matches_optional(repo, &object, "commit") {
-        Some(true) => RevisionStatus::Exists,
-        Some(false) => RevisionStatus::Missing,
-        None => RevisionStatus::Unknown,
-    }
-}
-
-fn missing_revision_status(repo: Option<&Path>) -> RevisionStatus {
-    if git_repository_available(repo) {
-        RevisionStatus::Missing
-    } else {
-        RevisionStatus::Unknown
-    }
-}
-
 pub fn show_target(repo: &Path, rev: &str) -> MarkResult<String> {
     let output = Command::new("git")
         .arg("-C")
@@ -72,17 +28,12 @@ pub fn existing_commitish_revision(repo: &Path, rev: &str, kind: &str) -> MarkRe
     existing_revision(repo, rev, kind, "commit")
 }
 
-pub fn existing_object_revision(repo: &Path, rev: &str, kind: &str) -> MarkResult<String> {
+pub fn existing_object_revision(repo: &Path, rev: &str) -> MarkResult<String> {
     if revision_expression_exists(repo, rev)? {
         return Ok(rev.to_owned());
     }
 
-    let label = if kind.is_empty() {
-        "revision".to_owned()
-    } else {
-        format!("{kind} revision")
-    };
-    Err(MarkError::Usage(format!("unknown {label} `{rev}`")))
+    Err(unknown_revision_error(rev, ""))
 }
 
 pub fn revision_is_treeish(repo: &Path, rev: &str) -> MarkResult<bool> {
@@ -157,12 +108,15 @@ fn existing_revision(repo: &Path, rev: &str, kind: &str, object_kind: &str) -> M
         return Ok(rev.to_owned());
     }
 
-    let label = if kind.is_empty() {
-        "revision".to_owned()
+    Err(unknown_revision_error(rev, kind))
+}
+
+fn unknown_revision_error(rev: &str, kind: &str) -> MarkError {
+    if kind.is_empty() {
+        MarkError::Usage(format!("unknown revision `{rev}`"))
     } else {
-        format!("{kind} revision")
-    };
-    Err(MarkError::Usage(format!("unknown {label} `{rev}`")))
+        MarkError::Usage(format!("unknown {kind} revision `{rev}`"))
+    }
 }
 
 fn commitish_exists(repo: &Path, rev: &str) -> MarkResult<bool> {
@@ -191,61 +145,19 @@ fn resolve_revision(repo: &Path, rev: &str) -> MarkResult<Option<String>> {
     }
 }
 
-fn resolve_revision_optional(repo: Option<&Path>, rev: &str) -> Option<String> {
-    let output = rev_parse_verify_optional(repo, rev).ok()?;
-    if !output.status.success() {
-        return None;
-    }
-
-    let revision = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    if revision.is_empty() {
-        None
-    } else {
-        Some(revision)
-    }
-}
-
-fn revision_expression_exists_optional(repo: Option<&Path>, rev: &str) -> Option<bool> {
-    let output = rev_parse_verify_optional(repo, rev).ok()?;
-    // `rev-parse --verify` exits non-zero for expressions that expand to
-    // multiple objects, but still writes the resolved objects. `git diff`
-    // accepts those expressions as range operands.
-    if output.status.success() || !output_stdout_is_empty(&output) {
-        return Some(true);
-    }
-
-    multi_revision_expression_exists_optional(repo, rev)
-}
-
 fn rev_parse_verify(repo: &Path, rev: &str) -> MarkResult<Output> {
-    Ok(rev_parse_verify_optional(Some(repo), rev)?)
-}
-
-fn rev_parse_verify_optional(repo: Option<&Path>, rev: &str) -> std::io::Result<Output> {
-    let mut command = git_command(repo);
-    command
+    Ok(git_command(repo)
         .args(["rev-parse", "--verify", "--quiet", "--end-of-options"])
-        .arg(rev);
-    command.output()
+        .arg(rev)
+        .output()?)
 }
 
 fn multi_revision_expression_exists(repo: &Path, rev: &str) -> MarkResult<bool> {
-    let output = multi_revision_expression_output(Some(repo), rev)?;
-    Ok(output.status.success())
-}
-
-fn multi_revision_expression_exists_optional(repo: Option<&Path>, rev: &str) -> Option<bool> {
-    multi_revision_expression_output(repo, rev)
-        .ok()
-        .map(|output| output.status.success())
-}
-
-fn multi_revision_expression_output(repo: Option<&Path>, rev: &str) -> std::io::Result<Output> {
-    let mut command = git_command(repo);
-    command
+    let output = git_command(repo)
         .args(["rev-list", "--no-walk", "--quiet", "--end-of-options"])
-        .arg(rev);
-    command.output()
+        .arg(rev)
+        .output()?;
+    Ok(output.status.success())
 }
 
 fn output_stdout_is_empty(output: &Output) -> bool {
@@ -253,30 +165,11 @@ fn output_stdout_is_empty(output: &Output) -> bool {
 }
 
 fn revision_object_matches(repo: &Path, object: &str, object_kind: &str) -> MarkResult<bool> {
-    let output = revision_object_matches_output(Some(repo), object, object_kind)?;
-    Ok(output.status.success())
-}
-
-fn revision_object_matches_optional(
-    repo: Option<&Path>,
-    object: &str,
-    object_kind: &str,
-) -> Option<bool> {
-    revision_object_matches_output(repo, object, object_kind)
-        .ok()
-        .map(|output| output.status.success())
-}
-
-fn revision_object_matches_output(
-    repo: Option<&Path>,
-    object: &str,
-    object_kind: &str,
-) -> std::io::Result<Output> {
-    let mut command = git_command(repo);
-    command
+    let output = git_command(repo)
         .args(["rev-parse", "--verify", "--quiet", "--end-of-options"])
-        .arg(format!("{object}^{{{object_kind}}}"));
-    command.output()
+        .arg(format!("{object}^{{{object_kind}}}"))
+        .output()?;
+    Ok(output.status.success())
 }
 
 fn empty_tree_revision(repo: &Path) -> MarkResult<String> {
@@ -311,17 +204,8 @@ fn has_head(repo: &Path) -> MarkResult<bool> {
     Ok(output.status.success())
 }
 
-fn git_repository_available(repo: Option<&Path>) -> bool {
-    let mut command = git_command(repo);
-    command.args(["rev-parse", "--show-toplevel"]);
-
-    command.output().is_ok_and(|output| output.status.success())
-}
-
-fn git_command(repo: Option<&Path>) -> Command {
+fn git_command(repo: &Path) -> Command {
     let mut command = Command::new("git");
-    if let Some(repo) = repo {
-        command.arg("-C").arg(repo);
-    }
+    command.arg("-C").arg(repo);
     command
 }

@@ -321,14 +321,6 @@ impl DiffLimits {
             max_line_bytes: env_usize("MARK_MAX_DIFF_LINE_BYTES"),
         }
     }
-
-    pub fn is_unlimited(self) -> bool {
-        self.max_patch_bytes.is_none()
-            && self.max_diff_rows.is_none()
-            && self.max_files.is_none()
-            && self.max_hunks.is_none()
-            && self.max_line_bytes.is_none()
-    }
 }
 
 fn env_usize(name: &str) -> Option<usize> {
@@ -474,25 +466,20 @@ impl DiffFile {
     }
 
     pub fn has_no_textual_changes(&self) -> bool {
-        matches!(&self.body, DiffFileBody::NoTextualChanges)
-            || matches!(&self.body, DiffFileBody::Text { hunks } if hunks.is_empty())
+        matches!(&self.body, DiffFileBody::Text { hunks } if hunks.is_empty())
     }
 
     pub fn hunks(&self) -> &[DiffHunk] {
         match &self.body {
             DiffFileBody::Text { hunks } => hunks,
-            DiffFileBody::Binary | DiffFileBody::NoTextualChanges => &[],
+            DiffFileBody::Binary => &[],
         }
     }
 
     pub fn hunks_mut(&mut self) -> &mut Vec<DiffHunk> {
-        if matches!(self.body, DiffFileBody::NoTextualChanges) {
-            self.body = DiffFileBody::Text { hunks: Vec::new() };
-        }
         match &mut self.body {
             DiffFileBody::Text { hunks } => hunks,
             DiffFileBody::Binary => panic!("binary diff files do not have text hunks"),
-            DiffFileBody::NoTextualChanges => unreachable!(),
         }
     }
 
@@ -507,7 +494,7 @@ impl DiffFile {
                             .map(DiffHunk::estimated_model_bytes)
                             .sum::<usize>()
                 }
-                DiffFileBody::Binary | DiffFileBody::NoTextualChanges => 0,
+                DiffFileBody::Binary => 0,
             })
     }
 }
@@ -664,17 +651,12 @@ impl FileChange {
     }
 }
 
+/// `Text` without hunks is a change with no textual diff, such as a pure
+/// rename or mode change.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DiffFileBody {
     Text { hunks: Vec<DiffHunk> },
     Binary,
-    NoTextualChanges,
-}
-
-impl Default for DiffFileBody {
-    fn default() -> Self {
-        Self::Text { hunks: Vec::new() }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -747,14 +729,6 @@ impl HunkLineRanges {
         }
     }
 
-    pub fn old(&self) -> LineSpan<OldLineNumber> {
-        self.old
-    }
-
-    pub fn new_lines(&self) -> LineSpan<NewLineNumber> {
-        self.new
-    }
-
     pub fn old_start(&self) -> usize {
         self.old.start().get()
     }
@@ -773,21 +747,21 @@ impl HunkLineRanges {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct LineSpan<N> {
+struct LineSpan<N> {
     start: N,
     count: usize,
 }
 
 impl<N: Copy> LineSpan<N> {
-    pub fn new(start: N, count: usize) -> Self {
+    fn new(start: N, count: usize) -> Self {
         Self { start, count }
     }
 
-    pub fn start(self) -> N {
+    fn start(self) -> N {
         self.start
     }
 
-    pub fn count(self) -> usize {
+    fn count(self) -> usize {
         self.count
     }
 }
@@ -882,11 +856,33 @@ impl DiffLineText {
     }
 
     pub(crate) fn span(backing: DiffLineTextBacking, offset: usize, len: usize) -> Self {
+        Self::span_within(backing, offset, len, u32::MAX)
+    }
+
+    /// Spans store 32-bit positions to keep every diff line small. A line that
+    /// starts past `max` copies its bytes into its own backing; a line longer
+    /// than `max` falls back to owned text.
+    fn span_within(backing: DiffLineTextBacking, offset: usize, len: usize, max: u32) -> Self {
+        let fits = |value: usize| u32::try_from(value).ok().filter(|value| *value <= max);
+        let (backing, offset, len) = match (fits(offset), fits(len)) {
+            (Some(offset), Some(len)) => (backing, offset, len),
+            (None, Some(len)) => {
+                let bytes = backing
+                    .raw()
+                    .get(offset..offset.saturating_add(len as usize))
+                    .unwrap_or_default();
+                (DiffLineTextBacking::new(Arc::from(bytes)), 0, len)
+            }
+            (_, None) => {
+                let bytes = backing.raw().get(offset..offset.saturating_add(len));
+                return Self::owned(String::from_utf8_lossy(bytes.unwrap_or_default()));
+            }
+        };
         Self {
             storage: DiffLineTextStorage::Span {
                 backing,
-                offset: u32::try_from(offset).unwrap_or(u32::MAX),
-                len: u32::try_from(len).unwrap_or(u32::MAX),
+                offset,
+                len,
             },
         }
     }
@@ -1134,142 +1130,21 @@ pub enum DiffLineKind {
     Meta,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DiffRowRef {
-    FileHeader(usize),
-    FileBodyNotice(usize),
-    HunkHeader {
-        file: usize,
-        hunk: usize,
-    },
-    Line {
-        file: usize,
-        hunk: usize,
-        line: usize,
-    },
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DiffViewModel {
-    len: usize,
-    file_start_rows: Vec<usize>,
-    hunk_start_rows: Vec<usize>,
-    hunk_rows: Vec<DiffViewHunkRow>,
-    file_body_notice_rows: Vec<Option<usize>>,
-}
+    #[test]
+    fn line_text_beyond_span_range_keeps_its_bytes() {
+        let raw = Arc::<[u8]>::from(b"head\nfar\xff\nhuge-line".as_slice());
+        let backing = DiffLineTextBacking::new(Arc::clone(&raw));
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct DiffViewHunkRow {
-    file: usize,
-    hunk: usize,
-    line_count: usize,
-}
+        let near = DiffLineText::span_within(backing.clone(), 0, 4, 4);
+        let far = DiffLineText::span_within(backing.clone(), 5, 4, 4);
+        let huge = DiffLineText::span_within(backing, 10, 9, 4);
 
-impl DiffViewModel {
-    pub fn new(changeset: &Changeset) -> Self {
-        let mut len = 0usize;
-        let mut file_start_rows = Vec::with_capacity(changeset.files.len());
-        let mut hunk_start_rows = Vec::new();
-        let mut hunk_rows = Vec::new();
-        let mut file_body_notice_rows = Vec::with_capacity(changeset.files.len());
-
-        for (file_index, file) in changeset.files.iter().enumerate() {
-            file_start_rows.push(len);
-            file_body_notice_rows.push(None);
-            len = len.saturating_add(1);
-
-            if file.is_binary() || file.has_no_textual_changes() {
-                file_body_notice_rows[file_index] = Some(len);
-                len = len.saturating_add(1);
-                continue;
-            }
-
-            for (hunk_index, hunk) in file.hunks().iter().enumerate() {
-                hunk_start_rows.push(len);
-                hunk_rows.push(DiffViewHunkRow {
-                    file: file_index,
-                    hunk: hunk_index,
-                    line_count: hunk.lines.len(),
-                });
-                len = len.saturating_add(1).saturating_add(hunk.lines.len());
-            }
-        }
-
-        Self {
-            len,
-            file_start_rows,
-            hunk_start_rows,
-            hunk_rows,
-            file_body_notice_rows,
-        }
-    }
-
-    pub fn len(&self) -> usize {
-        self.len
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len == 0
-    }
-
-    pub fn row(&self, index: usize) -> Option<DiffRowRef> {
-        if index >= self.len {
-            return None;
-        }
-        if let Ok(file) = self.file_start_rows.binary_search(&index) {
-            return Some(DiffRowRef::FileHeader(file));
-        }
-        if let Some(file) = self.file_at_row(index)
-            && self.file_body_notice_rows.get(file).copied().flatten() == Some(index)
-        {
-            return Some(DiffRowRef::FileBodyNotice(file));
-        }
-
-        let hunk_index = self
-            .hunk_start_rows
-            .partition_point(|start| *start <= index);
-        let hunk_index = hunk_index.checked_sub(1)?;
-        let start = *self.hunk_start_rows.get(hunk_index)?;
-        let hunk = *self.hunk_rows.get(hunk_index)?;
-        if index == start {
-            return Some(DiffRowRef::HunkHeader {
-                file: hunk.file,
-                hunk: hunk.hunk,
-            });
-        }
-        let line = index.saturating_sub(start).saturating_sub(1);
-        (line < hunk.line_count).then_some(DiffRowRef::Line {
-            file: hunk.file,
-            hunk: hunk.hunk,
-            line,
-        })
-    }
-
-    pub fn file_start_row(&self, file: usize) -> Option<usize> {
-        self.file_start_rows.get(file).copied()
-    }
-
-    pub fn file_at_row(&self, row: usize) -> Option<usize> {
-        if self.file_start_rows.is_empty() {
-            return None;
-        }
-        match self.file_start_rows.binary_search(&row) {
-            Ok(index) => Some(index),
-            Err(0) => Some(0),
-            Err(index) => Some(index - 1),
-        }
-    }
-
-    pub fn next_hunk_row(&self, row: usize) -> Option<usize> {
-        let index = self.hunk_start_rows.partition_point(|start| *start <= row);
-        self.hunk_start_rows.get(index).copied()
-    }
-
-    pub fn previous_hunk_row(&self, row: usize) -> Option<usize> {
-        let index = self.hunk_start_rows.partition_point(|start| *start < row);
-        index
-            .checked_sub(1)
-            .and_then(|index| self.hunk_start_rows.get(index))
-            .copied()
+        assert_eq!(near.as_bytes(), b"head");
+        assert_eq!(far.as_bytes(), b"far\xff");
+        assert_eq!(huge.as_bytes(), b"huge-line");
     }
 }

@@ -80,8 +80,9 @@ fn patch_file_limit_is_enforced_during_ingress() {
         ..DiffOptions::default()
     };
 
-    let error = load_review_ref_limited(
+    let error = load_changeset_limited(
         &options,
+        false,
         DiffLimits {
             max_patch_bytes: Some(4),
             ..DiffLimits::default()
@@ -119,8 +120,9 @@ fn git_diff_limit_stops_captured_output() {
         ..DiffOptions::default()
     };
 
-    let error = load_review_ref_limited(
+    let error = load_changeset_limited(
         &options,
+        false,
         DiffLimits {
             max_patch_bytes: Some(8),
             ..DiffLimits::default()

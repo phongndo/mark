@@ -126,7 +126,7 @@ fn render_bytes_stat_matches_full_changeset_stat_for_patch() {
     };
 
     let streamed = String::from_utf8(render_bytes(options.clone()).unwrap()).unwrap();
-    let full = render_stat(&load_review_ref(&options).unwrap());
+    let full = render_changeset_stat(&load_review_ref(&options).unwrap());
 
     assert_eq!(streamed, full);
 }
@@ -297,22 +297,4 @@ fn rename_or_copy_status_wins_over_later_mode_headers() {
         "diff --git a/source.txt b/copy.txt\ncopy from source.txt\ncopy to copy.txt\nold mode 100644\nnew mode 100755\n",
     );
     assert_eq!(copied[0].status(), FileStatus::Copied);
-}
-
-#[test]
-fn view_model_indexes_file_and_hunk_rows() {
-    let changeset = Changeset {
-        repo: PathBuf::from("/repo").into(),
-        title: "test".to_owned(),
-        files: parse_patch(
-            "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n",
-        ),
-        raw_patch: Changeset::empty_raw_patch(),
-    };
-    let model = DiffViewModel::new(&changeset);
-
-    assert_eq!(model.file_start_row(0), Some(0));
-    assert_eq!(model.file_at_row(3), Some(0));
-    assert_eq!(model.next_hunk_row(0), Some(1));
-    assert_eq!(model.previous_hunk_row(4), Some(1));
 }

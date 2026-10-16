@@ -37,6 +37,25 @@ fn temp_test_dir(name: &str) -> PathBuf {
     ))
 }
 
+/// Renders a loaded changeset in the streamed `--stat` format.
+fn render_changeset_stat(changeset: &Changeset) -> String {
+    let stats = stats::PatchStats {
+        files: changeset
+            .files
+            .iter()
+            .map(|file| stats::PatchFileStat {
+                old_path: file.old_path().map(str::to_owned),
+                new_path: file.new_path().map(str::to_owned),
+                additions: file.additions,
+                deletions: file.deletions,
+                is_binary: file.is_binary(),
+            })
+            .collect(),
+        totals: changeset.stats(),
+    };
+    render_patch_stats(&stats)
+}
+
 fn init_repo(repo: &Path) {
     fs::create_dir_all(repo).expect("repo directory should be created");
     git(["init", "-q"], repo);

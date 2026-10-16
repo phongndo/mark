@@ -110,3 +110,36 @@ fn parsers_match_git_stats_and_source_coordinates() {
     }
     fs::remove_dir_all(repo).unwrap();
 }
+
+#[test]
+fn completed_hunk_ignores_format_patch_trailer() {
+    let patch = "From 1234 Mon Sep 17 00:00:00 2001\nSubject: [PATCH] change\n\n---\n a.txt | 2 +-\n\ndiff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1,2 +1,2 @@\n keep\n-old\n+new\n\\ No newline at end of file\n-- \n2.43.0\n\n";
+
+    let stats = parse_patch_stats(BufReader::new(patch.as_bytes())).unwrap();
+    for files in [
+        parse_patch(patch),
+        parse_patch_bytes(Arc::from(patch.as_bytes())),
+    ] {
+        assert_eq!(files.len(), 1);
+        let lines = &files[0].hunks()[0].lines;
+        assert_eq!(
+            lines.iter().map(DiffLine::text).collect::<Vec<_>>(),
+            ["keep", "old", "new"]
+        );
+        assert_eq!(
+            (files[0].additions, files[0].deletions),
+            (stats.files[0].additions, stats.files[0].deletions)
+        );
+    }
+}
+
+#[test]
+fn junk_between_plain_unified_files_still_starts_next_file() {
+    let patch = "diff -ru a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\ndiff -ru a/b.txt b/b.txt\n--- a/b.txt\n+++ b/b.txt\n@@ -1 +1 @@\n-left\n+right\n";
+
+    let files = parse_patch(patch);
+
+    assert_eq!(files.len(), 2);
+    assert_eq!(files[0].hunks()[0].lines.len(), 2);
+    assert_eq!(files[1].display_path(), "b.txt");
+}

@@ -8,7 +8,7 @@ fn range_diff_reports_unknown_revision() {
     init_repo(&repo);
 
     let error = render(DiffOptions {
-        repo: Some(repo.clone().into()),
+        repo: Some(repo.into()),
         source: DiffSource::Range {
             left: "HEAD".into(),
             right: "missing-branch".into(),
@@ -37,7 +37,7 @@ fn range_diff_accepts_pathspec_right_operand() {
     fs::write(repo.join("src/other.rs"), "two\n").expect("other file should change");
 
     let options = DiffOptions {
-        repo: Some(repo.clone().into()),
+        repo: Some(repo.into()),
         source: DiffSource::Range {
             left: "HEAD".into(),
             right: "src/lib.rs".into(),
@@ -58,6 +58,43 @@ fn range_diff_accepts_pathspec_right_operand() {
     .expect("pathspec range stat should render");
     assert!(stat.contains("src/lib.rs"));
     assert!(!stat.contains("src/other.rs"));
+
+    fs::remove_dir_all(test_dir).expect("test directory should be removed");
+}
+
+#[test]
+fn path_scoped_reload_of_pathspec_range_keeps_one_separator() {
+    let test_dir = temp_test_dir("range-pathspec-scoped-reload");
+    let repo = test_dir.join("repo");
+    fs::create_dir_all(&test_dir).expect("test directory should be created");
+    init_repo(&repo);
+    fs::create_dir_all(repo.join("src")).expect("source directory should be created");
+    fs::write(repo.join("src/lib.rs"), "one\n").expect("lib file should be written");
+    fs::write(repo.join("src/other.rs"), "one\n").expect("other file should be written");
+    git(["add", "src/lib.rs", "src/other.rs"], &repo);
+    git(["commit", "-q", "-m", "add sources"], &repo);
+    fs::write(repo.join("src/lib.rs"), "two\n").expect("lib file should change");
+    fs::write(repo.join("src/other.rs"), "two\n").expect("other file should change");
+    let options = DiffOptions {
+        repo: Some(repo.clone().into()),
+        source: DiffSource::Range {
+            left: "HEAD".into(),
+            right: "src".into(),
+        },
+        local_untracked: crate::UntrackedMode::Exclude,
+        output: crate::DiffOutput::Patch,
+    };
+    let paths = [PathBuf::from("src/lib.rs")];
+
+    let mut args = git_diff_args(&options, &repo).expect("range args should resolve");
+    append_pathspecs(&mut args, &paths);
+    assert_eq!(args.iter().filter(|arg| *arg == "--").count(), 1);
+    assert_eq!(args.last().map(String::as_str), Some("src/lib.rs"));
+
+    let changeset =
+        load_review_ref_paths_with_raw_patch(&options, &paths).expect("scoped reload should load");
+    assert_eq!(changeset.files.len(), 1);
+    assert_eq!(changeset.files[0].display_path(), "src/lib.rs");
 
     fs::remove_dir_all(test_dir).expect("test directory should be removed");
 }
@@ -86,7 +123,7 @@ fn range_diff_accepts_treeish_revisions() {
     assert!(patch.contains("+changed"));
 
     let stat = render(DiffOptions {
-        repo: Some(repo.clone().into()),
+        repo: Some(repo.into()),
         source: DiffSource::Range {
             left: "HEAD~1^{tree}".into(),
             right: "HEAD".into(),
@@ -115,7 +152,7 @@ fn range_diff_accepts_multi_object_left_revision() {
     git(["merge", "-q", "--no-ff", "side", "-m", "merge"], &repo);
 
     let stat = render(DiffOptions {
-        repo: Some(repo.clone().into()),
+        repo: Some(repo.into()),
         source: DiffSource::Range {
             left: "HEAD^@".into(),
             right: "HEAD".into(),
@@ -146,7 +183,7 @@ fn range_diff_accepts_rev_path_tree_revisions() {
     git(["commit", "-q", "-m", "change source"], &repo);
 
     let patch = render(DiffOptions {
-        repo: Some(repo.clone().into()),
+        repo: Some(repo.into()),
         source: DiffSource::Range {
             left: "HEAD~1:src".into(),
             right: "HEAD:src".into(),
@@ -176,7 +213,7 @@ fn range_diff_accepts_rev_path_blob_revisions() {
     git(["commit", "-q", "-m", "change file"], &repo);
 
     let options = DiffOptions {
-        repo: Some(repo.clone().into()),
+        repo: Some(repo.into()),
         source: DiffSource::Range {
             left: "HEAD~1:file.txt".into(),
             right: "HEAD:file.txt".into(),
