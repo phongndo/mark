@@ -1798,14 +1798,6 @@ impl UiModel {
         })
     }
 
-    pub(crate) fn cache_key(&self) -> usize {
-        if self.rows.is_empty() {
-            self.row_segments.as_ptr() as usize
-        } else {
-            self.rows.as_ptr() as usize
-        }
-    }
-
     pub(crate) fn file_start_row(&self, file: usize) -> Option<usize> {
         self.file_start_rows
             .get(file)

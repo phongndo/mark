@@ -407,7 +407,7 @@ pub(crate) struct WrappedVisualLayout {
     pub(crate) layout: DiffLayoutMode,
     pub(crate) viewport_width: usize,
     pub(crate) model_rows: usize,
-    pub(crate) model_rows_ptr: usize,
+    pub(crate) model_identity: u64,
     /// Exact visual starts for eager layouts. Sparse layouts leave this empty.
     pub(crate) row_starts: Vec<usize>,
     pub(crate) row_start_stride: usize,
@@ -422,7 +422,7 @@ impl WrappedVisualLayout {
         self.layout == app.viewport.layout
             && self.viewport_width == app.viewport.viewport_width
             && self.model_rows == app.document.model.len()
-            && self.model_rows_ptr == app.document.model.cache_key()
+            && self.model_identity == app.document.model.identity()
     }
 }
 
