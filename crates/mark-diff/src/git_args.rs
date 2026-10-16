@@ -125,7 +125,7 @@ fn append_range_args(
     right: &str,
 ) -> MarkResult<()> {
     args.push("--end-of-options".to_owned());
-    let left = existing_object_revision(repo, left, "")?;
+    let left = existing_object_revision(repo, left)?;
 
     if revision_expression_exists(repo, right)? {
         args.push(left);
@@ -136,7 +136,7 @@ fn append_range_args(
         args.push(right.to_owned());
     } else {
         args.push(left);
-        args.push(existing_object_revision(repo, right, "")?);
+        args.push(existing_object_revision(repo, right)?);
     }
 
     Ok(())
