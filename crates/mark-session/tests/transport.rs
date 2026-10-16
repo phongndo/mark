@@ -3,6 +3,7 @@
 use std::{
     fs,
     io::{Read, Write},
+    path::Path,
     os::unix::fs::PermissionsExt,
     time::Duration,
 };
@@ -13,14 +14,10 @@ use mark_session::{
 };
 use tokio::sync::mpsc;
 
-#[test]
-fn one_request_round_trip_and_cleanup() {
-    let temp = tempfile::tempdir().unwrap();
-    let registry = Registry::at(temp.path().join("mark"));
-    let repo = temp.path().join("repo");
+fn session_record(registry: &Registry, root: &Path, session_id: &str) -> SessionRecord {
+    let repo = root.join("repo");
     fs::create_dir(&repo).unwrap();
-    let session_id = "round-trip";
-    let record = SessionRecord {
+    SessionRecord {
         session_id: session_id.to_owned(),
         process_id: std::process::id(),
         process_identity: current_process_identity(),
@@ -33,7 +30,15 @@ fn one_request_round_trip_and_cleanup() {
             .unwrap()
             .display()
             .to_string(),
-    };
+    }
+}
+
+#[test]
+fn one_request_round_trip_and_cleanup() {
+    let temp = tempfile::tempdir().unwrap();
+    let registry = Registry::at(temp.path().join("mark"));
+    let session_id = "round-trip";
+    let record = session_record(&registry, temp.path(), session_id);
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
@@ -99,6 +104,43 @@ fn one_request_round_trip_and_cleanup() {
         std::thread::sleep(Duration::from_millis(1));
     }
     assert!(!registry.session_dir(session_id).unwrap().exists());
+}
+
+#[test]
+fn connections_over_capacity_receive_a_busy_error() {
+    let temp = tempfile::tempdir().unwrap();
+    let registry = Registry::at(temp.path().join("mark"));
+    let session_id = "busy";
+    let record = session_record(&registry, temp.path(), session_id);
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap();
+    let (tx, _rx) = mpsc::channel(SESSION_COMMAND_CHANNEL_CAPACITY);
+    let (_handle, startup) = runtime.block_on(async { spawn_server(registry.clone(), record, tx) });
+    runtime
+        .block_on(startup)
+        .expect("startup signal")
+        .expect("server startup");
+
+    // Occupy every client slot with connections that never send a frame.
+    let socket_path = registry.socket_path(session_id).unwrap();
+    let _idle = (0..32)
+        .map(|_| std::os::unix::net::UnixStream::connect(&socket_path).unwrap())
+        .collect::<Vec<_>>();
+
+    let response = Client::new(&socket_path)
+        .with_timeout(Duration::from_secs(2))
+        .request(&Request::new(
+            "request-1",
+            METHOD_SESSION_GET,
+            serde_json::json!({}),
+        ))
+        .unwrap();
+
+    assert!(!response.ok);
+    assert_eq!(response.error.unwrap().code, "server_busy");
 }
 
 #[test]

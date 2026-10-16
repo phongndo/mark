@@ -1,6 +1,8 @@
 #[cfg(unix)]
 use std::{io, path::Path, sync::Arc, time::Duration};
 
+#[cfg(unix)]
+use tokio::io::AsyncReadExt;
 use tokio::sync::{mpsc, oneshot};
 
 #[cfg(unix)]
@@ -23,6 +25,8 @@ const MAX_CONNECTED_CLIENTS: usize = 32;
 const CLIENT_FRAME_TIMEOUT: Duration = Duration::from_secs(30);
 #[cfg(unix)]
 const CLIENT_RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
+#[cfg(unix)]
+const BUSY_REPLY_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Debug)]
 pub struct SessionCommand {
@@ -157,7 +161,10 @@ async fn run_server(
         let (stream, _) = listener.accept().await?;
         let permit = match Arc::clone(&clients).try_acquire_owned() {
             Ok(permit) => permit,
-            Err(_) => continue,
+            Err(_) => {
+                tokio::spawn(reject_busy_connection(stream));
+                continue;
+            }
         };
         let commands = commands.clone();
         tokio::spawn(async move {
@@ -165,6 +172,25 @@ async fn run_server(
             let _ = handle_connection(stream, commands).await;
         });
     }
+}
+
+#[cfg(unix)]
+async fn reject_busy_connection(mut stream: tokio::net::UnixStream) {
+    let response = Response::failure(
+        "",
+        ProtocolError::new("server_busy", "session has too many connected clients"),
+    );
+    let Ok(bytes) = serde_json::to_vec(&response) else {
+        return;
+    };
+    let _ = tokio::time::timeout(BUSY_REPLY_TIMEOUT, async {
+        // Drain the request first: closing a Unix socket with unread data
+        // resets the connection, and the client would lose the reply.
+        let mut request = (&mut stream).take(MAX_REQUEST_FRAME_BYTES as u64 + 1);
+        tokio::io::copy(&mut request, &mut tokio::io::sink()).await?;
+        write_frame(&mut stream, &bytes).await
+    })
+    .await;
 }
 
 #[cfg(unix)]
