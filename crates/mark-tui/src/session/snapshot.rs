@@ -253,12 +253,11 @@ fn patch_with_cache(
     if cache.as_ref().is_none_or(|cached| {
         cached.generation != app.document.generation
             || cached.file_path != file_path
-            || cached.selection != selection
+            || cached.plan.selection != selection
     }) {
         *cache = Some(PatchCache {
             generation: app.document.generation,
             file_path: file_path.to_owned(),
-            selection,
             plan: PatchPlan::build(file, selection)?,
         });
     }
@@ -399,7 +398,6 @@ fn patch_selection(file: &DiffFile, params: &PatchParams) -> Result<PatchSelecti
 pub(super) struct PatchCache {
     generation: u64,
     file_path: String,
-    selection: PatchSelection,
     plan: PatchPlan,
 }
 

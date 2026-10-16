@@ -15,7 +15,6 @@ pub(crate) struct ReviewCommentStore {
     comments: Vec<Option<ReviewComment>>,
     by_id: HashMap<String, usize>,
     anchors: HashMap<AnnotationKey, AnchorView>,
-    comment_count: usize,
 }
 
 #[derive(Debug, Default)]
@@ -27,11 +26,11 @@ pub(crate) struct AnchorView {
 
 impl ReviewCommentStore {
     pub(crate) fn len(&self) -> usize {
-        self.comment_count
+        self.by_id.len()
     }
 
     pub(crate) fn is_empty(&self) -> bool {
-        self.comment_count == 0
+        self.by_id.is_empty()
     }
 
     fn live_review_bytes(&self) -> usize {
@@ -163,7 +162,7 @@ impl ReviewCommentStore {
             return Ok(Some(previous));
         }
         let id = self.prospective_comment_id("human", 1);
-        if self.comment_count >= mark_session::MAX_LIVE_COMMENTS
+        if self.len() >= mark_session::MAX_LIVE_COMMENTS
             || self
                 .live_review_bytes()
                 .saturating_add(new_comment_bytes(&id, &anchor, &text, None, None))
@@ -246,7 +245,7 @@ impl ReviewCommentStore {
         generation: u64,
     ) -> Result<Vec<String>, StoreLimitError> {
         if comments.len() > mark_session::MAX_COMMENTS_PER_BATCH
-            || self.comment_count.saturating_add(comments.len()) > mark_session::MAX_LIVE_COMMENTS
+            || self.len().saturating_add(comments.len()) > mark_session::MAX_LIVE_COMMENTS
             || comments.iter().any(|comment| {
                 comment.anchor.path.is_empty()
                     || comment.anchor.path.len() > mark_session::MAX_PATH_BYTES
@@ -323,7 +322,7 @@ impl ReviewCommentStore {
     }
 
     pub(crate) fn clear_all(&mut self) -> usize {
-        let count = self.comment_count;
+        let count = self.len();
         *self = Self::default();
         count
     }
@@ -431,7 +430,6 @@ impl ReviewCommentStore {
             self.anchors.entry(anchor.clone()).or_default().ids.push(id);
             self.rebuild_anchor(&anchor);
         }
-        self.comment_count = self.comment_count.saturating_add(1);
     }
 
     fn remove_any_by_id(&mut self, id: &str) {
@@ -441,7 +439,6 @@ impl ReviewCommentStore {
         let Some(comment) = self.comments.get_mut(index).and_then(Option::take) else {
             return;
         };
-        self.comment_count = self.comment_count.saturating_sub(1);
         if let Some(view) = self.anchors.get_mut(&comment.anchor) {
             view.ids.retain(|candidate| candidate != id);
             if view.ids.is_empty() {
