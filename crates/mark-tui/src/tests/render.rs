@@ -2863,7 +2863,7 @@ fn line_gutters_use_theme_background() {
     let theme = DiffTheme::default();
     let line = DiffLine::context(7, 7, "same".to_owned());
 
-    let rendered = render_unified_line_at_scroll(&line, None, &[], 0, 24, theme, 0);
+    let rendered = render_unified_line_at_scroll(&line, None, &[], 24, theme, 0);
 
     assert_eq!(rendered.spans[0].style.fg, Some(theme.muted));
     assert_eq!(rendered.spans[0].style.bg, Some(theme.gutter_bg));
@@ -2876,7 +2876,7 @@ fn changed_line_gutters_use_delta_colors_and_bold_signs() {
     let theme = DiffTheme::default();
     let line = DiffLine::addition(7, "added".to_owned());
 
-    let rendered = render_unified_line_at_scroll(&line, None, &[], 0, 24, theme, 0);
+    let rendered = render_unified_line_at_scroll(&line, None, &[], 24, theme, 0);
 
     assert_eq!(rendered.spans[0].style.bg, Some(theme.addition_gutter_bg));
     assert_eq!(rendered.spans[1].style.fg, Some(theme.addition_fg));
@@ -2921,7 +2921,7 @@ fn split_view_uses_right_indicator_as_separator() {
 fn unified_diff_content_scrolls_horizontally() {
     let line = DiffLine::context(1, 1, "abcdef".to_owned());
 
-    let rendered = render_unified_line_at_scroll(&line, None, &[], 0, 18, DiffTheme::default(), 2);
+    let rendered = render_unified_line_at_scroll(&line, None, &[], 18, DiffTheme::default(), 2);
 
     assert!(line_text(&rendered).ends_with("cdef"));
 }
@@ -2952,7 +2952,7 @@ fn split_diff_content_scrolls_horizontally() {
 fn diff_lines_start_with_change_indicator() {
     let line = DiffLine::addition(3, "new".to_owned());
 
-    let rendered = render_unified_line_at_scroll(&line, None, &[], 0, 24, DiffTheme::default(), 0);
+    let rendered = render_unified_line_at_scroll(&line, None, &[], 24, DiffTheme::default(), 0);
 
     assert_eq!(rendered.spans[0].content.as_ref(), DIFF_INDICATOR);
     assert_eq!(
@@ -2967,7 +2967,7 @@ fn highlighted_cursor_diff_content_line_highlights_only_code_columns() {
     let line = DiffLine::context(1, 1, "code".to_owned());
     let width = 24;
     let theme = DiffTheme::default();
-    let rendered = render_unified_line_at_scroll(&line, None, &[], 0, width, theme, 0);
+    let rendered = render_unified_line_at_scroll(&line, None, &[], width, theme, 0);
     let highlighted = highlighted_cursor_diff_content_line(
         rendered.clone(),
         DiffLayoutMode::Unified,
@@ -4126,7 +4126,6 @@ fn transparent_background_only_resets_diff_base_background() {
         &DiffLine::context(7, 7, "same".to_owned()),
         None,
         &[],
-        0,
         24,
         theme,
         0,

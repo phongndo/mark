@@ -34,7 +34,6 @@ pub(crate) fn render_unified_line_at_scroll(
     line: &DiffLine,
     syntax: Option<&HighlightedLine>,
     inline: &[InlineRange],
-    _row_index: usize,
     width: usize,
     theme: DiffTheme,
     horizontal_scroll: usize,

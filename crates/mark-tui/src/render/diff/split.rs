@@ -364,11 +364,11 @@ pub(crate) struct SplitCellRender {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct SplitCellSpanRender {
-    cell: SplitCellRender,
-    scroll: DisplaySeek,
-    focused: bool,
-    continuation: bool,
+pub(super) struct SplitCellSpanRender {
+    pub(super) cell: SplitCellRender,
+    pub(super) scroll: DisplaySeek,
+    pub(super) focused: bool,
+    pub(super) continuation: bool,
 }
 
 pub(crate) fn split_cell_spans_at_scroll(
@@ -378,26 +378,17 @@ pub(crate) fn split_cell_spans_at_scroll(
     render: SplitCellRender,
     horizontal_scroll: usize,
 ) -> Vec<Span<'static>> {
-    split_cell_spans_at_scroll_with_focus(line, syntax, inline, render, horizontal_scroll, false)
-}
-
-pub(crate) fn split_cell_spans_at_scroll_with_focus(
-    line: Option<&DiffLine>,
-    syntax: Option<&HighlightedLine>,
-    inline: &[InlineRange],
-    render: SplitCellRender,
-    horizontal_scroll: usize,
-    focused: bool,
-) -> Vec<Span<'static>> {
     let text = line.map(DiffLine::text_lossy);
     split_cell_spans_at_scroll_with_focus_and_continuation(
         line.zip(text.as_deref()),
         syntax,
         inline,
-        render,
-        DisplaySeek::from_start(horizontal_scroll),
-        focused,
-        false,
+        SplitCellSpanRender {
+            cell: render,
+            scroll: DisplaySeek::from_start(horizontal_scroll),
+            focused: false,
+            continuation: false,
+        },
     )
 }
 
@@ -406,23 +397,11 @@ pub(super) fn split_cell_spans_at_scroll_with_focus_and_continuation(
     line: Option<(&DiffLine, &str)>,
     syntax: Option<&HighlightedLine>,
     inline: &[InlineRange],
-    render: SplitCellRender,
-    scroll: DisplaySeek,
-    focused: bool,
-    continuation: bool,
+    render: SplitCellSpanRender,
 ) -> Vec<Span<'static>> {
     let mut spans = Vec::with_capacity(6);
     append_split_cell_spans_at_scroll_with_focus_and_continuation(
-        &mut spans,
-        line,
-        syntax,
-        inline,
-        SplitCellSpanRender {
-            cell: render,
-            scroll,
-            focused,
-            continuation,
-        },
+        &mut spans, line, syntax, inline, render,
     );
     spans
 }

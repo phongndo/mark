@@ -15,7 +15,7 @@ use crate::{
 
 use super::{
     split::{
-        SplitCellRender, SplitGrepRender, SplitGrepText, SplitSide,
+        SplitCellRender, SplitCellSpanRender, SplitGrepRender, SplitGrepText, SplitSide,
         highlight_wrapped_split_grep_line, split_cell_spans_at_scroll,
         split_cell_spans_at_scroll_with_focus_and_continuation, wrapped_segment_scroll,
         wrapped_side_seeks,
@@ -155,7 +155,6 @@ pub(crate) fn render_context_line(
             &diff_line,
             syntax.as_deref(),
             &[],
-            row_index,
             width,
             theme,
             horizontal_scroll,
@@ -303,33 +302,28 @@ pub(crate) fn render_split_context_line_wrapped(
         let left_scroll = wrapped_segment_scroll(&left_scrolls, left_past_end, wrap_index);
         let right_scroll = wrapped_segment_scroll(right_scrolls, right_past_end, wrap_index);
         let visual_row = row_index.saturating_add(wrap_index);
+        let cell = |side, width, scroll| SplitCellSpanRender {
+            cell: SplitCellRender {
+                side,
+                row_index: visual_row,
+                width,
+                theme,
+            },
+            scroll,
+            focused: false,
+            continuation: wrap_index > 0,
+        };
         let mut spans = split_cell_spans_at_scroll_with_focus_and_continuation(
             Some((line, &text)),
             syntax,
             &[],
-            SplitCellRender {
-                side: SplitSide::Old,
-                row_index: visual_row,
-                width: left_width,
-                theme,
-            },
-            left_scroll,
-            false,
-            wrap_index > 0,
+            cell(SplitSide::Old, left_width, left_scroll),
         );
         spans.extend(split_cell_spans_at_scroll_with_focus_and_continuation(
             Some((line, &text)),
             syntax,
             &[],
-            SplitCellRender {
-                side: SplitSide::New,
-                row_index: visual_row,
-                width: right_width,
-                theme,
-            },
-            right_scroll,
-            false,
-            wrap_index > 0,
+            cell(SplitSide::New, right_width, right_scroll),
         ));
         lines.push(highlight_wrapped_split_grep_line(
             Line::from(spans),
