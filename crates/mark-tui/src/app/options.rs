@@ -554,17 +554,6 @@ pub(crate) fn persist_options_menu_draft_to_path(
     draft: OptionsDraft,
     changed_item: OptionsMenuItem,
 ) -> MarkResult<()> {
-    let color_scheme = if changed_item == OptionsMenuItem::ColorScheme {
-        let Some(SyntaxThemeConfig::Builtin { name: Some(name) }) =
-            color_scheme_config(draft.color_scheme)
-        else {
-            return Ok(());
-        };
-        Some(name)
-    } else {
-        None
-    };
-
     let mut document = load_options_document(path)?;
     match changed_item {
         OptionsMenuItem::Layout => set_root_value(
@@ -617,12 +606,14 @@ pub(crate) fn persist_options_menu_draft_to_path(
             )?;
         }
         OptionsMenuItem::ColorScheme => {
+            // A custom theme comes from the config itself; leave it untouched.
+            let Some(SyntaxThemeConfig::Builtin { name: Some(name) }) =
+                color_scheme_config(draft.color_scheme)
+            else {
+                return Ok(());
+            };
             document.as_table_mut().remove("colorscheme");
-            set_root_value(
-                &mut document,
-                "theme",
-                toml_edit::Value::from(color_scheme.expect("built-in theme should have a name")),
-            );
+            set_root_value(&mut document, "theme", toml_edit::Value::from(name));
         }
         OptionsMenuItem::NotificationMode => set_table_value(
             &mut document,
