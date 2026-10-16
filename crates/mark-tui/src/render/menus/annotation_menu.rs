@@ -15,7 +15,7 @@ use crate::{
             selector_menu_list_rows, selector_menu_outer_height, selector_menu_outer_width,
             selector_row_style, selector_separator_line,
         },
-        style::base_bg,
+        style::{base_bg, file_sidebar_style},
         text::{fit_padded, status_code, terminal_text},
     },
     theme::DiffTheme,
@@ -157,7 +157,7 @@ fn annotation_menu_item_lines(
     let status = Span::styled(
         fit_padded(status_code(item.status), 2),
         style
-            .fg(status_color(item.status, theme))
+            .patch(file_sidebar_style(item.status, theme))
             .add_modifier(Modifier::BOLD),
     );
     let header = fit_padded(&terminal_text(&item.label), width.saturating_sub(3));
@@ -173,15 +173,4 @@ fn annotation_menu_item_lines(
             style,
         )),
     ]
-}
-
-fn status_color(status: mark_diff::FileStatus, theme: DiffTheme) -> ratatui::prelude::Color {
-    match status {
-        mark_diff::FileStatus::Added | mark_diff::FileStatus::Copied => theme.addition_fg,
-        mark_diff::FileStatus::Deleted => theme.deletion_fg,
-        mark_diff::FileStatus::Modified
-        | mark_diff::FileStatus::Renamed
-        | mark_diff::FileStatus::TypeChanged => theme.hunk,
-        mark_diff::FileStatus::Unknown => theme.muted,
-    }
 }

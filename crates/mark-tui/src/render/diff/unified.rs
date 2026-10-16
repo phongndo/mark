@@ -224,10 +224,7 @@ pub(crate) fn row_bg(kind: DiffLineKind, theme: DiffTheme) -> Color {
 
 pub(crate) fn line_style(kind: DiffLineKind, theme: DiffTheme) -> Style {
     match kind {
-        DiffLineKind::Addition => Style::default()
-            .fg(theme.foreground)
-            .bg(row_bg(kind, theme)),
-        DiffLineKind::Deletion => Style::default()
+        DiffLineKind::Addition | DiffLineKind::Deletion => Style::default()
             .fg(theme.foreground)
             .bg(row_bg(kind, theme)),
         DiffLineKind::Meta => Style::default().fg(theme.muted).bg(diff_base_bg(theme)),

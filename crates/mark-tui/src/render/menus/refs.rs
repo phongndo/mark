@@ -28,10 +28,6 @@ use mark_diff::BranchName;
 
 pub(crate) fn branch_menu_list_visible_rows(app: &DiffApp, area: Rect) -> Option<usize> {
     let menu = app.refs.branch_menu_open()?;
-    if app.refs.comparison_branches.is_empty() {
-        return None;
-    }
-
     let menu_area = branch_menu_area(app, area)?;
     let inner = branch_menu_block(app.config.theme, menu).inner(menu_area);
     let pinned_rows = u16::from(app.selected_branch_menu_choice(menu).is_some());
@@ -39,10 +35,6 @@ pub(crate) fn branch_menu_list_visible_rows(app: &DiffApp, area: Rect) -> Option
 }
 
 pub(crate) fn commit_menu_list_visible_rows(app: &DiffApp, area: Rect) -> Option<usize> {
-    if !app.refs.commit_menu_is_open() || app.refs.comparison_commits.is_empty() {
-        return None;
-    }
-
     let menu_area = commit_menu_area(app, area)?;
     let inner = commit_menu_block(app.config.theme).inner(menu_area);
     let pinned_rows = u16::from(app.selected_commit_menu_choice().is_some());
@@ -50,10 +42,6 @@ pub(crate) fn commit_menu_list_visible_rows(app: &DiffApp, area: Rect) -> Option
 }
 
 pub(crate) fn color_scheme_picker_list_visible_rows(app: &DiffApp, area: Rect) -> Option<usize> {
-    if !app.overlays.color_scheme_picker_is_open() {
-        return None;
-    }
-
     let picker_area = color_scheme_picker_area(app, area)?;
     let inner = color_scheme_picker_block(app.config.theme).inner(picker_area);
     Some(selector_menu_list_rows(inner.height, 1))
