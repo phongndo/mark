@@ -10,8 +10,8 @@ use crate::{
             content_span_capacity, diff_indicator_span_for_focus, unified_gutter_text,
         },
         grep::{
-            diff_line_grep_highlight_text, grep_highlight_target_for_columns,
-            highlighted_grep_text_line, scrolled_text_byte_start, unified_content_start_column,
+            diff_line_grep_highlight_text, grep_highlight_target_for_columns, grep_text_byte_start,
+            highlighted_grep_text_line, unified_content_start_column,
         },
         style::diff_base_bg,
         text::{DisplaySeek, spaces},
@@ -98,6 +98,7 @@ pub(super) fn render_unified_line_wrapped_with_focus(
     let text = line.text_lossy();
     let seeks = wrapped_row_seeks(&text, content_width, rows.clone());
     let end = rows.end.min(seeks.rows);
+    let grep_text = (!grep_filter.is_empty()).then(|| diff_line_grep_highlight_text(line));
     let mut lines = Vec::with_capacity(end.saturating_sub(rows.start));
     for wrap_index in rows.start..end {
         let scroll = seeks.get(wrap_index).unwrap_or_default();
@@ -114,15 +115,17 @@ pub(super) fn render_unified_line_wrapped_with_focus(
                 continuation: wrap_index > 0,
             },
         );
-        lines.push(highlight_wrapped_unified_grep_line(
-            rendered,
-            line,
-            &text,
-            grep_filter,
-            width,
-            scroll.column,
-            theme,
-        ));
+        lines.push(match grep_text.as_deref() {
+            Some(grep_text) => highlight_wrapped_unified_grep_line(
+                rendered,
+                grep_text,
+                grep_filter,
+                width,
+                scroll.column,
+                theme,
+            ),
+            None => rendered,
+        });
     }
     lines
 }
@@ -189,23 +192,18 @@ fn render_unified_line_segment_with_focus(
 
 fn highlight_wrapped_unified_grep_line(
     rendered: Line<'static>,
-    line: &DiffLine,
-    text: &str,
+    grep_text: &str,
     query: &str,
     width: usize,
     horizontal_scroll: usize,
     theme: DiffTheme,
 ) -> Line<'static> {
-    if query.is_empty() {
-        return rendered;
-    }
-
     let targets = grep_highlight_target_for_columns(
-        diff_line_grep_highlight_text(line),
+        grep_text.to_owned(),
         &rendered.spans,
         unified_content_start_column(width),
         width,
-        1 + scrolled_text_byte_start(text, horizontal_scroll),
+        grep_text_byte_start(grep_text, horizontal_scroll),
     )
     .into_iter()
     .collect();

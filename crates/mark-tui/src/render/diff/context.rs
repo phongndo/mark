@@ -15,9 +15,10 @@ use crate::{
 
 use super::{
     split::{
-        SplitCellRender, SplitGrepRender, SplitSide, highlight_wrapped_split_grep_line,
-        split_cell_spans_at_scroll, split_cell_spans_at_scroll_with_focus_and_continuation,
-        wrapped_segment_scroll, wrapped_side_seeks,
+        SplitCellRender, SplitGrepRender, SplitGrepText, SplitSide,
+        highlight_wrapped_split_grep_line, split_cell_spans_at_scroll,
+        split_cell_spans_at_scroll_with_focus_and_continuation, wrapped_segment_scroll,
+        wrapped_side_seeks,
     },
     unified::{
         WrappedLineRender, render_unified_line_at_scroll, render_unified_line_wrapped_with_focus,
@@ -296,6 +297,7 @@ pub(crate) fn render_split_context_line_wrapped(
     };
     let rows = left_scrolls.rows.max(right_scrolls.rows);
     let end = window.end.min(rows);
+    let grep = SplitGrepText::new(grep_filter, Some(line), Some(line));
     let mut lines = Vec::with_capacity(end.saturating_sub(window.start));
     for wrap_index in window.start..end {
         let left_scroll = wrapped_segment_scroll(&left_scrolls, left_past_end, wrap_index);
@@ -331,8 +333,7 @@ pub(crate) fn render_split_context_line_wrapped(
         ));
         lines.push(highlight_wrapped_split_grep_line(
             Line::from(spans),
-            Some(line),
-            Some(line),
+            &grep,
             SplitGrepRender {
                 query: grep_filter,
                 width,

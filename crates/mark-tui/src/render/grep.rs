@@ -12,6 +12,6 @@ pub(crate) use highlight::highlighted_grep_text_line;
 pub(crate) use ranges::highlighted_line_in_ranges;
 pub(crate) use target::{
     diff_line_grep_highlight_text, grep_highlight_target_for_columns,
-    grep_highlight_targets_for_row, scrolled_text_byte_start, split_content_start_column,
+    grep_highlight_targets_for_row, grep_text_byte_start, split_content_start_column,
     split_diff_line_grep_highlight_target, unified_content_start_column,
 };

@@ -5,7 +5,10 @@ use ratatui::prelude::{Line, Span, Style};
 use crate::{
     app::{DiffApp, WrappedRowSeeks, split_cell_content_width, wrapped_row_seeks},
     render::{
-        grep::{highlighted_grep_text_line, split_diff_line_grep_highlight_target},
+        grep::{
+            diff_line_grep_highlight_text, highlighted_grep_text_line,
+            split_diff_line_grep_highlight_target,
+        },
         style::diff_base_bg,
         text::{DisplaySeek, display_width, spaces},
     },
@@ -161,6 +164,7 @@ pub(crate) fn render_split_line_wrapped_with_focus(
     let (right_scrolls, right_past_end) =
         wrapped_side_seeks(right_text.as_deref(), right_content_width, window.clone());
     let rows = left_scrolls.rows.max(right_scrolls.rows).max(1);
+    let grep = SplitGrepText::new(&app.filters.grep_filter, left_line, right_line);
     let visual_row_start = app.wrapped_visual_scroll_for_model_row(row_index);
     let end = window.end.min(rows);
     let mut rendered_lines = Vec::with_capacity(end.saturating_sub(window.start));
@@ -219,8 +223,7 @@ pub(crate) fn render_split_line_wrapped_with_focus(
         let line = Line::from(spans);
         rendered_lines.push(highlight_wrapped_split_grep_line(
             line,
-            left_line,
-            right_line,
+            &grep,
             SplitGrepRender {
                 query: &app.filters.grep_filter,
                 width,
@@ -271,10 +274,29 @@ pub(super) struct SplitGrepRender<'a> {
     pub(super) theme: DiffTheme,
 }
 
+/// Grep text for each side of a split row, built once per source line while a
+/// grep filter is active.
+#[derive(Debug, Default)]
+pub(super) struct SplitGrepText {
+    left: Option<String>,
+    right: Option<String>,
+}
+
+impl SplitGrepText {
+    pub(super) fn new(query: &str, left: Option<&DiffLine>, right: Option<&DiffLine>) -> Self {
+        if query.is_empty() {
+            return Self::default();
+        }
+        Self {
+            left: left.map(diff_line_grep_highlight_text),
+            right: right.map(diff_line_grep_highlight_text),
+        }
+    }
+}
+
 pub(super) fn highlight_wrapped_split_grep_line(
     rendered: Line<'static>,
-    left_line: Option<&DiffLine>,
-    right_line: Option<&DiffLine>,
+    grep: &SplitGrepText,
     render: SplitGrepRender<'_>,
 ) -> Line<'static> {
     let SplitGrepRender {
@@ -292,14 +314,14 @@ pub(super) fn highlight_wrapped_split_grep_line(
     let left_width = width / 2;
     let right_width = width.saturating_sub(left_width);
     let mut targets = Vec::with_capacity(2);
-    if let Some(target) = left_line.and_then(|line| {
-        split_diff_line_grep_highlight_target(line, &rendered.spans, 0, left_width, left_scroll)
+    if let Some(target) = grep.left.as_deref().and_then(|text| {
+        split_diff_line_grep_highlight_target(text, &rendered.spans, 0, left_width, left_scroll)
     }) {
         targets.push(target);
     }
-    if let Some(target) = right_line.and_then(|line| {
+    if let Some(target) = grep.right.as_deref().and_then(|text| {
         split_diff_line_grep_highlight_target(
-            line,
+            text,
             &rendered.spans,
             left_width,
             right_width,
