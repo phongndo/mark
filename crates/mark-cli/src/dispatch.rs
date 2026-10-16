@@ -3,13 +3,13 @@ use crate::{
     args::{self, Cli, Command},
     config,
     pager::pager,
-    review::{ReviewRequest, run_review},
+    review::{
+        ReviewRequest, compare_options, diff_options, difftool_options, patch_options,
+        review_options, run_review, show_options,
+    },
     session::session,
     skill::skill,
-    syntax::{
-        compare_options, diff_options, difftool_options, patch_options, review_options,
-        show_options, syntax,
-    },
+    syntax::syntax,
     update::update,
 };
 
@@ -62,7 +62,7 @@ impl ReviewCommand for args::DiffArgs {
         let empty_diff_fill = self.display.empty_diff_fill_override();
         let decorations = self.display.decoration_override();
         Ok(review_request(
-            diff_options(self)?,
+            diff_options(self),
             live_updates,
             syntax_enabled,
             empty_diff_fill,
@@ -93,7 +93,7 @@ impl ReviewCommand for args::ShowArgs {
         let empty_diff_fill = self.display.empty_diff_fill_override();
         let decorations = self.display.decoration_override();
         Ok(review_request(
-            show_options(self)?,
+            show_options(self),
             false,
             syntax_enabled,
             empty_diff_fill,
@@ -124,7 +124,7 @@ impl ReviewCommand for args::DifftoolArgs {
         let empty_diff_fill = self.display.empty_diff_fill_override();
         let decorations = self.display.decoration_override();
         Ok(review_request(
-            difftool_options(self)?,
+            difftool_options(self),
             live_updates,
             syntax_enabled,
             empty_diff_fill,

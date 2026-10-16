@@ -15,13 +15,13 @@ fn diff_output(stat: bool) -> mark_command::DiffOutput {
     }
 }
 
-pub(crate) fn diff_options(args: DiffArgs) -> MarkResult<mark_command::DiffOptions> {
-    Ok(mark_command::DiffOptions {
+pub(crate) fn diff_options(args: DiffArgs) -> mark_command::DiffOptions {
+    mark_command::DiffOptions {
         repo: args.repo.repo.map(Into::into),
         source: mark_command::DiffSource::Worktree,
         local_untracked: mark_command::UntrackedMode::from_include(!args.no_untracked),
         output: diff_output(args.display.stat),
-    })
+    }
 }
 
 pub(crate) fn compare_options(args: CompareArgs) -> MarkResult<mark_command::DiffOptions> {
@@ -46,23 +46,23 @@ pub(crate) fn compare_options(args: CompareArgs) -> MarkResult<mark_command::Dif
     })
 }
 
-pub(crate) fn show_options(args: ShowArgs) -> MarkResult<mark_command::DiffOptions> {
-    Ok(mark_command::DiffOptions {
+pub(crate) fn show_options(args: ShowArgs) -> mark_command::DiffOptions {
+    mark_command::DiffOptions {
         repo: args.repo.repo.map(Into::into),
         source: mark_command::DiffSource::Show(
             args.rev.unwrap_or_else(|| "HEAD".to_owned()).into(),
         ),
         local_untracked: mark_command::UntrackedMode::Exclude,
         output: diff_output(args.display.stat),
-    })
+    }
 }
 
 pub(crate) fn review_options(args: ReviewArgs) -> MarkResult<mark_command::DiffOptions> {
     mark_command::review_diff_options(args.repo.repo, &args.target, args.display.stat)
 }
 
-pub(crate) fn difftool_options(args: DifftoolArgs) -> MarkResult<mark_command::DiffOptions> {
-    Ok(mark_command::DiffOptions {
+pub(crate) fn difftool_options(args: DifftoolArgs) -> mark_command::DiffOptions {
+    mark_command::DiffOptions {
         repo: args.repo.repo.map(Into::into),
         source: mark_command::DiffSource::Difftool {
             left: args.left.into(),
@@ -71,7 +71,7 @@ pub(crate) fn difftool_options(args: DifftoolArgs) -> MarkResult<mark_command::D
         },
         local_untracked: mark_command::UntrackedMode::Exclude,
         output: diff_output(args.display.stat),
-    })
+    }
 }
 
 pub(crate) fn patch_options(args: PatchArgs) -> MarkResult<mark_command::DiffOptions> {
@@ -83,7 +83,7 @@ pub(crate) fn patch_options(args: PatchArgs) -> MarkResult<mark_command::DiffOpt
     })
 }
 
-pub(crate) fn patch_source(path: PathBuf) -> MarkResult<mark_command::DiffSource> {
+fn patch_source(path: PathBuf) -> MarkResult<mark_command::DiffSource> {
     if path == Path::new("-") {
         let max_patch_bytes = mark_diff::DiffLimits::from_env().max_patch_bytes;
         let patch = mark_diff::read_patch_input_limited(io::stdin().lock(), max_patch_bytes)?;
@@ -114,7 +114,7 @@ mod tests {
 
     #[test]
     fn diff_always_selects_all_local_changes() {
-        let options = diff_options(DiffArgs::default()).expect("diff options should build");
+        let options = diff_options(DiffArgs::default());
         assert_eq!(options.source, mark_command::DiffSource::Worktree);
     }
 
