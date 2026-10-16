@@ -4412,7 +4412,7 @@ fn content_spans_layers_inline_emphasis_over_syntax() {
 
     assert_eq!(
         number.style.fg,
-        syntax_fg(SyntaxClass::Number, DiffTheme::default())
+        DiffTheme::default().syntax.color(SyntaxClass::Number)
     );
     assert_eq!(
         number.style.bg,
