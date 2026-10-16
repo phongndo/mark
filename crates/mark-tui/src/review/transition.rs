@@ -251,25 +251,13 @@ fn anchor_evidence(app: &DiffApp, anchor: &AnnotationKey) -> ReviewAnchorEvidenc
             },
             hunk_fingerprint: None,
         },
-        AnnotationScope::Hunk {
-            old_start,
-            old_count,
-            new_start,
-            new_count,
-        } => ReviewAnchorEvidence {
+        AnnotationScope::Hunk { .. } => ReviewAnchorEvidence {
             file_fingerprint,
             old_lines: Vec::new(),
             new_lines: Vec::new(),
-            hunk_fingerprint: file
-                .hunks()
-                .iter()
-                .find(|hunk| {
-                    hunk.old_start() == old_start
-                        && hunk.old_count() == old_count
-                        && hunk.new_start() == new_start
-                        && hunk.new_count() == new_count
-                })
-                .map(hunk_fingerprint),
+            hunk_fingerprint: anchor
+                .hunk_index_in(file)
+                .map(|index| hunk_fingerprint(&file.hunks()[index])),
         },
     }
 }

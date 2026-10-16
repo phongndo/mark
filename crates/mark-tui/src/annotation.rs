@@ -200,6 +200,25 @@ impl AnnotationKey {
         ))
     }
 
+    /// Index of the hunk in `file` that a hunk-scoped key was created from.
+    pub(crate) fn hunk_index_in(&self, file: &DiffFile) -> Option<usize> {
+        let AnnotationScope::Hunk {
+            old_start,
+            old_count,
+            new_start,
+            new_count,
+        } = self.scope
+        else {
+            return None;
+        };
+        file.hunks().iter().position(|hunk| {
+            hunk.old_start() == old_start
+                && hunk.old_count() == old_count
+                && hunk.new_start() == new_start
+                && hunk.new_count() == new_count
+        })
+    }
+
     fn new(path: &str, side: AnnotationSide, line: usize, scope: AnnotationScope) -> Self {
         Self {
             path: path.to_owned(),

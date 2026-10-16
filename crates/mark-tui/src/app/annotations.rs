@@ -594,18 +594,8 @@ impl DiffApp {
     ) -> Option<usize> {
         match key.scope {
             AnnotationScope::File => return self.document.model.file_start_row(file_index.get()),
-            AnnotationScope::Hunk {
-                old_start,
-                old_count,
-                new_start,
-                new_count,
-            } => {
-                let hunk = file.hunks().iter().position(|hunk| {
-                    hunk.old_start() == old_start
-                        && hunk.old_count() == old_count
-                        && hunk.new_start() == new_start
-                        && hunk.new_count() == new_count
-                })?;
+            AnnotationScope::Hunk { .. } => {
+                let hunk = key.hunk_index_in(file)?;
                 let hunk_index = HunkIndex::new(hunk);
                 return self
                     .document

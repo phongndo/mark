@@ -78,19 +78,14 @@ pub(crate) fn to_protocol(app: &DiffApp, key: &AnnotationKey) -> ReviewAnchor {
             new_start,
             new_count,
         } => {
-            anchor.hunk = app.document.changeset.files.iter().find_map(|file| {
-                diff_file_has_path(file, &key.path)
-                    .then(|| {
-                        file.hunks().iter().position(|hunk| {
-                            hunk.old_start() == old_start
-                                && hunk.old_count() == old_count
-                                && hunk.new_start() == new_start
-                                && hunk.new_count() == new_count
-                        })
-                    })
-                    .flatten()
-                    .map(|index| index + 1)
-            });
+            anchor.hunk = app
+                .document
+                .changeset
+                .files
+                .iter()
+                .filter(|file| diff_file_has_path(file, &key.path))
+                .find_map(|file| key.hunk_index_in(file))
+                .map(|index| index + 1);
             if anchor.hunk.is_none() {
                 anchor.range = Some(RangeTarget {
                     old: source_range(old_start, old_count),
