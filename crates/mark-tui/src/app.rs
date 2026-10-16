@@ -82,10 +82,10 @@ pub(crate) use options::{
     BUILTIN_THEMES, BuiltinTheme, COMMON_OPTIONS_MENU_ITEMS, OptionsDraft, OptionsMenuItem,
     checkbox, color_scheme_config, color_scheme_from_config, color_scheme_label,
     decoration_preference_label, layout_override_from_setting, layout_setting_from_override,
-    layout_setting_label, next_decoration_preference, next_layout_setting, next_notification_mode,
-    next_toast_corner, next_toast_max_visible, next_toast_timeout_ms, notification_mode_label,
-    on_off_search, option_label, persist_options_menu_draft_to_path, toast_corner_label,
-    toast_timeout_label,
+    layout_setting_label, next_color_scheme, next_decoration_preference, next_layout_setting,
+    next_notification_mode, next_toast_corner, next_toast_max_visible, next_toast_timeout_ms,
+    notification_mode_label, on_off_search, option_label, persist_options_menu_draft_to_path,
+    toast_corner_label, toast_timeout_label,
 };
 #[cfg(test)]
 pub(crate) use runner::{drain_live_reloads, handle_event};

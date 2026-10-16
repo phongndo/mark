@@ -404,12 +404,11 @@ pub(crate) fn next_layout_setting(setting: LayoutSetting, delta: isize) -> Layou
         LayoutSetting::Split,
         LayoutSetting::Unified,
     ];
-    let current = settings
-        .iter()
-        .position(|candidate| *candidate == setting)
-        .unwrap_or_default();
-    let next = (current as isize + delta).rem_euclid(settings.len() as isize) as usize;
-    settings[next]
+    cycle_choice(&settings, setting, delta)
+}
+
+pub(crate) fn next_color_scheme(color_scheme: BuiltinTheme, delta: isize) -> BuiltinTheme {
+    cycle_choice(BUILTIN_THEMES, color_scheme, delta)
 }
 
 pub(crate) fn decoration_preference_label(preference: DecorationPreference) -> &'static str {

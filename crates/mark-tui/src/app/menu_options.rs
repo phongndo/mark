@@ -1,12 +1,12 @@
 mod color_scheme;
 
 use super::{
-    AppEffect, BUILTIN_THEMES, COMMON_OPTIONS_MENU_ITEMS, DiffApp, OptionsDraft, OptionsMenuItem,
+    AppEffect, COMMON_OPTIONS_MENU_ITEMS, DiffApp, OptionsDraft, OptionsMenuItem,
     SyntaxStartupMode, checkbox, color_scheme_label, decoration_preference_label,
-    layout_setting_from_override, layout_setting_label, next_decoration_preference,
-    next_layout_setting, next_notification_mode, next_toast_corner, next_toast_max_visible,
-    next_toast_timeout_ms, notification_mode_label, on_off_search, option_label,
-    toast_corner_label, toast_timeout_label,
+    layout_setting_from_override, layout_setting_label, next_color_scheme,
+    next_decoration_preference, next_layout_setting, next_notification_mode, next_toast_corner,
+    next_toast_max_visible, next_toast_timeout_ms, notification_mode_label, on_off_search,
+    option_label, toast_corner_label, toast_timeout_label,
 };
 use crate::controls::branch_match_score;
 use crate::selector::{SelectorController, SelectorMovement};
@@ -32,7 +32,7 @@ impl DiffApp {
             toast_timeout_ms: self.config.syntax_settings.notifications.timeout_ms(),
             toast_max_visible: self.config.syntax_settings.notifications.max_visible(),
         };
-        let len = self.options_menu_items().len();
+        let len = COMMON_OPTIONS_MENU_ITEMS.len();
         self.overlays
             .options_menu
             .set_selected(self.overlays.options_menu.selected, len);
@@ -102,12 +102,8 @@ impl DiffApp {
         }
     }
 
-    pub(crate) fn options_menu_items(&self) -> &'static [OptionsMenuItem] {
-        COMMON_OPTIONS_MENU_ITEMS
-    }
-
     pub(crate) fn filtered_options_menu_items(&self) -> Vec<OptionsMenuItem> {
-        let items = self.options_menu_items();
+        let items = COMMON_OPTIONS_MENU_ITEMS;
         let query = self.overlays.options_menu.input.trim().to_ascii_lowercase();
         if query.is_empty() {
             return items.to_vec();
@@ -308,13 +304,8 @@ impl DiffApp {
                     next_decoration_preference(self.overlays.options_menu_draft.decorations, delta);
             }
             OptionsMenuItem::ColorScheme => {
-                let choices = BUILTIN_THEMES;
-                let current = choices
-                    .iter()
-                    .position(|choice| *choice == self.overlays.options_menu_draft.color_scheme)
-                    .unwrap_or_default();
-                let next = (current as isize + delta).rem_euclid(choices.len() as isize) as usize;
-                self.overlays.options_menu_draft.color_scheme = choices[next];
+                self.overlays.options_menu_draft.color_scheme =
+                    next_color_scheme(self.overlays.options_menu_draft.color_scheme, delta);
             }
             OptionsMenuItem::NotificationMode => {
                 self.overlays.options_menu_draft.notification_mode =

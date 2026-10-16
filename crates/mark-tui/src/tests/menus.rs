@@ -2244,7 +2244,7 @@ fn options_menu_omits_branch_options_for_branch_diff() {
 
     assert_eq!(app.highlighted_option(), Some(OptionsMenuItem::Layout));
     assert_eq!(
-        app.options_menu_items(),
+        COMMON_OPTIONS_MENU_ITEMS,
         [
             OptionsMenuItem::Layout,
             OptionsMenuItem::FullFile,
