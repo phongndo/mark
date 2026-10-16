@@ -12,7 +12,7 @@ use crate::{
         style::{diff_base_bg, diff_indicator_span_for_focus},
         text::{DisplaySeek, display_width, spaces},
     },
-    syntax::{DiffSide, InlineRange},
+    syntax::{DiffSide, HighlightedLineRef, InlineRange, InlineRanges},
     theme::{DiffTheme, line_gutter_bg},
 };
 
@@ -51,14 +51,8 @@ pub(crate) fn render_split_line_with_focus(
     let theme = app.config.theme;
     let horizontal_scroll = app.viewport.horizontal_scroll;
 
-    let left_syntax = left.and_then(|index| app.syntax_line(file, hunk, index, DiffSide::Old));
-    let right_syntax = right.and_then(|index| app.syntax_line(file, hunk, index, DiffSide::New));
-    let left_inline = left
-        .map(|index| app.inline_ranges(file, hunk, index))
-        .unwrap_or_default();
-    let right_inline = right
-        .map(|index| app.inline_ranges(file, hunk, index))
-        .unwrap_or_default();
+    let (left_syntax, left_inline) = split_side_highlights(app, file, hunk, left, DiffSide::Old);
+    let (right_syntax, right_inline) = split_side_highlights(app, file, hunk, right, DiffSide::New);
 
     let left_width = width / 2;
     let right_width = width.saturating_sub(left_width);
@@ -67,20 +61,19 @@ pub(crate) fn render_split_line_with_focus(
     let right_line = right.and_then(|index| lines.get(index));
     let left_text = left_line.map(DiffLine::text_lossy);
     let right_text = right_line.map(DiffLine::text_lossy);
-    let mut spans = Vec::with_capacity(
-        split_cell_span_capacity(
-            left_line,
-            left_syntax.as_deref(),
-            left_inline.len(),
-            left_width,
-        )
-        .saturating_add(split_cell_span_capacity(
-            right_line,
-            right_syntax.as_deref(),
-            right_inline.len(),
-            right_width,
-        )),
-    );
+    let capacity = split_cell_span_capacity(
+        left_line,
+        left_syntax.as_deref(),
+        left_inline.len(),
+        left_width,
+    )
+    .saturating_add(split_cell_span_capacity(
+        right_line,
+        right_syntax.as_deref(),
+        right_inline.len(),
+        right_width,
+    ));
+    let mut spans = Vec::with_capacity(capacity);
     append_split_cell_spans_at_scroll_with_focus_and_continuation(
         &mut spans,
         left_line.zip(left_text.as_deref()),
@@ -141,14 +134,8 @@ pub(crate) fn render_split_line_wrapped_with_focus(
     }
     let theme = app.config.theme;
 
-    let left_syntax = left.and_then(|index| app.syntax_line(file, hunk, index, DiffSide::Old));
-    let right_syntax = right.and_then(|index| app.syntax_line(file, hunk, index, DiffSide::New));
-    let left_inline = left
-        .map(|index| app.inline_ranges(file, hunk, index))
-        .unwrap_or_default();
-    let right_inline = right
-        .map(|index| app.inline_ranges(file, hunk, index))
-        .unwrap_or_default();
+    let (left_syntax, left_inline) = split_side_highlights(app, file, hunk, left, DiffSide::Old);
+    let (right_syntax, right_inline) = split_side_highlights(app, file, hunk, right, DiffSide::New);
 
     let left_width = width / 2;
     let right_width = width.saturating_sub(left_width);
@@ -163,7 +150,19 @@ pub(crate) fn render_split_line_wrapped_with_focus(
         wrapped_side_seeks(left_text.as_deref(), left_content_width, window.clone());
     let (right_scrolls, right_past_end) =
         wrapped_side_seeks(right_text.as_deref(), right_content_width, window.clone());
-    let rows = left_scrolls.rows.max(right_scrolls.rows).max(1);
+    let rows = left_scrolls.rows.max(right_scrolls.rows);
+    let capacity = split_cell_span_capacity(
+        left_line,
+        left_syntax.as_deref(),
+        left_inline.len(),
+        left_width,
+    )
+    .saturating_add(split_cell_span_capacity(
+        right_line,
+        right_syntax.as_deref(),
+        right_inline.len(),
+        right_width,
+    ));
     let grep = SplitGrepText::new(&app.filters.grep_filter, left_line, right_line);
     let visual_row_start = app.wrapped_visual_scroll_for_model_row(row_index);
     let end = window.end.min(rows);
@@ -172,20 +171,7 @@ pub(crate) fn render_split_line_wrapped_with_focus(
         let left_scroll = wrapped_segment_scroll(&left_scrolls, left_past_end, wrap_index);
         let right_scroll = wrapped_segment_scroll(&right_scrolls, right_past_end, wrap_index);
         let visual_row = visual_row_start.saturating_add(wrap_index);
-        let mut spans = Vec::with_capacity(
-            split_cell_span_capacity(
-                left_line,
-                left_syntax.as_deref(),
-                left_inline.len(),
-                left_width,
-            )
-            .saturating_add(split_cell_span_capacity(
-                right_line,
-                right_syntax.as_deref(),
-                right_inline.len(),
-                right_width,
-            )),
-        );
+        let mut spans = Vec::with_capacity(capacity);
         append_split_cell_spans_at_scroll_with_focus_and_continuation(
             &mut spans,
             left_line.zip(left_text.as_deref()),
@@ -234,6 +220,23 @@ pub(crate) fn render_split_line_wrapped_with_focus(
         ));
     }
     rendered_lines
+}
+
+/// Syntax and inline-emphasis ranges for one side of a split row.
+fn split_side_highlights(
+    app: &mut DiffApp,
+    file: usize,
+    hunk: usize,
+    line: Option<usize>,
+    side: DiffSide,
+) -> (Option<HighlightedLineRef>, InlineRanges) {
+    let Some(line) = line else {
+        return (None, InlineRanges::default());
+    };
+    (
+        app.syntax_line(file, hunk, line, side),
+        app.inline_ranges(file, hunk, line),
+    )
 }
 
 /// Row seeks for one side, plus the seek used by rows past its last one.

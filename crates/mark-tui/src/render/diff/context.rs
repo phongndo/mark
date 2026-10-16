@@ -9,7 +9,7 @@ use crate::{
         style::{diff_base_bg, diff_indicator_span},
         text::{fit_padded, format_count},
     },
-    syntax::DiffSide,
+    syntax::{DiffSide, HighlightedLineRef},
     theme::DiffTheme,
 };
 
@@ -126,18 +126,14 @@ pub(crate) fn context_action_line(
     Line::from(spans)
 }
 
-pub(crate) fn render_context_line(
+/// The full-file context row as a diff line, with its syntax highlighting.
+fn context_diff_line(
     app: &mut DiffApp,
     file: usize,
     old_line: usize,
     new_line: usize,
-    row_index: usize,
-    width: usize,
-) -> Line<'static> {
-    let theme = app.config.theme;
-    let horizontal_scroll = app.viewport.horizontal_scroll;
-    let side = app.context_source_side(file);
-    let syntax = side.and_then(|side| {
+) -> (DiffLine, Option<HighlightedLineRef>) {
+    let syntax = app.context_source_side(file).and_then(|side| {
         let line_number = match side {
             DiffSide::Old => old_line,
             DiffSide::New => new_line,
@@ -149,6 +145,20 @@ pub(crate) fn render_context_line(
         new_line,
         app.rendered_context_line_text(file, old_line, new_line),
     );
+    (diff_line, syntax)
+}
+
+pub(crate) fn render_context_line(
+    app: &mut DiffApp,
+    file: usize,
+    old_line: usize,
+    new_line: usize,
+    row_index: usize,
+    width: usize,
+) -> Line<'static> {
+    let theme = app.config.theme;
+    let horizontal_scroll = app.viewport.horizontal_scroll;
+    let (diff_line, syntax) = context_diff_line(app, file, old_line, new_line);
 
     match app.viewport.layout {
         DiffLayoutMode::Unified => render_unified_line_at_scroll(
@@ -180,19 +190,7 @@ pub(crate) fn render_context_line_wrapped(
     rows: std::ops::Range<usize>,
 ) -> Vec<Line<'static>> {
     let theme = app.config.theme;
-    let side = app.context_source_side(file);
-    let syntax = side.and_then(|side| {
-        let line_number = match side {
-            DiffSide::Old => old_line,
-            DiffSide::New => new_line,
-        };
-        app.syntax_file_line(file, side, line_number)
-    });
-    let diff_line = DiffLine::context(
-        old_line,
-        new_line,
-        app.rendered_context_line_text(file, old_line, new_line),
-    );
+    let (diff_line, syntax) = context_diff_line(app, file, old_line, new_line);
 
     match app.viewport.layout {
         DiffLayoutMode::Unified => render_unified_line_wrapped_with_focus(
