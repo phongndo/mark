@@ -10,14 +10,6 @@ use std::{
 use crate::{DiffOptions, DiffOutput, DiffSource, PatchSource, PullRequestId, UntrackedMode};
 use mark_core::{MarkError, MarkResult};
 
-pub fn diff(input: DiffOptions) -> MarkResult<String> {
-    mark_diff::render(input)
-}
-
-pub fn diff_bytes(input: DiffOptions) -> MarkResult<Vec<u8>> {
-    mark_diff::render_bytes(input)
-}
-
 pub fn diff_to_writer(input: DiffOptions, writer: impl Write) -> MarkResult<()> {
     mark_diff::render_to_writer(input, writer)
 }
@@ -59,24 +51,6 @@ impl std::fmt::Display for GitHubRepoName {
     }
 }
 
-pub fn github_pr_diff_options(
-    repo: Option<PathBuf>,
-    target: &str,
-    stat: bool,
-) -> MarkResult<DiffOptions> {
-    let pull_request = github_pull_request_from_target(repo.as_deref(), target)?;
-    github_pull_request_diff_options(repo, pull_request, stat, github_pull_request_label)
-}
-
-pub fn local_review_diff_options(
-    repo: Option<PathBuf>,
-    target: &str,
-    stat: bool,
-) -> MarkResult<DiffOptions> {
-    let pull_request = local_github_pull_request_from_target(repo.as_deref(), target)?;
-    github_pull_request_diff_options(repo, pull_request, stat, review_label)
-}
-
 pub fn review_diff_options(
     repo: Option<PathBuf>,
     target: &str,
@@ -108,30 +82,6 @@ fn github_pull_request_diff_options(
             DiffOutput::Patch
         },
     })
-}
-
-pub(crate) fn local_github_pull_request_from_target(
-    repo: Option<&Path>,
-    target: &str,
-) -> MarkResult<GitHubPullRequest> {
-    let number = parse_pull_request_id(
-        target.trim(),
-        "expected a review number for the current repository",
-        "review number must be greater than zero",
-    )?;
-
-    local_github_pull_request(repo, number)
-}
-
-fn parse_pull_request_id(
-    value: &str,
-    parse_error: &str,
-    zero_error: &str,
-) -> MarkResult<PullRequestId> {
-    let number = value
-        .parse::<u64>()
-        .map_err(|_| MarkError::Usage(parse_error.to_owned()))?;
-    PullRequestId::new(number).ok_or_else(|| MarkError::Usage(zero_error.to_owned()))
 }
 
 pub(crate) fn github_pull_request_from_target(
@@ -250,13 +200,6 @@ pub(crate) fn valid_github_path_segment(segment: &str) -> bool {
         && segment
             .chars()
             .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
-}
-
-pub(crate) fn github_pull_request_label(pull_request: &GitHubPullRequest) -> String {
-    format!(
-        "github pr {}/{}#{}",
-        pull_request.owner, pull_request.repo, pull_request.number
-    )
 }
 
 fn review_label(pull_request: &GitHubPullRequest) -> String {

@@ -7,10 +7,6 @@ use crate::{
 };
 use mark_core::MarkResult;
 
-pub fn syntax_add(languages: &[String]) -> MarkResult<SyntaxAddResult> {
-    mark_syntax::add_languages(languages)
-}
-
 pub fn syntax_add_with_options(request: SyntaxAddRequest) -> MarkResult<SyntaxAddResult> {
     mark_syntax::add_languages_with_options(request)
 }

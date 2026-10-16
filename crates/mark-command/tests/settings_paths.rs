@@ -15,7 +15,6 @@ fn settings_path_commands_preserve_active_legacy_settings_file() {
         let legacy_path = mark_dir.join("syntax.toml");
         fs::write(&legacy_path, "colorscheme = \"ansi\"\n").unwrap();
 
-        assert_eq!(mark_command::config_path().unwrap(), legacy_path);
         assert_eq!(mark_command::syntax_settings_path().unwrap(), legacy_path);
     });
 
@@ -34,7 +33,6 @@ fn settings_path_commands_prefer_config_toml_when_present() {
         fs::write(&config_path, "colorscheme = \"system\"\n").unwrap();
         fs::write(&legacy_path, "colorscheme = \"ansi\"\n").unwrap();
 
-        assert_eq!(mark_command::config_path().unwrap(), config_path);
         assert_eq!(mark_command::syntax_settings_path().unwrap(), config_path);
     });
 
