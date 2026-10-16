@@ -3,7 +3,7 @@ set -eu
 
 version="${1:-latest}"
 repo="local/mark"
-repo_dir="$(CDPATH= cd "$(dirname "$0")/.." && pwd)"
+repo_dir="$(CDPATH='' cd "$(dirname "$0")/.." && pwd)"
 tmp_dir="$(mktemp -d)"
 
 cleanup() {
@@ -12,7 +12,9 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 cd "$repo_dir"
-package_version="$(cargo pkgid -p mark-cli --locked | sed 's/.*#//')"
+# Assign without a pipeline so a cargo failure stops the script under set -e.
+package_id="$(cargo pkgid -p mark-cli --locked)"
+package_version="${package_id##*[#@]}"
 
 case "$version" in
   latest)
@@ -83,7 +85,7 @@ fi
 
 # Give the updater a distinct development build so the first pass exercises
 # download and replacement. The installed release then exercises the no-op path.
-MARK_BUILD_CHANNEL=smoke-current MARK_BUILD_COMMIT= \
+MARK_BUILD_CHANNEL=smoke-current MARK_BUILD_COMMIT='' \
   cargo build -p mark-cli --locked
 smoke_current_binary="$tmp_dir/mark-smoke-current"
 install -m 755 "$repo_dir/target/debug/mark" "$smoke_current_binary"
@@ -222,7 +224,7 @@ SH
 chmod +x "$tmp_dir/bin/curl"
 
 # The release page's redirect finds the latest release without the API.
-MARK_INSTALLER= \
+MARK_INSTALLER='' \
 MARK_INSTALLER_URL="https://raw.githubusercontent.com/$repo/main/scripts/install.sh" \
 MARK_REPO="$repo" \
 MARK_SMOKE_API=0 \
