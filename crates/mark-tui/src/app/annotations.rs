@@ -210,9 +210,7 @@ impl DiffApp {
                     model_row,
                     anchor_scroll: self.annotation_anchor_visual_scroll(model_row),
                     status,
-                    label: self
-                        .annotation_label(key)
-                        .unwrap_or_else(|| format!("{}", key.line)),
+                    label: key.menu_label(),
                     preview: text
                         .lines()
                         .find(|line| !line.trim().is_empty())
