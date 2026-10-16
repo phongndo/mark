@@ -8,9 +8,7 @@ use super::super::{
     is_quit_key,
 };
 use super::event_context::{KeyEventContext, KeyEventCtx};
-use crate::render::compositor::{
-    ComponentEventResult, ComponentId, EventComponent, route_event_through_layers,
-};
+use crate::render::compositor::{ComponentEventResult, EventComponent, route_event_through_layers};
 use crossterm::event::KeyEvent;
 use mark_core::MarkResult;
 
@@ -36,25 +34,6 @@ enum KeyComponent {
 }
 
 impl<C: KeyEventContext> EventComponent<KeyEvent, C> for KeyComponent {
-    fn id(&self) -> ComponentId {
-        match self {
-            Self::Navigation => ComponentId::Navigation,
-            Self::ErrorLogResize => ComponentId::ErrorLogResize,
-            Self::PrefixStart | Self::PendingPrefix => ComponentId::Prefix,
-            Self::SingleGlobal => ComponentId::GlobalAction,
-            Self::ErrorLogClose => ComponentId::ErrorLog,
-            Self::OpenMenu => ComponentId::OpenMenuKey,
-            Self::AnnotationInput => ComponentId::AnnotationInput,
-            Self::SubmitMarks => ComponentId::GlobalAction,
-            Self::FilterInput => ComponentId::FilterInput,
-            Self::MouseScrollReset => ComponentId::MouseScrollReset,
-            Self::EditorShortcut => ComponentId::EditorShortcut,
-            Self::Quit => ComponentId::QuitKey,
-            Self::AnnotationDraftBindings => ComponentId::AnnotationDraftBindings,
-            Self::AnnotationTarget => ComponentId::AnnotationTarget,
-        }
-    }
-
     fn handle_event(&self, key: KeyEvent, ctx: &mut C) -> MarkResult<ComponentEventResult> {
         match self {
             Self::Navigation => handle_navigation_key_layer(key, ctx),

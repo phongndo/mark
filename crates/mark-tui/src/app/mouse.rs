@@ -2,9 +2,7 @@ use crossterm::event::{MouseEvent, MouseEventKind};
 use mark_core::MarkResult;
 
 use super::{ActionOutcome, DiffApp};
-use crate::render::compositor::{
-    ComponentEventResult, ComponentId, EventComponent, route_event_through_layers,
-};
+use crate::render::compositor::{ComponentEventResult, EventComponent, route_event_through_layers};
 use crate::theme::HORIZONTAL_SCROLL_STEP;
 
 mod annotation_clicks;
@@ -32,18 +30,6 @@ enum MouseComponent {
 }
 
 impl<C: MouseEventContext> EventComponent<MouseEvent, C> for MouseComponent {
-    fn id(&self) -> ComponentId {
-        match self {
-            Self::Diff => ComponentId::DiffView,
-            Self::ErrorLogResize => ComponentId::ErrorLogResize,
-            Self::OptionsMenu => ComponentId::OptionsMenu,
-            Self::ColorSchemePicker => ComponentId::ColorSchemePicker,
-            Self::FileSidebarResize => ComponentId::FileSidebarResize,
-            Self::HelpMenu => ComponentId::HelpMenu,
-            Self::OpenMenuScroll => ComponentId::OpenMenuScroll,
-        }
-    }
-
     fn handle_event(&self, mouse: MouseEvent, ctx: &mut C) -> MarkResult<ComponentEventResult> {
         match self {
             Self::Diff => handle_diff_mouse_layer(mouse, ctx),

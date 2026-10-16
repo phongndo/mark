@@ -119,21 +119,6 @@ impl RenderContext for AppRenderCtx<'_> {
             ComponentId::CommitMenu => draw_commit_menu(frame, self.app, area),
             ComponentId::HelpMenu => draw_help_menu(frame, self.app, area),
             ComponentId::MarksConfirm => draw_marks_confirm(frame, self.app, area),
-            ComponentId::AnnotationTarget
-            | ComponentId::AnnotationDraftBindings
-            | ComponentId::QuitKey
-            | ComponentId::EditorShortcut
-            | ComponentId::MouseScrollReset
-            | ComponentId::FilterInput
-            | ComponentId::AnnotationInput
-            | ComponentId::ErrorLog
-            | ComponentId::Prefix
-            | ComponentId::GlobalAction
-            | ComponentId::OpenMenuKey
-            | ComponentId::ErrorLogResize
-            | ComponentId::Navigation
-            | ComponentId::OpenMenuScroll
-            | ComponentId::FileSidebarResize => {}
         }
     }
 }
