@@ -381,17 +381,14 @@ impl DiffSearchIndex {
     }
 
     pub(crate) fn max_line_width(&self) -> usize {
-        self.max_line_width_from(self.files.iter())
+        Self::max_line_width_from(self.files.iter())
     }
 
     pub(crate) fn max_line_width_for_files(&self, files: &[FileIndex]) -> usize {
-        self.max_line_width_from(files.iter().filter_map(|file| self.files.get(file.get())))
+        Self::max_line_width_from(files.iter().filter_map(|file| self.files.get(file.get())))
     }
 
-    fn max_line_width_from<'a>(
-        &self,
-        files: impl IntoIterator<Item = &'a FileSearchIndex>,
-    ) -> usize {
+    fn max_line_width_from<'a>(files: impl IntoIterator<Item = &'a FileSearchIndex>) -> usize {
         files
             .into_iter()
             .map(|file| file.max_line_width)
