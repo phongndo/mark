@@ -256,17 +256,12 @@ impl SuspendedTerminal {
             SetCursorStyle::BlinkingBlock
         )?;
         stdout.flush()?;
-        drain_pending_editor_events()?;
+        // The diff view owns terminal input while it is running, so pending
+        // input is not drained here; DiffApp filters transient editor quit keys
+        // after resume.
         self.active = false;
         Ok(())
     }
-}
-
-fn drain_pending_editor_events() -> io::Result<()> {
-    // The diff view owns terminal input while it is running. Avoid draining
-    // input here; transient editor quit keys are filtered by DiffApp after
-    // resume.
-    Ok(())
 }
 
 #[cfg(unix)]

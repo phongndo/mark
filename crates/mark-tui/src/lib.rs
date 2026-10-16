@@ -32,5 +32,5 @@ pub use static_pager::{
 };
 pub use theme::{
     AllocationBenchmarkStage, DecorationPreference, DiffBenchmarkOptions, DiffBenchmarkReport,
-    SyntaxBenchmarkReport,
+    SyntaxBenchmarkReport, SyntaxLatencyBucket,
 };
