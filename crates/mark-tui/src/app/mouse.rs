@@ -16,8 +16,6 @@ pub(crate) use scroll::{MouseScroll, MouseScrollDirection};
 
 use event_context::{MouseEventContext, MouseEventCtx};
 
-type MouseLayer = MouseComponent;
-
 #[derive(Clone, Copy)]
 enum MouseComponent {
     Diff,
@@ -31,34 +29,27 @@ enum MouseComponent {
 
 impl<C: MouseEventContext> EventComponent<MouseEvent, C> for MouseComponent {
     fn handle_event(&self, mouse: MouseEvent, ctx: &mut C) -> MarkResult<ComponentEventResult> {
-        match self {
-            Self::Diff => handle_diff_mouse_layer(mouse, ctx),
-            Self::ErrorLogResize => handle_error_log_resize_mouse_layer(mouse, ctx),
-            Self::OptionsMenu => handle_options_menu_mouse_layer(mouse, ctx),
-            Self::ColorSchemePicker => handle_color_scheme_picker_mouse_layer(mouse, ctx),
-            Self::FileSidebarResize => handle_file_sidebar_resize_mouse_layer(mouse, ctx),
-            Self::HelpMenu => handle_help_menu_mouse_layer(mouse, ctx),
-            Self::OpenMenuScroll => handle_open_menu_scroll_mouse_layer(mouse, ctx),
-        }
+        let consumed = match self {
+            Self::Diff => ctx.handle_diff_mouse(mouse),
+            Self::ErrorLogResize => ctx.handle_error_log_resize_mouse(mouse),
+            Self::OptionsMenu => ctx.handle_options_menu_mouse(mouse),
+            Self::ColorSchemePicker => ctx.handle_color_scheme_picker_mouse(mouse),
+            Self::FileSidebarResize => ctx.handle_file_sidebar_resize_mouse(mouse),
+            Self::HelpMenu => ctx.handle_help_menu_mouse(mouse),
+            Self::OpenMenuScroll => ctx.handle_open_menu_scroll(mouse.kind),
+        };
+        Ok(ComponentEventResult::consumed_if(consumed))
     }
 }
 
-const DIFF_MOUSE_COMPONENT: MouseComponent = MouseComponent::Diff;
-const ERROR_LOG_RESIZE_MOUSE_COMPONENT: MouseComponent = MouseComponent::ErrorLogResize;
-const OPTIONS_MENU_MOUSE_COMPONENT: MouseComponent = MouseComponent::OptionsMenu;
-const COLOR_SCHEME_PICKER_MOUSE_COMPONENT: MouseComponent = MouseComponent::ColorSchemePicker;
-const FILE_SIDEBAR_RESIZE_MOUSE_COMPONENT: MouseComponent = MouseComponent::FileSidebarResize;
-const HELP_MENU_MOUSE_COMPONENT: MouseComponent = MouseComponent::HelpMenu;
-const OPEN_MENU_SCROLL_MOUSE_COMPONENT: MouseComponent = MouseComponent::OpenMenuScroll;
-
-const MOUSE_LAYERS: &[MouseLayer] = &[
-    DIFF_MOUSE_COMPONENT,
-    ERROR_LOG_RESIZE_MOUSE_COMPONENT,
-    OPTIONS_MENU_MOUSE_COMPONENT,
-    COLOR_SCHEME_PICKER_MOUSE_COMPONENT,
-    FILE_SIDEBAR_RESIZE_MOUSE_COMPONENT,
-    HELP_MENU_MOUSE_COMPONENT,
-    OPEN_MENU_SCROLL_MOUSE_COMPONENT,
+const MOUSE_LAYERS: &[MouseComponent] = &[
+    MouseComponent::Diff,
+    MouseComponent::ErrorLogResize,
+    MouseComponent::OptionsMenu,
+    MouseComponent::ColorSchemePicker,
+    MouseComponent::FileSidebarResize,
+    MouseComponent::HelpMenu,
+    MouseComponent::OpenMenuScroll,
 ];
 
 fn route_mouse_through_layers(
@@ -67,63 +58,6 @@ fn route_mouse_through_layers(
 ) -> MarkResult<ComponentEventResult> {
     let mut ctx = MouseEventCtx::new(app);
     route_event_through_layers(MOUSE_LAYERS, mouse, &mut ctx)
-}
-
-fn consumed_if(consumed: bool) -> ComponentEventResult {
-    if consumed {
-        ComponentEventResult::Consumed
-    } else {
-        ComponentEventResult::Ignored
-    }
-}
-
-fn handle_open_menu_scroll_mouse_layer(
-    mouse: MouseEvent,
-    ctx: &mut dyn MouseEventContext,
-) -> MarkResult<ComponentEventResult> {
-    Ok(consumed_if(ctx.handle_open_menu_scroll(mouse.kind)))
-}
-
-fn handle_help_menu_mouse_layer(
-    mouse: MouseEvent,
-    ctx: &mut dyn MouseEventContext,
-) -> MarkResult<ComponentEventResult> {
-    Ok(consumed_if(ctx.handle_help_menu_mouse(mouse)))
-}
-
-fn handle_file_sidebar_resize_mouse_layer(
-    mouse: MouseEvent,
-    ctx: &mut dyn MouseEventContext,
-) -> MarkResult<ComponentEventResult> {
-    Ok(consumed_if(ctx.handle_file_sidebar_resize_mouse(mouse)))
-}
-
-fn handle_color_scheme_picker_mouse_layer(
-    mouse: MouseEvent,
-    ctx: &mut dyn MouseEventContext,
-) -> MarkResult<ComponentEventResult> {
-    Ok(consumed_if(ctx.handle_color_scheme_picker_mouse(mouse)))
-}
-
-fn handle_options_menu_mouse_layer(
-    mouse: MouseEvent,
-    ctx: &mut dyn MouseEventContext,
-) -> MarkResult<ComponentEventResult> {
-    Ok(consumed_if(ctx.handle_options_menu_mouse(mouse)))
-}
-
-fn handle_error_log_resize_mouse_layer(
-    mouse: MouseEvent,
-    ctx: &mut dyn MouseEventContext,
-) -> MarkResult<ComponentEventResult> {
-    Ok(consumed_if(ctx.handle_error_log_resize_mouse(mouse)))
-}
-
-fn handle_diff_mouse_layer(
-    mouse: MouseEvent,
-    ctx: &mut dyn MouseEventContext,
-) -> MarkResult<ComponentEventResult> {
-    Ok(consumed_if(ctx.handle_diff_mouse(mouse)))
 }
 
 impl DiffApp {

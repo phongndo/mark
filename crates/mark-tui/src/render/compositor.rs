@@ -11,6 +11,16 @@ pub(crate) enum ComponentEventResult {
     Quit,
 }
 
+impl ComponentEventResult {
+    pub(crate) fn consumed_if(consumed: bool) -> Self {
+        if consumed {
+            Self::Consumed
+        } else {
+            Self::Ignored
+        }
+    }
+}
+
 pub(crate) trait EventComponent<E, Ctx: ?Sized>: Sync {
     fn handle_event(&self, event: E, ctx: &mut Ctx) -> MarkResult<ComponentEventResult>;
 }
