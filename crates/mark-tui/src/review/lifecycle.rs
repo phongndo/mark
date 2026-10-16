@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
 
+use mark_diff::DiffFile;
 use serde::Serialize;
 
 use crate::app::DiffApp;
@@ -69,17 +70,16 @@ impl DiffApp {
         self.runtime.dirty = true;
     }
 
-    pub(crate) fn toggle_reviewed_progress(&mut self) {
+    /// The file under the viewport focus row (or the selected file), with the
+    /// one-based index of the hunk the focus row belongs to, if any.
+    pub(crate) fn focused_file_and_hunk(&self) -> Option<(usize, &DiffFile, Option<usize>)> {
         let focus_row = self.viewport_focus_row();
         let file_index = self
             .document
             .model
             .file_at_row(focus_row)
             .unwrap_or(self.sidebar.selected_file.get());
-        let Some(file) = self.document.changeset.files.get(file_index) else {
-            return;
-        };
-        let path = file.display_path().to_owned();
+        let file = self.document.changeset.files.get(file_index)?;
         let hunk = self
             .document
             .model
@@ -87,6 +87,14 @@ impl DiffApp {
             .and_then(|row| row.typed_hunk_key())
             .filter(|(candidate, _)| candidate.get() == file_index)
             .map(|(_, hunk)| hunk.get() + 1);
+        Some((file_index, file, hunk))
+    }
+
+    pub(crate) fn toggle_reviewed_progress(&mut self) {
+        let Some((_, file, hunk)) = self.focused_file_and_hunk() else {
+            return;
+        };
+        let path = file.display_path().to_owned();
         let reviewed = if let Some(hunk) = hunk {
             let reviewed = !self.annotations_state.lifecycle.hunk_reviewed(&path, hunk);
             self.annotations_state

@@ -18,23 +18,13 @@ const MAX_HUNK_HEADER_BYTES: usize = 256;
 const DEFAULT_LINE_CONTEXT: usize = 3;
 
 pub(crate) fn focus(app: &DiffApp) -> Option<Focus> {
-    let focus_row = app.viewport_focus_row();
-    let row = app.document.model.row(focus_row);
-    let file_index = app
-        .document
-        .model
-        .file_at_row(focus_row)
-        .unwrap_or(app.sidebar.selected_file.get());
-    let file = app.document.changeset.files.get(file_index)?;
-    let hunk = row
-        .and_then(UiRow::typed_hunk_key)
-        .filter(|(file, _)| file.get() == file_index)
-        .map(|(_, hunk)| hunk.get() + 1)
-        .or_else(|| {
-            app.focused_hunk_for_viewport(app.viewport.viewport_rows)
-                .filter(|(file, _)| file.get() == file_index)
-                .map(|(_, hunk)| hunk.get() + 1)
-        });
+    let (file_index, file, hunk) = app.focused_file_and_hunk()?;
+    let row = app.document.model.row(app.viewport_focus_row());
+    let hunk = hunk.or_else(|| {
+        app.focused_hunk_for_viewport(app.viewport.viewport_rows)
+            .filter(|(file, _)| file.get() == file_index)
+            .map(|(_, hunk)| hunk.get() + 1)
+    });
     let (old_line, new_line) = row
         .and_then(|row| focus_coordinates(app, row))
         .unwrap_or((None, None));
