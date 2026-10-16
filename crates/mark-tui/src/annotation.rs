@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use mark_diff::{Changeset, DiffFile, DiffLine, DiffLineKind};
 
-use crate::model::UiRow;
+use crate::{model::UiRow, syntax::changed_block_around};
 
 pub(crate) const ANNOTATION_CLOSE_BUTTON: &str = "[x]";
 pub(crate) const ANNOTATION_CLOSE_BUTTON_WIDTH: usize = 3;
@@ -260,52 +260,9 @@ pub(crate) fn paired_old_line_for_addition(
     lines: &[DiffLine],
     addition_index: usize,
 ) -> Option<usize> {
-    let (deletions, additions) = change_block_line_indices(lines, addition_index)?;
-    let pair_index = additions
-        .iter()
-        .position(|index| *index == addition_index)?;
-    let deletion_index = *deletions.get(pair_index)?;
+    let block = changed_block_around(lines, addition_index, usize::MAX)?;
+    let (deletion_index, _) = block.paired_lines(addition_index, DiffLineKind::Addition)?;
     lines.get(deletion_index)?.old_line()
-}
-
-fn change_block_line_indices(lines: &[DiffLine], index: usize) -> Option<(Vec<usize>, Vec<usize>)> {
-    if !lines.get(index).is_some_and(is_change_line) {
-        return None;
-    }
-
-    let mut start = index;
-    while start > 0 && lines.get(start - 1).is_some_and(is_change_block_line) {
-        start -= 1;
-    }
-
-    let mut end = index + 1;
-    while end < lines.len() && lines.get(end).is_some_and(is_change_block_line) {
-        end += 1;
-    }
-
-    let mut deletions = Vec::new();
-    let mut additions = Vec::new();
-    for (offset, line) in lines[start..end].iter().enumerate() {
-        let line_index = start + offset;
-        match line.kind() {
-            DiffLineKind::Deletion => deletions.push(line_index),
-            DiffLineKind::Addition => additions.push(line_index),
-            DiffLineKind::Context | DiffLineKind::Meta => {}
-        }
-    }
-
-    Some((deletions, additions))
-}
-
-fn is_change_line(line: &DiffLine) -> bool {
-    matches!(line.kind(), DiffLineKind::Deletion | DiffLineKind::Addition)
-}
-
-fn is_change_block_line(line: &DiffLine) -> bool {
-    matches!(
-        line.kind(),
-        DiffLineKind::Deletion | DiffLineKind::Addition | DiffLineKind::Meta
-    )
 }
 
 #[derive(Debug, Clone)]

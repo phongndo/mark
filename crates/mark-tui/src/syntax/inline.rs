@@ -71,41 +71,7 @@ impl InlineHunkEmphasisCache {
             };
         }
 
-        let mut blocks = Vec::new();
-        let mut index = 0usize;
-
-        while index < lines.len() {
-            if !matches!(
-                lines[index].kind(),
-                DiffLineKind::Deletion | DiffLineKind::Addition
-            ) {
-                index += 1;
-                continue;
-            }
-
-            let start = index;
-            let mut deletions = Vec::new();
-            let mut additions = Vec::new();
-            while index < lines.len()
-                && matches!(
-                    lines[index].kind(),
-                    DiffLineKind::Deletion | DiffLineKind::Addition
-                )
-            {
-                match lines[index].kind() {
-                    DiffLineKind::Deletion => deletions.push(index),
-                    DiffLineKind::Addition => additions.push(index),
-                    DiffLineKind::Context | DiffLineKind::Meta => {}
-                }
-                index += 1;
-            }
-            blocks.push(InlineChangedBlock {
-                start,
-                end: index,
-                deletions,
-                additions,
-            });
-        }
+        let blocks = changed_blocks(lines);
 
         Self {
             lines: HashMap::new(),
@@ -143,11 +109,10 @@ impl InlineHunkEmphasisCache {
             .iter()
             .find(|block| line >= block.start && line < block.end)
         {
-            paired_changed_lines(block, line, diff_line.kind())
+            block.paired_lines(line, diff_line.kind())
         } else {
-            inline_changed_block_around(lines, line)
-                .as_ref()
-                .and_then(|block| paired_changed_lines(block, line, diff_line.kind()))
+            changed_block_around(lines, line, MAX_INLINE_CHANGED_BLOCK_LINES)
+                .and_then(|block| block.paired_lines(line, diff_line.kind()))
         };
         let Some((old_index, new_index)) = pair else {
             self.set_emphasis(line, Vec::new());
@@ -173,107 +138,115 @@ impl InlineHunkEmphasisCache {
     }
 }
 
-fn paired_changed_lines(
-    block: &InlineChangedBlock,
-    line: usize,
-    kind: DiffLineKind,
-) -> Option<(usize, usize)> {
-    match kind {
-        DiffLineKind::Deletion => {
-            let pair_index = block.deletions.binary_search(&line).ok()?;
-            Some((line, *block.additions.get(pair_index)?))
+impl InlineChangedBlock {
+    /// Pairs the n-th deletion of the block with its n-th addition.
+    pub(crate) fn paired_lines(&self, line: usize, kind: DiffLineKind) -> Option<(usize, usize)> {
+        match kind {
+            DiffLineKind::Deletion => {
+                let pair_index = self.deletions.binary_search(&line).ok()?;
+                Some((line, *self.additions.get(pair_index)?))
+            }
+            DiffLineKind::Addition => {
+                let pair_index = self.additions.binary_search(&line).ok()?;
+                Some((*self.deletions.get(pair_index)?, line))
+            }
+            DiffLineKind::Context | DiffLineKind::Meta => None,
         }
-        DiffLineKind::Addition => {
-            let pair_index = block.additions.binary_search(&line).ok()?;
-            Some((*block.deletions.get(pair_index)?, line))
+    }
+
+    fn from_range(lines: &[DiffLine], start: usize, end: usize) -> Self {
+        let mut deletions = Vec::new();
+        let mut additions = Vec::new();
+        for (offset, diff_line) in lines[start..end].iter().enumerate() {
+            match diff_line.kind() {
+                DiffLineKind::Deletion => deletions.push(start + offset),
+                DiffLineKind::Addition => additions.push(start + offset),
+                DiffLineKind::Context | DiffLineKind::Meta => {}
+            }
         }
-        DiffLineKind::Context | DiffLineKind::Meta => None,
+        Self {
+            start,
+            end,
+            deletions,
+            additions,
+        }
     }
 }
 
-fn inline_changed_block_around(lines: &[DiffLine], line: usize) -> Option<InlineChangedBlock> {
-    let diff_line = lines.get(line)?;
-    if !matches!(
-        diff_line.kind(),
-        DiffLineKind::Deletion | DiffLineKind::Addition
-    ) {
+fn is_change_line(kind: DiffLineKind) -> bool {
+    matches!(kind, DiffLineKind::Deletion | DiffLineKind::Addition)
+}
+
+/// A `\ No newline at end of file` marker annotates the line before it, so
+/// it continues a change block instead of splitting a replacement in two.
+fn continues_change_block(kind: DiffLineKind) -> bool {
+    matches!(
+        kind,
+        DiffLineKind::Deletion | DiffLineKind::Addition | DiffLineKind::Meta
+    )
+}
+
+/// Every maximal run of changed lines in a hunk, in order.
+fn changed_blocks(lines: &[DiffLine]) -> Vec<InlineChangedBlock> {
+    let mut blocks = Vec::new();
+    let mut index = 0usize;
+    while index < lines.len() {
+        if !is_change_line(lines[index].kind()) {
+            index += 1;
+            continue;
+        }
+        let start = index;
+        while index < lines.len() && continues_change_block(lines[index].kind()) {
+            index += 1;
+        }
+        blocks.push(InlineChangedBlock::from_range(lines, start, index));
+    }
+    blocks
+}
+
+/// The changed block containing `line`, or `None` when `line` is not a change
+/// or the block extends more than `max_scan` lines around it.
+pub(crate) fn changed_block_around(
+    lines: &[DiffLine],
+    line: usize,
+    max_scan: usize,
+) -> Option<InlineChangedBlock> {
+    if !is_change_line(lines.get(line)?.kind()) {
         return None;
     }
 
     let mut start = line;
     let mut scanned = 0usize;
-    while start > 0
-        && matches!(
-            lines[start - 1].kind(),
-            DiffLineKind::Deletion | DiffLineKind::Addition
-        )
-    {
+    while start > 0 && continues_change_block(lines[start - 1].kind()) {
         start -= 1;
         scanned += 1;
-        if scanned > MAX_INLINE_CHANGED_BLOCK_LINES {
+        if scanned > max_scan {
             return None;
         }
     }
 
     let mut end = line.saturating_add(1);
-    while end < lines.len()
-        && matches!(
-            lines[end].kind(),
-            DiffLineKind::Deletion | DiffLineKind::Addition
-        )
-    {
+    while end < lines.len() && continues_change_block(lines[end].kind()) {
         end += 1;
         scanned += 1;
-        if scanned > MAX_INLINE_CHANGED_BLOCK_LINES {
+        if scanned > max_scan {
             return None;
         }
     }
 
-    let mut deletions = Vec::new();
-    let mut additions = Vec::new();
-    for (offset, diff_line) in lines[start..end].iter().enumerate() {
-        match diff_line.kind() {
-            DiffLineKind::Deletion => deletions.push(start + offset),
-            DiffLineKind::Addition => additions.push(start + offset),
-            DiffLineKind::Context | DiffLineKind::Meta => {}
-        }
-    }
-
-    Some(InlineChangedBlock {
-        start,
-        end,
-        deletions,
-        additions,
-    })
+    Some(InlineChangedBlock::from_range(lines, start, end))
 }
 
 #[cfg(test)]
 pub(crate) fn compute_hunk_inline_emphasis(lines: &[DiffLine]) -> Vec<InlineLineEmphasis> {
     let mut emphasis = vec![InlineLineEmphasis::default(); lines.len()];
-    let mut index = 0usize;
-
-    while index < lines.len() {
-        match lines[index].kind() {
-            DiffLineKind::Deletion | DiffLineKind::Addition => {
-                let mut deletions = Vec::new();
-                let mut additions = Vec::new();
-                while index < lines.len()
-                    && matches!(
-                        lines[index].kind(),
-                        DiffLineKind::Deletion | DiffLineKind::Addition
-                    )
-                {
-                    match lines[index].kind() {
-                        DiffLineKind::Deletion => deletions.push(index),
-                        DiffLineKind::Addition => additions.push(index),
-                        DiffLineKind::Context | DiffLineKind::Meta => {}
-                    }
-                    index += 1;
-                }
-                compute_changed_block_inline_emphasis(lines, &deletions, &additions, &mut emphasis);
-            }
-            DiffLineKind::Context | DiffLineKind::Meta => index += 1,
-        }
+    for block in changed_blocks(lines) {
+        compute_changed_block_inline_emphasis(
+            lines,
+            &block.deletions,
+            &block.additions,
+            &mut emphasis,
+        );
     }
 
     emphasis
@@ -673,6 +646,25 @@ mod tests {
         assert!(
             cache.lines.len() <= 2,
             "cache should remain viewport-line sparse"
+        );
+    }
+
+    #[test]
+    fn no_newline_marker_does_not_split_a_replacement_pair() {
+        // Annotations already paired across the marker; inline emphasis now
+        // follows the same change-block rule on both cache paths.
+        let lines = vec![
+            DiffLine::deletion(1, "let value = old_name;"),
+            DiffLine::meta("\\ No newline at end of file"),
+            DiffLine::addition(1, "let value = new_name;"),
+        ];
+
+        let mut cache = InlineHunkEmphasisCache::new(&lines);
+        assert!(!cache.ranges_for_line(&lines, 0).is_empty());
+        assert_eq!(
+            changed_block_around(&lines, 2, MAX_INLINE_CHANGED_BLOCK_LINES)
+                .and_then(|block| block.paired_lines(2, DiffLineKind::Addition)),
+            Some((0, 2))
         );
     }
 
