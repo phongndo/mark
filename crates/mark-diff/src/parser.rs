@@ -8,68 +8,7 @@ use crate::{
 };
 
 pub fn parse_patch(patch: &str) -> Vec<DiffFile> {
-    let mut files = Vec::new();
-    let mut current: Option<DiffFileBuilder> = None;
-    let mut current_hunk: Option<DiffHunkBuilder> = None;
-    let mut lines = patch_lines(patch).peekable();
-
-    while let Some(line) = lines.next() {
-        let header_line = patch_header_line(line);
-        if header_line.starts_with("diff --git ") {
-            finish_hunk(&mut current, &mut current_hunk);
-            finish_file(&mut files, &mut current);
-            current = Some(DiffFileBuilder::from_diff_git(header_line));
-            continue;
-        }
-
-        if current_hunk
-            .as_ref()
-            .is_some_and(DiffHunkBuilder::is_complete)
-            && !line.starts_with('\\')
-        {
-            finish_hunk(&mut current, &mut current_hunk);
-        }
-
-        if header_line.starts_with("--- ")
-            && starts_unified_file(current.as_ref(), current_hunk.as_ref())
-            && let Some(new_header) = lines
-                .peek()
-                .copied()
-                .map(patch_header_line)
-                .filter(|line| line.starts_with("+++ "))
-        {
-            finish_hunk(&mut current, &mut current_hunk);
-            finish_file(&mut files, &mut current);
-            let new_header = new_header.to_owned();
-            let _ = lines.next();
-            current = Some(DiffFileBuilder::from_unified_headers(
-                header_line,
-                &new_header,
-            ));
-            continue;
-        }
-
-        let Some(file) = current.as_mut() else {
-            continue;
-        };
-
-        if header_line.starts_with("@@ ") {
-            finish_hunk(&mut current, &mut current_hunk);
-            current_hunk = Some(DiffHunkBuilder::from_header(header_line));
-            continue;
-        }
-
-        if let Some(hunk) = current_hunk.as_mut() {
-            hunk.push_line(line);
-            continue;
-        }
-
-        file.apply_header(header_line);
-    }
-
-    finish_hunk(&mut current, &mut current_hunk);
-    finish_file(&mut files, &mut current);
-    files
+    parse_patch_bytes(Arc::from(patch.as_bytes()))
 }
 
 pub fn parse_patch_bytes(raw: Arc<[u8]>) -> Vec<DiffFile> {
@@ -352,16 +291,6 @@ fn check_limit(
     Ok(())
 }
 
-fn patch_lines(patch: &str) -> impl Iterator<Item = &str> {
-    patch
-        .split_inclusive('\n')
-        .map(|line| line.strip_suffix('\n').unwrap_or(line))
-}
-
-fn patch_header_line(line: &str) -> &str {
-    line.strip_suffix('\r').unwrap_or(line)
-}
-
 fn patch_header_bytes(line: &[u8]) -> &[u8] {
     line.strip_suffix(b"\r").unwrap_or(line)
 }
@@ -387,10 +316,6 @@ fn patch_byte_lines(patch: &[u8]) -> impl Iterator<Item = PatchByteLine<'_>> {
             bytes: &patch[line_start..line_end],
         })
     })
-}
-
-fn is_diff_no_newline_marker(raw: &str) -> bool {
-    raw.starts_with("\\ No newline at end of file")
 }
 
 fn finish_hunk(file: &mut Option<DiffFileBuilder>, hunk: &mut Option<DiffHunkBuilder>) {
@@ -675,41 +600,6 @@ impl DiffHunkBuilder {
         }
     }
 
-    fn push_line(&mut self, raw: &str) {
-        let Some(prefix) = raw.as_bytes().first().copied() else {
-            self.push_context("");
-            return;
-        };
-
-        match prefix {
-            b'+' => {
-                let new_line = self.new_line;
-                self.new_line = self.new_line.saturating_add(1);
-                self.additions = self.additions.saturating_add(1);
-                self.lines.push(DiffLine::addition(
-                    new_line,
-                    raw.get(1..).unwrap_or_default(),
-                ));
-            }
-            b'-' => {
-                let old_line = self.old_line;
-                self.old_line = self.old_line.saturating_add(1);
-                self.deletions = self.deletions.saturating_add(1);
-                self.lines.push(DiffLine::deletion(
-                    old_line,
-                    raw.get(1..).unwrap_or_default(),
-                ));
-            }
-            b' ' => self.push_context_owned(raw.get(1..).unwrap_or_default().to_owned()),
-            b'\\' => {
-                if !is_diff_no_newline_marker(raw) {
-                    self.lines.push(DiffLine::meta(raw));
-                }
-            }
-            _ => self.push_context(raw),
-        }
-    }
-
     fn push_line_span(&mut self, line_backing: DiffLineTextBacking, line_start: usize, raw: &[u8]) {
         let Some(prefix) = raw.first().copied() else {
             self.push_context_span(line_backing, line_start, 0);
@@ -757,18 +647,6 @@ impl DiffHunkBuilder {
     fn is_complete(&self) -> bool {
         self.old_line.saturating_sub(self.ranges.old_start()) >= self.ranges.old_count()
             && self.new_line.saturating_sub(self.ranges.new_start()) >= self.ranges.new_count()
-    }
-
-    fn push_context(&mut self, text: &str) {
-        self.push_context_owned(text.to_owned());
-    }
-
-    fn push_context_owned(&mut self, text: String) {
-        let old_line = self.old_line;
-        let new_line = self.new_line;
-        self.old_line = self.old_line.saturating_add(1);
-        self.new_line = self.new_line.saturating_add(1);
-        self.lines.push(DiffLine::context(old_line, new_line, text));
     }
 
     fn push_context_span(&mut self, backing: DiffLineTextBacking, offset: usize, len: usize) {
