@@ -185,21 +185,44 @@ fn settle_static_syntax(app: &mut DiffApp, timeout: Duration) {
         return;
     }
 
-    app.prepare_syntax_for_viewport(app.document.model.len().max(1));
+    // Queueing is bounded: a full queue rejects jobs, and an unavailable
+    // full-file source only queues its hunk fallback on the next request.
+    // Keep requesting until a round resolves nothing new. When the cache
+    // cannot hold every result, re-requests only replace evicted entries, so
+    // the resolved count stops growing and the output stays partial.
+    let rows = app.document.model.len().max(1);
     let start = std::time::Instant::now();
+    let mut resolved = None;
     loop {
-        app.drain_syntax();
-        let idle = app
+        app.prepare_syntax_for_viewport(rows);
+        loop {
+            app.drain_syntax();
+            if static_syntax_idle(app) || start.elapsed() >= timeout {
+                break;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        if !static_syntax_idle(app) || start.elapsed() >= timeout {
+            break;
+        }
+        let now_resolved = app
             .config
             .syntax
             .as_ref()
-            .is_none_or(SyntaxRuntime::is_idle);
-        if idle || start.elapsed() >= timeout {
+            .map_or(0, SyntaxRuntime::resolved_count);
+        if resolved == Some(now_resolved) {
             break;
         }
-        thread::sleep(Duration::from_millis(1));
+        resolved = Some(now_resolved);
     }
     app.drain_syntax();
+}
+
+fn static_syntax_idle(app: &DiffApp) -> bool {
+    app.config
+        .syntax
+        .as_ref()
+        .is_none_or(SyntaxRuntime::is_idle)
 }
 
 fn push_ansi_line(output: &mut String, line: Line<'_>, color: bool) {
@@ -477,6 +500,44 @@ mod tests {
     }
 
     #[test]
+    fn static_pager_syntax_settle_requeues_jobs_rejected_by_a_full_queue() {
+        // A one-entry queue rejects most visible jobs on the first request.
+        // Settling must keep requesting until every hunk side is highlighted.
+        let mut app = static_app_with_rust_syntax(SyntaxLimits {
+            queue_entries: 1,
+            worker_threads: 1,
+            ..SyntaxLimits::default()
+        });
+
+        configure_static_app(&mut app, 80);
+        settle_static_syntax(&mut app, Duration::from_secs(30));
+
+        let syntax = app.config.syntax.as_ref().expect("syntax should stay on");
+        assert_eq!(syntax.cache.len(), 2 * MANY_FILES);
+    }
+
+    #[test]
+    fn static_pager_syntax_settle_stops_when_the_cache_cannot_hold_everything() {
+        let mut app = static_app_with_rust_syntax(SyntaxLimits {
+            queue_entries: 1,
+            cache_entries: 2,
+            worker_threads: 1,
+            ..SyntaxLimits::default()
+        });
+
+        configure_static_app(&mut app, 80);
+        let start = std::time::Instant::now();
+        settle_static_syntax(&mut app, Duration::from_secs(30));
+
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "settling must not keep re-highlighting evicted results"
+        );
+        let syntax = app.config.syntax.as_ref().expect("syntax should stay on");
+        assert_eq!(syntax.cache.len(), 2);
+    }
+
+    #[test]
     fn static_pager_serializes_theme_styles_as_ansi() {
         let output = render_static_changeset(
             DiffOptions::default(),
@@ -678,6 +739,29 @@ mod tests {
         second.change = FileChange::modified("second.rs");
         changeset.files.push(second);
         changeset
+    }
+
+    const MANY_FILES: usize = 6;
+
+    fn static_app_with_rust_syntax(limits: SyntaxLimits) -> DiffApp {
+        let mut changeset = fixture_changeset();
+        let file = changeset.files[0].clone();
+        changeset.files = (0..MANY_FILES)
+            .map(|index| {
+                let mut file = file.clone();
+                file.change = FileChange::modified(format!("file{index}.rs"));
+                file
+            })
+            .collect();
+        let mut app = DiffApp::new_with_syntax(
+            DiffOptions::default(),
+            changeset,
+            DiffLayoutMode::Unified,
+            SyntaxStartupMode::Disabled,
+        );
+        app.config.syntax_limits = limits;
+        app.config.syntax = SyntaxRuntime::start_with_languages(vec!["rust".to_owned()], limits);
+        app
     }
 
     fn syntax_runtime_with_rust_queue(queue: SyntaxWorkerQueue) -> SyntaxRuntime {

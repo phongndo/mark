@@ -105,6 +105,17 @@ impl SyntaxRuntime {
         self.pending.is_empty() && self.queue.len() == 0
     }
 
+    /// Counts sources with a final outcome: a cached result, a skip, or a
+    /// failure. Static output uses it to tell real progress from re-queueing
+    /// work that the cache cannot hold at once.
+    pub(crate) fn resolved_count(&self) -> usize {
+        self.cache.len()
+            + self.skipped.len()
+            + self.skipped_sources.len()
+            + self.unavailable_full_files.len()
+            + self.failed.len()
+    }
+
     pub(crate) fn stats(&self) -> SyntaxBenchmarkReport {
         self.stats.clone()
     }
