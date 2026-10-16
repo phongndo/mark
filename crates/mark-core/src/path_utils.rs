@@ -1,18 +1,8 @@
 use std::{
     fs,
     io::{self, Write},
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
 };
-
-/// Returns true when `path` is under `root`, resolving existing symlinks and
-/// otherwise comparing lexically normalized paths.
-pub fn path_is_inside(path: &Path, root: &Path) -> bool {
-    if let Some((path, root)) = fs::canonicalize(path).ok().zip(fs::canonicalize(root).ok()) {
-        return path.starts_with(root);
-    }
-
-    normalize_lexically(path).starts_with(normalize_lexically(root))
-}
 
 /// Replaces `path` atomically with `contents`, retaining existing permissions.
 pub fn atomic_write(path: &Path, contents: &[u8]) -> io::Result<()> {
@@ -84,34 +74,6 @@ fn sync_parent_directory(_parent: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// Normalizes `.` and `..` path components without touching the filesystem.
-pub fn normalize_lexically(path: &Path) -> PathBuf {
-    let mut normalized = PathBuf::new();
-
-    for component in path.components() {
-        match component {
-            Component::CurDir => {}
-            Component::ParentDir => match normalized.components().next_back() {
-                Some(Component::Normal(_)) => {
-                    normalized.pop();
-                }
-                Some(Component::ParentDir) | None => normalized.push(component.as_os_str()),
-                Some(Component::Prefix(_)) | Some(Component::RootDir) => {}
-                Some(Component::CurDir) => unreachable!("normalized paths never contain curdir"),
-            },
-            Component::Prefix(_) | Component::RootDir | Component::Normal(_) => {
-                normalized.push(component.as_os_str());
-            }
-        }
-    }
-
-    if normalized.as_os_str().is_empty() {
-        PathBuf::from(".")
-    } else {
-        normalized
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -119,18 +81,6 @@ mod tests {
         env,
         time::{SystemTime, UNIX_EPOCH},
     };
-
-    #[test]
-    fn path_is_inside_matches_lexically_normalized_roots() {
-        assert!(path_is_inside(
-            Path::new("/repo/agent-worktrees/entry"),
-            Path::new("/repo/mark/../agent-worktrees"),
-        ));
-        assert!(!path_is_inside(
-            Path::new("/repo/root/../escape"),
-            Path::new("/repo/root"),
-        ));
-    }
 
     #[test]
     fn atomic_write_replaces_complete_contents() {
@@ -197,28 +147,6 @@ mod tests {
             fs::read_to_string(target).expect("target should be readable"),
             "new"
         );
-        fs::remove_dir_all(test_dir).expect("test directory should be removed");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn path_is_inside_matches_canonicalized_paths() {
-        let test_dir = test_dir("mark-core-path-utils-test");
-        let root = test_dir.join("root");
-        let child = root.join("child");
-        fs::create_dir_all(&child).expect("child directory should be created");
-        let link = test_dir.join("link");
-        std::os::unix::fs::symlink(&root, &link).expect("symlink should be created");
-
-        assert!(!link.join("child").starts_with(&root));
-        assert!(path_is_inside(&link.join("child"), &root));
-
-        let outside = test_dir.join("outside");
-        fs::create_dir_all(&outside).expect("outside directory should be created");
-        let escape = root.join("escape");
-        std::os::unix::fs::symlink(&outside, &escape).expect("escape symlink should be created");
-        assert!(!path_is_inside(&escape, &root));
-
         fs::remove_dir_all(test_dir).expect("test directory should be removed");
     }
 

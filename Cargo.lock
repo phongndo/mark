@@ -918,7 +918,6 @@ dependencies = [
 name = "mark-core"
 version = "0.15.0"
 dependencies = [
- "serde",
  "serde_json",
  "tempfile",
 ]
