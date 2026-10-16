@@ -1,8 +1,8 @@
 use ratatui::{
     Frame,
-    layout::{Alignment, Rect},
-    prelude::{Line, Modifier, Span, Style, Text},
-    widgets::{Block, BorderType, Clear, Padding, Paragraph},
+    layout::Rect,
+    prelude::{Line, Span, Style, Text},
+    widgets::{Block, Clear, Paragraph},
 };
 use unicode_width::UnicodeWidthStr;
 
@@ -11,8 +11,8 @@ use crate::{
     render::{
         selector_menu::{
             centered_floating_rect, floating_menu_fits_terminal, floating_menu_max_height,
-            floating_menu_max_width, selector_border_color, selector_count_color,
-            selector_menu_outer_width, selector_title_color,
+            floating_menu_max_width, selector_count_color, selector_menu_block,
+            selector_menu_outer_width,
         },
         style::base_bg,
         text::fit_padded,
@@ -65,23 +65,5 @@ fn marks_confirm_area(app: &DiffApp, area: Rect) -> Option<Rect> {
 }
 
 fn marks_confirm_block(theme: DiffTheme) -> Block<'static> {
-    let bg = base_bg(theme);
-    if !theme.decorations.show_borders() {
-        return Block::default()
-            .style(Style::default().bg(bg))
-            .padding(Padding::horizontal(1));
-    }
-    Block::bordered()
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(selector_border_color(theme)).bg(bg))
-        .style(Style::default().bg(bg))
-        .padding(Padding::horizontal(1))
-        .title(Line::from(Span::styled(
-            TITLE,
-            Style::default()
-                .fg(selector_title_color(theme))
-                .bg(bg)
-                .add_modifier(Modifier::BOLD),
-        )))
-        .title_alignment(Alignment::Center)
+    selector_menu_block(theme, TITLE, base_bg(theme))
 }

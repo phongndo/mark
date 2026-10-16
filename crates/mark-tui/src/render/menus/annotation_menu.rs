@@ -1,8 +1,8 @@
 use ratatui::{
     Frame,
-    layout::{Alignment, Rect},
+    layout::Rect,
     prelude::{Line, Modifier, Span, Style},
-    widgets::{Block, BorderType, Clear, Padding, Paragraph},
+    widgets::{Block, Clear, Paragraph},
 };
 use unicode_width::UnicodeWidthStr;
 
@@ -11,10 +11,9 @@ use crate::{
     render::{
         selector_menu::{
             centered_floating_rect, floating_menu_fits_terminal, floating_menu_max_inner_height,
-            floating_menu_max_width, selector_border_color, selector_empty_line,
-            selector_input_line, selector_menu_list_rows, selector_menu_outer_height,
-            selector_menu_outer_width, selector_row_style, selector_separator_line,
-            selector_title_color,
+            floating_menu_max_width, selector_empty_line, selector_input_line, selector_menu_block,
+            selector_menu_list_rows, selector_menu_outer_height, selector_menu_outer_width,
+            selector_row_style, selector_separator_line,
         },
         style::base_bg,
         text::{fit_padded, status_code, terminal_text},
@@ -126,25 +125,7 @@ fn annotation_menu_visible_items(inner_height: u16) -> usize {
 }
 
 pub(crate) fn annotation_menu_block(theme: DiffTheme) -> Block<'static> {
-    let bg = base_bg(theme);
-    if !theme.decorations.show_borders() {
-        return Block::default()
-            .style(Style::default().bg(bg))
-            .padding(Padding::horizontal(1));
-    }
-    Block::bordered()
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(selector_border_color(theme)).bg(bg))
-        .style(Style::default().bg(bg))
-        .padding(Padding::horizontal(1))
-        .title(Line::from(Span::styled(
-            " Annotations ",
-            Style::default()
-                .fg(selector_title_color(theme))
-                .bg(bg)
-                .add_modifier(Modifier::BOLD),
-        )))
-        .title_alignment(Alignment::Center)
+    selector_menu_block(theme, " Annotations ", base_bg(theme))
 }
 
 fn annotation_menu_width(app: &DiffApp, items: &[AnnotationMenuItem]) -> u16 {

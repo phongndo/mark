@@ -1,9 +1,9 @@
 use mark_diff::{DiffOptions, DiffSource};
 use ratatui::{
     Frame,
-    layout::{Alignment, Rect},
-    prelude::{Line, Modifier, Span, Style, Text},
-    widgets::{Block, BorderType, Clear, Padding, Paragraph},
+    layout::Rect,
+    prelude::{Line, Span, Style, Text},
+    widgets::{Block, Clear, Paragraph},
 };
 use unicode_width::UnicodeWidthStr;
 
@@ -15,10 +15,10 @@ use crate::{
             ScrollableSelectorMenu, SelectorMenuInput, SelectorMenuLinesRequest,
             centered_floating_rect, floating_menu_fits_terminal, floating_menu_max_height,
             floating_menu_max_inner_height, floating_menu_max_width,
-            render_scrollable_selector_menu, selector_border_color, selector_count_color,
-            selector_disabled_line, selector_entry_line, selector_menu_lines,
-            selector_menu_list_rows, selector_menu_outer_height, selector_menu_outer_width,
-            selector_prompt_color, selector_title_color, text_with_cursor,
+            render_scrollable_selector_menu, selector_count_color, selector_disabled_line,
+            selector_entry_line, selector_menu_block, selector_menu_lines, selector_menu_list_rows,
+            selector_menu_outer_height, selector_menu_outer_width, selector_prompt_color,
+            text_with_cursor,
         },
         style::{base_bg, input_cursor_style, spans_with_input_cursor},
         text::fit_padded,
@@ -111,25 +111,7 @@ pub(crate) fn diff_menu_area(app: &DiffApp, area: Rect, choices: &[DiffChoice]) 
 }
 
 pub(crate) fn diff_menu_block(theme: DiffTheme) -> Block<'static> {
-    let bg = base_bg(theme);
-    if !theme.decorations.show_borders() {
-        return Block::default()
-            .style(Style::default().bg(bg))
-            .padding(Padding::horizontal(1));
-    }
-    Block::bordered()
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(selector_border_color(theme)).bg(bg))
-        .style(Style::default().bg(bg))
-        .padding(Padding::horizontal(1))
-        .title(Line::from(Span::styled(
-            " Diff ",
-            Style::default()
-                .fg(selector_title_color(theme))
-                .bg(bg)
-                .add_modifier(Modifier::BOLD),
-        )))
-        .title_alignment(Alignment::Center)
+    selector_menu_block(theme, " Diff ", base_bg(theme))
 }
 
 pub(crate) fn draw_review_input(frame: &mut Frame<'_>, app: &DiffApp, area: Rect) {
@@ -190,25 +172,7 @@ pub(crate) fn review_input_area(app: &DiffApp, area: Rect) -> Option<Rect> {
 }
 
 pub(crate) fn review_input_block(theme: DiffTheme) -> Block<'static> {
-    let bg = base_bg(theme);
-    if !theme.decorations.show_borders() {
-        return Block::default()
-            .style(Style::default().bg(bg))
-            .padding(Padding::horizontal(1));
-    }
-    Block::bordered()
-        .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(selector_border_color(theme)).bg(bg))
-        .style(Style::default().bg(bg))
-        .padding(Padding::horizontal(1))
-        .title(Line::from(Span::styled(
-            " Review ",
-            Style::default()
-                .fg(selector_title_color(theme))
-                .bg(bg)
-                .add_modifier(Modifier::BOLD),
-        )))
-        .title_alignment(Alignment::Center)
+    selector_menu_block(theme, " Review ", base_bg(theme))
 }
 
 fn diff_menu_floating_width(app: &DiffApp, choices: &[DiffChoice]) -> u16 {

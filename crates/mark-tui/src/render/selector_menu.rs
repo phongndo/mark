@@ -1,8 +1,11 @@
 use ratatui::{
     Frame,
-    layout::Rect,
+    layout::{Alignment, Rect},
     prelude::{Color, Line, Modifier, Span, Style, Text},
-    widgets::{Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
+    widgets::{
+        Block, BorderType, Clear, Padding, Paragraph, Scrollbar, ScrollbarOrientation,
+        ScrollbarState,
+    },
 };
 use unicode_width::UnicodeWidthStr;
 
@@ -307,6 +310,32 @@ pub(crate) fn text_with_cursor(input: &str, cursor: usize) -> String {
     } else {
         format!("{input}{INPUT_CURSOR}")
     }
+}
+
+/// The bordered (or, without borders, padded) block every selector menu uses.
+pub(crate) fn selector_menu_block(
+    theme: DiffTheme,
+    title: &'static str,
+    bg: Color,
+) -> Block<'static> {
+    if !theme.decorations.show_borders() {
+        return Block::default()
+            .style(Style::default().bg(bg))
+            .padding(Padding::horizontal(1));
+    }
+    Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(selector_border_color(theme)).bg(bg))
+        .style(Style::default().bg(bg))
+        .padding(Padding::horizontal(1))
+        .title(Line::from(Span::styled(
+            title,
+            Style::default()
+                .fg(selector_title_color(theme))
+                .bg(bg)
+                .add_modifier(Modifier::BOLD),
+        )))
+        .title_alignment(Alignment::Center)
 }
 
 pub(crate) fn selector_separator_line(width: usize, theme: DiffTheme) -> Line<'static> {
