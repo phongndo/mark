@@ -1,19 +1,31 @@
 #!/usr/bin/env sh
 set -eu
 
-repo_dir=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
+repo_dir=$(CDPATH='' cd "$(dirname "$0")/.." && pwd)
 cd "$repo_dir"
 
 fail=0
+rg_output=$(mktemp)
+trap 'rm -f "$rg_output"' EXIT
 
 check_absent() {
   pattern=$1
   shift
-  if rg -n "$pattern" "$@" >/tmp/mark-architecture-rg.$$ 2>/dev/null; then
-    cat /tmp/mark-architecture-rg.$$
-    fail=1
-  fi
-  rm -f /tmp/mark-architecture-rg.$$
+  status=0
+  rg -n "$pattern" "$@" >"$rg_output" || status=$?
+  case $status in
+    0)
+      cat "$rg_output"
+      fail=1
+      ;;
+    1) ;;
+    *)
+      # rg exits 1 for no matches; anything else (missing rg, a bad path or
+      # pattern) means the check did not run and must not pass silently.
+      echo "check-architecture: rg exited $status for pattern: $pattern" >&2
+      exit 2
+      ;;
+  esac
 }
 
 check_absent 'mod prelude|super::prelude|prelude::\*' crates/mark-tui/src/app crates/mark-tui/src/controls.rs crates/mark-tui/src/render crates/mark-diff/src crates/mark-cli/src
