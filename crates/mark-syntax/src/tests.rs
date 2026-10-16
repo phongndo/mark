@@ -1214,6 +1214,32 @@ fn clean_cache_preserves_valid_bundled_language_configuration() {
 }
 
 #[test]
+fn explicit_language_sets_ignore_the_user_syntax_config() {
+    let dir = unique_temp_dir("explicit-language-set");
+
+    with_xdg_config_home(&dir, || {
+        save_config(&StoredSyntaxConfig {
+            extensions: vec![StoredLanguageMapping {
+                pattern: "custom".to_owned(),
+                language: "rust".to_owned(),
+            }],
+            ..StoredSyntaxConfig::default()
+        })
+        .unwrap();
+
+        let languages = SyntaxLanguageSet::from_enabled_languages(&["rust".to_owned()]);
+
+        assert_eq!(languages.language_for_path("lib.custom"), None);
+        assert_eq!(
+            languages.language_for_path("lib.rs").as_deref(),
+            Some("rust")
+        );
+    });
+
+    remove_temp_dir(&dir);
+}
+
+#[test]
 fn clean_config_preserves_core_aliases_and_the_supplied_catalog() {
     let mut config = StoredSyntaxConfig {
         languages: vec![

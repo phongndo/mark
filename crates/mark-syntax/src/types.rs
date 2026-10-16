@@ -1180,12 +1180,16 @@ impl SyntaxLanguageSet {
         })
     }
 
+    /// A self-contained set of `languages` with built-in path detection only.
+    ///
+    /// Benchmarks and tests pass explicit languages to get reproducible
+    /// results, so this does not read the user's syntax config or its custom
+    /// extension and filename mappings.
     pub fn from_enabled_languages(languages: &[String]) -> Self {
-        let config = load_config().unwrap_or_default();
         Self {
             enabled: normalize_language_names(languages),
-            extensions: config.extensions,
-            filenames: config.filenames,
+            extensions: Vec::new(),
+            filenames: Vec::new(),
         }
     }
 
