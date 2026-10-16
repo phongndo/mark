@@ -54,39 +54,6 @@ impl Default for DiffRunOptions {
     }
 }
 
-pub fn run() -> MarkResult<()> {
-    run_diff(DiffOptions::default())
-}
-
-pub fn run_diff(options: DiffOptions) -> MarkResult<()> {
-    run_diff_with_options(options, DiffRunOptions::default())
-}
-
-pub fn run_diff_with_live_updates(options: DiffOptions, live_updates: bool) -> MarkResult<()> {
-    run_diff_with_options(
-        options,
-        DiffRunOptions {
-            live_updates,
-            ..DiffRunOptions::default()
-        },
-    )
-}
-
-pub fn run_diff_with_live_updates_and_syntax(
-    options: DiffOptions,
-    live_updates: bool,
-    syntax_enabled: bool,
-) -> MarkResult<()> {
-    run_diff_with_options(
-        options,
-        DiffRunOptions {
-            live_updates,
-            syntax_enabled,
-            ..DiffRunOptions::default()
-        },
-    )
-}
-
 pub fn run_diff_with_options(options: DiffOptions, run_options: DiffRunOptions) -> MarkResult<()> {
     run_diff_with_options_and_session(options, run_options, true)
 }
