@@ -7,14 +7,13 @@ use crate::{
     render::{
         diff::{
             ContentSpanRender, DiffCellColumns, append_content_spans_at_scroll,
-            append_gutter_spans, content_span_capacity, diff_indicator_span_for_focus,
-            unified_gutter_text,
+            append_gutter_spans, content_span_capacity, unified_gutter_text,
         },
         grep::{
             diff_line_grep_highlight_text, grep_highlight_target_for_columns, grep_text_byte_start,
             highlighted_grep_text_line, unified_content_start_column,
         },
-        style::diff_base_bg,
+        style::{diff_base_bg, diff_indicator_span_for_focus},
         text::{DisplaySeek, spaces},
     },
     syntax::InlineRange,

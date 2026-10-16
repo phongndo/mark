@@ -31,7 +31,7 @@ mod viewport;
 mod wrapped;
 pub(crate) use content::{
     ContentSpanRender, DiffCellColumns, append_content_spans_at_scroll, append_gutter_spans,
-    content_span_capacity, diff_indicator_span_for_focus, empty_diff_fill_from,
+    content_span_capacity, empty_diff_fill_from,
 };
 #[cfg(test)]
 pub(crate) use content::{content_spans_at_scroll, inline_bg};

@@ -13,7 +13,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
     render::{
-        style::{diff_indicator_span, diff_sign_style, focused_diff_indicator_span},
+        style::diff_sign_style,
         text::{DisplaySeek, fit_padded_from, fit_with_width_from, spaces},
     },
     syntax::InlineRange,
@@ -56,18 +56,6 @@ impl DiffCellColumns {
 
     pub(crate) fn content_start(self) -> usize {
         self.indicator + self.gutter
-    }
-}
-
-pub(crate) fn diff_indicator_span_for_focus(
-    kind: DiffLineKind,
-    theme: DiffTheme,
-    focused: bool,
-) -> Span<'static> {
-    if focused {
-        focused_diff_indicator_span(kind, theme)
-    } else {
-        diff_indicator_span(kind, theme)
     }
 }
 

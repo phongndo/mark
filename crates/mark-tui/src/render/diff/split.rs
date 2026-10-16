@@ -9,7 +9,7 @@ use crate::{
             diff_line_grep_highlight_text, highlighted_grep_text_line,
             split_diff_line_grep_highlight_target,
         },
-        style::diff_base_bg,
+        style::{diff_base_bg, diff_indicator_span_for_focus},
         text::{DisplaySeek, display_width, spaces},
     },
     syntax::{DiffSide, InlineRange},
@@ -18,7 +18,7 @@ use crate::{
 
 use super::{
     ContentSpanRender, DiffCellColumns, append_content_spans_at_scroll, append_gutter_spans,
-    content_span_capacity, diff_indicator_span_for_focus, empty_diff_fill_from, split_gutter_text,
+    content_span_capacity, empty_diff_fill_from, split_gutter_text,
 };
 
 #[derive(Debug, Clone, Copy)]
