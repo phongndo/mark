@@ -33,36 +33,3 @@ fn base64_encode(bytes: &[u8]) -> String {
     }
     encoded
 }
-
-pub(crate) fn json_string(text: &str) -> String {
-    let mut out = String::with_capacity(text.len() + 2);
-    out.push('"');
-    for character in text.chars() {
-        match character {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            '\u{08}' => out.push_str("\\b"),
-            '\u{0c}' => out.push_str("\\f"),
-            character if character <= '\u{1f}' => {
-                out.push_str("\\u00");
-                let value = character as u8;
-                out.push(hex_digit(value >> 4));
-                out.push(hex_digit(value & 0x0f));
-            }
-            character => out.push(character),
-        }
-    }
-    out.push('"');
-    out
-}
-
-fn hex_digit(value: u8) -> char {
-    match value {
-        0..=9 => (b'0' + value) as char,
-        10..=15 => (b'a' + (value - 10)) as char,
-        _ => '0',
-    }
-}

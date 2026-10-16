@@ -44,7 +44,7 @@ pub(crate) use annotation_editor::{
 pub(crate) use annotations::AnnotationMenuItem;
 #[cfg(test)]
 pub(crate) use clipboard::osc52_clipboard_sequence;
-pub(crate) use clipboard::{json_string, write_osc52_clipboard};
+pub(crate) use clipboard::write_osc52_clipboard;
 pub(crate) use code_selection::CodeSelectionState;
 pub(crate) use context::{full_file_context_expansions, full_file_mode_available};
 pub(crate) use core::{

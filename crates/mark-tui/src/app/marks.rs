@@ -1,15 +1,22 @@
-use super::{DiffApp, MarkExport, MarkScope, json_string};
+use super::{DiffApp, MarkExport, MarkScope};
 use crate::annotation::{
     AnnotationKey, AnnotationScope, AnnotationSide, paired_old_line_for_addition,
 };
 use crate::model::{UiModel, UiModelBuildOptions, UiRow, line_after_hunk};
 use crate::syntax::{DiffSide, available_context_lines};
+use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 
 #[cfg(test)]
 use super::write_osc52_clipboard;
 #[cfg(test)]
 use std::io::Write;
+
+#[derive(Serialize)]
+struct MarksExport<'a> {
+    version: u32,
+    marks: &'a [MarkExport],
+}
 
 impl DiffApp {
     #[cfg(test)]
@@ -49,48 +56,11 @@ impl DiffApp {
                 ))
         });
 
-        let mut out = String::from("{\n  \"version\": 1,\n  \"marks\": [\n");
-        for (index, mark) in marks.iter().enumerate() {
-            if index > 0 {
-                out.push_str(",\n");
-            }
-            out.push_str("    {\n");
-            out.push_str("      \"path\": ");
-            out.push_str(&json_string(&mark.path));
-            if let Some(scope) = mark.scope {
-                out.push_str(",\n      \"scope\": ");
-                out.push_str(&json_string(match scope {
-                    MarkScope::File => "file",
-                    MarkScope::Hunk => "hunk",
-                }));
-            }
-            if let Some(old_line) = mark.old_line {
-                out.push_str(",\n      \"old_line\": ");
-                out.push_str(&old_line.to_string());
-            }
-            if let Some(new_line) = mark.new_line {
-                out.push_str(",\n      \"new_line\": ");
-                out.push_str(&new_line.to_string());
-            }
-            for (name, value) in [
-                ("old_start", mark.old_start),
-                ("old_count", mark.old_count),
-                ("new_start", mark.new_start),
-                ("new_count", mark.new_count),
-            ] {
-                if let Some(value) = value {
-                    out.push_str(",\n      \"");
-                    out.push_str(name);
-                    out.push_str("\": ");
-                    out.push_str(&value.to_string());
-                }
-            }
-            out.push_str(",\n      \"body\": ");
-            out.push_str(&json_string(&mark.body));
-            out.push_str("\n    }");
-        }
-        out.push_str("\n  ]\n}");
-        Some(out)
+        let export = MarksExport {
+            version: 1,
+            marks: &marks,
+        };
+        Some(serde_json::to_string_pretty(&export).expect("marks export should serialize"))
     }
 
     fn export_marks(&self) -> Vec<MarkExport> {

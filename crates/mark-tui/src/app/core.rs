@@ -11,6 +11,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use mark_core::MarkResult;
 use mark_diff::{Changeset, DiffOptions, DiffSource, DiffStats};
 use ratatui::layout::Rect;
+use serde::Serialize;
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::{
@@ -248,21 +249,30 @@ impl std::fmt::Debug for FilterWorker {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub(crate) enum MarkScope {
     File,
     Hunk,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// One mark in the copied marks JSON. Field order is the output order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct MarkExport {
     pub(crate) path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) scope: Option<MarkScope>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) old_line: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) new_line: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) old_start: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) old_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) new_start: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) new_count: Option<usize>,
     pub(crate) body: String,
 }
