@@ -32,16 +32,10 @@ impl SyntaxRuntime {
             side,
         } = position;
         self.stats.queue_requests = self.stats.queue_requests.saturating_add(1);
-        if let Some(key) = self.position_keys.get(&position).copied() {
-            if self.cache.contains_key(&key) {
-                return;
-            }
-            if self.pending.contains(&key) {
-                if priority == SyntaxPriority::Visible {
-                    self.queue.promote(key);
-                }
-                return;
-            }
+        if let Some(key) = self.position_keys.get(&position).copied()
+            && self.already_requested(key, priority)
+        {
+            return;
         }
         if self.skipped.contains_key(&position) {
             return;
@@ -93,15 +87,13 @@ impl SyntaxRuntime {
                 self.source_keys.insert(key.source, key);
                 self.position_keys.insert(position, key);
                 self.line_maps.insert(position, line_map);
-                if self.queue_job(
+                self.queue_job(
                     key,
                     language,
                     SyntaxJobSource::FullFile(source),
                     priority,
                     Some(position),
-                ) {
-                    return;
-                }
+                );
                 return;
             }
         }
@@ -158,16 +150,10 @@ impl SyntaxRuntime {
             side,
             kind: SyntaxSourceKind::FullFile,
         };
-        if let Some(key) = self.source_keys.get(&source_id).copied() {
-            if self.cache.contains_key(&key) {
-                return;
-            }
-            if self.pending.contains(&key) {
-                if priority == SyntaxPriority::Visible {
-                    self.queue.promote(key);
-                }
-                return;
-            }
+        if let Some(key) = self.source_keys.get(&source_id).copied()
+            && self.already_requested(key, priority)
+        {
+            return;
         }
         if self.skipped_sources.contains(&source_id) {
             return;
@@ -218,13 +204,7 @@ impl SyntaxRuntime {
         priority: SyntaxPriority,
         position: Option<SyntaxPosition>,
     ) -> bool {
-        if self.cache.contains_key(&key) {
-            return true;
-        }
-        if self.pending.contains(&key) {
-            if priority == SyntaxPriority::Visible {
-                self.queue.promote(key);
-            }
+        if self.already_requested(key, priority) {
             return true;
         }
 
@@ -251,14 +231,8 @@ impl SyntaxRuntime {
 
         match self.queue.try_push(job, priority) {
             Ok(push) => {
-                for dropped in std::iter::once(push.dropped)
-                    .chain(push.dropped_more.into_iter().map(Some))
-                    .flatten()
-                {
+                for dropped in push.dropped {
                     self.pending.remove(&dropped);
-                    self.stats.jobs_evicted = self.stats.jobs_evicted.saturating_add(1);
-                }
-                if push.dropped_overflow {
                     self.stats.jobs_evicted = self.stats.jobs_evicted.saturating_add(1);
                 }
                 self.stats.jobs_queued = self.stats.jobs_queued.saturating_add(1);
@@ -296,6 +270,21 @@ impl SyntaxRuntime {
                 false
             }
         }
+    }
+
+    /// Whether `key` already has a cached result or a queued job. A pending
+    /// job requested as visible again is promoted ahead of prefetch work.
+    fn already_requested(&mut self, key: SyntaxKey, priority: SyntaxPriority) -> bool {
+        if self.cache.contains_key(&key) {
+            return true;
+        }
+        if self.pending.contains(&key) {
+            if priority == SyntaxPriority::Visible {
+                self.queue.promote(key);
+            }
+            return true;
+        }
+        false
     }
 
     pub(crate) fn skip(&mut self, position: SyntaxPosition, reason: SyntaxSkipReason) {

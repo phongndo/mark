@@ -347,11 +347,7 @@ fn queue_admission_preserves_budget_and_reports_every_eviction() {
                     Err(SyntaxQueueError::Full) => assert_eq!(after, before),
                     Err(error) => panic!("unexpected rejection: {error:?}"),
                     Ok(push) => {
-                        let evicted = push
-                            .dropped
-                            .into_iter()
-                            .chain(push.dropped_more)
-                            .collect::<HashSet<_>>();
+                        let evicted = push.dropped.into_iter().collect::<HashSet<_>>();
                         let missing = before
                             .0
                             .iter()

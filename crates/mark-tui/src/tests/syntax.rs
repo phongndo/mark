@@ -57,7 +57,7 @@ fn visible_highlight_job_can_evict_prefetch_when_queue_is_full() {
         .try_push(syntax_job(visible), SyntaxPriority::Visible)
         .unwrap();
 
-    assert_eq!(pushed.dropped, Some(prefetch));
+    assert_eq!(pushed.dropped, vec![prefetch]);
     assert_eq!(queue.len(), 1);
     assert_eq!(queue.try_pop().map(|job| job.key), Some(visible));
 }
