@@ -22,7 +22,7 @@ use crate::{
         DiffApp, LiveUpdatesState, MAX_LIVE_GREP_MATCHES, PostFilterNavigation, SyntaxStartupMode,
         max_scroll_for_viewport, run_loop, sync_live_diff,
     },
-    controls::{DiffLayoutMode, default_layout_for_width, filtered_file_indices},
+    controls::{DiffLayoutMode, default_layout_for_width},
     model::UiModel,
     render::draw,
     review::VerdictDestination,
@@ -34,6 +34,10 @@ use crate::{
         AllocationBenchmarkStage, DecorationPreference, DiffBenchmarkOptions, DiffBenchmarkReport,
     },
 };
+
+mod legacy_filter;
+
+use legacy_filter::filtered_file_indices;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DiffRunOptions {
