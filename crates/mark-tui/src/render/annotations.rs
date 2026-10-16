@@ -9,6 +9,7 @@ use crate::{
     },
     controls::INPUT_CURSOR,
     render::{
+        selector_menu::text_with_cursor,
         style::{base_bg, input_cursor_style, spans_with_input_cursor},
         text::{fit, fit_byte_prefix_with_width, fit_padded, spaces, terminal_text},
     },
@@ -340,15 +341,6 @@ pub(crate) fn render_annotation_compose_block(
 pub(crate) fn annotation_compose_block_height(draft: &AnnotationDraft, width: usize) -> usize {
     let display = text_with_cursor(&draft.input, draft.cursor);
     annotation_display_line_count(&display, width).saturating_add(2)
-}
-
-fn text_with_cursor(input: &str, cursor: usize) -> String {
-    let cursor = cursor.min(input.len());
-    if input.is_char_boundary(cursor) {
-        format!("{}{}{}", &input[..cursor], INPUT_CURSOR, &input[cursor..])
-    } else {
-        format!("{input}{INPUT_CURSOR}")
-    }
 }
 
 pub(crate) fn annotation_close_hit_at_column(column: u16, columns: (usize, usize)) -> bool {
