@@ -5,10 +5,7 @@ pub use allocation_profile::{
     allocation_snapshot, reset_allocation_peak,
 };
 
-use std::{
-    panic::{AssertUnwindSafe, catch_unwind, resume_unwind},
-    sync::OnceLock,
-};
+use std::sync::OnceLock;
 
 const MAX_CPU_THREADS: usize = 8;
 
@@ -27,27 +24,6 @@ pub fn cpu_pool() -> &'static rayon::ThreadPool {
             .build()
             .expect("shared CPU pool should start")
     })
-}
-
-/// Runs CPU-bound work on the shared pool without blocking the async caller.
-pub async fn run_cpu<F, R>(function: F) -> R
-where
-    F: FnOnce() -> R + Send + 'static,
-    R: Send + 'static,
-{
-    let (sender, receiver) = tokio::sync::oneshot::channel();
-    cpu_pool().spawn_fifo(move || {
-        let result = catch_unwind(AssertUnwindSafe(function));
-        let _ = sender.send(result);
-    });
-
-    match receiver
-        .await
-        .expect("shared CPU pool stopped before returning its result")
-    {
-        Ok(result) => result,
-        Err(panic) => resume_unwind(panic),
-    }
 }
 
 /// Reports whether the lazy shared CPU pool has been constructed.
@@ -89,16 +65,6 @@ mod tests {
                 .is_some_and(|name| name.starts_with("mark-cpu-"))
         );
         assert!(is_cpu_pool_started());
-    }
-
-    #[test]
-    fn run_cpu_returns_pool_result() {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .build()
-            .expect("test runtime should start");
-        let result = runtime.block_on(run_cpu(|| 20 + 22));
-
-        assert_eq!(result, 42);
     }
 
     #[test]
