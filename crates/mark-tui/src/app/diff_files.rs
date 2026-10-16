@@ -73,7 +73,7 @@ pub(crate) fn splice_diff_files_for_paths(
 
 pub(crate) fn diff_file_matches_path(file: &mark_diff::DiffFile, path: &Path) -> bool {
     let path = diff_path_string(path);
-    file.old_path() == Some(path.as_str()) || file.new_path() == Some(path.as_str())
+    crate::annotation::diff_file_has_path(file, &path)
 }
 
 pub(crate) fn diff_file_matches_path_scope(file: &mark_diff::DiffFile, path: &Path) -> bool {

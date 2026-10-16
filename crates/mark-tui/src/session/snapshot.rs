@@ -9,7 +9,9 @@ use mark_session::{
 
 use crate::{app::DiffApp, model::UiRow};
 
-use super::{COMMENT_PAGE_RESERVE_BYTES, RESPONSE_RESULT_BUDGET_BYTES, runtime::SessionRuntime};
+use super::{
+    COMMENT_PAGE_RESERVE_BYTES, RESPONSE_RESULT_BUDGET_BYTES, find_file, runtime::SessionRuntime,
+};
 
 const MAX_HUNK_HEADER_BYTES: usize = 256;
 const DEFAULT_LINE_CONTEXT: usize = 3;
@@ -321,27 +323,6 @@ fn file_summary(app: &DiffApp, file: &DiffFile) -> FileSummary {
         hunks_truncated: file.hunks().len() > hunks.len(),
         hunks,
     }
-}
-
-fn find_file<'a>(app: &'a DiffApp, path: &str) -> Result<&'a DiffFile, ProtocolError> {
-    let mut matches = app.document.changeset.files.iter().filter(|file| {
-        file.old_path() == Some(path)
-            || file.new_path() == Some(path)
-            || file.display_path() == path
-    });
-    let file = matches.next().ok_or_else(|| {
-        ProtocolError::new(
-            "path_not_found",
-            format!("file is not in the loaded changeset: {path}"),
-        )
-    })?;
-    if matches.next().is_some() {
-        return Err(ProtocolError::new(
-            "ambiguous_path",
-            format!("path matches multiple files in the changeset: {path}"),
-        ));
-    }
-    Ok(file)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

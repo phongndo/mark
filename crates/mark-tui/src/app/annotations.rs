@@ -4,6 +4,7 @@ use super::{
 };
 use crate::annotation::{
     AnnotationDraft, AnnotationKey, AnnotationKeyIndex, AnnotationScope, AnnotationSide,
+    diff_file_has_path,
 };
 use crate::editor::{configured_editor, open_text_in_editor};
 use crate::keymap::{AnnotationMenuAction, GlobalAction, MenuAction};
@@ -201,10 +202,7 @@ impl DiffApp {
                     .changeset
                     .files
                     .iter()
-                    .find(|file| {
-                        file.old_path() == Some(key.path.as_str())
-                            || file.new_path() == Some(key.path.as_str())
-                    })
+                    .find(|file| diff_file_has_path(file, &key.path))
                     .map(|file| file.status())
                     .unwrap_or(FileStatus::Unknown);
                 Some(AnnotationMenuItem {

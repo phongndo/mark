@@ -275,6 +275,11 @@ fn preferred_file_path_and_side(file: &DiffFile) -> Option<(&str, AnnotationSide
         .or_else(|| file.old_path().map(|path| (path, AnnotationSide::Old)))
 }
 
+/// Whether `path` names `file`: either side of a rename, or its display path.
+pub(crate) fn diff_file_has_path(file: &DiffFile, path: &str) -> bool {
+    file.old_path() == Some(path) || file.new_path() == Some(path) || file.display_path() == path
+}
+
 pub(crate) fn paired_old_line_for_addition(
     lines: &[DiffLine],
     addition_index: usize,

@@ -2,9 +2,11 @@ use mark_diff::DiffFile;
 use mark_session::{ProtocolError, RangeTarget, ReviewAnchor, ReviewAnchorScope, SourceRange};
 
 use crate::{
-    annotation::{AnnotationKey, AnnotationScope, AnnotationSide},
+    annotation::{AnnotationKey, AnnotationScope, AnnotationSide, diff_file_has_path},
     app::DiffApp,
 };
+
+use super::find_file;
 
 pub(crate) fn validate(
     app: &DiffApp,
@@ -77,18 +79,17 @@ pub(crate) fn to_protocol(app: &DiffApp, key: &AnnotationKey) -> ReviewAnchor {
             new_count,
         } => {
             anchor.hunk = app.document.changeset.files.iter().find_map(|file| {
-                (file.old_path() == Some(key.path.as_str())
-                    || file.new_path() == Some(key.path.as_str()))
-                .then(|| {
-                    file.hunks().iter().position(|hunk| {
-                        hunk.old_start() == old_start
-                            && hunk.old_count() == old_count
-                            && hunk.new_start() == new_start
-                            && hunk.new_count() == new_count
+                diff_file_has_path(file, &key.path)
+                    .then(|| {
+                        file.hunks().iter().position(|hunk| {
+                            hunk.old_start() == old_start
+                                && hunk.old_count() == old_count
+                                && hunk.new_start() == new_start
+                                && hunk.new_count() == new_count
+                        })
                     })
-                })
-                .flatten()
-                .map(|index| index + 1)
+                    .flatten()
+                    .map(|index| index + 1)
             });
             if anchor.hunk.is_none() {
                 anchor.range = Some(RangeTarget {
@@ -103,28 +104,6 @@ pub(crate) fn to_protocol(app: &DiffApp, key: &AnnotationKey) -> ReviewAnchor {
         },
     }
     anchor
-}
-
-fn find_file<'a>(app: &'a DiffApp, path: &str) -> Result<&'a DiffFile, ProtocolError> {
-    let mut matches = app
-        .document
-        .changeset
-        .files
-        .iter()
-        .filter(|file| file.old_path() == Some(path) || file.new_path() == Some(path));
-    let file = matches.next().ok_or_else(|| {
-        ProtocolError::new(
-            "path_not_found",
-            format!("file is not in the loaded changeset: {path}"),
-        )
-    })?;
-    if matches.next().is_some() {
-        return Err(ProtocolError::new(
-            "ambiguous_path",
-            format!("path matches multiple files in the changeset: {path}"),
-        ));
-    }
-    Ok(file)
 }
 
 fn validate_line(

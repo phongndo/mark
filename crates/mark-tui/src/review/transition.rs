@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use mark_diff::{DiffFile, DiffHunk};
 
 use crate::{
-    annotation::{AnnotationKey, AnnotationScope, AnnotationSide},
+    annotation::{AnnotationKey, AnnotationScope, AnnotationSide, diff_file_has_path},
     app::DiffApp,
     review::{ReviewAnchorEvidence, ReviewComment},
 };
@@ -369,7 +369,7 @@ fn find_file<'a>(app: &'a DiffApp, path: &str) -> Option<&'a DiffFile> {
         .changeset
         .files
         .iter()
-        .find(|file| file.old_path() == Some(path) || file.new_path() == Some(path))
+        .find(|file| diff_file_has_path(file, path))
 }
 
 fn hunk_fingerprint(hunk: &DiffHunk) -> String {

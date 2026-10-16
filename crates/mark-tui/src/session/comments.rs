@@ -17,7 +17,7 @@ use crate::{
     },
 };
 
-use super::{COMMENT_PAGE_RESERVE_BYTES, RESPONSE_RESULT_BUDGET_BYTES, anchors};
+use super::{COMMENT_PAGE_RESERVE_BYTES, RESPONSE_RESULT_BUDGET_BYTES, anchors, find_file};
 
 pub(crate) struct CommentPage {
     pub(crate) comments: Vec<CommentView>,
@@ -342,13 +342,9 @@ pub(crate) fn set_progress(
     if params.file.is_empty() || params.file.len() > mark_session::MAX_PATH_BYTES {
         return Err(ProtocolError::new("invalid_path", "invalid progress path"));
     }
-    let file = app
-        .document
-        .changeset
-        .files
-        .iter()
-        .find(|file| file.display_path() == params.file)
-        .ok_or_else(|| ProtocolError::new("path_not_found", "file is not in the changeset"))?;
+    let file = find_file(app, &params.file)?;
+    // Progress is keyed by display path, whichever alias the request used.
+    let path = file.display_path().to_owned();
     if let Some(hunk) = params.hunk {
         if hunk == 0 || hunk > file.hunks().len() {
             return Err(ProtocolError::new(
@@ -358,11 +354,11 @@ pub(crate) fn set_progress(
         }
         app.annotations_state
             .lifecycle
-            .set_hunk_reviewed(&params.file, hunk, params.reviewed);
+            .set_hunk_reviewed(&path, hunk, params.reviewed);
     } else {
         app.annotations_state
             .lifecycle
-            .set_file_reviewed(&params.file, params.reviewed);
+            .set_file_reviewed(&path, params.reviewed);
     }
     app.runtime.dirty = true;
     Ok(ProgressResult {
@@ -849,6 +845,35 @@ mod tests {
 
         assert_eq!(error.code, "comment_limit");
         assert_eq!(app.annotations_state.annotations.len(), 50);
+    }
+
+    #[test]
+    fn progress_accepts_the_old_path_of_a_renamed_file() {
+        let patch =
+            "diff --git a/old.rs b/new.rs\n--- a/old.rs\n+++ b/new.rs\n@@ -1 +1 @@\n-old\n+new\n";
+        let mut app = DiffApp::new(
+            DiffOptions::default(),
+            Changeset {
+                repo: RepoRoot::new("/repo"),
+                title: "test".to_owned(),
+                files: mark_diff::parse_patch(patch),
+                raw_patch: Arc::from(patch.as_bytes()),
+            },
+            DiffLayoutMode::Unified,
+        );
+
+        set_progress(
+            &mut app,
+            ProgressSetParams {
+                generation: 0,
+                file: "old.rs".to_owned(),
+                hunk: Some(1),
+                reviewed: true,
+            },
+        )
+        .unwrap();
+
+        assert!(app.annotations_state.lifecycle.hunk_reviewed("new.rs", 1));
     }
 
     #[test]
