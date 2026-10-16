@@ -449,6 +449,8 @@ pub(crate) enum OptionsMenuItem {
 }
 
 impl OptionsMenuItem {
+    /// Whether changing this option is saved to the user's config. Checked
+    /// once, before queueing the persistence effect.
     pub(crate) fn persists(self) -> bool {
         !matches!(self, Self::HorizontalScrollLock)
     }
@@ -552,10 +554,6 @@ pub(crate) fn persist_options_menu_draft_to_path(
     draft: OptionsDraft,
     changed_item: OptionsMenuItem,
 ) -> MarkResult<()> {
-    if !changed_item.persists() {
-        return Ok(());
-    }
-
     let color_scheme = if changed_item == OptionsMenuItem::ColorScheme {
         let Some(SyntaxThemeConfig::Builtin { name: Some(name) }) =
             color_scheme_config(draft.color_scheme)
@@ -601,6 +599,7 @@ pub(crate) fn persist_options_menu_draft_to_path(
                 toml_edit::Value::from(draft.line_wrapping),
             );
         }
+        // Session-only; never queued for persistence (see `persists`).
         OptionsMenuItem::HorizontalScrollLock => return Ok(()),
         OptionsMenuItem::Decorations => {
             if document

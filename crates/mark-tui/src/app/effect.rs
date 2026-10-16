@@ -152,10 +152,6 @@ impl DiffApp {
                 draft,
                 changed_item,
             } => {
-                if !changed_item.persists() {
-                    return Ok(());
-                }
-
                 #[cfg(test)]
                 {
                     self.config.last_persisted_options_menu_draft = Some((draft, changed_item));
