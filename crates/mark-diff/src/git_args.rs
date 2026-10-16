@@ -67,6 +67,13 @@ fn git_show_args(repo: &Path, rev: &str) -> MarkResult<Vec<String>> {
 }
 
 pub(super) fn append_pathspecs(args: &mut Vec<String>, paths: &[PathBuf]) {
+    // A range whose right operand is a pathspec already ends in `-- <spec>`.
+    // Git would read a second `--` as a literal pathspec and union every
+    // spec, returning the whole range. Git cannot intersect pathspecs, so the
+    // requested paths, which name files from this review, replace it.
+    if let Some(separator) = args.iter().position(|arg| arg == "--") {
+        args.truncate(separator);
+    }
     args.push("--".to_owned());
     args.extend(paths.iter().map(|path| path.to_string_lossy().into_owned()));
 }
