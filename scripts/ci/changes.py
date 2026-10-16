@@ -35,18 +35,16 @@ def classify_paths(paths: Iterable[str]) -> dict[str, bool]:
         if path.startswith("crates/"):
             result["rust"] = True
             result["performance"] = True
+        # The binary embeds assets (skills via include_str!, themes at build
+        # time), so asset edits can break Rust builds and tests.
+        if path.startswith("assets/"):
+            result["rust"] = True
         if path.startswith("assets/themes/"):
-            result["generated"] = True
-            result["performance"] = True
-
-        if path.startswith("benchmarks/"):
             result["generated"] = True
             result["performance"] = True
 
         if path.startswith("tools/"):
             result["generated"] = True
-            if "bench" in path or "profile" in path:
-                result["performance"] = True
 
         if path.startswith("scripts/"):
             result["rust"] = True
