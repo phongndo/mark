@@ -3,8 +3,8 @@
 use std::{
     fs,
     io::{Read, Write},
-    path::Path,
     os::unix::fs::PermissionsExt,
+    path::Path,
     time::Duration,
 };
 

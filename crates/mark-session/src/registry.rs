@@ -45,16 +45,13 @@ impl std::error::Error for SelectionError {}
 
 impl Registry {
     pub fn discover() -> io::Result<Self> {
-        let base = runtime_base_directory()?;
-        Ok(Self { base })
+        Ok(Self {
+            base: runtime_base_directory(),
+        })
     }
 
     pub fn at(base: impl Into<PathBuf>) -> Self {
         Self { base: base.into() }
-    }
-
-    pub fn base(&self) -> &Path {
-        &self.base
     }
 
     pub fn session_dir(&self, session_id: &str) -> io::Result<PathBuf> {
@@ -64,10 +61,6 @@ impl Registry {
 
     pub fn socket_path(&self, session_id: &str) -> io::Result<PathBuf> {
         Ok(self.session_dir(session_id)?.join(SOCKET_FILE))
-    }
-
-    pub fn record_path(&self, session_id: &str) -> io::Result<PathBuf> {
-        Ok(self.session_dir(session_id)?.join(RECORD_FILE))
     }
 
     pub fn prepare_session(&self, session_id: &str) -> io::Result<PathBuf> {
@@ -163,7 +156,7 @@ impl Registry {
         Ok(sessions)
     }
 
-    pub fn read_record(&self, session_id: &str) -> io::Result<SessionRecord> {
+    fn read_record(&self, session_id: &str) -> io::Result<SessionRecord> {
         let session_dir = self.session_dir(session_id)?;
         verify_private_directory(&session_dir)?;
         let record_path = session_dir.join(RECORD_FILE);
@@ -329,11 +322,11 @@ fn validate_session_id(session_id: &str) -> io::Result<()> {
     Ok(())
 }
 
-fn runtime_base_directory() -> io::Result<PathBuf> {
+fn runtime_base_directory() -> PathBuf {
     if let Some(runtime) = env::var_os("XDG_RUNTIME_DIR").filter(|value| !value.is_empty()) {
-        return Ok(PathBuf::from(runtime).join("mark"));
+        return PathBuf::from(runtime).join("mark");
     }
-    Ok(env::temp_dir().join(format!("mark-{}", current_uid())))
+    env::temp_dir().join(format!("mark-{}", current_uid()))
 }
 
 fn nonce() -> u128 {

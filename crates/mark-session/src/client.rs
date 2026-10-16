@@ -1,8 +1,4 @@
-use std::{
-    io,
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::{io, path::PathBuf, time::Duration};
 
 #[cfg(unix)]
 use std::io::{Read, Write};
@@ -38,10 +34,6 @@ impl Client {
             self.reload_timeout = Some(timeout);
         }
         self
-    }
-
-    pub fn endpoint(&self) -> &Path {
-        &self.endpoint
     }
 
     #[cfg(any(unix, test))]
