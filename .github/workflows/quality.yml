@@ -95,6 +95,9 @@ jobs:
           toolchain: stable
           components: rustfmt, clippy
 
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
       - name: Run Rust suite
         run: scripts/ci/rust
 
