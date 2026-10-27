@@ -40,7 +40,8 @@ check_absent '\.(par_iter|par_iter_mut|into_par_iter)\(' crates -g '*.rs' -g '!*
 check_absent 'syntaxmate::(engine|grammars)' crates/mark-syntax/src -g '*.rs'
 check_absent 'mark[_-]tui|ratatui' crates/mark-session
 check_absent '\bDiffApp\b|\bUiRow\b' crates/mark-session/src
-check_absent 'ReviewPersistence|MARK_STATE_HOME|mark/reviews' crates/mark-tui/src crates/mark-cli/src
+# Durable record paths and filesystem ownership stay behind mark-session.
+check_absent 'XDG_STATE_HOME|\.local/state/mark|mark/reviews' crates/mark-tui/src crates/mark-cli/src -g '*.rs' -g '!**/tests/**'
 
 for removed_path in \
   assets/grammars \

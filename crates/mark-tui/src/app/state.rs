@@ -774,6 +774,7 @@ pub(crate) struct AppConfigState {
 
 #[derive(Debug)]
 pub(crate) struct RuntimeState {
+    pub(crate) integration: Option<Box<crate::integration::IntegratedReview>>,
     pub(crate) terminal_clear_requested: bool,
     pub(crate) dirty: bool,
     pub(crate) hit_map: HitMap,

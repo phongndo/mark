@@ -4,8 +4,10 @@
 static GLOBAL_ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 mod args;
+mod bridge;
 mod config;
 mod dispatch;
+mod integration;
 mod pager;
 mod review;
 mod session;

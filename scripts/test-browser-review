@@ -1,0 +1,15 @@
+#!/usr/bin/env sh
+set -eu
+
+mark_browser_repo=$(CDPATH='' cd "$(dirname "$0")/.." && pwd)
+cd "$mark_browser_repo"
+
+if [ -z "${IN_NIX_SHELL:-}" ]; then
+  exec nix develop -c "$mark_browser_repo/scripts/test-browser-review" "$@"
+fi
+
+cargo build --package mark-cli --locked
+if [ -n "${MARK_BROWSER:-}" ] || command -v chromium >/dev/null 2>&1; then
+  exec node "$mark_browser_repo/tools/test-browser-review.mjs" "$mark_browser_repo/target/debug/mark" "$@"
+fi
+exec nix shell nixpkgs#chromium -c node "$mark_browser_repo/tools/test-browser-review.mjs" "$mark_browser_repo/target/debug/mark" "$@"

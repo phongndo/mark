@@ -74,34 +74,29 @@ interface.
 - Stable snapshots by default; continuous reload only with `--watch`.
 - Custom themes, keybindings, and editor integration.
 - Lazy loading and viewport rendering for large diffs.
-- Private local sessions for review automation, with no daemon or hosted state.
+- Local agent reviews with conversation binding, saved feedback, and resumable passes.
 
 ## Use with an AI agent
 
-Mark already connects to shell-capable agents through its JSON CLI—no plugin or
-MCP server required.
+Install Mark's native harness package to get its command, review-loop skill,
+and local MCP connection together. In Pi, for example:
 
-1. Open `mark diff` in one terminal and leave it running.
-2. Start your agent in another terminal in the same repository.
-3. Paste this prompt:
+```sh
+pi install npm:mark-pi
+```
 
-   > Run `mark skill show` and follow the bundled workflow to review my open Mark
-   > session. Read the diff and saved human marks, then publish findings into Mark.
-   > Leave the viewport, reviewed state, dispositions, and final verdict to me.
+Run `/mark` in Pi to review in the same terminal. Save notes with `Ctrl-S`,
+then press `Q` to send feedback or `q` to return without submitting it. The
+integration binds the review to the current conversation and worktree;
+reopening continues the review against the next snapshot.
 
-For questions instead of a full review, save a mark with `Enter`, then ask the
-agent to answer your saved marks. Ask again after saving a follow-up; the skill
-is request-driven, not a background listener.
+[Harness integrations](docs/integrations.md) covers installation and the
+supported experience in Claude Code, Codex, Pi, OpenCode V2, and fx. Command
+names and presentation follow each host's available interfaces.
 
-`mark skill path` materializes the version-matched skill for agents that load
-skill files. To install it, use `mark skill install --agent pi`; run
-`mark skill install --help` for supported agents. Reinstall after upgrading Mark
-to refresh that copy.
-
-If multiple reviews are open, tell the agent which session to use. Keep Mark
-open: sessions and their comments are in-memory and disappear when it closes.
-See [live agent sessions](docs/usage.md#live-agent-review-sessions) for lifecycle
-details.
+Shell-capable agents can also use the existing JSON session CLI with an
+already-open standalone Mark review. See
+[live agent sessions](docs/usage.md#live-agent-review-sessions).
 
 ## Controls
 

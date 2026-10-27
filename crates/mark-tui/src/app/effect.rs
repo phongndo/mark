@@ -112,6 +112,9 @@ impl DiffApp {
         match effect {
             AppEffect::Quit => Ok(()),
             AppEffect::SubmitMarks(text) => {
+                if self.runtime.integration.is_some() {
+                    return crate::integration::submit(self);
+                }
                 match env::var(MARK_ANNOTATIONS_PATH_ENV) {
                     Ok(path) if !path.is_empty() => fs::write(path, text)?,
                     _ => {

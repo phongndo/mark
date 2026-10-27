@@ -19,6 +19,16 @@ ci-performance:
 ci-workflows:
     actionlint -color
 
+ci-integrations:
+    cargo build -p mark-cli --locked
+    MARK_TEST_BIN="$PWD/target/debug/mark" node --test assets/integrations/tests/*.test.mjs assets/integrations/fx/tests/*.test.mjs
+
+test-browser-review:
+    scripts/test-browser-review
+
+test-pi-review:
+    scripts/test-pi-review
+
 fix:
     hk fix --all
 

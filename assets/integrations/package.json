@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "package": "node package.mjs",
+    "test": "node --test tests/*.test.mjs fx/tests/*.test.mjs"
+  }
+}

@@ -112,6 +112,19 @@ impl DiffApp {
         &mut self,
         action: AppAction,
     ) -> MarkResult<ActionOutcome> {
+        if self.runtime.integration.is_some()
+            && matches!(
+                action,
+                AppAction::OpenDiffMenu
+                    | AppAction::OpenReviewTarget
+                    | AppAction::ToggleHeadBranchMenu
+                    | AppAction::ToggleBaseBranchMenu
+                    | AppAction::ToggleCommitMenu
+            )
+        {
+            return Ok(ActionOutcome::effect(AppEffect::Toast(ToastLevel::Warning,
+                "This review keeps its original comparison. Open another review to choose a different source.".to_owned())));
+        }
         match action {
             AppAction::Quit => Ok(ActionOutcome::effect(AppEffect::Quit)),
             AppAction::SubmitMarks => {
@@ -119,6 +132,12 @@ impl DiffApp {
                     && !self.commit_annotation_draft(draft)
                 {
                     return Ok(ActionOutcome::consumed());
+                }
+                if !crate::integration::has_feedback(self) {
+                    return Ok(ActionOutcome::effect(AppEffect::Toast(
+                        ToastLevel::Warning,
+                        "No new feedback to send. Use q to return to the conversation.".to_owned(),
+                    )));
                 }
                 let Some(text) = self.marks_clipboard_json() else {
                     return Ok(ActionOutcome::effect(AppEffect::Toast(

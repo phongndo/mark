@@ -4,5 +4,7 @@ set -eux
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo test --workspace --all-targets --all-features --locked
+MARK_TEST_BIN="$PWD/target/debug/mark" node --test assets/integrations/tests/*.test.mjs assets/integrations/fx/tests/*.test.mjs
+node --test tools/test-integrations-release.mjs
 scripts/check-architecture
 scripts/smoke-installer-update

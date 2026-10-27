@@ -64,7 +64,14 @@ targeting are described in [configuration](configuration.md).
 
 ## Live agent review sessions
 
-Use the [README agent workflow](../README.md#use-with-an-ai-agent) to get started.
+For a native command with automatic conversation binding and saved review
+passes, use a [harness integration](integrations.md). The live-session CLI
+below remains available for an already-open standalone terminal review:
+
+1. Open `mark diff` in a human terminal.
+2. In the agent conversation, ask it to run `mark skill show` and review that
+   open session, or answer your saved marks.
+
 `mark skill show` is the version-matched workflow; `mark session --help` is the
 command reference. The skill is request-driven, not a background listener.
 
@@ -72,6 +79,10 @@ Every interactive review except pager mode registers a private local session.
 Keep Mark open: comments, reviewed progress, dispositions, and verdicts are
 in-memory and discarded when it closes. There is no daemon or hosted service.
 Export anything you need before closing the review.
+
+This lifetime applies to standalone sessions. Native harness reviews use durable
+records, so returning to the conversation preserves submitted feedback and
+saved annotations.
 
 Session discovery and bounded inspection start with:
 

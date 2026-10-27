@@ -77,8 +77,12 @@ jobs:
           release_tag="v$version"
 
           if gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "$release_tag is already released; bump the version in Cargo.toml to release again."
-            exit 0
+            released_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$release_tag" --jq .sha)"
+            if [[ "$released_sha" != "$GITHUB_SHA" ]]; then
+              echo "$release_tag is already released from $released_sha; bump Cargo.toml to release a new source."
+              exit 0
+            fi
+            echo "Retrying $release_tag from its original qualified source, including integration publication."
           fi
           if tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$release_tag" --jq .sha 2>/dev/null)" && \
              [[ "$tag_sha" != "$GITHUB_SHA" ]]; then
@@ -247,3 +251,19 @@ jobs:
     name: Check published installs
     needs: publish
     uses: ./.github/workflows/installs.yml
+
+  integrations:
+    name: Publish harness integrations
+    needs:
+      - prepare
+      - publish
+    permissions:
+      contents: write
+      id-token: write
+    uses: ./.github/workflows/publish-integrations.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+      source_sha: ${{ needs.prepare.outputs.source_sha }}
+      release_tag: ${{ needs.prepare.outputs.release_tag }}
+    secrets:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

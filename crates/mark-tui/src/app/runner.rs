@@ -26,6 +26,7 @@ pub(crate) async fn run_loop(
     let mut scroll_fence = MouseScrollContextFence::default();
 
     loop {
+        crate::integration::poll(app);
         app.expire_toasts(Instant::now());
         if let Some(runtime) = session_runtime.as_deref_mut() {
             runtime.drain_startup(app);
@@ -46,6 +47,7 @@ pub(crate) async fn run_loop(
         app.drain_trailing_context_worker();
         app.drain_syntax();
         if app.runtime.dirty {
+            crate::integration::checkpoint_or_notice(app);
             if app.runtime.terminal_clear_requested {
                 terminal.clear()?;
                 app.runtime.terminal_clear_requested = false;

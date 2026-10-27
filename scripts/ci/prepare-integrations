@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+set -eu
+mark_release_root=$(CDPATH='' cd "$(dirname "$0")/../.." && pwd)
+exec node "$mark_release_root/scripts/ci/prepare-integrations.mjs" "$@"

@@ -1,0 +1,133 @@
+name: Publish integrations
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      source_sha:
+        required: true
+        type: string
+      release_tag:
+        required: true
+        type: string
+    secrets:
+      NPM_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-integrations
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish qualified integration packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Checkout qualified source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify published core release and exact source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RELEASE_TAG" == "v$VERSION" ]]
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_SHA" ]]
+          [[ "$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq .sha)" == "$SOURCE_SHA" ]]
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease,tagName > "$RUNNER_TEMP/mark-core-release.json"
+          node -e 'const fs=require("fs"),r=JSON.parse(fs.readFileSync(process.argv[1]));if(r.isDraft||r.isPrerelease||r.tagName!==process.env.RELEASE_TAG)process.exit(1)' "$RUNNER_TEMP/mark-core-release.json"
+
+      - name: Install release Node runtime
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Pin npm with OIDC dist-tag support
+        run: npm install --global npm@11.21.0 --ignore-scripts --no-audit --no-fund
+
+      - name: Test release preparation and publication logic
+        run: node --test tools/test-integrations-release.mjs
+
+      - name: Prepare all integrations from the same source version
+        env:
+          VERSION: ${{ inputs.version }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: scripts/ci/prepare-integrations --version "$VERSION" --source-sha "$SOURCE_SHA" --output dist/integrations-release
+
+      - name: Retain exact staged packages and marketplace
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mark-integrations-${{ inputs.version }}
+          path: dist/integrations-release
+          include-hidden-files: true
+          if-no-files-found: error
+
+      - name: Attach standalone integration packages to the core release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: gh release upload "$RELEASE_TAG" dist/integrations-release/assets/* dist/integrations-release/release-index.json --repo "$GITHUB_REPOSITORY" --clobber
+
+      - name: Publish self-contained marketplace branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          publication="$RUNNER_TEMP/mark-integration-publication"
+          distribution="$GITHUB_WORKSPACE/dist/integrations-release/marketplace"
+          git init --quiet "$publication"
+          cd "$publication"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git config credential.helper '!gh auth git-credential'
+          git remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
+          if git ls-remote --exit-code --heads origin refs/heads/integrations > "$RUNNER_TEMP/mark-integration-ref"; then
+            git fetch --quiet origin refs/heads/integrations
+            git checkout --quiet --detach FETCH_HEAD
+            node -e 'const fs=require("fs"),r=JSON.parse(fs.readFileSync("release.json"));const a=r.version.split(".").map(Number),b=process.env.VERSION.split(".").map(Number);const newer=a.some((v,i)=>a.slice(0,i).every((x,j)=>x===b[j])&&v>b[i]);if(newer||(r.version===process.env.VERSION&&r.source_sha!==process.env.SOURCE_SHA))throw Error("refusing to replace another or newer qualified integration release")'
+            git rm --quiet -r --ignore-unmatch .
+          else
+            status=$?
+            [[ "$status" -eq 2 ]] || exit "$status"
+          fi
+          cp -R "$distribution/." .
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit --quiet -m "Publish Mark integrations $VERSION from $SOURCE_SHA"
+            git push origin HEAD:refs/heads/integrations
+          fi
+
+      # GitHub packages and catalogs work independently of npm authorization.
+      # An npm failure must leave them usable while this job remains failed and
+      # retryable. npm checks the caller workflow name: configure release.yml,
+      # environment release, and allow both npm publish and npm dist-tag. OIDC
+      # is attempted first; NPM_TOKEN is an optional fallback, never a skip.
+      - name: Publish npm packages, verify bytes, then promote latest
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: node scripts/ci/publish-integration-npm.mjs dist/integrations-release

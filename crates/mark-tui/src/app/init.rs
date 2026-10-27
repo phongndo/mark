@@ -664,6 +664,7 @@ impl DiffApp {
                 syntax,
             },
             runtime: RuntimeState {
+                integration: None,
                 terminal_clear_requested: false,
                 dirty: true,
                 hit_map: HitMap::default(),

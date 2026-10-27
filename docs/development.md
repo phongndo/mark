@@ -32,6 +32,11 @@ Special verification paths:
   judgment.
 - Cross-subsystem refactors: `scripts/check-architecture`; see the
   [boundary rationale](architecture.md).
+- Harness packages: `just ci-integrations` exercises
+  adapters and self-contained packaging. `scripts/test-pi-review` checks the
+  real terminal handoff when Pi is installed; `scripts/test-browser-review`
+  drives the local viewer in temporary Chromium. Real host and model behavior
+  remains covered by [agent evaluations](agent-review-evals.md).
 
 ## Performance work
 
@@ -97,7 +102,9 @@ Bump the workspace version in [Cargo.toml](../Cargo.toml), refresh
 runs on every push to `main` and acts when the version has no release yet: it
 waits for a successful CI **push** run on that exact commit, builds, tags, and
 publishes. If it fails, fix `main` and the next push retries, or dispatch it
-from the current `main`. The
+from the current `main`. A retry of the original release commit also retries
+integration publication when the core release already exists. A later commit
+with that same version does not replace the released source. The
 [Installs workflow](../.github/workflows/installs.yml) then installs the release
 with Homebrew, the install script, mise, and Nix on each platform and checks the
 version; it runs again daily.
@@ -107,6 +114,36 @@ Source qualification and packaging rules live in the Release workflow and
 installer contract: [install.sh](../scripts/install.sh) and mise's GitHub
 backend select archives by their target triple. Change the installer and
 packaging checks together if that contract changes.
+
+The [integration publication workflow](../.github/workflows/publish-integrations.yml)
+runs after the core release. It generates all five standalone ZIPs, Claude and
+Codex marketplace catalogs, and Pi/OpenCode npm tarballs from the same qualified
+source and workspace version. `release-index.json` records artifact hashes and
+npm integrity. The generated `integrations` branch is the public marketplace;
+the source templates under `assets/integrations` are not installable packages.
+GitHub downloads and marketplace publication can finish even when npm needs
+authentication. The workflow reports npm failures and can resume without
+republishing conflicting immutable versions.
+
+npm trusted publishers for `mark-pi` and `mark-opencode` must name GitHub owner
+`phongndo`, repository `mark`, calling workflow `release.yml`, and environment
+`release`. Allow both direct publication and `npm dist-tag`. The workflow pins
+Node 24 and npm 11.21.0 for OIDC publication and tag promotion. An optional
+`NPM_TOKEN` secret in the `release` environment is the explicit fallback.
+Configure publishers in each package's npm settings after its initial
+authenticated publication; see [npm's trusted publisher documentation](https://docs.npmjs.com/trusted-publishers/).
+No npm login token belongs in the repository.
+
+For local artifact inspection, run:
+
+```sh
+scripts/ci/prepare-integrations --source-sha "$(git rev-parse HEAD)" --output /tmp/mark-integration-release
+```
+
+The output directory must be empty. `node --test tools/test-integrations-release.mjs`
+checks deterministic packaging, registry verification, and retry behavior with
+an isolated registry fixture. Actual publication additionally verifies the
+downloaded npm tarball bytes before promoting either package to `latest`.
 
 The generated `mark-cli.rb` release asset is consumed by
 [phongndo/homebrew-tap](https://github.com/phongndo/homebrew-tap). For immediate

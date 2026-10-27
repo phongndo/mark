@@ -1,0 +1,244 @@
+#!/usr/bin/env python3
+"""Exercise the real Pi terminal handoff without credentials or network calls.
+
+Run inside the development shell after building mark-cli. Python uses only its
+standard library; --pi and --mark accept explicit installed/built executables.
+The final receipt check uses a local mock provider, not a model service.
+"""
+
+import argparse
+import fcntl
+import json
+import os
+from pathlib import Path
+import pty
+import re
+import select
+import shutil
+import signal
+import struct
+import subprocess
+import tempfile
+import termios
+import time
+import uuid
+
+
+ROOT = Path(__file__).resolve().parents[1]
+ANSI = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]")
+MOCK_PROVIDER = r'''
+import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
+export default function (pi) {
+  pi.registerProvider("mark-test-local", {
+    baseUrl: "http://127.0.0.1", api: "mark-test-local-api", apiKey: "local-test-only",
+    models: [{ id: "receipt", name: "Local receipt test", reasoning: false,
+      input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 32768, maxTokens: 1024 }],
+    streamSimple(model) {
+      const stream = createAssistantMessageEventStream();
+      const message = { role: "assistant", content: [], api: "mark-test-local-api",
+        provider: "mark-test-local", model: model.id, timestamp: Date.now(), stopReason: "stop",
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
+      queueMicrotask(() => {
+        stream.push({ type: "start", partial: message });
+        message.content.push({ type: "text", text: "Local receipt accepted." });
+        stream.push({ type: "text_start", contentIndex: 0, partial: message });
+        stream.push({ type: "text_delta", contentIndex: 0, delta: "Local receipt accepted.", partial: message });
+        stream.push({ type: "text_end", contentIndex: 0, content: "Local receipt accepted.", partial: message });
+        stream.push({ type: "done", reason: "stop", message });
+        stream.end();
+      });
+      return stream;
+    },
+  });
+}
+'''
+
+
+class Terminal:
+    def __init__(self, command, cwd, env):
+        self.master, slave = pty.openpty()
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 120, 0, 0))
+
+        def own_terminal():
+            os.setsid()
+            fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+
+        self.process = subprocess.Popen(command, cwd=cwd, env=env, stdin=slave,
+                                        stdout=slave, stderr=slave, preexec_fn=own_terminal)
+        os.close(slave)
+        self.output = ""
+
+    def pump(self, timeout=0.1):
+        if select.select([self.master], [], [], timeout)[0]:
+            try:
+                self.output += os.read(self.master, 65536).decode("utf-8", "replace")
+            except OSError:
+                pass
+
+    def wait(self, predicate, description, timeout=12):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            self.pump()
+            if predicate():
+                return
+            if self.process.poll() is not None:
+                break
+        raise AssertionError(f"Timed out waiting for {description}:\n{ANSI.sub('', self.output)[-2500:]}")
+
+    def contains(self, text, after=0):
+        return text in ANSI.sub("", self.output[after:])
+
+    def send(self, text):
+        start = len(self.output)
+        os.write(self.master, text.encode())
+        return start
+
+    def close(self):
+        if self.process.poll() is None:
+            self.send("\x04")
+            deadline = time.monotonic() + 1
+            while self.process.poll() is None and time.monotonic() < deadline:
+                self.pump()
+        if self.process.poll() is None:
+            os.killpg(self.process.pid, signal.SIGTERM)
+            try:
+                self.process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                os.killpg(self.process.pid, signal.SIGKILL)
+                self.process.wait(timeout=3)
+        os.close(self.master)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--pi", default=shutil.which("pi"))
+    parser.add_argument("--mark", default=str(ROOT / "target/debug/mark"))
+    parser.add_argument("--package-dir", type=Path, help="An exported Pi package; otherwise generate one temporarily")
+    args = parser.parse_args()
+    if not args.pi:
+        parser.error("Pi is unavailable; pass --pi /absolute/path/to/pi")
+    mark = str(Path(args.mark).resolve())
+    if not Path(mark).is_file():
+        parser.error("Build Mark first: nix develop -c cargo build -p mark-cli --locked")
+    with tempfile.TemporaryDirectory(prefix="mark-pi-pty-") as temporary:
+        task = Path(temporary)
+        repository = task / "repository"
+        repository.mkdir()
+        # Pass no inherited credentials or provider settings into the fixture.
+        env = {key: os.environ[key] for key in ("PATH", "HOME", "USER", "SHELL", "LANG", "LC_ALL", "COLORTERM") if key in os.environ}
+        env.update(TERM="xterm-256color", PI_OFFLINE="1", MARK_BIN=mark,
+                   PI_CODING_AGENT_DIR=str(task / "pi"), XDG_STATE_HOME=str(task / "state"),
+                   XDG_CONFIG_HOME=str(task / "config"), XDG_DATA_HOME=str(task / "data"),
+                   XDG_CACHE_HOME=str(task / "cache"))
+        package = args.package_dir
+        if package is None:
+            if not shutil.which("node"):
+                parser.error("Use nix develop for Node, or supply --package-dir from mark integration path --agent pi")
+            subprocess.run(["node", str(ROOT / "assets/integrations/package.mjs"), str(task / "packages")], env=env, check=True, stdout=subprocess.DEVNULL)
+            package = task / "packages/pi"
+        extension = str((package / "index.js").resolve())
+        if not Path(extension).is_file():
+            parser.error("--package-dir must contain the exported Pi index.js")
+        provider = task / "local-provider.js"
+        provider.write_text(MOCK_PROVIDER)
+
+        def git(*arguments):
+            subprocess.run(["git", *arguments], cwd=repository, env=env, check=True, capture_output=True)
+
+        git("init", "--quiet")
+        git("config", "user.name", "Mark terminal test")
+        git("config", "user.email", "mark-test@example.invalid")
+        (repository / "example.txt").write_text("before\n")
+        git("add", "example.txt")
+        git("commit", "--quiet", "-m", "baseline")
+        (repository / "example.txt").write_text("after\n")
+        conversation = str(uuid.uuid4())
+
+        # Exercise Pi's actual MCP client before the UI test. Remove this
+        # temporary config afterward so the package itself registers the server
+        # during the terminal portion of the test.
+        agent_dir = task / "pi"
+        agent_dir.mkdir(exist_ok=True)
+        mcp_config = agent_dir / "mcp.json"
+        mcp_config.write_text(json.dumps({"mcpServers": {"mark": {"command": mark, "args": ["mcp"]}}}))
+        checked = subprocess.run([args.pi, "mcp", "list", "--json"], cwd=repository, env=env,
+                                 text=True, capture_output=True, timeout=15)
+        status = json.loads(checked.stdout)
+        assert checked.returncode == 0 and not status["errors"], status
+        server = next(server for server in status["servers"] if server["name"] == "mark")
+        assert server["state"] == "connected", server
+        assert {"review_open", "review_get", "review_patch", "review_refresh", "review_changes",
+                "comment_add", "comment_reply", "feedback_get", "feedback_wait", "feedback_ack"} <= set(server["tools"]), server
+        assert "feedback_submit" not in server["tools"], "Submission remains a human UI action"
+        mcp_config.unlink()
+
+        def run_json(arguments, params=None):
+            result = subprocess.run([mark, *arguments], cwd=repository, env=env,
+                                    input=None if params is None else json.dumps(params),
+                                    text=True, capture_output=True, timeout=10)
+            response = json.loads(result.stdout)
+            assert response.get("ok"), response
+            assert result.returncode == 0, result.stderr
+            return response["result"]
+
+        def call(method, params):
+            return run_json(["bridge", "call", method, "--stdin", "--json"], params)
+
+        def open_review():
+            return run_json(["bridge", "open", "--harness", "pi", "--conversation", conversation,
+                             "--repo", str(repository), "--json"])
+
+        review = open_review()
+        review_id = review["review_id"]
+        note = "Preserve this draft across Back."
+        call("comment.add", {"review_id": review_id, "generation": review["generation"],
+                             "client_mutation_id": str(uuid.uuid4()), "origin": "human",
+                             "anchor": {"file": "example.txt", "new_line": 1}, "body": note})
+        current = lambda: call("review.get", {"review_id": review_id})
+        command = [args.pi, "--offline", "--no-session", "--session-id", conversation,
+                   "--no-context-files", "--no-skills", "--no-extensions",
+                   "-e", "builtin:mcp", "-e", extension]
+
+        terminal = Terminal(command, repository, env)
+        try:
+            terminal.wait(lambda: terminal.contains("commands"), "Pi startup")
+            start = terminal.send("/mark\r")
+            terminal.wait(lambda: terminal.contains("Q sends feedback", start), "same-terminal Mark handoff")
+            terminal.wait(lambda: terminal.contains(note, start), "restored human draft")
+            start = terminal.send("q")
+            terminal.wait(lambda: terminal.contains("commands", start), "Pi renderer restoration after Back")
+            saved = current()
+            assert saved["last_return"]["outcome"] == "back", saved["last_return"]
+            assert not saved["submissions"]
+            assert saved["threads"][0]["messages"][0]["body"] == note
+            start = terminal.send("/mark\r")
+            terminal.wait(lambda: terminal.contains("Q sends feedback", start), "reopened Mark review")
+            assert current()["review_id"] == review_id
+            start = terminal.send("Q")
+            terminal.wait(lambda: terminal.contains("No API key", start), "isolated provider rejection")
+            saved = current()
+            assert saved["last_return"]["outcome"] == "submitted"
+            assert len(saved["submissions"]) == 1
+            assert saved["submissions"][0]["acknowledged_by"] == [], "An unrecorded message must remain pending"
+        finally:
+            terminal.close()
+
+        # Retry the same conversation with an in-process, network-free provider.
+        accepted = Terminal(command + ["-e", str(provider), "--provider", "mark-test-local",
+                                       "--model", "receipt", "--api-key", "local-test-only"], repository, env)
+        try:
+            accepted.wait(lambda: accepted.contains("commands"), "Pi startup with local provider")
+            start = accepted.send("/mark\r")
+            accepted.wait(lambda: accepted.contains("Local receipt accepted.", start), "recorded user message and local assistant response")
+            consumer = f"pi:{conversation}"
+            accepted.wait(lambda: consumer in current()["submissions"][0]["acknowledged_by"], "feedback receipt acknowledgement")
+            assert current()["review_id"] == review_id
+        finally:
+            accepted.close()
+    print("Pi terminal check passed: real MCP discovery, same-terminal review, Back preserves drafts, Submit stays pending until recorded, retry keeps the review ID.")
+
+
+if __name__ == "__main__":
+    main()

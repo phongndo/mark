@@ -48,8 +48,30 @@ exposed content and Mark's allocations, since engine storage is private.
 
 ## Live sessions
 
-[mark-session](../crates/mark-session/src/lib.rs) is a UI-independent transport
-and protocol boundary. Review state belongs to the live TUI, not a daemon or
-persistent review database. Agents contribute findings; human navigation,
-reviewed state, dispositions, and verdicts remain human-owned. Session lifetime
-and reload behavior are described in [usage](usage.md#live-agent-review-sessions).
+[mark-session](../crates/mark-session/src/lib.rs) owns UI-independent transport,
+protocol, and durable integrated review records. A live `session_id` identifies
+one process endpoint; a durable `review_id` identifies a review bound to an
+exact harness conversation, canonical worktree, and typed source. Standalone
+TUI sessions retain their existing in-memory lifetime.
+
+Checkpoint paths, schema validation, atomic replacement, and process locking
+belong to `mark-session`. The TUI adapts annotations and progress through the
+[integration](../crates/mark-tui/src/integration.rs) seam; viewport indexes,
+render caches, and drafts being composed remain UI-owned. Snapshot generations
+and review revisions serve separate purposes; feedback submissions retain
+immutable message versions.
+
+The CLI bridge loads source evidence through Mark's diff modules. Headless
+refresh uses the existing review transition to preserve progress and re-anchor
+comments consistently with a terminal reload. CLI, native panes, the local
+browser viewer, and MCP use the shared record interface. `mark-mcp` owns MCP
+framing, schemas, bounded responses, and the agent-facing projection; a callback
+connects it to review behavior. Agents see submitted human feedback through
+this projection. Human submission, navigation, reviewed state, dispositions,
+and verdicts remain human-owned.
+
+Harness adapters own presentation, exact conversation binding, and returning
+accepted feedback to that conversation. MCP subprocesses do not own the user's
+terminal. Browser viewers run on demand on loopback with a capability URL scoped
+to one review and expire after inactivity. Lifecycle and installation are
+described in [integrations](integrations.md).

@@ -3,7 +3,7 @@ use mark_session::ProtocolError;
 
 use crate::{annotation::diff_file_has_path, app::DiffApp};
 
-mod anchors;
+pub(crate) mod anchors;
 mod comments;
 mod controller;
 mod navigation;

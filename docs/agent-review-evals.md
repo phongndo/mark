@@ -1,5 +1,16 @@
 # Live agent workflow evaluations
 
+For native packages, first run `just ci-integrations`,
+the installed host's plugin tests, `scripts/test-pi-review`, and
+`scripts/test-browser-review` where available. Then exercise the complete native
+loop in a disposable repository: invoke Mark, submit a question and a requested
+change, have the agent address both, and reopen the same review to inspect the
+next pass. Check the exact originating conversation/worktree, preserved replies,
+changed scope, cancellation, failed delivery, and repeated invocation. Record
+host/model versions and distinguish unsupported surfaces from failures. Native
+launch is part of this workflow; the existing-session prohibition below applies
+to standalone live sessions only.
+
 These are behavioral evaluations of the bundled skill, not phrase-matching unit
 tests. Run them with a real shell-capable agent against a disposable repository.
 They are intentionally provider-neutral and operator-scored: a successful CLI

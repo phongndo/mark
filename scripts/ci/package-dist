@@ -39,6 +39,10 @@ rm -rf "$package_dir"
 mkdir -p "$package_dir"
 install -m 755 "$binary" "$package_dir/mark"
 cp README.md LICENSE "$package_dir/"
+for harness in pi claude codex opencode fx; do
+  "$binary" integration export --agent "$harness" \
+    --output "$package_dir/integrations/$harness" >/dev/null
+done
 notices="$package_dir/THIRD_PARTY_NOTICES"
 : > "$notices"
 for notice_dir in assets/licenses/syntaxmate-0.2.0 assets/themes/licenses; do

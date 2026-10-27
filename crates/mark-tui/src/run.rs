@@ -78,6 +78,7 @@ fn run_diff_with_options_and_session(
         options,
         run_options,
         session_enabled,
+        None,
     ))?
 }
 
@@ -85,9 +86,29 @@ async fn run_diff_with_options_async(
     options: DiffOptions,
     run_options: DiffRunOptions,
     session_enabled: bool,
+    review_id: Option<String>,
 ) -> MarkResult<()> {
     let load_options = options.clone();
+    let initial_record = review_id
+        .as_ref()
+        .map(|id| {
+            mark_session::review::ReviewStore::from_env()?
+                .call("review.get", serde_json::json!({"review_id":id}))
+        })
+        .transpose()?;
+    let initial_patch = initial_record
+        .as_ref()
+        .and_then(|record| record["snapshot"]["patch"].as_str())
+        .map(str::to_owned);
     let changeset = runtime::spawn_blocking(move || {
+        if let Some(patch) = initial_patch {
+            let mut snapshot = load_options.clone();
+            snapshot.source = mark_diff::DiffSource::Patch(mark_diff::PatchSource::Text {
+                label: "Mark review".into(),
+                patch: std::sync::Arc::from(patch.into_bytes()),
+            });
+            return mark_diff::load_review_ref_with_raw_patch(&snapshot);
+        }
         if session_enabled {
             mark_diff::load_review_ref_with_raw_patch(&load_options)
         } else {
@@ -108,6 +129,9 @@ async fn run_diff_with_options_async(
         SyntaxStartupMode::Disabled
     };
     let mut app = DiffApp::new_with_syntax(options, changeset, layout, syntax_mode);
+    if let Some(record) = initial_record {
+        crate::integration::attach(&mut app, record)?;
+    }
     if let Some(empty_diff_fill) = run_options.empty_diff_fill {
         app.config.theme.decorations.empty_fill = empty_diff_fill;
     }
@@ -149,7 +173,39 @@ async fn run_diff_with_options_async(
         session.as_mut(),
     )
     .await;
-    finish_diff_view(&mut app, &mut cleanup, result)
+    finish_diff_view(&mut app, &mut cleanup, result)?;
+    crate::integration::finish(&mut app)
+}
+
+/// Run a harness-bound review. Terminal ownership remains with the native host
+/// adapter; feedback is returned as data after the terminal has been restored.
+pub fn run_integrated_review(
+    options: DiffOptions,
+    review_id: &str,
+) -> MarkResult<serde_json::Value> {
+    runtime::block_on(run_diff_with_options_async(
+        options,
+        DiffRunOptions::default(),
+        false,
+        Some(review_id.to_owned()),
+    ))??;
+    let record = mark_session::review::ReviewStore::from_env()?
+        .call("review.get", serde_json::json!({"review_id":review_id}))?;
+    let returned = &record["last_return"];
+    let ids = returned["submission_ids"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let feedback = record["submissions"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|submission| ids.contains(&submission["submission_id"]))
+        .cloned()
+        .collect::<Vec<_>>();
+    Ok(
+        serde_json::json!({"review_id":review_id,"generation":record["generation"],"outcome":returned["outcome"],"submission_ids":ids,"feedback":feedback}),
+    )
 }
 
 // Formatting stays out of the async body: rust-analyzer treats every

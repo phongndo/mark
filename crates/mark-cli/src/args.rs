@@ -69,6 +69,18 @@ pub(crate) fn help_styles() -> Styles {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
+    #[command(about = "Materialize or export a bundled harness integration")]
+    Integration {
+        #[command(subcommand)]
+        command: crate::integration::IntegrationCommand,
+    },
+    #[command(about = "Run the bundled local MCP server")]
+    Mcp(crate::bridge::McpArgs),
+    #[command(about = "Open and exchange reviews with a coding harness")]
+    Bridge {
+        #[command(subcommand)]
+        command: crate::bridge::BridgeCommand,
+    },
     #[command(
         about = "Review all local changes",
         after_help = "\

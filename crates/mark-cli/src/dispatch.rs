@@ -15,6 +15,9 @@ use crate::{
 
 pub(crate) fn run_cli(cli: Cli) -> CliResult<()> {
     match cli.command {
+        Some(Command::Integration { command }) => crate::integration::run(command),
+        Some(Command::Mcp(args)) => crate::bridge::mcp(args),
+        Some(Command::Bridge { command }) => crate::bridge::run(command),
         None => Ok(()),
         Some(Command::Config) => config::config(),
         Some(Command::Diff(args)) => {

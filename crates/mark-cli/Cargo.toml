@@ -22,6 +22,7 @@ mark-core.workspace = true
 mark-diff.workspace = true
 mark-git.workspace = true
 mark-runtime.workspace = true
+mark-mcp = { path = "../mark-mcp" }
 mark-session.workspace = true
 mark-syntax.workspace = true
 mark-tui.workspace = true
@@ -29,6 +30,7 @@ serde.workspace = true
 serde_json.workspace = true
 shlex.workspace = true
 unicode-width.workspace = true
+tempfile.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 rustix.workspace = true
