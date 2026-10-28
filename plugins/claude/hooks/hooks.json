@@ -1,0 +1,4 @@
+{
+  "description": "Native Mark review pane and /mark command",
+  "modules": ["./register.js"]
+}

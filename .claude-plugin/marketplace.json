@@ -1,0 +1,13 @@
+{
+  "name": "mark",
+  "owner": {
+    "name": "Mark maintainers"
+  },
+  "plugins": [
+    {
+      "name": "mark",
+      "source": "./plugins/claude",
+      "description": "Review agent changes with Mark"
+    }
+  ]
+}

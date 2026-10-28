@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "mark": {
+      "type": "stdio",
+      "command": "mark",
+      "args": ["mcp", "--harness", "fx"]
+    }
+  }
+}

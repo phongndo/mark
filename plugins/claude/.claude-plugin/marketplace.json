@@ -1,0 +1,13 @@
+{
+  "name": "mark-local",
+  "owner": {
+    "name": "Mark"
+  },
+  "plugins": [
+    {
+      "description": "Review changes and submit feedback without leaving the Claude conversation.",
+      "name": "mark",
+      "source": "./"
+    }
+  ]
+}

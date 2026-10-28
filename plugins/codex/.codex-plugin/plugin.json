@@ -1,0 +1,7 @@
+{
+  "description": "Mark review tools and review-loop skill. Invoke with $mark; desktop reviews use the local browser.",
+  "mcpServers": "./.mcp.json",
+  "name": "mark",
+  "skills": "./skills/",
+  "version": "0.16.0"
+}

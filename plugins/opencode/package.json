@@ -1,0 +1,45 @@
+{
+  "bugs": "https://github.com/phongndo/mark/issues",
+  "dependencies": {
+    "@opencode/plugin": ">=2.2.0 <3"
+  },
+  "description": "Run a Mark review in the current OpenCode V2 terminal.",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "exports": {
+    ".": "./server.js",
+    "./tui": "./tui.js"
+  },
+  "files": [
+    "server.js",
+    "tui.js",
+    "adapter.mjs",
+    "common/bridge.mjs",
+    "skills/mark-review-loop"
+  ],
+  "homepage": "https://github.com/phongndo/mark",
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "mark",
+    "code-review",
+    "diff",
+    "mcp"
+  ],
+  "license": "MIT",
+  "name": "mark-opencode",
+  "peerDependencies": {
+    "solid-js": ">=1.9.0 <2"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "directory": "assets/integrations/opencode",
+    "type": "git",
+    "url": "git+https://github.com/phongndo/mark.git"
+  },
+  "type": "module",
+  "version": "0.16.0"
+}

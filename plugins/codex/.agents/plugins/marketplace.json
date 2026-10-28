@@ -1,0 +1,20 @@
+{
+  "interface": {
+    "displayName": "Mark"
+  },
+  "name": "mark-local",
+  "plugins": [
+    {
+      "category": "Productivity",
+      "name": "mark",
+      "policy": {
+        "authentication": "ON_INSTALL",
+        "installation": "AVAILABLE"
+      },
+      "source": {
+        "path": "./",
+        "source": "local"
+      }
+    }
+  ]
+}

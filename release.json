@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "version": "0.16.0",
+  "source_sha": "a9087db0a1829c7b4764a2ca55292c1ee7b96175",
+  "release_tag": "v0.16.0",
+  "npm": [
+    {
+      "host": "pi",
+      "name": "mark-pi",
+      "version": "0.16.0",
+      "integrity": "sha512-JK1skCEQYxt4JrS8WoxlvcsLnSHHTXnjH5CI4+GZRgxW3RyI+sn6GT3DMPJFra41o6z2otYPKWut7ox9qPVsLQ=="
+    },
+    {
+      "host": "opencode",
+      "name": "mark-opencode",
+      "version": "0.16.0",
+      "integrity": "sha512-MW8SrPbqK9jqR3v7DoL50WTxt/v0l7y8FOL96kW7DZeYj+Q+EOOS977DgZLZ/vmEpicJF6J6L9ttLJUEkuwagg=="
+    }
+  ]
+}

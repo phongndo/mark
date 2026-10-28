@@ -1,0 +1,3 @@
+{
+  "mcpServers": { "mark": { "command": "mark", "args": ["mcp"] } }
+}
