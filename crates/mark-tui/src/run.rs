@@ -79,7 +79,9 @@ fn run_diff_with_options_and_session(
         run_options,
         session_enabled,
         None,
+        false,
     ))?
+    .map(|_| ())
 }
 
 async fn run_diff_with_options_async(
@@ -87,7 +89,8 @@ async fn run_diff_with_options_async(
     run_options: DiffRunOptions,
     session_enabled: bool,
     review_id: Option<String>,
-) -> MarkResult<()> {
+    annotation_handoff: bool,
+) -> MarkResult<Option<String>> {
     let load_options = options.clone();
     let initial_record = review_id
         .as_ref()
@@ -129,6 +132,7 @@ async fn run_diff_with_options_async(
         SyntaxStartupMode::Disabled
     };
     let mut app = DiffApp::new_with_syntax(options, changeset, layout, syntax_mode);
+    app.runtime.annotation_handoff = annotation_handoff.then_some(None);
     if let Some(record) = initial_record {
         crate::integration::attach(&mut app, record)?;
     }
@@ -174,7 +178,19 @@ async fn run_diff_with_options_async(
     )
     .await;
     finish_diff_view(&mut app, &mut cleanup, result)?;
-    crate::integration::finish(&mut app)
+    crate::integration::finish(&mut app)?;
+    Ok(app.runtime.annotation_handoff.take().flatten())
+}
+
+/// A terminal annotation session. Only an explicit Send returns Markdown.
+pub fn run_annotation_review(options: DiffOptions) -> MarkResult<Option<String>> {
+    runtime::block_on(run_diff_with_options_async(
+        options,
+        DiffRunOptions::default(),
+        false,
+        None,
+        true,
+    ))?
 }
 
 /// Run a harness-bound review. Terminal ownership remains with the native host
@@ -188,6 +204,7 @@ pub fn run_integrated_review(
         DiffRunOptions::default(),
         false,
         Some(review_id.to_owned()),
+        false,
     ))??;
     let record = mark_session::review::ReviewStore::from_env()?
         .call("review.get", serde_json::json!({"review_id":review_id}))?;

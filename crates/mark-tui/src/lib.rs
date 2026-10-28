@@ -25,8 +25,8 @@ mod theme;
 mod toast;
 
 pub use run::{
-    DiffRunOptions, benchmark_diff_view, run_diff_with_options, run_integrated_review,
-    run_pager_diff_with_options,
+    DiffRunOptions, benchmark_diff_view, run_annotation_review, run_diff_with_options,
+    run_integrated_review, run_pager_diff_with_options,
 };
 pub use static_pager::{
     StaticPagerLayout, StaticPagerOptions, render_static_changeset,

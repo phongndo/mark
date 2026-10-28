@@ -854,11 +854,7 @@ impl DiffApp {
             .borrow_mut()
             .insert(draft.key.clone(), Some(draft.model_row_index));
         if draft.input.trim().is_empty() {
-            if self
-                .annotations_state
-                .annotations
-                .last_comment_is_human(&draft.key)
-            {
+            if self.annotations_state.annotations.has_human(&draft.key) {
                 self.annotations_state.annotations.remove_human(&draft.key);
             }
             if self.annotations_state.annotations.get(&draft.key).is_none() {

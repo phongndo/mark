@@ -82,14 +82,7 @@ impl ReviewCommentStore {
     }
 
     pub(crate) fn editable_human_text(&self, key: &AnnotationKey) -> Option<&str> {
-        self.last_comment_is_human(key)
-            .then(|| self.human_text(key))
-            .flatten()
-    }
-
-    pub(crate) fn last_comment_is_human(&self, key: &AnnotationKey) -> bool {
-        self.last_comment(key)
-            .is_some_and(|comment| comment.origin == CommentOrigin::Human)
+        self.human_text(key)
     }
 
     pub(crate) fn human_bodies(&self, key: &AnnotationKey) -> Option<String> {
@@ -108,15 +101,6 @@ impl ReviewCommentStore {
     pub(crate) fn has_human(&self, key: &AnnotationKey) -> bool {
         self.comments_at(key)
             .any(|comment| comment.origin == CommentOrigin::Human)
-    }
-
-    pub(crate) fn has_agent(&self, key: &AnnotationKey) -> bool {
-        self.comments_at(key)
-            .any(|comment| comment.origin == CommentOrigin::Agent)
-    }
-
-    pub(crate) fn is_human_only(&self, key: &AnnotationKey) -> bool {
-        self.has_human(key) && !self.has_agent(key)
     }
 
     #[cfg(test)]
@@ -138,11 +122,8 @@ impl ReviewCommentStore {
             return Err(StoreLimitError);
         }
         let anchor = self.canonical_anchor(&anchor);
-        // The latest human turn is editable. A new note after an agent answer
-        // starts another turn.
-        if self.last_comment_is_human(&anchor)
-            && let Some(index) = self.human_index(&anchor)
-        {
+        // An annotation stays editable regardless of who added other notes.
+        if let Some(index) = self.human_index(&anchor) {
             let comment = self.comments[index]
                 .as_ref()
                 .expect("indexed comment should exist");
@@ -302,7 +283,10 @@ impl ReviewCommentStore {
     #[cfg(test)]
     pub(crate) fn remove(&mut self, anchor: &AnnotationKey) -> Option<String> {
         let previous = self.get(anchor).cloned()?;
-        if self.has_agent(anchor) {
+        let has_agent = self
+            .comments_at(anchor)
+            .any(|comment| comment.origin == CommentOrigin::Agent);
+        if has_agent {
             self.remove_agents_at(anchor);
         } else {
             self.remove_human(anchor)?;
@@ -447,12 +431,6 @@ impl ReviewCommentStore {
             }
         }
         self.rebuild_anchor(&comment.anchor);
-    }
-
-    fn last_comment(&self, anchor: &AnnotationKey) -> Option<&ReviewComment> {
-        let id = self.anchors.get(anchor)?.ids.last()?;
-        let index = *self.by_id.get(id)?;
-        self.comments.get(index)?.as_ref()
     }
 
     fn human_index(&self, anchor: &AnnotationKey) -> Option<usize> {
@@ -612,61 +590,23 @@ fn same_rendered_anchor(left: &AnnotationKey, right: &AnnotationKey) -> bool {
 }
 
 fn render_comments(comments: &[&ReviewComment]) -> String {
-    if comments.len() == 1 {
-        let comment = comments[0];
-        if comment.origin == CommentOrigin::Human {
-            return comment.summary.clone();
-        }
-        return match comment.rationale.as_deref() {
-            Some(rationale) if !rationale.is_empty() => {
-                format!("{}\n\n{rationale}", comment.summary)
-            }
-            _ => comment.summary.clone(),
-        };
-    }
-
-    let mut rendered = String::new();
-    for (index, comment) in comments.iter().enumerate() {
-        if index > 0 {
-            rendered.push_str("\n\n");
-        }
-        match comment.origin {
-            CommentOrigin::Human => rendered.push_str("Human: "),
-            CommentOrigin::Agent => {
-                rendered.push_str("Agent");
-                if let Some(author) = comment
-                    .author
-                    .as_deref()
-                    .filter(|author| !author.is_empty())
-                {
-                    rendered.push_str(" (");
-                    rendered.push_str(author);
-                    rendered.push(')');
-                }
-                rendered.push_str(": ");
-            }
-        }
-        rendered.push_str(&comment.summary);
-        if let Some(rationale) = comment.rationale.as_deref().filter(|text| !text.is_empty()) {
-            rendered.push('\n');
-            rendered.push_str(rationale);
-        }
-    }
-    rendered
+    comments
+        .iter()
+        .map(
+            |comment| match comment.rationale.as_deref().filter(|text| !text.is_empty()) {
+                Some(rationale) => format!("{}\n\n{rationale}", comment.summary),
+                None => comment.summary.clone(),
+            },
+        )
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 fn comment_label(comments: &[&ReviewComment]) -> String {
     match comments {
-        [comment] if comment.origin == CommentOrigin::Human => lifecycle_label("Human", comment),
-        [comment] => {
-            let origin = comment
-                .author
-                .as_deref()
-                .map_or_else(|| "Agent".to_owned(), |author| format!("Agent · {author}"));
-            lifecycle_label(&origin, comment)
-        }
+        [comment] => lifecycle_label("Mark", comment),
         comments => {
-            let mut label = format!("{} comments", comments.len());
+            let mut label = format!("{} marks", comments.len());
             if comments
                 .iter()
                 .any(|comment| comment.lifecycle == CommentLifecycle::Moved)
@@ -765,8 +705,11 @@ mod tests {
         assert_eq!(store.len(), 2);
         assert_eq!(store.anchor_count(), 1);
         assert_eq!(ids, ["agent-2"]);
-        assert!(store.get(&anchor()).unwrap().contains("Human:"));
-        assert!(store.get(&anchor()).unwrap().contains("Agent (codex):"));
+        assert_eq!(
+            store.get(&anchor()).unwrap(),
+            "human note\n\nagent finding\n\nreason"
+        );
+        assert_eq!(store.label(&anchor()), Some("2 marks"));
     }
 
     #[test]
@@ -801,7 +744,7 @@ mod tests {
         assert!(!rendered.contains('\u{7}'));
         assert!(rendered.contains("summary\\u{1b}]52;c;summary\\u{7}"));
         assert!(rendered.contains("rationale\\u{1b}]52;c;rationale\\u{7}"));
-        assert!(rendered.contains("author\\u{1b}]52;c;author\\u{7}"));
+        assert!(!rendered.contains("author"));
     }
 
     #[test]
@@ -855,7 +798,8 @@ mod tests {
 
         assert!(store.remove(&anchor).is_some());
         assert_eq!(store.human_text(&anchor), Some("human note"));
-        assert!(store.is_human_only(&anchor));
+        assert_eq!(store.len(), 1);
+        assert!(store.has_human(&anchor));
         assert!(store.remove(&anchor).is_some());
         assert!(!store.contains_key(&anchor));
     }
@@ -983,7 +927,7 @@ mod tests {
     }
 
     #[test]
-    fn human_follow_up_after_agent_appends_a_new_turn() {
+    fn editing_a_note_after_an_agent_annotation_updates_the_same_note() {
         let mut store = ReviewCommentStore::default();
         store
             .insert_human(anchor(), "what does this mean?".to_owned(), 1)
@@ -1000,27 +944,22 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(store.human_text(&anchor()), Some("what does this mean?"));
-        assert_eq!(store.editable_human_text(&anchor()), None);
+        assert_eq!(
+            store.editable_human_text(&anchor()),
+            Some("what does this mean?")
+        );
         assert_eq!(
             store.insert_human(anchor(), "replace it".to_owned(), 1),
-            Ok(None)
+            Ok(Some("what does this mean?".to_owned()))
         );
-        assert_eq!(store.len(), 3);
+        assert_eq!(store.len(), 2);
         assert_eq!(store.human_text(&anchor()), Some("replace it"));
-        assert_eq!(store.editable_human_text(&anchor()), Some("replace it"));
-        assert_eq!(
-            store.human_bodies(&anchor()).as_deref(),
-            Some("what does this mean?\n\nreplace it")
-        );
-        let rendered = store.get(&anchor()).expect("stacked mark");
-        assert!(rendered.contains("Human: what does this mean?"));
-        assert!(rendered.contains("Agent (pi): it retries"));
-        assert!(rendered.contains("Human: replace it"));
+        assert_eq!(store.human_bodies(&anchor()).as_deref(), Some("replace it"));
+        assert_eq!(store.get(&anchor()).unwrap(), "replace it\n\nit retries");
     }
 
     #[test]
-    fn editing_the_latest_human_turn_replaces_it() {
+    fn repeated_edits_do_not_create_conversation_turns() {
         let mut store = ReviewCommentStore::default();
         store
             .insert_human(anchor(), "what does this mean?".to_owned(), 1)
@@ -1042,12 +981,9 @@ mod tests {
             store.insert_human(anchor(), "fixed".to_owned(), 1),
             Ok(Some("typo".to_owned()))
         );
-        assert_eq!(store.len(), 3);
+        assert_eq!(store.len(), 2);
         assert_eq!(store.human_text(&anchor()), Some("fixed"));
-        assert_eq!(
-            store.human_bodies(&anchor()).as_deref(),
-            Some("what does this mean?\n\nfixed")
-        );
+        assert_eq!(store.human_bodies(&anchor()).as_deref(), Some("fixed"));
     }
 
     #[test]

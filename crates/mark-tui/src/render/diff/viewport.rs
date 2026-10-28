@@ -191,7 +191,7 @@ fn push_annotation_blocks(
                         width,
                         theme,
                         Some(&label),
-                        app.annotations_state.annotations.is_human_only(&key),
+                        app.annotations_state.annotations.has_human(&key),
                     ),
                     width,
                     theme,

@@ -156,7 +156,7 @@ fn editing_or_removing_a_human_note_preserves_thread_identity() {
 }
 
 #[test]
-fn sending_an_already_submitted_review_keeps_the_view_open() {
+fn returning_an_already_submitted_review_is_immediate() {
     let (_directory, store, record, mut view) = fixture();
     attach_with_store(&mut view, record, store).unwrap();
     let key =
@@ -172,7 +172,8 @@ fn sending_an_already_submitted_review_keeps_the_view_open() {
     let outcome = view
         .perform_app_action_with_effects(crate::app::AppAction::SubmitMarks)
         .unwrap();
-    assert_eq!(outcome.handled_quit_request(), Some(false));
+    assert_eq!(outcome.handled_quit_request(), Some(true));
+    assert_eq!(outcome.into_effects(), [crate::app::AppEffect::Quit]);
 }
 
 #[test]

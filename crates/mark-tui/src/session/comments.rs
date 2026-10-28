@@ -663,12 +663,13 @@ mod tests {
             .flat_map(|line| line.spans)
             .map(|span| span.content.into_owned())
             .collect::<String>();
-        assert!(rendered.contains("2 comments"));
-        assert!(rendered.contains("Agent (agent): finding"));
+        assert!(rendered.contains("2 marks"));
+        assert!(rendered.contains("finding"));
+        assert!(!rendered.contains("Agent ("));
     }
 
     #[test]
-    fn agent_author_controls_are_escaped_in_the_card_title() {
+    fn annotation_cards_do_not_render_agent_authors() {
         let mut app = app();
         let mut input = comment(1);
         input.author = Some("unsafe\u{1b}]52;c;payload\u{7}".to_owned());
@@ -689,7 +690,7 @@ mod tests {
             .collect::<String>();
         assert!(!rendered.contains('\u{1b}'));
         assert!(!rendered.contains('\u{7}'));
-        assert!(rendered.contains("unsafe\\u{1b}]52;c;payload\\u{7}"));
+        assert!(!rendered.contains("unsafe"));
     }
 
     #[test]

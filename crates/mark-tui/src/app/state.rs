@@ -27,7 +27,7 @@ use mark_diff::{BranchName, Changeset, DiffOptions, DiffStats};
 use mark_syntax::{AnnotationTargeting, ColorOverrides, SyntaxLimits, SyntaxSettings};
 use ratatui::layout::Rect;
 use std::cell::RefCell;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, atomic::AtomicU64};
 use std::time::{Duration, Instant};
 
@@ -149,6 +149,9 @@ pub(crate) struct OverlayState {
     pub(crate) review_input_cursor: usize,
     pub(crate) options_menu: SelectorState,
     pub(crate) annotation_menu: SelectorState,
+    pub(crate) annotation_selection: HashSet<AnnotationKey>,
+    // The marks list is keyboard-first; `/` moves typing into its filter.
+    pub(crate) annotation_menu_filtering: bool,
     pub(crate) options_menu_draft: OptionsDraft,
     pub(crate) color_scheme_picker: SelectorState,
     pub(crate) color_scheme_preview_original: Option<(BuiltinTheme, DiffTheme)>,
@@ -305,6 +308,8 @@ impl OverlayState {
             self.active_overlay = ActiveOverlay::None;
         }
         self.annotation_menu.reset();
+        self.annotation_menu_filtering = false;
+        self.annotation_selection.clear();
         self.rendered_annotation_menu_area = None;
         true
     }
@@ -775,6 +780,7 @@ pub(crate) struct AppConfigState {
 #[derive(Debug)]
 pub(crate) struct RuntimeState {
     pub(crate) integration: Option<Box<crate::integration::IntegratedReview>>,
+    pub(crate) annotation_handoff: Option<Option<String>>,
     pub(crate) terminal_clear_requested: bool,
     pub(crate) dirty: bool,
     pub(crate) hit_map: HitMap,

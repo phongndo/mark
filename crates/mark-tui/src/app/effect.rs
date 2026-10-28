@@ -10,7 +10,7 @@ pub(crate) const MARK_ANNOTATIONS_PATH_ENV: &str = "MARK_ANNOTATIONS_PATH";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum AppEffect {
     Quit,
-    SubmitMarks(String),
+    SubmitMarks(String, Vec<crate::annotation::AnnotationKey>),
     Reload,
     OpenEditorShortcut,
     OpenFocusedHunkInEditor,
@@ -96,11 +96,9 @@ impl DiffApp {
     pub(crate) fn queue_effect(&mut self, effect: AppEffect) {
         self.runtime.push_effect(effect);
     }
-
     pub(crate) fn take_queued_effects(&mut self) -> Vec<AppEffect> {
         self.runtime.take_effects()
     }
-
     pub(crate) fn run_effects(&mut self, effects: Vec<AppEffect>) -> MarkResult<()> {
         for effect in effects {
             self.run_effect(effect)?;
@@ -111,9 +109,13 @@ impl DiffApp {
     pub(crate) fn run_effect(&mut self, effect: AppEffect) -> MarkResult<()> {
         match effect {
             AppEffect::Quit => Ok(()),
-            AppEffect::SubmitMarks(text) => {
+            AppEffect::SubmitMarks(text, keys) => {
+                if let Some(result) = self.runtime.annotation_handoff.as_mut() {
+                    *result = Some(text);
+                    return Ok(());
+                }
                 if self.runtime.integration.is_some() {
-                    return crate::integration::submit(self);
+                    return crate::integration::submit_selected(self, &keys);
                 }
                 match env::var(MARK_ANNOTATIONS_PATH_ENV) {
                     Ok(path) if !path.is_empty() => fs::write(path, text)?,

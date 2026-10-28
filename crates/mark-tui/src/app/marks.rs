@@ -45,7 +45,61 @@ impl DiffApp {
         Some(serde_json::to_string_pretty(&export).expect("marks export should serialize"))
     }
 
+    pub(crate) fn selected_annotations_markdown(
+        &self,
+        selected: &HashSet<AnnotationKey>,
+    ) -> Option<String> {
+        let mut marks = self.export_selected_marks(Some(selected));
+        marks.sort_by(|a, b| {
+            (&a.path, a.old_line, a.new_line).cmp(&(&b.path, b.old_line, b.new_line))
+        });
+        if marks.is_empty() {
+            return None;
+        }
+        Some(
+            marks
+                .into_iter()
+                .map(|mark| {
+                    let mut location = mark.path.replace(['\n', '\r'], " ");
+                    if let Some(line) = mark.new_line {
+                        location.push_str(&format!(":{line}"));
+                    } else if let Some(line) = mark.old_line {
+                        location.push_str(&format!(":{line} (old)"));
+                    } else if mark.scope == Some(MarkScope::Hunk) {
+                        location.push_str(&format!(
+                            " (hunk -{} +{})",
+                            mark.old_start.unwrap_or(0),
+                            mark.new_start.unwrap_or(0)
+                        ));
+                    }
+                    let fence = "`".repeat(
+                        location
+                            .split(|ch| ch != '`')
+                            .map(str::len)
+                            .max()
+                            .unwrap_or(0)
+                            + 1,
+                    );
+                    let label = if location.contains('`') {
+                        format!("{fence} {location} {fence}")
+                    } else {
+                        format!("`{location}`")
+                    };
+                    format!(
+                        "- {label} — {}",
+                        mark.body.trim().lines().collect::<Vec<_>>().join("\n  ")
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+    }
+
     fn export_marks(&self) -> Vec<MarkExport> {
+        self.export_selected_marks(None)
+    }
+
+    fn export_selected_marks(&self, selected: Option<&HashSet<AnnotationKey>>) -> Vec<MarkExport> {
         // Copy marks for the current diff, not stale annotations whose path still
         // exists after a reload. Build an unfiltered model so active file/grep
         // filters do not hide otherwise-current marks from export.
@@ -60,6 +114,7 @@ impl DiffApp {
         self.annotations_state
             .annotations
             .keys()
+            .filter(|key| selected.is_none_or(|selection| selection.contains(*key)))
             .filter_map(|key| {
                 let body = self.annotations_state.annotations.human_bodies(key)?;
                 if !exportable_keys.contains(key)

@@ -563,6 +563,8 @@ impl DiffApp {
                 review_input_cursor: 0,
                 options_menu: SelectorState::default(),
                 annotation_menu: SelectorState::default(),
+                annotation_selection: HashSet::new(),
+                annotation_menu_filtering: false,
                 options_menu_draft: OptionsDraft {
                     layout: layout_setting_from_override(layout_override),
                     full_file: settings.full_file,
@@ -665,6 +667,7 @@ impl DiffApp {
             },
             runtime: RuntimeState {
                 integration: None,
+                annotation_handoff: None,
                 terminal_clear_requested: false,
                 dirty: true,
                 hit_map: HitMap::default(),

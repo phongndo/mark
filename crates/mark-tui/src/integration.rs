@@ -142,7 +142,7 @@ fn attach_with_store(app: &mut DiffApp, value: Value, store: ReviewStore) -> Mar
             });
         }
     }
-    app.set_notice("Q sends feedback · q returns to conversation · notes are saved locally");
+    app.set_notice("⏎ add mark · n marks · Q send all · q quit");
     integration.last_signature = signature(app);
     app.runtime.integration = Some(Box::new(integration));
     Ok(())
@@ -198,10 +198,35 @@ pub(crate) fn poll(app: &mut DiffApp) {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn submit(app: &mut DiffApp) -> MarkResult<()> {
+    let keys = app
+        .annotations_state
+        .annotations
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>();
+    submit_selected(app, &keys)
+}
+
+pub(crate) fn submit_selected(app: &mut DiffApp, keys: &[AnnotationKey]) -> MarkResult<()> {
     with_integration(app, |review, app| {
         review.save(app)?;
-        let result = review.mutate("feedback.submit", json!({}))?;
+        let thread_ids = app
+            .annotations_state
+            .annotations
+            .comments()
+            .filter(|comment| {
+                comment.origin == CommentOrigin::Human && keys.contains(&comment.anchor)
+            })
+            .filter_map(|comment| {
+                review
+                    .imported
+                    .get(&comment.id)
+                    .map(|item| item.thread_id.clone())
+            })
+            .collect::<HashSet<_>>();
+        let result = review.mutate("feedback.submit", json!({"thread_ids":thread_ids}))?;
         let id = result["submission"]["submission_id"]
             .as_str()
             .or_else(|| result["submission_id"].as_str())

@@ -133,19 +133,7 @@ impl DiffApp {
                 {
                     return Ok(ActionOutcome::consumed());
                 }
-                if !crate::integration::has_feedback(self) {
-                    return Ok(ActionOutcome::effect(AppEffect::Toast(
-                        ToastLevel::Warning,
-                        "No new feedback to send. Use q to return to the conversation.".to_owned(),
-                    )));
-                }
-                let Some(text) = self.marks_clipboard_json() else {
-                    return Ok(ActionOutcome::effect(AppEffect::Toast(
-                        ToastLevel::Warning,
-                        "no marks to submit".to_owned(),
-                    )));
-                };
-                Ok(ActionOutcome::effect(AppEffect::SubmitMarks(text)))
+                Ok(ActionOutcome::effect(self.all_annotations_submission()))
             }
             AppAction::ToggleHelp => {
                 self.toggle_help_menu();
