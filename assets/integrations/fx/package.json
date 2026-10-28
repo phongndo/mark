@@ -3,9 +3,14 @@
   "version": "0.16.0",
   "private": true,
   "type": "module",
-  "description": "Mark skill and MCP browser review handoff for Vercel Labs fx",
+  "description": "Terminal diff annotations with Markdown feedback for fx",
   "scripts": {
     "test": "node --test tests/*.test.mjs"
   },
-  "files": ["open-review.mjs", "HOST.md", ".mcp.json", "skills", "common"]
+  "files": [
+    "open-review.mjs",
+    "HOST.md",
+    "skills",
+    "common"
+  ]
 }

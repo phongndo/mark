@@ -14,6 +14,15 @@ pub(crate) struct McpArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum BridgeCommand {
+    #[command(about = "Annotate the current diff in this terminal and return Markdown")]
+    Annotate {
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        #[arg(long)]
+        base: Option<String>,
+        #[arg(long)]
+        result_file: PathBuf,
+    },
     #[command(about = "Create or resume this harness conversation's review")]
     Open {
         #[arg(long)]

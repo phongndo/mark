@@ -2,7 +2,7 @@
   "name": "mark-opencode",
   "version": "0.16.0",
   "type": "module",
-  "description": "Run a Mark review in the current OpenCode V2 terminal.",
+  "description": "Annotate the diff in the terminal and prepare selected notes as a Markdown chat draft.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -11,11 +11,33 @@
   },
   "homepage": "https://github.com/phongndo/mark",
   "bugs": "https://github.com/phongndo/mark/issues",
-  "keywords": ["opencode", "opencode-plugin", "mark", "code-review", "diff", "mcp"],
-  "engines": { "node": ">=22.19.0" },
-  "files": ["server.js", "tui.js", "adapter.mjs", "common/bridge.mjs", "skills/mark-review-loop"],
-  "publishConfig": { "access": "public" },
-  "exports": { ".": "./server.js", "./tui": "./tui.js" },
-  "dependencies": { "@opencode/plugin": ">=2.2.0 <3" },
-  "peerDependencies": { "solid-js": ">=1.9.0 <2" }
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "mark",
+    "code-review",
+    "diff"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "files": [
+    "server.js",
+    "tui.js",
+    "adapter.mjs",
+    "common/review.mjs"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": "./server.js",
+    "./tui": "./tui.js"
+  },
+  "dependencies": {
+    "@opencode/plugin": ">=2.2.0 <3"
+  },
+  "peerDependencies": {
+    "solid-js": ">=1.9.0 <2"
+  }
 }

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, realpathSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,11 +15,11 @@ const sri = bytes => `sha512-${createHash("sha512").update(bytes).digest("base64
 const json = path => JSON.parse(readFileSync(path, "utf8"));
 
 function fixture() {
-  const root = mkdtempSync(join(tmpdir(), "mark-release-test-"));
+  const root = mkdtempSync(join(realpathSync(tmpdir()), "mark-release-test-"));
   const source = join(root, "source");
   mkdirSync(join(source, "assets/skills"), { recursive: true });
   cpSync(join(project, "assets/integrations"), join(source, "assets/integrations"), { recursive: true });
-  cpSync(join(project, "assets/skills/agent-review"), join(source, "assets/skills/agent-review"), { recursive: true });
+  cpSync(join(project, "assets/skills/annotation-review"), join(source, "assets/skills/annotation-review"), { recursive: true });
   cpSync(join(project, "LICENSE"), join(source, "LICENSE"));
   writeFileSync(join(source, "Cargo.toml"), '[workspace.package]\nversion = "1.2.3"\nrepository = "https://github.com/phongndo/mark"\n\n[workspace.dependencies]\n');
   return { root, source, output: join(root, "release"), cleanup: () => rmSync(root, { recursive: true, force: true }) };
@@ -56,15 +56,15 @@ test("one-version artifacts contain detached packages, npm packlists, and valid 
       const archive = readFileSync(join(f.output, "assets", plugin.file));
       assert.equal(createHash("sha256").update(archive).digest("hex"), plugin.sha256);
       const content = entries(archive);
-      assert(content.has("LICENSE") && content.has("README.md") && content.has("common/bridge.mjs"));
-      assert([...content.keys()].some(path => /^skills\/[^/]+\/SKILL\.md$/.test(path)));
+      assert(content.has("LICENSE") && content.has("README.md") && content.has("common/review.mjs"));
+      assert.equal(content.has("skills/mark/SKILL.md"), ["codex", "fx"].includes(plugin.host));
       assert(![...content.keys()].some(path => path.includes("/tests/") || path.startsWith("tests/")));
     }
     for (const item of index.npm) {
       assert.equal(item.version, index.version);
       assert.equal(sri(readFileSync(join(f.output, "assets", item.file))), item.integrity);
-      assert(item.files.includes("common/bridge.mjs"));
-      assert(item.files.includes("skills/mark-review-loop/SKILL.md"));
+      assert(item.files.includes("common/review.mjs"));
+      assert(!item.files.some(path => path.startsWith("skills/")));
     }
     const distribution = join(f.output, "marketplace");
     const claude = json(join(distribution, ".claude-plugin/marketplace.json"));
@@ -90,18 +90,18 @@ test("preparation rejects source/version mismatches instead of publishing an ove
 });
 
 test("npm packlist validation rejects an omitted runtime skill", () => {
-  const root = mkdtempSync(join(tmpdir(), "mark-packlist-test-"));
+  const root = mkdtempSync(join(realpathSync(tmpdir()), "mark-packlist-test-"));
   try {
     mkdirSync(join(root, "skills/review"), { recursive: true });
     writeFileSync(join(root, "skills/review/SKILL.md"), "review");
     writeFileSync(join(root, "package.json"), JSON.stringify({ name: "test-pi", version: "1.2.3", license: "MIT", repository: "git+https://github.com/phongndo/mark.git", publishConfig: { access: "public" }, pi: { extensions: ["./index.js"] } }));
-    const metadata = { name: "test-pi", version: "1.2.3", files: ["package.json", "LICENSE", "README.md", "common/bridge.mjs", "index.js"].map(path => ({ path })) };
+    const metadata = { name: "test-pi", version: "1.2.3", files: ["package.json", "LICENSE", "README.md", "common/review.mjs", "index.js"].map(path => ({ path })) };
     assert.throws(() => validatePacklist(metadata, root, "pi", "1.2.3"), /omits runtime file skills\/review\/SKILL.md/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 function registryFixture() {
-  const directory = mkdtempSync(join(tmpdir(), "mark-publish-test-"));
+  const directory = mkdtempSync(join(realpathSync(tmpdir()), "mark-publish-test-"));
   mkdirSync(join(directory, "assets"));
   const index = { version: "1.2.3", source_sha: sha, npm: ["pi", "opencode"].map(host => {
     const bytes = Buffer.from(`immutable ${host} package bytes`), file = `${host}.tgz`;

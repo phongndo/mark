@@ -28,16 +28,13 @@ fn packages_are_self_contained_outside_the_checkout_and_match_the_binary_version
         let manifest: Value =
             serde_json::from_slice(&fs::read(output.join(agent.manifest())).unwrap()).unwrap();
         assert_eq!(manifest["version"], env!("CARGO_PKG_VERSION"));
-        let skill = fs::read_to_string(
-            output
-                .join("skills")
-                .join(agent.skill_name())
-                .join("SKILL.md"),
-        )
-        .unwrap();
-        assert!(skill.contains(&format!("name: {}\n", agent.skill_name())));
-        assert!(skill.contains("feedback_wait"));
-        assert!(output.join("common/bridge.mjs").is_file());
+        let skill = output.join("skills/mark/SKILL.md");
+        assert_eq!(
+            skill.is_file(),
+            matches!(agent, IntegrationAgent::Codex | IntegrationAgent::Fx)
+        );
+        assert!(!output.join(".mcp.json").exists());
+        assert!(output.join("common/review.mjs").is_file());
         assert_eq!(
             fs::read(output.join("LICENSE")).unwrap(),
             LICENSE.as_bytes()
@@ -80,7 +77,6 @@ fn packages_are_self_contained_outside_the_checkout_and_match_the_binary_version
         }
         if matches!(agent, IntegrationAgent::Codex | IntegrationAgent::Fx) {
             assert!(output.join("skills/mark/HOST.md").is_file());
-            assert!(skill.contains("[the host entry instructions](HOST.md)"));
         }
     }
 }
@@ -100,15 +96,13 @@ fn fx_skill_survives_without_its_surrounding_package() {
     }
     fs::remove_dir_all(output).unwrap();
     assert!(detached.join("open-review.mjs").is_file());
-    assert!(detached.join("common/bridge.mjs").is_file());
+    assert!(detached.join("common/review.mjs").is_file());
     assert!(detached.join("LICENSE").is_file());
-    let host = fs::read_to_string(detached.join("HOST.md")).unwrap();
-    assert!(host.contains("`./open-review.mjs`"));
-    assert!(!host.contains("../../open-review.mjs"));
+    assert!(detached.join("HOST.md").is_file());
     assert!(
         fs::read_to_string(detached.join("open-review.mjs"))
             .unwrap()
-            .contains("\"./common/bridge.mjs\"")
+            .contains("\"./common/review.mjs\"")
     );
 }
 
@@ -184,10 +178,8 @@ fn native_marketplaces_and_portable_codex_metadata_reference_this_package() {
     let portable: Value =
         serde_json::from_slice(&fs::read(codex.join("plugin.json")).unwrap()).unwrap();
     assert_eq!(portable["version"], env!("CARGO_PKG_VERSION"));
-    let mcp: Value = serde_json::from_slice(&fs::read(codex.join("mcp.json")).unwrap()).unwrap();
-    assert_eq!(mcp["mcpServers"]["mark"]["type"], "stdio");
-    assert_eq!(mcp["mcpServers"]["mark"]["command"], "mark");
-    assert_eq!(mcp["mcpServers"]["mark"]["args"][0], "mcp");
+    assert!(!codex.join("mcp.json").exists());
+    assert!(!codex.join(".mcp.json").exists());
 }
 
 #[test]

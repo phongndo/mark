@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Exercise the real Pi terminal handoff without credentials or network calls.
+"""Exercise Pi handing over its terminal for annotations and receiving plain Markdown locally.
 
 Run inside the development shell after building mark-cli. Python uses only its
 standard library; --pi and --mark accept explicit installed/built executables.
-The final receipt check uses a local mock provider, not a model service.
+The message check uses a local mock provider, not a model service.
 """
 
 import argparse
@@ -21,14 +21,17 @@ import subprocess
 import tempfile
 import termios
 import time
-import uuid
 
 
 ROOT = Path(__file__).resolve().parents[1]
 ANSI = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]")
 MOCK_PROVIDER = r'''
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
+import { appendFileSync } from "node:fs";
 export default function (pi) {
+  pi.on("message_start", event => {
+    if (event.message.role === "user") appendFileSync(process.env.MARK_TEST_MESSAGES, JSON.stringify(event.message) + "\n");
+  });
   pi.registerProvider("mark-test-local", {
     baseUrl: "http://127.0.0.1", api: "mark-test-local-api", apiKey: "local-test-only",
     models: [{ id: "receipt", name: "Local receipt test", reasoning: false,
@@ -101,13 +104,15 @@ class Terminal:
             deadline = time.monotonic() + 1
             while self.process.poll() is None and time.monotonic() < deadline:
                 self.pump()
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            if self.process.poll() is not None:
+                break
+            os.killpg(self.process.pid, sig)
+            deadline = time.monotonic() + 3
+            while self.process.poll() is None and time.monotonic() < deadline:
+                self.pump()
         if self.process.poll() is None:
-            os.killpg(self.process.pid, signal.SIGTERM)
-            try:
-                self.process.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                os.killpg(self.process.pid, signal.SIGKILL)
-                self.process.wait(timeout=3)
+            raise AssertionError("Pi did not exit after SIGKILL")
         os.close(self.master)
 
 
@@ -115,44 +120,32 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pi", default=shutil.which("pi"))
     parser.add_argument("--mark", default=str(ROOT / "target/debug/mark"))
-    parser.add_argument("--package-dir", type=Path, help="An exported Pi package; otherwise generate one temporarily")
+    parser.add_argument("--package-dir", type=Path)
     args = parser.parse_args()
     if not args.pi:
         parser.error("Pi is unavailable; pass --pi /absolute/path/to/pi")
     mark = str(Path(args.mark).resolve())
     if not Path(mark).is_file():
         parser.error("Build Mark first: nix develop -c cargo build -p mark-cli --locked")
-    with tempfile.TemporaryDirectory(prefix="mark-pi-pty-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="mark-pi-terminal-") as temporary:
         task = Path(temporary).resolve()
         repository = task / "repository"
         repository.mkdir()
-        # Pass no inherited credentials or provider settings into the fixture.
         env = {key: os.environ[key] for key in ("PATH", "HOME", "USER", "SHELL", "LANG", "LC_ALL", "COLORTERM") if key in os.environ}
         env.update(TERM="xterm-256color", PI_OFFLINE="1", MARK_BIN=mark,
                    PI_CODING_AGENT_DIR=str(task / "pi"), XDG_STATE_HOME=str(task / "state"),
                    XDG_CONFIG_HOME=str(task / "config"), XDG_DATA_HOME=str(task / "data"),
-                   XDG_CACHE_HOME=str(task / "cache"))
-        # Existing installations may retain an older checkpoint in this store.
-        # It must neither prevent /mark from opening nor be overwritten.
-        older = task / "state/mark/reviews/e2400d07f9833faa1abca4ee4bfd502b.json"
-        older.parent.mkdir(parents=True, mode=0o700)
-        older_bytes = b'{"schema":1,"identity":{},"comments":[]}'
-        older.write_bytes(older_bytes)
+                   XDG_CACHE_HOME=str(task / "cache"),
+                   MARK_TEST_MESSAGES=str(task / "messages"))
         package = args.package_dir
         if package is None:
-            if not shutil.which("node"):
-                parser.error("Use nix develop for Node, or supply --package-dir from mark integration path --agent pi")
-            subprocess.run(["node", str(ROOT / "assets/integrations/package.mjs"), str(task / "packages")], env=env, check=True, stdout=subprocess.DEVNULL)
-            package = task / "packages/pi"
+            package = task / "package"
+            subprocess.run([mark, "integration", "export", "--agent", "pi", "--output", str(package)], env=env, check=True, capture_output=True)
         extension = str((package / "index.js").resolve())
-        if not Path(extension).is_file():
-            parser.error("--package-dir must contain the exported Pi index.js")
         provider = task / "local-provider.js"
         provider.write_text(MOCK_PROVIDER)
-
         def git(*arguments):
             subprocess.run(["git", *arguments], cwd=repository, env=env, check=True, capture_output=True)
-
         git("init", "--quiet")
         git("config", "user.name", "Mark terminal test")
         git("config", "user.email", "mark-test@example.invalid")
@@ -160,91 +153,49 @@ def main():
         git("add", "example.txt")
         git("commit", "--quiet", "-m", "baseline")
         (repository / "example.txt").write_text("after\n")
-        conversation = str(uuid.uuid4())
-
-        # Exercise Pi's actual MCP client before the UI test. Remove this
-        # temporary config afterward so the package itself registers the server
-        # during the terminal portion of the test.
-        agent_dir = task / "pi"
-        agent_dir.mkdir(exist_ok=True)
-        mcp_config = agent_dir / "mcp.json"
-        mcp_config.write_text(json.dumps({"mcpServers": {"mark": {"command": mark, "args": ["mcp"]}}}))
-        checked = subprocess.run([args.pi, "mcp", "list", "--json"], cwd=repository, env=env,
-                                 text=True, capture_output=True, timeout=15)
-        status = json.loads(checked.stdout)
-        assert checked.returncode == 0 and not status["errors"], status
-        server = next(server for server in status["servers"] if server["name"] == "mark")
-        assert server["state"] == "connected", server
-        assert {"review_open", "review_get", "review_patch", "review_refresh", "review_changes",
-                "comment_add", "comment_reply", "feedback_get", "feedback_wait", "feedback_ack"} <= set(server["tools"]), server
-        assert "feedback_submit" not in server["tools"], "Submission remains a human UI action"
-        mcp_config.unlink()
-
-        def run_json(arguments, params=None):
-            result = subprocess.run([mark, *arguments], cwd=repository, env=env,
-                                    input=None if params is None else json.dumps(params),
-                                    text=True, capture_output=True, timeout=10)
-            response = json.loads(result.stdout)
-            assert response.get("ok"), response
-            assert result.returncode == 0, result.stderr
-            return response["result"]
-
-        def call(method, params):
-            return run_json(["bridge", "call", method, "--stdin", "--json"], params)
-
-        def open_review():
-            return run_json(["bridge", "open", "--harness", "pi", "--conversation", conversation,
-                             "--repo", str(repository), "--json"])
-
-        review = open_review()
-        review_id = review["review_id"]
-        note = "Preserve this draft across Back."
-        call("comment.add", {"review_id": review_id, "generation": review["generation"],
-                             "client_mutation_id": str(uuid.uuid4()), "origin": "human",
-                             "anchor": {"file": "example.txt", "new_line": 1}, "body": note})
-        current = lambda: call("review.get", {"review_id": review_id})
-        command = [args.pi, "--offline", "--no-session", "--session-id", conversation,
-                   "--no-context-files", "--no-skills", "--no-extensions",
-                   "-e", "builtin:mcp", "-e", extension]
-
+        command = [args.pi, "--offline", "--no-session", "--no-context-files", "--no-skills", "--no-extensions",
+                   "-e", extension, "-e", str(provider), "--provider", "mark-test-local", "--model", "receipt", "--api-key", "local-test-only"]
         terminal = Terminal(command, repository, env)
         try:
             terminal.wait(lambda: terminal.contains("commands"), "Pi startup")
             start = terminal.send("/mark\r")
-            terminal.wait(lambda: terminal.contains("Q sends feedback", start), "same-terminal Mark handoff")
-            terminal.wait(lambda: terminal.contains(note, start), "restored human draft")
-            start = terminal.send("q")
-            terminal.wait(lambda: terminal.contains("commands", start), "Pi renderer restoration after Back")
-            saved = current()
-            assert saved["last_return"]["outcome"] == "back", saved["last_return"]
-            assert not saved["submissions"]
-            assert saved["threads"][0]["messages"][0]["body"] == note
-            start = terminal.send("/mark\r")
-            terminal.wait(lambda: terminal.contains("Q sends feedback", start), "reopened Mark review")
-            assert current()["review_id"] == review_id
+            terminal.wait(lambda: terminal.contains("Q return all marks", start), "terminal handoff")
+            assert not (task / "messages").exists(), "Opening must not send feedback"
+            # Enter annotates the focused code line.
+            terminal.send("\r")
+            terminal.wait(lambda: terminal.contains("[✓]", start), "annotation editor")
+            terminal.send("What does this mean?")
             start = terminal.send("Q")
-            terminal.wait(lambda: terminal.contains("No API key", start), "isolated provider rejection")
-            saved = current()
-            assert saved["last_return"]["outcome"] == "submitted"
-            assert len(saved["submissions"]) == 1
-            assert saved["submissions"][0]["acknowledged_by"] == [], "An unrecorded message must remain pending"
+            terminal.wait(lambda: terminal.contains("example.txt:1", start), "annotations in the Pi input")
+            deadline = time.monotonic() + 0.5
+            while time.monotonic() < deadline:
+                terminal.pump()
+            assert not (task / "messages").exists(), "Submitting annotations must only fill the draft"
+            assert not terminal.contains("Local receipt accepted."), "Submitting annotations must not start an agent turn"
+            terminal.send(" Please explain.\r")
+            terminal.wait(lambda: terminal.contains("Local receipt accepted."), "manual Enter starts the local response")
+            messages = [json.loads(line) for line in (task / "messages").read_text().splitlines()]
+            assert len(messages) == 1, messages
+            content = messages[0]["content"]
+            text = content if isinstance(content, str) else "".join(part.get("text", "") for part in content if part["type"] == "text")
+            assert text == "- `example.txt:1` — What does this mean? Please explain.", text
+            start = terminal.send("/mark\r")
+            terminal.wait(lambda: terminal.contains("Q return all marks", start), "fresh terminal review")
+            # With no notes, Q immediately returns an empty draft. Reopening
+            # proves that it exited and did not restore the old annotation.
+            terminal.send("Q")
+            deadline = time.monotonic() + 0.3
+            while time.monotonic() < deadline:
+                terminal.pump()
+            start = terminal.send("/mark\r")
+            terminal.wait(lambda: terminal.contains("Q return all marks", start), "reopen after empty Shift-Q")
+            terminal.send("q")
+            terminal.pump(0.2)
+            assert len((task / "messages").read_text().splitlines()) == 1
+            assert not (task / "state/mark/reviews").exists(), "Annotation sessions must not write history"
         finally:
             terminal.close()
-
-        # Retry the same conversation with an in-process, network-free provider.
-        accepted = Terminal(command + ["-e", str(provider), "--provider", "mark-test-local",
-                                       "--model", "receipt", "--api-key", "local-test-only"], repository, env)
-        try:
-            accepted.wait(lambda: accepted.contains("commands"), "Pi startup with local provider")
-            start = accepted.send("/mark\r")
-            accepted.wait(lambda: accepted.contains("Local receipt accepted.", start), "recorded user message and local assistant response")
-            consumer = f"pi:{conversation}"
-            accepted.wait(lambda: consumer in current()["submissions"][0]["acknowledged_by"], "feedback receipt acknowledgement")
-            assert current()["review_id"] == review_id
-        finally:
-            accepted.close()
-        assert older.read_bytes() == older_bytes, "Older checkpoints must be preserved"
-    print("Pi terminal check passed: real MCP discovery, same-terminal review, Back preserves drafts, Submit stays pending until recorded, retry keeps the review ID.")
+    print("Pi terminal check passed: Shift-Q instantly fills the draft, only manual Enter sends, fresh invocations, no review history.")
 
 
 if __name__ == "__main__":

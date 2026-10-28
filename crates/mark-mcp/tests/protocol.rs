@@ -97,6 +97,32 @@ fn handshake_negotiates_supported_versions_and_unknown_counteroffers() {
 }
 
 #[test]
+fn reply_tools_are_not_exposed_or_dispatched() {
+    let responses = exchange(
+        &connection(vec![
+            request(json!(1), "tools/list", json!({})),
+            tool(
+                json!(2),
+                "comment_reply",
+                json!({
+                    "review_id":"review-1", "generation":1, "client_mutation_id":"reply",
+                    "thread_id":"thread-1", "reply_to":"message-1", "body":"answer"
+                }),
+            ),
+        ]),
+        no_backend,
+    );
+    assert!(
+        !responses[1]["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|tool| tool["name"] == "comment_reply")
+    );
+    assert_eq!(responses[2]["error"]["code"], -32602);
+}
+
+#[test]
 fn lifecycle_requires_the_initialized_notification_and_allows_early_ping() {
     let responses = exchange(
         &[
@@ -229,7 +255,7 @@ fn schemas_reject_spoofing_invalid_types_and_oversized_pages_before_backend() {
             tool(json!(0), "comment_add", spoof),
             tool(json!(1), "comment_add", wrong_generation),
             tool(json!(2), "comment_add", wrong_anchor),
-            tool(json!(3), "comment_reply", json!({"review_id": "r"})),
+            tool(json!(3), "comment_add", json!({"review_id": "r"})),
             tool(
                 json!(4),
                 "review_patch",
@@ -255,15 +281,12 @@ fn schemas_reject_spoofing_invalid_types_and_oversized_pages_before_backend() {
 
 #[test]
 fn mutations_keep_retry_identity_force_agent_origin_and_redact_draft_threads() {
-    let mut arguments = mutation();
-    arguments["thread_id"] = json!("thread-1");
-    arguments["reply_to"] = json!("human-1");
-    arguments.as_object_mut().unwrap().remove("anchor");
+    let arguments = mutation();
     let mut calls = Vec::new();
     let responses = exchange(
         &connection(vec![
-            tool(json!(1), "comment_reply", arguments.clone()),
-            tool(json!(2), "comment_reply", arguments),
+            tool(json!(1), "comment_add", arguments.clone()),
+            tool(json!(2), "comment_add", arguments),
         ]),
         |method, args| {
             calls.push((method.to_owned(), args));
@@ -271,7 +294,7 @@ fn mutations_keep_retry_identity_force_agent_origin_and_redact_draft_threads() {
                 json!({"review_id": "review-1", "generation": 1, "revision": 2, "thread": {
                     "thread_id": "thread-1", "messages": [
                         {"message_id": "human-1", "origin": "human", "body": "private draft", "revision": 1},
-                        {"message_id": "agent-1", "origin": "agent", "body": "agent reply", "revision": 2}
+                        {"message_id": "agent-1", "origin": "agent", "body": "code annotation", "revision": 2}
                     ]
                 }}),
             )
@@ -279,13 +302,13 @@ fn mutations_keep_retry_identity_force_agent_origin_and_redact_draft_threads() {
     );
     assert_eq!(calls.len(), 2);
     assert_eq!(calls[0], calls[1]);
-    assert_eq!(calls[0].0, "comment.reply");
+    assert_eq!(calls[0].0, "comment.add");
     assert_eq!(calls[0].1["origin"], "agent");
     assert_eq!(calls[0].1["client_mutation_id"], "mutation-1");
     assert_eq!(responses[1]["result"], responses[2]["result"]);
     let serialized = serde_json::to_string(&responses).unwrap();
     assert!(!serialized.contains("private draft"));
-    assert!(serialized.contains("agent reply"));
+    assert!(serialized.contains("code annotation"));
 }
 
 #[test]

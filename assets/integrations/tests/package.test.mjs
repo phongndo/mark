@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { cpSync, mkdirSync, mkdtempSync, realpathSync, readFileSync, readdirSync, rmSync, lstatSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, realpathSync, readFileSync, readdirSync, rmSync, lstatSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { execFileSync } from "node:child_process";
 import { harnesses, packageFiles, parseArguments, workspaceVersion, writePackages } from "../package.mjs";
 
@@ -11,106 +11,80 @@ function allFiles(directory, prefix = "") {
   return readdirSync(directory, { withFileTypes: true }).flatMap(entry => entry.isDirectory()
     ? allFiles(join(directory, entry.name), prefix + entry.name + "/") : [prefix + entry.name]).sort();
 }
+const temporary = prefix => mkdtempSync(join(realpathSync(tmpdir()), prefix));
 
-test("generated packages load outside the source tree and carry a versioned skill", async () => {
-  const output = mkdtempSync(join(realpathSync(tmpdir()), "mark-packages-"));
+test("generated packages load outside the source tree with only the needed host entry", async () => {
+  const output = temporary("mark-packages-");
   try {
-    const source = dirname(fileURLToPath(import.meta.url));
-    execFileSync(process.execPath, [join(source, "../package.mjs"), output]);
+    writePackages(output);
     const pi = await import(pathToFileURL(join(output, "pi/index.js")));
     const commands = [];
-    pi.default({ on() {}, registerMcpServer() {}, registerCommand: name => commands.push(name) });
+    pi.default({ on() {}, registerCommand: name => commands.push(name) });
     assert.deepEqual(commands, ["mark"]);
     const opencode = await import(pathToFileURL(join(output, "opencode/adapter.mjs")));
     assert.equal(typeof opencode.setupMark, "function");
-    for (const [host, name] of [["pi", "mark-review-loop"], ["claude", "review-loop"], ["codex", "mark"], ["opencode", "mark-review-loop"], ["fx", "mark"]]) {
-      const path = join(output, host, "skills", name, "SKILL.md");
-      assert.equal(lstatSync(path).isSymbolicLink(), false);
-      assert.match(readFileSync(path, "utf8"), /feedback_wait/);
-      assert.match(readFileSync(path, "utf8"), new RegExp(`name: ${name}\\n`));
+    for (const host of harnesses) {
+      assert.equal(existsSync(join(output, host, ".mcp.json")), false);
+      assert.equal(existsSync(join(output, host, "mcp.json")), false);
+      assert.equal(lstatSync(join(output, host, "common/review.mjs")).isSymbolicLink(), false);
+      assert.equal(existsSync(join(output, host, "skills/mark/SKILL.md")), ["codex", "fx"].includes(host));
     }
     const manifest = JSON.parse(readFileSync(join(output, "codex/.codex-plugin/plugin.json"), "utf8"));
-    assert.equal(manifest.mcpServers, "./.mcp.json");
-    assert.ok(manifest.version);
-    const fx = await import(pathToFileURL(join(output, "fx/open-review.mjs")));
-    assert.equal(typeof fx.openReview, "function");
-    assert.match(readFileSync(join(output, "fx/skills/mark/HOST.md"), "utf8"), /no supported custom `\/mark`/);
+    assert.equal(manifest.mcpServers, undefined);
   } finally { rmSync(output, { recursive: true, force: true }); }
 });
 
-test("fx skill is an executable detached consumer after its parent package is removed", async () => {
-  const temporary = mkdtempSync(join(realpathSync(tmpdir()), "mark-detached-fx-"));
+test("terminal skills execute after their parent packages are removed", () => {
+  const task = temporary("mark-detached-skills-");
   try {
-    const output = join(temporary, "packages");
-    writePackages(output);
-    const detached = join(temporary, "installed", "mark");
-    mkdirSync(dirname(detached), { recursive: true });
-    cpSync(join(output, "fx/skills/mark"), detached, { recursive: true });
-    rmSync(output, { recursive: true });
-    const helper = await import(pathToFileURL(join(detached, "open-review.mjs")));
-    const binding = { harness: "fx", conversation: "current-fx-conversation" };
-    const calls = [];
-    const result = helper.openReview({ conversation: binding.conversation, repository: temporary }, {
-      bridge: {
-        open(input) { calls.push(input); return { review_id: "review-1", binding }; },
-        web(review_id) { calls.push(review_id); return { review_id, url: "http://127.0.0.1:1234/review" }; },
-      },
-    });
-    assert.equal(result.review_id, "review-1");
-    assert.equal(calls[0].conversation, binding.conversation);
-    assert.equal(calls[1], "review-1");
-    assert.match(readFileSync(join(detached, "HOST.md"), "utf8"), /`\.\/open-review\.mjs`/);
-    assert.ok(allFiles(detached).includes("common/bridge.mjs"));
-    assert.ok(allFiles(detached).includes("LICENSE"));
-  } finally { rmSync(temporary, { recursive: true, force: true }); }
-});
-
-test("release version is explicit, deterministic, and no development files ship", () => {
-  const temporary = mkdtempSync(join(realpathSync(tmpdir()), "mark-public-packages-"));
-  try {
-    const options = parseArguments([temporary, "--version", "12.34.56-rc.1"]);
-    assert.equal(options.version, "12.34.56-rc.1");
-    writePackages(options.output, options.version);
-    for (const harness of harnesses) {
-      const first = packageFiles(harness, options.version);
-      const second = packageFiles(harness, options.version);
-      assert.deepEqual([...first], [...second]);
-      assert.ok([...first.keys()].every(path => !/(^|\/)(?:tests|__tests__|node_modules)(\/|$)/.test(path)));
-      for (const [name, bytes] of first) assert.deepEqual(readFileSync(join(temporary, harness, name)), bytes);
-      const path = harness === "claude" ? ".claude-plugin/plugin.json" : harness === "codex" ? ".codex-plugin/plugin.json" : "package.json";
-      assert.equal(JSON.parse(first.get(path)).version, options.version);
+    const output = join(task, "packages"); writePackages(output);
+    const binary = join(task, "mark");
+    writeFileSync(binary, '#!/bin/sh\nprintf \'%s\\n\' \'{"markdown":"- feedback"}\' > "$6"\n', { mode: 0o700 });
+    for (const host of ["codex", "fx"]) {
+      const detached = join(task, host); cpSync(join(output, host, "skills/mark"), detached, { recursive: true });
+      rmSync(join(output, host), { recursive: true });
+      assert.equal(execFileSync(process.execPath, [join(detached, "open-review.mjs")], {
+        env: { ...process.env, MARK_BIN: binary }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+      }), "- feedback\n");
     }
-    const codex = packageFiles("codex", options.version);
-    assert.equal(JSON.parse(codex.get("plugin.json")).version, options.version);
-    assert.equal(JSON.parse(codex.get("mcp.json")).mcpServers.mark.type, "stdio");
-    assert.ok(codex.has(".agents/plugins/marketplace.json"));
-    assert.ok(packageFiles("claude", options.version).has(".claude-plugin/marketplace.json"));
-    for (const version of ["latest", "file:../source", "1.2", "1.2.3-01", "1.2.3\n", "v1.2.3"]) assert.throws(() => parseArguments([temporary, "--version", version]));
-  } finally { rmSync(temporary, { recursive: true, force: true }); }
+  } finally { rmSync(task, { recursive: true, force: true }); }
 });
 
-test("generated package drift is preserved rather than overwritten", () => {
-  const temporary = mkdtempSync(join(realpathSync(tmpdir()), "mark-generator-drift-"));
+test("release packages are deterministic and omit development resources", () => {
+  const output = temporary("mark-public-packages-");
   try {
-    writePackages(temporary);
-    writeFileSync(join(temporary, "pi/index.js"), "local edit");
-    assert.throws(() => writePackages(temporary), /Preserving modified/);
-    assert.equal(readFileSync(join(temporary, "pi/index.js"), "utf8"), "local edit");
-  } finally { rmSync(temporary, { recursive: true, force: true }); }
-});
-
-test("public packages and installed-binary exports have identical consumer files", { skip: !process.env.MARK_TEST_BIN && "MARK_TEST_BIN supplies the freshly built binary" }, () => {
-  const temporary = mkdtempSync(join(realpathSync(tmpdir()), "mark-package-parity-"));
-  try {
-    const generated = join(temporary, "generated");
-    writePackages(generated, workspaceVersion());
-    for (const harness of harnesses) {
-      const installed = join(temporary, "installed", harness);
-      execFileSync(process.env.MARK_TEST_BIN, ["integration", "export", "--agent", harness, "--output", installed]);
-      const expected = allFiles(join(generated, harness));
-      const actual = allFiles(installed).filter(path => path !== ".mark-integration.json");
-      assert.deepEqual(actual, expected, `${harness} file set`);
-      for (const path of expected) assert.deepEqual(readFileSync(join(installed, path)), readFileSync(join(generated, harness, path)), `${harness}/${path}`);
+    const options = parseArguments([output, "--version", "12.34.56-rc.1"]); writePackages(options.output, options.version);
+    for (const host of harnesses) {
+      const files = packageFiles(host, options.version);
+      assert.deepEqual([...files], [...packageFiles(host, options.version)]);
+      assert.ok([...files.keys()].every(path => !/(^|\/)(?:tests|__tests__|node_modules)(\/|$)/.test(path)));
+      for (const [path, bytes] of files) assert.deepEqual(readFileSync(join(output, host, path)), bytes);
+      const manifest = host === "claude" ? ".claude-plugin/plugin.json" : host === "codex" ? ".codex-plugin/plugin.json" : "package.json";
+      assert.equal(JSON.parse(files.get(manifest)).version, options.version);
     }
-  } finally { rmSync(temporary, { recursive: true, force: true }); }
+    for (const version of ["latest", "1.2", "1.2.3-01", "v1.2.3"]) assert.throws(() => parseArguments([output, "--version", version]));
+  } finally { rmSync(output, { recursive: true, force: true }); }
+});
+
+test("modified generated packages are preserved", () => {
+  const output = temporary("mark-generator-drift-");
+  try {
+    writePackages(output); writeFileSync(join(output, "pi/index.js"), "local edit");
+    assert.throws(() => writePackages(output), /Preserving modified/);
+    assert.equal(readFileSync(join(output, "pi/index.js"), "utf8"), "local edit");
+  } finally { rmSync(output, { recursive: true, force: true }); }
+});
+
+test("public packages match installed-binary exports", { skip: !process.env.MARK_TEST_BIN }, () => {
+  const task = temporary("mark-package-parity-");
+  try {
+    const generated = join(task, "generated"); writePackages(generated, workspaceVersion());
+    for (const host of harnesses) {
+      const installed = join(task, "installed", host);
+      execFileSync(process.env.MARK_TEST_BIN, ["integration", "export", "--agent", host, "--output", installed]);
+      const paths = allFiles(join(generated, host));
+      assert.deepEqual(allFiles(installed).filter(path => path !== ".mark-integration.json"), paths);
+      for (const path of paths) assert.deepEqual(readFileSync(join(installed, path)), readFileSync(join(generated, host, path)), host + "/" + path);
+    }
+  } finally { rmSync(task, { recursive: true, force: true }); }
 });

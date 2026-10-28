@@ -5,7 +5,7 @@ import { mkdtempSync, realpathSync, mkdirSync, writeFileSync, readFileSync, rmSy
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { createBridge } from "../common/bridge.mjs";
+import { createReview } from "../common/review.mjs";
 
 const source = dirname(fileURLToPath(import.meta.url));
 
@@ -16,8 +16,8 @@ test("npm tarballs include the standalone runtime and exclude internal package f
     const generated = join(task, "generated");
     execFileSync(process.execPath, [join(source, "../package.mjs"), generated], { env });
     const expected = {
-      pi: ["LICENSE", "README.md", "common/bridge.mjs", "index.js", "package.json", "skills/mark-review-loop/SKILL.md"],
-      opencode: ["LICENSE", "README.md", "adapter.mjs", "common/bridge.mjs", "package.json", "server.js", "skills/mark-review-loop/SKILL.md", "tui.js"],
+      pi: ["LICENSE", "README.md", "common/review.mjs", "index.js", "package.json"],
+      opencode: ["LICENSE", "README.md", "adapter.mjs", "common/review.mjs", "package.json", "server.js", "tui.js"],
     };
     const extracted = {};
     for (const host of Object.keys(expected)) {
@@ -43,7 +43,6 @@ test("npm tarballs include the standalone runtime and exclude internal package f
       const manifest = JSON.parse(readFileSync(join(extracted[host], "package.json"), "utf8"));
       assert.equal(manifest.license, "MIT");
       assert.equal(manifest.publishConfig.access, "public");
-      assert.match(readFileSync(join(extracted[host], "skills/mark-review-loop/SKILL.md"), "utf8"), /feedback_wait/);
       for (const file of expected[host].filter(path => /\.(?:js|mjs)$/.test(path) && !path.includes("/"))) {
         assert.doesNotMatch(readFileSync(join(extracted[host], file), "utf8"), /\.\.\/common\//);
       }
@@ -54,11 +53,7 @@ test("npm tarballs include the standalone runtime and exclude internal package f
       process.env.MARK_BIN = "/temporary path/mark";
       const pi = await import(pathToFileURL(join(extracted.pi, "index.js")));
       const registered = [];
-      pi.default({ on() {}, registerCommand: name => registered.push(name), registerMcpServer: (name, config) => {
-        assert.equal(name, "mark");
-        assert.equal(config.command, process.env.MARK_BIN);
-        assert.deepEqual(config.args, ["mcp"]);
-      } });
+      pi.default({ on() {}, registerCommand: name => registered.push(name) });
       assert.deepEqual(registered, ["mark"]);
     } finally {
       if (previousBinary === undefined) delete process.env.MARK_BIN;
@@ -83,13 +78,6 @@ test("npm tarballs include the standalone runtime and exclude internal package f
   } finally { rmSync(task, { recursive: true, force: true }); }
 });
 
-test("missing and incompatible Mark binaries give an actionable dependency error", () => {
-  const missing = createBridge({ binary: "/missing/mark", spawn: () => ({ error: new Error("ENOENT") }) });
-  assert.throws(() => missing.open({ harness: "pi", conversation: "s1", repository: "/repo" }), /Mark 0\.16\.0 or newer[\s\S]*MARK_BIN/);
-  const outdated = createBridge({ spawn: () => ({ status: 2, stdout: "", stderr: "error: unrecognized subcommand 'bridge'" }) });
-  assert.throws(() => outdated.open({ harness: "pi", conversation: "s1", repository: "/repo" }), /releases[\s\S]*restart the host/);
-  const unsupported = createBridge({ spawn: () => ({ status: 0, stdout: "{}" }) });
-  assert.throws(() => unsupported.call("review.get", {}), /unsupported bridge response[\s\S]*Mark 0\.16\.0/);
-  const backendError = createBridge({ spawn: () => ({ status: 1, stdout: JSON.stringify({ ok: false, error: { message: "review not found" } }) }) });
-  assert.throws(() => backendError.call("review.get", {}), /^Error: review not found$/);
+test("a missing Mark binary gives an actionable error", async () => {
+  assert.throws(() => createReview({ binary: "/missing/mark" })(), /MARK_BIN/);
 });

@@ -141,7 +141,8 @@ fn connection(
     }
     if request.method == "GET" && path == "api/review" {
         let result = super::call("review.get", json!({"review_id":review_id})).map(|mut record| {
-            record["files"] = diff_files(record["snapshot"]["patch"].as_str().unwrap_or_default());
+            record["files"] =
+                super::source::files(record["snapshot"]["patch"].as_str().unwrap_or_default());
             record
         });
         return json_response(stream, result);
@@ -183,16 +184,6 @@ fn connection(
         return json_response(stream, super::call(method, params));
     }
     respond(stream, 404, "text/plain", b"Review not found")
-}
-
-fn diff_files(patch: &str) -> Value {
-    json!(mark_diff::parse_patch(patch).iter().map(|file| {
-        json!({"path":file.display_path(),"old_path":file.old_path(),"new_path":file.new_path(),"binary":file.is_binary(),"status":file.status().label(),
-            "hunks":file.hunks().iter().map(|hunk|json!({"header":hunk.header,"lines":hunk.lines.iter().map(|line|{
-                let kind=match line.kind(){mark_diff::DiffLineKind::Addition=>"add",mark_diff::DiffLineKind::Deletion=>"del",mark_diff::DiffLineKind::Context=>"context",mark_diff::DiffLineKind::Meta=>"meta"};
-                json!({"kind":kind,"old_line":line.old_line(),"new_line":line.new_line(),"text":line.text_lossy()})
-            }).collect::<Vec<_>>()})).collect::<Vec<_>>()})
-    }).collect::<Vec<_>>())
 }
 
 fn json_response(stream: &mut TcpStream, result: io::Result<Value>) -> io::Result<()> {
@@ -383,7 +374,7 @@ mod tests {
             },
         );
         assert!(response.starts_with(b"HTTP/1.1 200"));
-        assert!(String::from_utf8_lossy(&response).contains("Send feedback"));
+        assert!(String::from_utf8_lossy(&response).contains("Send comments"));
     }
 
     #[test]

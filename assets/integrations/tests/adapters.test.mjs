@@ -1,134 +1,128 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createBridge, deliverFeedback } from "../common/bridge.mjs";
+import { writeFileSync, existsSync } from "node:fs";
+import { copyAnnotations, createReview } from "../common/review.mjs";
 import { registerMark } from "../pi/index.js";
 import { setupMark } from "../opencode/adapter.mjs";
 
-function backend(outcome = "submitted") {
-  const calls = [];
-  let pending = false;
-  return {
-    calls,
-    open(binding) { calls.push(["open", binding]); return { review_id: "r1" }; },
-    review(id) { calls.push(["review", id]); pending = outcome === "submitted"; return { review_id: id, outcome }; },
-    call(method, input) {
-      calls.push([method, input]);
-      if (method === "feedback.get") return { generation: 3, submissions: pending ? [{ submission_id: "s1", threads: [{ body: "Fix the race" }] }] : [] };
-      if (method === "feedback.ack") pending = false;
-      return {};
-    },
-  };
-}
-
-function piHost(bridge, { recordMessages = true } = {}) {
-  const log = [];
-  let session = "conversation-1";
-  let handler;
-  const events = new Map();
-  const ctx = {
-    mode: "tui", cwd: "/project", sessionManager: { getSessionId: () => session },
-    ui: {
-      notify: (...args) => log.push(["notify", ...args]),
-      custom: async factory => {
-        let result;
-        factory({ stop: () => log.push(["stop"]), start: () => log.push(["start"]), requestRender: () => log.push(["render"]) }, {}, {}, value => { result = value; });
-        return result;
-      },
-    },
-  };
-  const pi = {
-    on(name, handler) { events.set(name, handler); }, registerMcpServer: (...args) => log.push(["mcp", ...args]),
+const markdown = "- `CMakeLists.txt:17` — What does this mean?";
+function piHost(review) {
+  const log = [], events = new Map();
+  let session = "conversation-1", handler, draft = "";
+  const ctx = { mode: "tui", cwd: "/dirty/project", sessionManager: { getSessionId: () => session },
+    ui: { getEditorText: () => draft, setEditorText: text => { draft = text; log.push(["draft", text]); }, notify: (...args) => log.push(["notify", ...args]),
+      custom: factory => new Promise((resolve, reject) => {
+        try { factory({ stop: () => log.push(["stop"]), start: () => log.push(["start"]), requestRender: () => log.push(["render"]) }, {}, {}, resolve); }
+        catch (error) { reject(error); }
+      }) } };
+  const pi = { on: (name, fn) => events.set(name, fn),
     registerCommand: (name, options) => { assert.equal(name, "mark"); handler = options.handler; },
-    sendUserMessage: (...args) => {
-      log.push(["send", ...args]);
-      if (recordMessages) queueMicrotask(() => events.get("message_start")({ message: { role: "user", content: [{ type: "text", text: args[0] }] } }, ctx));
-    },
+    sendUserMessage: (...args) => log.push(["send", ...args]),
   };
-  registerMark(pi, { bridge, terminal: { stdin: { isTTY: true }, stdout: { isTTY: true } } });
-  return { log, ctx, run: () => handler("", ctx), switchSession: () => { session = "conversation-2"; } };
+  registerMark(pi, { review });
+  return { log, ctx, run: () => handler("", ctx),
+    switchSession: () => { session = "conversation-2"; events.get("session_start")({}, ctx); } };
 }
 
-test("Pi hands off this terminal and returns submitted feedback to the bound conversation", async () => {
-  const bridge = backend();
-  const host = piHost(bridge);
+test("Pi restores the terminal and fills the editor without starting a turn", async () => {
+  const host = piHost(({ repository }) => { assert.equal(repository, "/dirty/project"); assert.deepEqual(host.log, [["stop"]]); return markdown; });
   await host.run();
-  assert.deepEqual(bridge.calls[0], ["open", { harness: "pi", conversation: "conversation-1", repository: "/project" }]);
-  assert.deepEqual(host.log.filter(x => ["stop", "start", "render"].includes(x[0])).map(x => x[0]), ["stop", "start", "render"]);
-  assert.equal(host.log.find(x => x[0] === "send")[2].deliverAs, "followUp");
-  assert.equal(bridge.calls.at(-1)[0], "feedback.ack");
-  assert.equal(bridge.calls.at(-1)[1].consumer, "pi:conversation-1");
+  assert.deepEqual(host.log, [["stop"], ["start"], ["render"], ["draft", markdown]]);
 });
 
-test("Back keeps draft feedback out of the agent conversation", async () => {
-  const bridge = backend("back");
-  const host = piHost(bridge);
+test("Pi appends annotations to an existing draft", async () => {
+  const host = piHost(() => markdown);
+  host.ctx.ui.setEditorText("Please explain these annotations.");
   await host.run();
-  assert.equal(host.log.some(x => x[0] === "send"), false);
-  assert.equal(bridge.calls.some(x => x[0] === "feedback.ack"), false);
+  assert.equal(host.ctx.ui.getEditorText(), "Please explain these annotations.\n\n" + markdown);
+  assert.equal(host.log.some(item => item[0] === "send"), false);
 });
 
-test("Pi leaves feedback pending when a provider error prevents the user message being recorded", async () => {
-  const bridge = backend();
-  const host = piHost(bridge, { recordMessages: false });
+test("Pi Back starts fresh and failures always restore its renderer", async () => {
+  let opens = 0;
+  const host = piHost(() => { if (++opens === 2) throw Error("terminal failed"); return ""; });
+  await host.run(); await host.run(); await host.run();
+  assert.equal(opens, 3);
+  assert.equal(host.log.filter(item => item[0] === "start").length, 3);
+  assert.equal(host.ctx.ui.getEditorText(), "");
+  assert.equal(host.log.some(item => item[0] === "send"), false);
+  assert.match(host.log.find(item => item[0] === "notify")[1], /terminal failed/);
+});
+
+test("a changed Pi conversation receives no feedback", async () => {
+  const host = piHost(() => { host.switchSession(); return markdown; });
   await host.run();
-  assert.equal(host.log.some(x => x[0] === "send"), true);
-  assert.equal(bridge.calls.some(x => x[0] === "feedback.ack"), false);
+  assert.equal(host.ctx.ui.getEditorText(), "");
+  assert.equal(host.log.some(item => item[0] === "send"), false);
 });
 
-test("Pi restores its renderer when the Mark child fails", async () => {
-  const bridge = backend();
-  bridge.review = () => { throw new Error("child failed"); };
-  const host = piHost(bridge);
-  await host.run();
-  assert.deepEqual(host.log.filter(x => ["stop", "start", "render"].includes(x[0])).map(x => x[0]), ["stop", "start", "render"]);
-  assert.match(host.log.find(x => x[0] === "notify")[1], /child failed/);
-});
-
-test("a changed Pi session leaves submitted feedback unacknowledged", async () => {
-  const bridge = backend();
-  const original = bridge.review.bind(bridge);
-  const host = piHost(bridge);
-  bridge.review = id => { const result = original(id); host.switchSession(); return result; };
-  await host.run();
-  assert.equal(host.log.some(x => x[0] === "send"), false);
-  assert.equal(bridge.calls.some(x => x[0] === "feedback.ack"), false);
-  assert.match(host.log.find(x => x[0] === "notify")[1], /conversation changed/);
-});
-
-test("a rejected host message does not acknowledge submitted feedback", async () => {
-  const bridge = backend();
-  bridge.review("r1");
-  await assert.rejects(deliverFeedback(bridge, "r1", "agent", () => { throw new Error("busy"); }, () => true), /busy/);
-  assert.equal(bridge.calls.some(x => x[0] === "feedback.ack"), false);
-});
-
-test("OpenCode releases and restores the renderer before sending to the captured session", async () => {
-  const bridge = backend();
-  const events = [];
-  let command;
-  const context = {
-    location: { directory: "/project" },
-    keymap: { layer: fn => { command = fn().commands[0]; } },
-    ui: { router: { current: () => ({ type: "session", sessionID: "oc-1" }) }, toast: { show: x => events.push(["toast", x]) } },
-    renderer: { suspend: async () => events.push(["suspend"]), resume: async () => events.push(["resume"]) },
-    client: { session: { prompt: async input => { events.push(["prompt", input]); return {}; } } },
+function openCodeHost(review) {
+  let command, session = "oc-1";
+  const log = [];
+  const context = { location: { directory: "/dirty/project" },
+    renderer: { suspend: async () => { log.push(["suspend"]); }, resume: async () => { log.push(["resume"]); } },
+    keymap: { layer: fn => { command = fn().commands[0]; }, dispatch: id => log.push(["dispatch", id]) },
+    ui: { router: { current: () => ({ type: "session", sessionID: session }) }, toast: { show: item => log.push(["toast", item]) } },
+    client: { session: { prompt: async input => { log.push(["prompt", input]); } } },
   };
-  setupMark(context, { bridge, terminal: { stdin: { isTTY: true }, stdout: { isTTY: true } } });
-  await command.run();
-  assert.equal(command.slash.name, "mark");
-  assert.deepEqual(events.map(x => x[0]), ["suspend", "resume", "prompt"]);
-  assert.equal(events[2][1].sessionID, "oc-1");
+  setupMark(context, { review, copy: text => log.push(["copy", text]) });
+  return { log, run: () => command.run(), switchSession: () => { session = "oc-2"; } };
+}
+
+test("OpenCode restores its terminal and pastes Markdown without submitting", async () => {
+  const host = openCodeHost(({ repository }) => { assert.equal(repository, "/dirty/project"); return markdown; });
+  await host.run();
+  assert.deepEqual(host.log, [["suspend"], ["resume"], ["copy", markdown], ["dispatch", "prompt.paste"]]);
 });
 
-test("bridge uses an argv array and JSON stdin without executing shell input", () => {
-  const calls = [];
-  const bridge = createBridge({ binary: "/path with space/mark", spawn: (binary, args, options) => {
-    calls.push({ binary, args, options }); return { status: 0, stdout: JSON.stringify({ ok: true, result: { review_id: "r1" } }) };
+test("OpenCode Back, errors, and changed conversations restore without sending", async () => {
+  for (const result of ["", "error", "switch"]) {
+    const host = openCodeHost(() => {
+      if (result === "error") throw Error("terminal failed");
+      if (result === "switch") host.switchSession();
+      return result === "switch" ? markdown : "";
+    });
+    await host.run();
+    assert.deepEqual(host.log.slice(0, 2), [["suspend"], ["resume"]]);
+    assert.equal(host.log.some(item => item[0] === "prompt"), false);
+  }
+});
+
+test("clipboard transport passes annotations as input without a shell", () => {
+  for (const [platform, env, binary, args] of [
+    ["darwin", {}, "pbcopy", []],
+    ["linux", { WAYLAND_DISPLAY: "wayland-0" }, "wl-copy", []],
+    ["linux", {}, "xclip", ["-selection", "clipboard"]],
+  ]) {
+    copyAnnotations(markdown, { platform, env, spawn: (...input) => {
+      assert.deepEqual(input, [binary, args, { input: markdown, encoding: "utf8" }]);
+      return { status: 0 };
+    } });
+  }
+  assert.throws(() => copyAnnotations(markdown, { spawn: () => ({ status: 1, stderr: "clipboard unavailable" }) }), /clipboard unavailable/);
+});
+
+test("shared handoff inherits the terminal, reads its result, and cleans up", () => {
+  let result;
+  const review = createReview({ binary: "/path with spaces/mark", spawn: (binary, args, options) => {
+    assert.equal(binary, "/path with spaces/mark");
+    assert.deepEqual(args.slice(0, 4), ["bridge", "annotate", "--repo", "/dirty repo/$(not shell)"]);
+    assert.deepEqual(options, { stdio: "inherit" });
+    result = args.at(-1); writeFileSync(result, JSON.stringify({ markdown }));
+    return { status: 0 };
   } });
-  bridge.open({ harness: "pi", conversation: "$(touch /tmp/unwanted)", repository: "/project with spaces" });
-  bridge.call("comment.add", { body: "`echo unsafe`", review_id: "r1" });
-  assert.equal(calls[0].binary, "/path with space/mark");
-  assert.equal(calls[0].args[5], "$(touch /tmp/unwanted)");
-  assert.equal(calls[0].options.shell, undefined);
-  assert.equal(JSON.parse(calls[1].options.input).body, "`echo unsafe`");
+  assert.equal(review({ repository: "/dirty repo/$(not shell)" }), markdown);
+  assert.equal(existsSync(result), false);
+});
+
+test("shared handoff rejects missing, malformed, and failed child results", () => {
+  for (const response of [undefined, "not json", "{}", "error"]) {
+    let result;
+    const review = createReview({ spawn: (_binary, args) => {
+      result = args.at(-1);
+      if (response !== undefined) writeFileSync(result, response);
+      return { status: response === "error" ? 1 : 0 };
+    } });
+    assert.throws(() => review()); assert.equal(existsSync(result), false);
+  }
 });

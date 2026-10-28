@@ -956,7 +956,7 @@ fn local_viewer_accepts_fragmented_http_requests() {
     stream.shutdown(Shutdown::Write).unwrap();
     let (status, body) = response(&mut stream);
     assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
-    assert!(String::from_utf8(body).unwrap().contains("Send feedback"));
+    assert!(String::from_utf8(body).unwrap().contains("Send comments"));
 }
 
 #[test]
@@ -967,7 +967,7 @@ fn local_viewer_records_human_feedback_and_returns_it_to_same_review() {
     let viewer = WebServer::start(&fixture, &opened);
     let (status, html) = viewer.request("GET", "", &[], &[]);
     assert_eq!(status, 200);
-    assert!(String::from_utf8(html).unwrap().contains("Send feedback"));
+    assert!(String::from_utf8(html).unwrap().contains("Send comments"));
     let mut add = mutation(&opened, "browser-note");
     // The capability URL pins the original review even if a caller supplies a different ID.
     add["review_id"] = other["review_id"].clone();

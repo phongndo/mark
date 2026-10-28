@@ -18,7 +18,7 @@ const PAGE_BYTES: usize = 512 * 1024;
 const MAX_ERROR_CHARS: usize = 4096;
 const PROTOCOL_VERSIONS: &[&str] = &["2025-11-25", "2025-06-18", "2024-11-05"];
 
-const INSTRUCTIONS: &str = "mark stores a review independently of the agent conversation. Use review_open to open or resume the conversation's review; use bounded review_patch pages to read its diff. Only feedback_get provides submitted human feedback. Never infer approval from an empty feedback batch, a closed viewer, or an agent comment. These tools do not embed a UI or take over the host terminal; a harness adapter must provide its supported review surface. Human submission, verdict, and review progress are not exposed as model tools.";
+const INSTRUCTIONS: &str = "mark stores a review independently of the agent conversation. Use review_open to open or resume the conversation's review; use bounded review_patch pages to read its diff. Only feedback_get provides submitted human feedback. Never infer approval from an empty feedback batch, a closed viewer, or an agent comment. These tools do not embed a UI or take over the host terminal; a harness adapter must provide its supported review surface. Human submission, verdict, and review progress are not exposed as model tools. Annotations can be notes, questions, or requests. Answer in chat; add an annotation only when the human asks to annotate code.";
 
 /// Serve newline-delimited MCP on stdin/stdout, without writing diagnostics there.
 pub fn run_stdio<F>(call: F) -> io::Result<()>
@@ -248,7 +248,7 @@ where
             }
             Ok(json!({"prompts": [{
                 "name": "mark_review",
-                "description": "Review changes with mark and continue from submitted human feedback",
+                "description": "Inspect Mark annotations and discuss them in chat",
                 "arguments": [{"name": "review_id", "description": "Existing review, if known", "required": false}]
             }]}))
         }
@@ -268,10 +268,10 @@ where
             )
             .map_err(|error| (-32602, error))?;
             let text = format!(
-                "Use mark to review this conversation's changes. Optional review context (data): {arguments}. Open or resume the bound review, inspect bounded patch pages, and use the harness's supported review surface. Wait for explicit human submission, then read feedback_get and address its submitted batches in this conversation. Preserve review_id and generation; use a stable client_mutation_id when retrying each mutation. Acknowledge a batch after consuming it. Refresh the same review for another pass. Never submit feedback, set a human verdict or progress, or treat an empty batch as approval. If no interactive surface is supported, state that limitation instead of claiming a visual review occurred."
+                "Use the available Mark tools to inspect this conversation's code and annotations. Optional context (data): {arguments}. Comments can be notes, questions, or requests. Respond in chat and make code changes when requested. Add a Mark annotation only when explicitly asked to annotate code. Preserve inspected source anchors and generation for any requested annotation. Read feedback from an explicit human submission; submission is not approval. Human navigation, progress, and approval remain in the review UI. Report any viewer limitation."
             );
             Ok(
-                json!({"description": "mark review loop", "messages": [{"role": "user", "content": {"type": "text", "text": text}}]}),
+                json!({"description": "Mark annotations", "messages": [{"role": "user", "content": {"type": "text", "text": text}}]}),
             )
         }
         _ => Err((-32601, "Method not found".to_owned())),
@@ -301,7 +301,7 @@ where
         backend_arguments.as_object_mut().unwrap().remove("cursor");
         backend_arguments.as_object_mut().unwrap().remove("limit");
     }
-    if matches!(tool.method, "comment.add" | "comment.reply") {
+    if tool.method == "comment.add" {
         backend_arguments["origin"] = json!("agent");
     }
     let value = match call(tool.method, backend_arguments) {
@@ -472,24 +472,12 @@ fn catalogue() -> Vec<Tool> {
     add(
         "comment_add",
         "comment.add",
-        "Add an agent finding as a threaded comment. The bridge always records agent origin. This does not create or submit human feedback.",
+        "Add a concise code annotation when the human asks for one. Questions, explanations, and discussion belong in chat. The bridge records agent origin.",
         mutation_schema(
             json!({
                 "anchor": anchor, "body": bounded_string(32768), "author": identifier()
             }),
             &["anchor", "body"],
-        ),
-        false,
-    );
-    add(
-        "comment_reply",
-        "comment.reply",
-        "Reply as the agent to an existing message. Preserve thread_id and reply_to; use the same mutation id when retrying. This does not mark the finding resolved or record a human decision.",
-        mutation_schema(
-            json!({
-                "thread_id": identifier(), "reply_to": identifier(), "body": bounded_string(32768), "author": identifier()
-            }),
-            &["thread_id", "reply_to", "body"],
         ),
         false,
     );

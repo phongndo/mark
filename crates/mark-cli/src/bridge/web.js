@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-let record, anchor, reply, editing, submitted, busy = false;
+let record, anchor, editing, submitted, busy = false;
 const selected = new Set(), pending = new Map();
 const endpoint = new URL('api', location.href), recordURL = new URL('api/review', location.href);
 
@@ -39,15 +39,15 @@ async function load() {
   renderDiff(); renderThreads();
 }
 function resetCompose() {
-  anchor = reply = editing = undefined;
+  anchor = editing = undefined;
   $('body').value = ''; $('target').textContent = 'Select a file or line in the diff.';
-  $('save').disabled = true; $('composeTitle').textContent = 'Add a note'; $('cancelReply').hidden = true;
+  $('save').disabled = true; $('composeTitle').textContent = 'Add a note'; $('cancelEdit').hidden = true;
 }
-function target(value, thread, message) {
-  anchor = value; reply = thread; editing = message;
+function target(value, message) {
+  anchor = value; editing = message;
   $('target').textContent = value.file + (value.old_line ? ' · old line ' + value.old_line : value.new_line ? ' · line ' + value.new_line : ' · file');
-  $('save').disabled = false; $('composeTitle').textContent = message ? 'Edit your note' : thread ? 'Reply to thread' : 'Add a note';
-  $('cancelReply').hidden = !thread && !message;
+  $('save').disabled = false; $('composeTitle').textContent = message ? 'Edit your note' : 'Add a note';
+  $('cancelEdit').hidden = !message;
   if (message) $('body').value = message.body;
   document.querySelectorAll('.selected').forEach(element => element.classList.remove('selected'));
   $('body').focus();
@@ -118,28 +118,18 @@ function renderThreads() {
     };
     label.append(check, node('strong', thread.anchor.file)); container.append(label);
     if (thread.stale) container.append(node('small', 'Anchor needs verification against this pass.', 'stale'));
-    const lastHuman = messages.filter(message => message.origin === 'human').at(-1);
     for (const message of messages) {
       const block = node('div', undefined, 'message');
-      block.append(node('small', message.origin === 'agent' ? (message.author || 'Agent') : 'You'), node('p', message.body));
+      block.append(node('p', message.body));
       if (message.origin === 'human') {
-        if (message === lastHuman) {
-          const edit = node('button', 'Edit'); edit.onclick = () => target(thread.anchor, thread, message); block.append(edit);
-        }
+        const edit = node('button', 'Edit'); edit.onclick = () => target(thread.anchor, message); block.append(edit);
         const remove = node('button', 'Remove');
         remove.onclick = () => action(async () => { await api('comment.remove', { message_id: message.message_id }); await load(); });
         block.append(remove);
       }
       container.append(block);
     }
-    const button = node('button', 'Reply'); button.onclick = () => target(thread.anchor, thread); container.append(button);
-    const disposition = node('select'); disposition.setAttribute('aria-label', 'Finding status');
-    for (const value of ['open', 'accepted', 'dismissed', 'blocking', 'non_blocking', 'fixed']) {
-      const option = node('option', value.replace('_', ' ')); option.value = value; disposition.append(option);
-    }
-    disposition.value = thread.disposition;
-    disposition.onchange = () => action(async () => { await api('review.disposition', { thread_id: thread.thread_id, disposition: disposition.value }); await load(); });
-    container.append(disposition); root.append(container);
+    root.append(container);
   }
   updateSend();
 }
@@ -150,16 +140,14 @@ async function action(task) {
 $('compose').onsubmit = event => {
   event.preventDefault(); action(async () => {
     const body = $('body').value.trim(); if (!anchor || !body) return;
-    const method = editing ? 'comment.edit' : reply ? 'comment.reply' : 'comment.add';
-    const params = editing ? { message_id: editing.message_id, body } : reply ? {
-      thread_id: reply.thread_id, reply_to: reply.messages.filter(message => !message.deleted).at(-1).message_id, body,
-    } : { anchor, body };
+    const method = editing ? 'comment.edit' : 'comment.add';
+    const params = editing ? { message_id: editing.message_id, body } : { anchor, body };
     const result = await api(method, params);
     const id = result.thread?.thread_id; if (id) selected.add(id);
     resetCompose(); await load(); notice('Note saved. Send feedback when you are ready.');
   });
 };
-$('cancelReply').onclick = resetCompose;
+$('cancelEdit').onclick = resetCompose;
 $('refresh').onclick = () => action(async () => {
   if ($('body').value.trim()) throw Error('Save your current note before refreshing the review.');
   record = await read();

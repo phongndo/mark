@@ -5,7 +5,7 @@ use std::{
 
 use mark_command::{DiffOptions, DiffOutput, DiffSource, PatchSource, UntrackedMode};
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -94,4 +94,14 @@ pub(super) fn patch(options: &DiffOptions) -> io::Result<String> {
         .map_err(|error| io::Error::other(error.to_string()))?;
     String::from_utf8(changeset.raw_patch.to_vec())
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "review patch is not UTF-8"))
+}
+
+pub(super) fn files(patch: &str) -> Value {
+    json!(mark_diff::parse_patch(patch).iter().map(|file| {
+        json!({"path":file.display_path(),"old_path":file.old_path(),"new_path":file.new_path(),"binary":file.is_binary(),"status":file.status().label(),
+            "hunks":file.hunks().iter().map(|hunk|json!({"header":hunk.header,"lines":hunk.lines.iter().map(|line|{
+                let kind=match line.kind(){mark_diff::DiffLineKind::Addition=>"add",mark_diff::DiffLineKind::Deletion=>"del",mark_diff::DiffLineKind::Context=>"context",mark_diff::DiffLineKind::Meta=>"meta"};
+                json!({"kind":kind,"old_line":line.old_line(),"new_line":line.new_line(),"text":line.text_lossy()})
+            }).collect::<Vec<_>>()})).collect::<Vec<_>>()})
+    }).collect::<Vec<_>>())
 }

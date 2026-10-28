@@ -16,7 +16,7 @@ mod files;
 mod tests;
 
 include!(concat!(env!("OUT_DIR"), "/integration_assets.rs"));
-const SKILL: &str = include_str!("../../../assets/skills/agent-review/SKILL.md");
+const SKILL: &str = include_str!("../../../assets/skills/annotation-review/SKILL.md");
 const LICENSE: &str = include_str!("../../../LICENSE");
 const INTRO: &str = include_str!("../../../assets/integrations/README.md");
 
@@ -56,14 +56,6 @@ impl IntegrationAgent {
             Self::Codex => "codex",
             Self::Opencode => "opencode",
             Self::Fx => "fx",
-        }
-    }
-
-    fn skill_name(self) -> &'static str {
-        match self {
-            Self::Claude => "review-loop",
-            Self::Codex | Self::Fx => "mark",
-            _ => "mark-review-loop",
         }
     }
 
@@ -140,33 +132,13 @@ fn package(agent: IntegrationAgent) -> io::Result<BTreeMap<PathBuf, Vec<u8>>> {
         }
         files.insert(path, bytes);
     }
-    let skill_dir = PathBuf::from("skills").join(agent.skill_name());
-    let mut body = SKILL
-        .lines()
-        .map(|line| {
-            if line.starts_with("name: ") {
-                format!("name: {}", agent.skill_name())
-            } else {
-                line.to_owned()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    body.push('\n');
     if matches!(agent, IntegrationAgent::Codex | IntegrationAgent::Fx) {
-        let host = files
-            .get(Path::new("HOST.md"))
-            .ok_or_else(|| invalid("embedded host instructions are missing"))?
-            .clone();
-        files.insert(skill_dir.join("HOST.md"), host);
-        body.push_str(&format!("\nFor `$mark` in {}, read [the host entry instructions](HOST.md) before opening a review.\n", agent.name()));
-    }
-    files.insert(skill_dir.join("SKILL.md"), body.into_bytes());
-    if agent == IntegrationAgent::Fx {
-        for name in ["open-review.mjs", "LICENSE", "README.md"] {
+        let skill_dir = PathBuf::from("skills/mark");
+        files.insert(skill_dir.join("SKILL.md"), SKILL.as_bytes().to_vec());
+        for name in ["HOST.md", "open-review.mjs", "LICENSE", "README.md"] {
             let bytes = files
                 .get(Path::new(name))
-                .ok_or_else(|| invalid("detached fx skill asset is missing"))?
+                .ok_or_else(|| invalid("annotation skill asset is missing"))?
                 .clone();
             files.insert(skill_dir.join(name), bytes);
         }
@@ -184,9 +156,6 @@ fn package(agent: IntegrationAgent) -> io::Result<BTreeMap<PathBuf, Vec<u8>>> {
             .ok_or_else(|| invalid("embedded package manifest is missing"))?,
     )?;
     manifest["version"] = json!(env!("CARGO_PKG_VERSION"));
-    if agent == IntegrationAgent::Pi {
-        manifest["pi"]["skills"] = json!(["./skills/mark-review-loop"]);
-    }
     files.insert(manifest_path, json_bytes(&manifest)?);
     if agent == IntegrationAgent::Claude {
         files.insert(PathBuf::from(".claude-plugin/marketplace.json"), json_bytes(&json!({
@@ -215,21 +184,6 @@ fn package(agent: IntegrationAgent) -> io::Result<BTreeMap<PathBuf, Vec<u8>>> {
             }
         }
         files.insert(PathBuf::from("plugin.json"), json_bytes(&portable)?);
-        let mut mcp: Value = serde_json::from_slice(
-            files
-                .get(Path::new(".mcp.json"))
-                .ok_or_else(|| invalid("embedded MCP configuration is missing"))?,
-        )?;
-        mcp["$schema"] = json!("https://agent-plugins.org/schemas/1.0.0/mcp.schema.json");
-        for (_, server) in mcp["mcpServers"]
-            .as_object_mut()
-            .ok_or_else(|| invalid("MCP configuration must name its servers"))?
-        {
-            if server.get("type").is_none() {
-                server["type"] = json!("stdio");
-            }
-        }
-        files.insert(PathBuf::from("mcp.json"), json_bytes(&mcp)?);
         files.insert(PathBuf::from(".agents/plugins/marketplace.json"), json_bytes(&json!({
             "name": "mark-local", "interface": { "displayName": "Mark" },
             "plugins": [{ "name": manifest["name"], "source": { "source": "local", "path": "./" },

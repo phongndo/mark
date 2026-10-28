@@ -55,24 +55,15 @@ export function packageFiles(harness, version = workspaceVersion()) {
   for (const [name, bytes] of files) {
     if (!name.includes("/") && /\.(mjs|js)$/.test(name)) files.set(name, Buffer.from(bytes.toString("utf8").replaceAll('"../common/', '"./common/')));
   }
-  const name = harness === "claude" ? "review-loop" : ["codex", "fx"].includes(harness) ? "mark" : "mark-review-loop";
-  const skillDir = `skills/${name}`;
-  let body = readFileSync(join(root, "../skills/agent-review/SKILL.md"), "utf8").replace(/^name: .*$/m, `name: ${name}`);
   if (["codex", "fx"].includes(harness)) {
-    files.set(`${skillDir}/HOST.md`, files.get("HOST.md"));
-    body += `\nFor \`$mark\` in ${harness}, read [the host entry instructions](HOST.md) before opening a review.\n`;
-  }
-  files.set(`${skillDir}/SKILL.md`, Buffer.from(body));
-  if (harness === "fx") {
-    files.set(`${skillDir}/open-review.mjs`, files.get("open-review.mjs"));
-    files.set(`${skillDir}/LICENSE`, files.get("LICENSE"));
-    files.set(`${skillDir}/README.md`, files.get("README.md"));
+    const skillDir = "skills/mark";
+    files.set(`${skillDir}/SKILL.md`, readFileSync(join(root, "../skills/annotation-review/SKILL.md")));
+    for (const name of ["HOST.md", "open-review.mjs", "LICENSE", "README.md"]) files.set(`${skillDir}/${name}`, files.get(name));
     for (const [path, bytes] of [...files]) if (path.startsWith("common/")) files.set(`${skillDir}/${path}`, bytes);
   }
   const manifestPath = harness === "claude" ? ".claude-plugin/plugin.json" : harness === "codex" ? ".codex-plugin/plugin.json" : "package.json";
   const manifest = JSON.parse(files.get(manifestPath));
   manifest.version = version;
-  if (harness === "pi") manifest.pi.skills = ["./skills/mark-review-loop"];
   files.set(manifestPath, jsonBytes(manifest));
   if (harness === "claude") files.set(".claude-plugin/marketplace.json", jsonBytes({
     name: "mark-local", owner: { name: "Mark" },
@@ -82,10 +73,6 @@ export function packageFiles(harness, version = workspaceVersion()) {
     const portable = { $schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json", license: "MIT", repository: "https://github.com/phongndo/mark" };
     for (const key of ["name", "version", "description", "author", "homepage", "repository", "license", "keywords"]) if (manifest[key] !== undefined && manifest[key] !== null) portable[key] = manifest[key];
     files.set("plugin.json", jsonBytes(portable));
-    const mcp = JSON.parse(files.get(".mcp.json"));
-    mcp.$schema = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json";
-    for (const server of Object.values(mcp.mcpServers)) server.type ??= "stdio";
-    files.set("mcp.json", jsonBytes(mcp));
     files.set(".agents/plugins/marketplace.json", jsonBytes({
       name: "mark-local", interface: { displayName: "Mark" },
       plugins: [{ name: manifest.name, source: { source: "local", path: "./" }, policy: { installation: "AVAILABLE", authentication: "ON_INSTALL" }, category: "Productivity" }],

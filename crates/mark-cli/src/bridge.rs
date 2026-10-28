@@ -17,6 +17,24 @@ pub(crate) use args::{BridgeCommand, McpArgs};
 
 pub(crate) fn run(command: BridgeCommand) -> CliResult<()> {
     match command {
+        BridgeCommand::Annotate {
+            repo,
+            base,
+            result_file,
+        } => {
+            if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+                return Err(io::Error::new(io::ErrorKind::Unsupported,
+                    "Mark needs an interactive terminal. Run /mark from your agent, or run `mark diff` in a terminal.").into());
+            }
+            let source = base.map_or_else(
+                || json!({"kind":"worktree"}),
+                |base| json!({"kind":"base","base":base}),
+            );
+            let options = source::options(&json!(repo), &source)?;
+            let markdown = mark_tui::run_annotation_review(options)?.unwrap_or_default();
+            write_result(&result_file, &json!({"markdown":markdown}))?;
+            Ok(())
+        }
         BridgeCommand::Open {
             harness,
             conversation,

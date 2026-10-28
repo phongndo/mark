@@ -1,0 +1,10 @@
+#!/bin/sh
+# Run the checkout's Mark extension from the current (possibly dirty) worktree.
+set -eu
+mark_checkout=$(CDPATH='' cd "$(dirname "$0")/.." && pwd)
+if [ ! -x "$mark_checkout/target/debug/mark" ]; then
+  printf '%s\n' "Build Mark first in $mark_checkout: nix develop -c cargo build -p mark-cli --locked" >&2
+  exit 1
+fi
+export MARK_BIN="$mark_checkout/target/debug/mark"
+exec pi --no-extensions --no-skills -e "$mark_checkout/assets/integrations/pi/index.js" "$@"

@@ -66,8 +66,8 @@ function manifestPaths(host) {
 function validatePackage(directory, host, version) {
   const paths = files(directory);
   assert(paths.includes("LICENSE") && paths.includes("README.md"), `${host} must include license and documentation`);
-  assert(paths.includes("common/bridge.mjs"), `${host} must include its shared bridge`);
-  assert(paths.some(path => /^skills\/[^/]+\/SKILL\.md$/.test(path)), `${host} must include its generated skill`);
+  assert(paths.includes("common/review.mjs"), `${host} must include its shared bridge`);
+  if (["codex", "fx"].includes(host)) assert(paths.includes("skills/mark/SKILL.md"), host + " must include its annotation skill");
   assert(!paths.some(path => /(^|\/)(?:node_modules|tests?|fixtures)(?:\/|$)/.test(path)), `${host} contains development files`);
   const manifests = manifestPaths(host).filter(path => existsSync(join(directory, path)));
   assert(manifests.length, `${host} has no host manifest`);
@@ -85,7 +85,7 @@ export function validatePacklist(metadata, directory, host, version) {
   const repository = typeof manifest.repository === "string" ? manifest.repository : manifest.repository?.url;
   assert.equal(repository?.replace(/^git\+/, "").replace(/\.git\/?$/, "").replace(/\/$/, ""), "https://github.com/phongndo/mark", `${host} repository must match the public release source for provenance`);
   const packed = new Set(metadata.files.map(file => file.path));
-  const required = ["package.json", "LICENSE", "README.md", "common/bridge.mjs"];
+  const required = ["package.json", "LICENSE", "README.md", "common/review.mjs"];
   for (const path of files(directory).filter(path => /^skills\/[^/]+\/SKILL\.md$/.test(path))) required.push(path);
   if (host === "pi") required.push(...manifest.pi.extensions.map(path => path.replace(/^\.\//, "")));
   if (host === "opencode") required.push(...Object.values(manifest.exports).map(path => path.replace(/^\.\//, "")), "adapter.mjs");
