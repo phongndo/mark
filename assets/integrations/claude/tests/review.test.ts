@@ -1,89 +1,107 @@
-import { expect, test } from "claude-code/testing";
+import { expect, mock, test } from "claude-code/testing";
 
-test("/mark opens a review for this conversation through the real mod host", async ($, on) => {
-  const commands = [];
-  let opened = false;
-  let prompt = "";
-  let pending = false;
-  const record = { review_id: "r1", generation: 1, threads: [], submissions: [] };
-  on("session.id", async () => ({ value: "claude-test-conversation" }));
-  on("session.cwd", async () => ({ value: "/test/project" }));
-  on("env.get", async () => ({ value: "mark" }));
-  on("ui.invalidate", async () => ({ value: undefined }));
-  on("ui.close", async () => ({ value: undefined }));
-  on("prompt.submit", async (_$, e) => { prompt = e.text; return { text: e.text }; });
-  on("process.run", async (_$, e) => {
-    commands.push(e.argv);
-    const method = e.argv[3];
-    const input = JSON.parse(e.init?.stdin || "{}");
-    let result;
-    if (e.argv[2] === "open" || method === "review.get") result = record;
-    else if (method === "review.patch") result = { review_id: "r1", generation: 1, patch: "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -0,0 +1 @@\n+fixed\n", next_offset: null };
-    else if (method === "comment.add") {
-      expect(input.origin).toBe("human");
-      expect(input.anchor).toEqual({ file: "a", new_line: 1 });
-      expect(typeof input.client_mutation_id).toBe("string");
-      const thread = { thread_id: "t1", anchor: input.anchor, messages: [{ message_id: "m1", origin: "human", body: input.body }], stale: false };
-      record.threads.push(thread);
-      result = { thread };
-    } else if (method === "feedback.submit") {
-      expect(input.thread_ids).toEqual(["t1"]);
-      pending = true;
-      result = { submission: { submission_id: "s1", threads: record.threads } };
-    } else if (method === "feedback.get") result = { submissions: pending ? [{ submission_id: "s1", threads: record.threads }] : [] };
-    else if (method === "feedback.ack") { pending = false; result = {}; }
-    else if (method === "review.finish") result = {};
-    else throw new Error(`Unexpected bridge method ${method}`);
-    return { value: { exitCode: 0, stdout: JSON.stringify({ ok: true, result }), stderr: "" } };
+async function setup($, on, { env = { REX_BLOCK: "block:claude" }, draft = "" } = {}) {
+  const clock = mock.clock(on);
+  const commands = [], filled = [], notices = [], copied = [], files = new Map();
+  let session = "original", alive = true, fillAvailable = true;
+  on("session.id", async () => ({ value: session }));
+  on("session.cwd", async () => ({ value: "/dirty/project" }));
+  on("env.get", async (_$, event) => ({ value: { MARK_BIN: "/local/mark", ...env }[event.name] }));
+  on("ui.toast", async (_$, event) => { notices.push(event.text); return { value: undefined }; });
+  on("ui.copy", async (_$, event) => { copied.push(event.text); return { value: { isCopied: true } }; });
+  on("prompt.read", async () => ({ value: { text: draft, cursor: draft.length } }));
+  on("prompt.fill", async (_$, event) => {
+    if (!fillAvailable) return { isFilled: false };
+    filled.push(event); draft += event.text;
+    return { isFilled: true };
   });
-  on("ui.open", async () => { opened = true; return { value: { isPlaced: true } }; });
-  const response = await $.command.run({ command: "mark", args: "" });
-  expect(response.text).toBeUndefined();
-  expect(opened).toBe(true);
-  expect(commands.some(args => args.includes("--conversation"))).toBe(true);
-  expect(commands.some(args => args.includes("review.patch"))).toBe(true);
-  const ui = await $.ui.mount({ plugin: "mark", surface: "terminal", component: "Pane", requestId: "mark-review", props: { title: "Mark", isFocused: true, bodyColumns: 80, placement: "inline" } });
-  expect((await ui.find({ key: "submit" }))?.text).toContain("Submit");
-  expect((await ui.find({ type: "Code" }))?.text).toContain("+fixed");
-  await ui.input({ key: "file", text: "a" });
-  await ui.input({ key: "line", text: "new:1" });
-  await ui.input({ key: "body", text: "Fix this race." });
-  await ui.press({ key: "add" });
-  await ui.redraw();
-  expect(record.threads.length, (await ui.findAll({ type: "Text" })).map(item => item.text).join("\n")).toBe(1);
-  expect((await ui.find({ key: "submit" }))?.text).toContain("1 selected");
-  await ui.press({ key: "submit" });
-  expect(prompt).toContain("Fix this race.");
-  expect(pending).toBe(false);
-  await ui.unmount();
-  for (const surface of ["desktop", "vscode"]) {
-    const rendered = await $.ui.mount({ plugin: "mark", surface, component: "Pane", requestId: "mark-review", props: { title: "Mark", isFocused: true, bodyColumns: 80, placement: "inline" } });
-    expect((await rendered.find({ key: "add" }))?.text).toContain("Save comment");
-    await rendered.unmount();
-  }
+  on("fs.exists", async (_$, event) => ({ value: files.has(event.path) }));
+  on("fs.read", async (_$, event) => ({ value: files.get(event.path) }));
+  on("process.run", async (_$, event) => {
+    commands.push(event.argv);
+    const [program, command] = event.argv;
+    const stdout = program === "mktemp" ? "/tmp/mark-1\n"
+      : program === "rex" && command === "split" ? JSON.stringify({ block_ids: ["block:mark"] })
+      : program === "tmux" && command === "split-window" ? "%7\n" : "";
+    const exitCode = (command === "block" || command === "display-message") && !alive ? 1 : 0;
+    return { value: { exitCode, stdout, stderr: "" } };
+  });
+  const result = await $.command.run({ command: "mark", args: "" });
+  return {
+    result, clock, commands, filled, notices, copied,
+    finish: markdown => files.set("/tmp/mark-1/result.json", JSON.stringify({ markdown })),
+    close: () => { alive = false; },
+    switchSession: () => { session = "other"; },
+    setFillAvailable: available => { fillAvailable = available; },
+  };
+}
+
+test("opens the real Mark TUI in a Rex split beside Claude", async ($, on) => {
+  const host = await setup($, on);
+  const split = host.commands.find(argv => argv[1] === "split");
+  expect(split.slice(0, 11)).toEqual(["rex", "split", "--json", "-b", "block:claude", "-c", "/dirty/project", "--label", "mark", "--shell", "none"]);
+  expect(split.slice(-7)).toEqual(["/local/mark", "bridge", "annotate", "--repo", "/dirty/project", "--result-file", "/tmp/mark-1/result.json"]);
+  expect(host.result.text).toContain("Mark opened");
 });
 
-test("a pane from another conversation cannot mutate or deliver feedback", async ($, on) => {
-  let session = "original";
-  const methods = [];
-  let notice = "";
-  on("session.id", async () => ({ value: session }));
-  on("session.cwd", async () => ({ value: "/test/project" }));
-  on("env.get", async () => ({ value: "mark" }));
-  on("ui.invalidate", async () => ({ value: undefined }));
-  on("ui.open", async () => ({ value: { isPlaced: true } }));
-  on("ui.toast", async (_$, e) => { notice = e.text; return { value: undefined }; });
-  on("process.run", async (_$, e) => {
-    methods.push(e.argv[3]);
-    const result = e.argv[3] === "review.patch" ? { patch: "", next_offset: null } : { review_id: "r1", generation: 1, threads: [], submissions: [] };
-    return { value: { exitCode: 0, stdout: JSON.stringify({ ok: true, result }), stderr: "" } };
-  });
-  await $.command.run({ command: "mark", args: "" });
-  const ui = await $.ui.mount({ plugin: "mark", surface: "terminal", component: "Pane", requestId: "mark-review", props: { title: "Mark", isFocused: true, bodyColumns: 80, placement: "inline" } });
-  session = "different";
-  await ui.press({ key: "retry" });
-  expect(notice).toContain("another conversation");
-  expect(methods.includes("feedback.get")).toBe(false);
-  expect(methods.includes("feedback.ack")).toBe(false);
-  await ui.unmount();
+test("returned marks fill the chat draft without sending", async ($, on) => {
+  const host = await setup($, on);
+  host.finish("- `a:1` — What does this mean?");
+  await host.clock.advance(600);
+  expect(host.filled.map(event => ({ text: event.text, mode: event.mode }))).toEqual([{ text: "- `a:1` — What does this mean?", mode: "append" }]);
+  expect(host.commands.at(-1)).toEqual(["rm", "-rf", "/tmp/mark-1"]);
+});
+
+test("marks append after an existing draft", async ($, on) => {
+  const host = await setup($, on, { draft: "Explain these notes." });
+  host.finish("- `a:1` — note");
+  await host.clock.advance(600);
+  expect(host.filled[0].text).toBe("\n\n- `a:1` — note");
+});
+
+test("tmux is used when Rex is absent", async ($, on) => {
+  const host = await setup($, on, { env: { TMUX: "/tmp/tmux", TMUX_PANE: "%1" } });
+  expect(host.commands.find(argv => argv[0] === "tmux").slice(0, 10)).toEqual(["tmux", "split-window", "-h", "-t", "%1", "-c", "/dirty/project", "-P", "-F", "#{pane_id}"]);
+  host.close();
+  await host.clock.advance(600);
+  expect(host.filled.length).toBe(0);
+  expect(host.commands.at(-1)).toEqual(["rm", "-rf", "/tmp/mark-1"]);
+});
+
+test("closing Mark without marks fills nothing and allows reopening", async ($, on) => {
+  const closed = await setup($, on);
+  closed.close();
+  await closed.clock.advance(600);
+  expect(closed.filled.length).toBe(0);
+  expect((await $.command.run({ command: "mark", args: "" })).text).toContain("Mark opened");
+});
+
+test("a changed conversation is refused", async ($, on) => {
+  const host = await setup($, on);
+  host.switchSession();
+  host.finish("- `a:1` — note");
+  await host.clock.advance(600);
+  expect(host.filled.length).toBe(0);
+  expect(host.notices.at(-1)).toContain("conversation changed");
+});
+
+test("an unavailable chat input copies marks to the clipboard", async ($, on) => {
+  const host = await setup($, on);
+  host.setFillAvailable(false);
+  host.finish("- `a:1` — note");
+  await host.clock.advance(600);
+  expect(host.copied).toEqual(["- `a:1` — note"]);
+  expect(host.notices.at(-1)).toContain("clipboard");
+});
+
+test("without Rex or tmux, /mark explains how to run it", async ($, on) => {
+  const host = await setup($, on, { env: {} });
+  expect(host.result.text).toContain("Rex or tmux");
+  expect(host.commands.at(-1)).toEqual(["rm", "-rf", "/tmp/mark-1"]);
+});
+
+test("a second /mark while one is open does not open another split", async ($, on) => {
+  const host = await setup($, on);
+  expect((await $.command.run({ command: "mark", args: "" })).text).toContain("already open");
+  expect(host.commands.filter(argv => argv[1] === "split").length).toBe(1);
 });

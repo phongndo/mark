@@ -1,5 +1,5 @@
 {
   "name": "mark",
   "version": "0.16.0",
-  "description": "Review changes and submit feedback without leaving the Claude conversation."
+  "description": "Annotate the diff in Mark beside the chat and prepare selected notes as a Markdown chat draft."
 }
