@@ -177,8 +177,8 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         # npm can process first publications for several minutes. Keep the
-        # retry interval here too, so retries of older qualified source commits
-        # receive the same five-minute indexing window without changing bytes.
+        # registry options here too, so retries of older qualified sources
+        # use full metadata and a five-minute window without changing bytes.
         run: |
           node --input-type=module <<'JS'
           import { readFileSync } from "node:fs";
@@ -189,6 +189,9 @@ jobs:
           const result = await publishNpmPackages(index, {
             directory,
             delay: () => new Promise(resolve => setTimeout(resolve, 15000)),
+            fetchRegistry: (url, options) => fetch(url, options.headers
+              ? { ...options, headers: { ...options.headers, accept: "application/json" } }
+              : options),
           });
           console.log(JSON.stringify(result));
           JS

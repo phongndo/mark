@@ -31,7 +31,7 @@ export async function publishNpmPackages(index, {
 
   async function metadata(name, version) {
     const response = await fetchRegistry(`${registry}/${encodeURIComponent(name)}${version ? `/${version}` : ""}`, {
-      headers: { accept: "application/vnd.npm.install-v1+json" }, signal: AbortSignal.timeout(30000),
+      headers: { accept: "application/json" }, signal: AbortSignal.timeout(30000),
     });
     if (response.status === 404) return undefined;
     assert(response.ok, `npm registry verification failed (${response.status}) for ${name}`);

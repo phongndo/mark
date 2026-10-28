@@ -231,6 +231,27 @@ test("registry outages are failures rather than evidence of absent packages", as
   } finally { f.cleanup(); }
 });
 
+test("metadata verification uses full JSON when the registry rejects abbreviated metadata", async () => {
+  const f = registryFixture();
+  let metadataRequests = 0;
+  try {
+    const result = await publishNpmPackages(f.index, {
+      ...f,
+      fetchRegistry: async (input, options) => {
+        if (!new URL(input).pathname.startsWith("/tarballs/")) {
+          metadataRequests++;
+          if (options?.headers?.accept !== "application/json") return new Response("metadata format not acceptable", { status: 406 });
+        }
+        return f.fetchRegistry(input);
+      },
+    });
+    assert.equal(result.length, 2);
+    assert(result.every(item => item.latest));
+    assert(metadataRequests > 0);
+    assert(f.index.npm.every(item => f.events.includes(`download:${item.name}`)), "full metadata must still lead to verification of the published tarball bytes");
+  } finally { f.cleanup(); }
+});
+
 test("an older release cannot move a package's latest tag backwards", async () => {
   const f = registryFixture();
   try {
