@@ -49,6 +49,7 @@ pub(crate) fn statusline_header_line(app: &DiffApp, width: usize) -> Line<'stati
     let mut spans = Vec::new();
 
     push_statusline_left_spans(&mut spans, app, &mut left_width);
+    push_handoff_hint_span(&mut spans, app, &mut left_width);
     // The left side's unused width is the gap before the right side.
     if left_width > 0 {
         spans.push(Span::styled(
@@ -152,9 +153,9 @@ pub(crate) fn push_statusline_left_spans(
                 "{} {}",
                 format_count(annotation_count),
                 if annotation_count == 1 {
-                    "note"
+                    "mark"
                 } else {
-                    "notes"
+                    "marks"
                 }
             ),
             Style::default()
@@ -165,6 +166,28 @@ pub(crate) fn push_statusline_left_spans(
         );
     }
     push_fitted_statusline_span(spans, " ", Style::default().bg(info_bg), remaining);
+}
+
+// Shown only while annotating for a chat, and only whole: a cut hint misleads.
+fn push_handoff_hint_span(spans: &mut Vec<Span<'static>>, app: &DiffApp, remaining: &mut usize) {
+    if app.runtime.annotation_handoff.is_none() {
+        return;
+    }
+    let hint = [
+        "  ⏎ add mark · n marks · Q send all · q quit",
+        "  ⏎ mark · n list · Q send",
+    ]
+    .into_iter()
+    .find(|hint| hint.width() <= *remaining);
+    if let Some(hint) = hint {
+        *remaining -= hint.width();
+        spans.push(Span::styled(
+            hint,
+            Style::default()
+                .fg(app.config.theme.muted)
+                .bg(statusline_bg(app.config.theme)),
+        ));
+    }
 }
 
 pub(crate) fn push_fitted_statusline_span(

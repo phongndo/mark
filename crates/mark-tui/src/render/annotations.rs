@@ -124,10 +124,23 @@ fn annotation_bottom_border_line(
         AnnotationFooterButton::Edit => theme.search_match_bg,
         AnnotationFooterButton::Submit => theme.addition_fg,
     };
+    // The editor is the one place a key hint helps: Enter adds a line here.
+    let hint = if button == AnnotationFooterButton::Submit {
+        " ⏎ new line · ^S save "
+    } else {
+        ""
+    };
+    let hint = if left >= hint.width() + 2 { hint } else { "" };
     let mut spans = vec![
         annotation_border_span("└", theme),
-        Span::styled(annotation_rule(left, theme), style),
+        Span::styled(annotation_rule(left - hint.width(), theme), style),
     ];
+    if !hint.is_empty() {
+        spans.push(Span::styled(
+            hint,
+            Style::default().fg(theme.muted).bg(base_bg(theme)),
+        ));
+    }
     if show_button {
         spans.push(Span::styled(
             label,
@@ -300,8 +313,9 @@ pub(crate) fn render_annotation_saved_block(
     editable_human: bool,
 ) -> Vec<Line<'static>> {
     let mut lines = vec![annotation_top_border_line(width, theme, label)];
+    // A saved mark is the reviewer's own words; keep it as readable as code.
     for line in annotation_display_lines(text, width) {
-        lines.push(annotation_body_line(&line, width, theme, theme.muted));
+        lines.push(annotation_body_line(&line, width, theme, theme.foreground));
     }
     lines.push(annotation_bottom_border_line(
         width,
@@ -379,17 +393,17 @@ mod tests {
     };
 
     #[test]
-    fn agent_and_mixed_cards_do_not_render_an_edit_button() {
+    fn read_only_notes_do_not_render_an_edit_button() {
         let lines = render_annotation_saved_block(
-            "Agent: explanation",
+            "annotation",
             32,
             DiffTheme::default(),
-            Some("Agent"),
+            Some("Note"),
             false,
         );
         let footer = lines.last().unwrap().to_string();
 
-        assert!(!footer.contains("[↻]"));
+        assert!(!footer.contains("[e]"));
         assert!(!footer.contains("[e]"));
     }
 
@@ -399,7 +413,7 @@ mod tests {
             render_annotation_saved_block("note", 12, DiffTheme::default(), Some("Line"), true);
         let text: Vec<String> = lines.iter().map(ToString::to_string).collect();
 
-        assert_eq!(text, ["┌Line ──[x]┐", "│note      │", "└───────[↻]┘"]);
+        assert_eq!(text, ["┌Line ──[x]┐", "│note      │", "└───────[e]┘"]);
     }
 
     #[test]

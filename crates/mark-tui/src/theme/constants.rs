@@ -29,4 +29,4 @@ pub(crate) const FILE_SIDEBAR_MIN_DIFF_WIDTH: u16 = 30;
 pub(crate) const STATUSLINE_SELECTOR_GAP: &str = " ";
 pub(crate) const FLOATING_MENU_MIN_WIDTH: u16 = 24;
 pub(crate) const FLOATING_MENU_MIN_HEIGHT: u16 = 5;
-pub(crate) const HELP_KEY_COLUMN_WIDTH: usize = 17;
+pub(crate) const HELP_KEY_COLUMN_WIDTH: usize = 20;

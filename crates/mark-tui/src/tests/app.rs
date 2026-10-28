@@ -20,7 +20,7 @@ fn n_opens_annotation_menu_shortcut_without_grep_filter() {
         .expect("n should open annotation menu shortcut");
     assert_eq!(
         app.notifications.toasts.latest_text(),
-        Some("no annotations")
+        Some("No marks yet. Press Enter on a line to add one.")
     );
     assert_eq!(app.sidebar.selected_file, FILE_0);
     assert_eq!(app.focused_hunk_for_viewport(7), Some((FILE_0, HUNK_0)));

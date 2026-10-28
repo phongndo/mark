@@ -15,8 +15,8 @@ use crate::{
             selector_menu_list_rows, selector_menu_outer_height, selector_menu_outer_width,
             selector_row_style, selector_separator_line,
         },
-        style::{base_bg, file_sidebar_style},
-        text::{fit_padded, status_code, terminal_text},
+        style::base_bg,
+        text::{fit, fit_padded, fit_with_ellipsis, terminal_text},
     },
     theme::DiffTheme,
 };
@@ -26,7 +26,7 @@ pub(crate) fn draw_annotation_menu(frame: &mut Frame<'_>, app: &DiffApp, area: R
     let Some(menu_area) = annotation_menu_area(app, area, &items) else {
         return;
     };
-    let block = annotation_menu_block(app.config.theme);
+    let block = annotation_menu_block(app);
     let inner = block.inner(menu_area);
     let selected = app
         .overlays
@@ -50,29 +50,38 @@ fn annotation_menu_lines(
 ) -> Vec<Line<'static>> {
     let theme = app.config.theme;
     let width = inner.width as usize;
-    let mut lines = vec![selector_input_line(
-        &app.overlays.annotation_menu.input,
-        app.overlays.annotation_menu.input_cursor,
-        width,
-        theme,
-        items.len(),
-        app.annotation_menu_items().len(),
-    )];
+    let menu = &app.overlays.annotation_menu;
+    let total = app.annotation_menu_items().len();
+    let checked = app.overlays.annotation_selection.len();
+    let mut lines = vec![
+        if app.overlays.annotation_menu_filtering || !menu.input.is_empty() {
+            selector_input_line(
+                &menu.input,
+                menu.input_cursor,
+                width,
+                theme,
+                items.len(),
+                total,
+            )
+        } else {
+            let count = match checked {
+                0 if total == 1 => "1 mark".to_owned(),
+                0 => format!("{total} marks"),
+                n => format!("{n} of {total} selected"),
+            };
+            hint_line(" / filter", &count, width, theme)
+        },
+    ];
     lines.push(selector_separator_line(width, theme));
 
     let visible_items = annotation_menu_visible_items(inner.height).max(1);
     if items.is_empty() {
-        lines.push(selector_empty_line(
-            " no matching annotations",
-            width,
-            theme,
-        ));
-        return lines;
+        lines.push(selector_empty_line(" no matching marks", width, theme));
     }
     for (index, item) in items
         .iter()
         .enumerate()
-        .skip(app.overlays.annotation_menu.scroll)
+        .skip(menu.scroll)
         .take(visible_items)
     {
         lines.extend(annotation_menu_item_lines(
@@ -80,17 +89,37 @@ fn annotation_menu_lines(
             width,
             theme,
             index == selected,
+            app.annotations_state
+                .annotations
+                .has_human(&item.key)
+                .then(|| app.overlays.annotation_selection.contains(&item.key)),
         ));
     }
     lines.push(selector_separator_line(width, theme));
+    let footer = if app.overlays.annotation_menu_filtering {
+        " type to filter  ⏎ done  esc clear".to_owned()
+    } else {
+        let send = if checked == 0 {
+            "send"
+        } else {
+            "send selected"
+        };
+        format!(" space select  a all  ⏎ edit  d delete  ^S {send}  Q send all  esc close")
+    };
     lines.push(Line::from(Span::styled(
-        fit_padded(
-            " ^A accept  ^D dismiss  ^B blocking  ^O non-blocking  ^F fixed",
-            width,
-        ),
+        fit_padded(&footer, width),
         Style::default().fg(theme.muted).bg(base_bg(theme)),
     )));
     lines
+}
+
+fn hint_line(left: &str, right: &str, width: usize, theme: DiffTheme) -> Line<'static> {
+    let style = Style::default().fg(theme.muted).bg(base_bg(theme));
+    let left_width = width.saturating_sub(right.width());
+    Line::from(vec![
+        Span::styled(fit_padded(left, left_width), style),
+        Span::styled(fit(right, width.saturating_sub(left_width)), style),
+    ])
 }
 
 pub(crate) fn annotation_menu_area(
@@ -103,7 +132,7 @@ pub(crate) fn annotation_menu_area(
     }
     let list_cap = annotation_menu_visible_items(floating_menu_max_inner_height(area));
     let list_rows = items.len().max(1).min(list_cap).saturating_mul(2);
-    let width = floating_menu_max_width(area, annotation_menu_width(app, items));
+    let width = floating_menu_max_width(area, annotation_menu_width(app));
     let height = selector_menu_outer_height(area, list_rows, 2);
     if width == 0 || height == 0 {
         return None;
@@ -114,7 +143,7 @@ pub(crate) fn annotation_menu_area(
 pub(crate) fn annotation_menu_list_visible_rows(app: &DiffApp, area: Rect) -> Option<usize> {
     let items = app.filtered_annotation_menu_items();
     let menu_area = annotation_menu_area(app, area, &items)?;
-    let inner = annotation_menu_block(app.config.theme).inner(menu_area);
+    let inner = annotation_menu_block(app).inner(menu_area);
     Some(annotation_menu_visible_items(inner.height))
 }
 
@@ -124,53 +153,72 @@ fn annotation_menu_visible_items(inner_height: u16) -> usize {
         .max(1)
 }
 
-pub(crate) fn annotation_menu_block(theme: DiffTheme) -> Block<'static> {
-    selector_menu_block(theme, " Annotations ", base_bg(theme))
+pub(crate) fn annotation_menu_block(app: &DiffApp) -> Block<'static> {
+    selector_menu_block(app.config.theme, " Marks ", base_bg(app.config.theme))
 }
 
-fn annotation_menu_width(app: &DiffApp, items: &[AnnotationMenuItem]) -> u16 {
-    let input = app
-        .overlays
-        .annotation_menu
-        .input
-        .width()
-        .saturating_add(12);
-    let rows = items
+fn annotation_menu_width(app: &DiffApp) -> u16 {
+    let rows = app
+        .annotation_menu_items()
         .iter()
         .map(|item| {
-            let label = terminal_text(&item.label);
-            let body = terminal_text(item.text.lines().next().unwrap_or(""));
-            format!(" {} {label} {body} ", status_code(item.status)).width()
+            let label = terminal_text(&item.label).width();
+            let body = terminal_text(&item.preview).width();
+            label.max(body).saturating_add(8)
         })
         .max()
-        .unwrap_or(24);
-    selector_menu_outer_width(rows.max(input).max(80))
+        .unwrap_or(0);
+    selector_menu_outer_width(rows.clamp(84, 110))
 }
 
 fn annotation_menu_item_lines(
     item: &AnnotationMenuItem,
     width: usize,
     theme: DiffTheme,
-    selected: bool,
+    highlighted: bool,
+    checked: Option<bool>,
 ) -> [Line<'static>; 2] {
-    let style = selector_row_style(theme, selected);
-    let status = Span::styled(
-        fit_padded(status_code(item.status), 2),
-        style
-            .patch(file_sidebar_style(item.status, theme))
-            .add_modifier(Modifier::BOLD),
-    );
-    let header = fit_padded(&terminal_text(&item.label), width.saturating_sub(3));
-    let body = if item.text.trim().is_empty() {
-        "(empty annotation)".to_owned()
+    let style = selector_row_style(theme, highlighted);
+    let pointer = if highlighted { "▸ " } else { "  " };
+    let pointer_style = style.fg(theme.addition_fg);
+    let (mark, mark_style) = match checked {
+        Some(true) => (
+            "● ",
+            style.fg(theme.addition_fg).add_modifier(Modifier::BOLD),
+        ),
+        Some(false) => ("○ ", style.fg(theme.muted)),
+        None => ("  ", style),
+    };
+    let label = terminal_text(&item.label);
+    let header_width = width.saturating_sub(4);
+    let body = flattened_note(&item.text);
+    let body_style = if highlighted {
+        style.remove_modifier(Modifier::BOLD).fg(theme.foreground)
     } else {
-        terminal_text(item.text.lines().next().unwrap_or(""))
+        style.fg(theme.muted)
     };
     [
-        Line::from(vec![status, Span::styled(format!(" {header}"), style)]),
-        Line::from(Span::styled(
-            format!("   {}", fit_padded(&body, width.saturating_sub(3))),
-            style,
-        )),
+        Line::from(vec![
+            Span::styled(pointer, pointer_style),
+            Span::styled(mark, mark_style),
+            Span::styled(fit_padded(&label, header_width), style),
+        ]),
+        Line::from(vec![
+            Span::styled("    ", style),
+            Span::styled(
+                fit_padded(&fit_with_ellipsis(&body, header_width), header_width),
+                body_style,
+            ),
+        ]),
     ]
+}
+
+// One line per item keeps rows aligned; multi-line notes read as one sentence.
+fn flattened_note(text: &str) -> String {
+    let words = terminal_text(&text.split_whitespace().collect::<Vec<_>>().join(" "));
+    if words.is_empty() {
+        "(empty mark)".to_owned()
+    } else {
+        words
+    }
 }

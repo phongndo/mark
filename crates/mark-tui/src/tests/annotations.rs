@@ -712,8 +712,8 @@ fn file_and_hunk_headers_accept_scoped_annotations() {
         .map(line_text)
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(rendered.contains("Human · file"));
-    assert!(rendered.contains("Human · hunk -1 → +1"));
+    assert!(rendered.contains("Mark · file"));
+    assert!(rendered.contains("Mark · hunk -1 → +1"));
     assert!(rendered.contains("file note"));
     assert!(rendered.contains("hunk note"));
 
@@ -848,12 +848,39 @@ fn hunk_annotations_remain_visible_and_editable_in_full_file_view() {
 }
 
 #[test]
-fn submit_marks_shortcut_commits_open_annotation_and_requests_exit() {
+fn shift_q_immediately_returns_all_annotations_without_opening_menu() {
+    let (mut app, _, first) = marked_unified_app(&["hello", "world"], "first question");
+    app.runtime.annotation_handoff = Some(None);
+    let second = AnnotationKey {
+        line: 2,
+        ..first.clone()
+    };
+    app.annotations_state
+        .annotations
+        .insert_human(second, "second question".into(), 0)
+        .unwrap();
+    let outcome = app
+        .handle_key_with_effects(KeyEvent::new(KeyCode::Char('Q'), KeyModifiers::SHIFT))
+        .unwrap();
+    assert_eq!(outcome.handled_quit_request(), Some(true));
+    assert!(!app.overlays.annotation_menu_is_open());
+    assert_eq!(outcome.into_effects(), [AppEffect::Quit]);
+    assert_eq!(
+        app.runtime.annotation_handoff,
+        Some(Some(
+            "- `file.rs:1` — first question\n- `file.rs:2` — second question".into()
+        ))
+    );
+}
+
+#[test]
+fn submit_marks_shortcut_commits_draft_and_returns_immediately() {
     use crate::annotation::{AnnotationDraft, AnnotationKey};
 
     let mut changeset = changeset_with_line_text("hello");
     changeset.files[0].hunks_mut()[0].lines[0] = DiffLine::addition(1, "hello");
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.runtime.annotation_handoff = Some(None);
     let code_row = app
         .document
         .model
@@ -878,6 +905,7 @@ fn submit_marks_shortcut_commits_open_annotation_and_requests_exit() {
         .expect("submit shortcut should be handled");
 
     assert!(should_quit);
+    assert!(!app.overlays.annotation_menu_is_open());
     assert!(app.annotations_state.annotation_draft.is_none());
     assert_eq!(
         app.annotations_state
@@ -895,6 +923,7 @@ fn submit_marks_shortcut_preempts_sticky_annotation_target_mode() {
     let mut changeset = changeset_with_line_text("hello");
     changeset.files[0].hunks_mut()[0].lines[0] = DiffLine::addition(1, "hello");
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.runtime.annotation_handoff = Some(None);
     app.set_viewport_rows(10);
     let code_row = app
         .document
@@ -920,6 +949,7 @@ fn submit_marks_shortcut_preempts_sticky_annotation_target_mode() {
         .expect("submit shortcut should preempt target hints");
 
     assert!(should_quit);
+    assert!(!app.overlays.annotation_menu_is_open());
 }
 
 #[test]
@@ -932,6 +962,7 @@ fn configured_multi_key_submit_shortcut_works_while_drafting() {
     let mut changeset = changeset_with_line_text("hello");
     changeset.files[0].hunks_mut()[0].lines[0] = DiffLine::addition(1, "hello");
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
+    app.runtime.annotation_handoff = Some(None);
     app.config.keymap = Keymap::parse(
         r#"
         [keymap.global]
@@ -975,6 +1006,7 @@ fn configured_multi_key_submit_shortcut_works_while_drafting() {
         .expect("submit sequence should be handled");
 
     assert!(should_quit);
+    assert!(!app.overlays.annotation_menu_is_open());
     assert!(app.annotations_state.annotation_draft.is_none());
     assert_eq!(
         app.annotations_state
@@ -986,37 +1018,132 @@ fn configured_multi_key_submit_shortcut_works_while_drafting() {
 }
 
 #[test]
-fn submit_marks_action_exports_marks_and_requests_exit() {
-    use crate::annotation::AnnotationKey;
-
-    let mut changeset = changeset_with_line_text("hello");
-    changeset.files[0].hunks_mut()[0].lines[0] = DiffLine::addition(1, "hello");
-    let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
-    let code_row = app
-        .document
-        .model
-        .rows
-        .iter()
-        .position(|row| matches!(row, UiRow::UnifiedLine { .. }))
-        .expect("unified line");
-    let key = AnnotationKey::from_ui_row(
-        &app.document.changeset,
-        app.document.model.row(code_row).expect("row"),
-    )
-    .expect("annotation key");
-    app.annotations_state
-        .annotations
-        .insert(key, "send this note".to_owned());
-
+fn submit_marks_action_returns_annotations_immediately() {
+    let (mut app, _, _) = marked_unified_app(&["hello"], "send this note");
     let outcome = app
         .perform_app_action_with_effects(AppAction::SubmitMarks)
-        .expect("submit action should export marks");
-
+        .unwrap();
     assert_eq!(outcome.handled_quit_request(), Some(true));
-    assert!(matches!(
-        outcome.into_effects().as_slice(),
-        [AppEffect::SubmitMarks(text)] if text.contains("send this note")
-    ));
+    let effects = outcome.into_effects();
+    assert!(
+        matches!(effects.as_slice(), [AppEffect::SubmitMarks(text, keys)]
+        if text == "- `file.rs:1` — send this note" && keys.len() == 1),
+        "{effects:?}"
+    );
+}
+
+fn two_mark_menu_app() -> (DiffApp, AnnotationKey, AnnotationKey) {
+    let (mut app, _, first) = marked_unified_app(&["hello", "world"], "first question");
+    let second = AnnotationKey {
+        line: 2,
+        ..first.clone()
+    };
+    app.annotations_state
+        .annotations
+        .insert_human(second.clone(), "second question".into(), 0)
+        .unwrap();
+    app.open_annotation_menu();
+    (app, first, second)
+}
+
+fn submitted_marks(app: &mut DiffApp) -> String {
+    let send = KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL);
+    let outcome = app.handle_key_with_effects(send).unwrap();
+    assert_eq!(outcome.handled_quit_request(), Some(true));
+    match outcome.into_effects().as_slice() {
+        [AppEffect::Quit, AppEffect::SubmitMarks(text, _)] => text.clone(),
+        effects => panic!("{effects:?}"),
+    }
+}
+
+#[test]
+fn annotations_menu_sends_the_highlighted_mark_when_none_are_selected() {
+    let (mut app, _, _) = two_mark_menu_app();
+    app.handle_key_with_effects(press(KeyCode::Char('j')))
+        .unwrap();
+    assert_eq!(submitted_marks(&mut app), "- `file.rs:2` — second question");
+}
+
+#[test]
+fn annotations_menu_space_selects_and_advances() {
+    let (mut app, _, _) = two_mark_menu_app();
+    for _ in 0..2 {
+        app.handle_key_with_effects(press(KeyCode::Char(' ')))
+            .unwrap();
+    }
+    assert_eq!(
+        submitted_marks(&mut app),
+        "- `file.rs:1` — first question\n- `file.rs:2` — second question"
+    );
+}
+
+#[test]
+fn annotations_menu_list_keys_do_not_type_into_the_filter() {
+    let (mut app, first, second) = two_mark_menu_app();
+    for code in ['j', 'k', 'j', 'a'] {
+        app.handle_key_with_effects(press(KeyCode::Char(code)))
+            .unwrap();
+    }
+    assert!(app.overlays.annotation_menu.input.is_empty());
+    assert_eq!(app.overlays.annotation_menu.selected, 1);
+    assert_eq!(app.overlays.annotation_selection.len(), 2);
+
+    app.handle_key_with_effects(press(KeyCode::Char('d')))
+        .unwrap();
+    assert!(app.annotations_state.annotations.get(&second).is_none());
+    assert!(app.annotations_state.annotations.get(&first).is_some());
+}
+
+#[test]
+fn annotations_menu_slash_filters_until_enter() {
+    let (mut app, _, _) = two_mark_menu_app();
+    for code in ['/', 's', 'e', 'c'] {
+        app.handle_key_with_effects(press(KeyCode::Char(code)))
+            .unwrap();
+    }
+    app.handle_key_with_effects(press(KeyCode::Enter)).unwrap();
+    assert!(!app.overlays.annotation_menu_filtering);
+    assert_eq!(app.filtered_annotation_menu_items().len(), 1);
+    assert_eq!(submitted_marks(&mut app), "- `file.rs:2` — second question");
+}
+
+#[test]
+fn shift_q_from_marks_menu_ignores_selection_and_returns_all_marks() {
+    let (mut app, _, first) = marked_unified_app(&["hello", "world"], "first question");
+    let second = AnnotationKey {
+        line: 2,
+        ..first.clone()
+    };
+    app.annotations_state
+        .annotations
+        .insert_human(second, "second question".into(), 0)
+        .unwrap();
+    app.open_annotation_menu();
+    app.handle_key_with_effects(press(KeyCode::Char(' ')))
+        .unwrap();
+    assert_eq!(app.overlays.annotation_selection.len(), 1);
+    let outcome = app
+        .handle_key_with_effects(KeyEvent::new(KeyCode::Char('Q'), KeyModifiers::SHIFT))
+        .unwrap();
+    assert_eq!(outcome.handled_quit_request(), Some(true));
+    assert!(
+        outcome
+            .into_effects()
+            .iter()
+            .any(|effect| matches!(effect, AppEffect::SubmitMarks(_, keys) if keys.len() == 2))
+    );
+}
+
+#[test]
+fn shift_q_with_no_marks_returns_immediately_without_feedback() {
+    let (mut app, _, _) = marked_unified_app(&["hello"], "temporary note");
+    app.annotations_state.annotations.clear_all();
+    let outcome = app
+        .handle_key_with_effects(KeyEvent::new(KeyCode::Char('Q'), KeyModifiers::SHIFT))
+        .unwrap();
+    assert_eq!(outcome.handled_quit_request(), Some(true));
+    assert_eq!(outcome.into_effects(), [AppEffect::Quit]);
+    assert!(!app.overlays.annotation_menu_is_open());
 }
 
 #[test]
@@ -2632,7 +2759,7 @@ fn old_side_annotation_renders_and_edits_on_deletion_only_split_row() {
     );
     let footer_row = rendered
         .iter()
-        .position(|line| line_text(line).contains("[↻]"))
+        .position(|line| line_text(line).contains("[e]"))
         .expect("edit footer") as u16;
 
     assert!(app.handle_diff_click(58, 1 + footer_row));
@@ -3244,7 +3371,7 @@ fn close_button_removes_the_whole_mark_stack() {
     let rendered = build_diff_viewport_lines(&mut app, 48, 10);
     let top_row = rendered
         .iter()
-        .position(|line| line_text(line).contains("2 comments"))
+        .position(|line| line_text(line).contains("2 marks"))
         .expect("mixed comment card") as u16
         + 1;
     assert!(app.handle_diff_click(46, top_row));
@@ -3347,7 +3474,7 @@ fn annotation_save_and_cancel_use_configured_keybindings() {
     let rendered = build_diff_viewport_lines(&mut app, 40, 8);
     let edit_row = rendered
         .iter()
-        .position(|line| line_text(line).contains("[↻]"))
+        .position(|line| line_text(line).contains("[e]"))
         .expect("saved annotation edit footer") as u16
         + app.runtime.hit_map.diff_area.expect("diff area").y;
     assert!(app.handle_diff_click(38, edit_row));
@@ -3681,7 +3808,7 @@ fn hunk_source_keeps_single_line_without_trailing_newline_marker() {
 }
 
 #[test]
-fn follow_up_on_answered_mark_starts_empty_and_appends() {
+fn editing_a_mark_keeps_its_text_and_does_not_append_a_message() {
     use crate::review::NewAgentComment;
 
     let changeset = changeset_with_line_text("hello");
@@ -3725,13 +3852,13 @@ fn follow_up_on_answered_mark_starts_empty_and_appends() {
 
     app.select_annotation_cursor_model_row(code_row);
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
-        .expect("open follow-up");
+        .expect("edit annotation");
     let draft = app
         .annotations_state
         .annotation_draft
         .as_ref()
-        .expect("follow-up draft");
-    assert_eq!(draft.input, "");
+        .expect("annotation draft");
+    assert_eq!(draft.input, "what does this mean?");
 
     app.handle_annotation_input_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE));
     app.handle_annotation_input_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
@@ -3740,9 +3867,9 @@ fn follow_up_on_answered_mark_starts_empty_and_appends() {
             .annotations
             .human_bodies(&key)
             .as_deref(),
-        Some("what does this mean?\n\nr")
+        Some("what does this mean?r")
     );
-    assert_eq!(app.annotations_state.annotations.len(), 3);
+    assert_eq!(app.annotations_state.annotations.len(), 2);
 }
 
 fn marked_unified_app(lines: &[&str], note: &str) -> (DiffApp, usize, AnnotationKey) {
@@ -3945,7 +4072,7 @@ fn cursor_steps_onto_a_saved_mark_before_the_next_line() {
 }
 
 #[test]
-fn follow_up_edit_prefills_the_latest_human_turn() {
+fn reopening_an_annotation_prefills_its_current_text() {
     use crate::review::NewAgentComment;
 
     let (mut app, code_row, key) = marked_unified_app(&["hello"], "what does this mean?");
@@ -3963,7 +4090,7 @@ fn follow_up_edit_prefills_the_latest_human_turn() {
         .unwrap();
     app.select_annotation_cursor_model_row(code_row);
     app.handle_key(press(KeyCode::Enter))
-        .expect("open follow-up");
+        .expect("edit annotation");
     app.handle_annotation_input_key(KeyEvent::new(KeyCode::Char('t'), KeyModifiers::NONE));
     app.handle_annotation_input_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL));
     assert_eq!(
@@ -3971,16 +4098,38 @@ fn follow_up_edit_prefills_the_latest_human_turn() {
             .annotations
             .human_bodies(&key)
             .as_deref(),
-        Some("what does this mean?\n\nt")
+        Some("what does this mean?t")
     );
 
     app.select_annotation_cursor_model_row(code_row);
     app.handle_key(press(KeyCode::Enter))
-        .expect("edit latest human turn");
+        .expect("reopen annotation");
     let draft = app
         .annotations_state
         .annotation_draft
         .as_ref()
         .expect("edit draft");
-    assert_eq!(draft.input, "t");
+    assert_eq!(draft.input, "what does this mean?t");
+}
+
+#[test]
+fn escape_keeps_a_new_mark_instead_of_discarding_typed_text() {
+    let (mut app, _, key) = marked_unified_app(&["hello"], "existing");
+    app.annotations_state.annotations.remove_human(&key);
+    let model_row_index = app.annotation_model_row(&key).unwrap_or(0);
+    app.annotations_state.annotation_draft = Some(AnnotationDraft {
+        key: key.clone(),
+        model_row_index,
+        input: "typed".to_owned(),
+        cursor: "typed".len(),
+    });
+    assert!(app.handle_annotation_input_key(press(KeyCode::Esc)));
+    assert!(app.annotations_state.annotation_draft.is_none());
+    assert_eq!(
+        app.annotations_state
+            .annotations
+            .get(&key)
+            .map(String::as_str),
+        Some("typed")
+    );
 }

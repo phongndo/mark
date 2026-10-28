@@ -614,6 +614,9 @@ fn help_menu_rendered_rows_are_wide_enough_for_default_descriptions() {
     let changeset = changeset_with_context_lines(1);
     let mut app = DiffApp::new(DiffOptions::default(), changeset, DiffLayoutMode::Unified);
     app.toggle_help_menu();
+    for character in "grep match".chars() {
+        app.push_help_menu_input(character);
+    }
 
     let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 80))
         .expect("test terminal should be created");
@@ -629,6 +632,8 @@ fn help_menu_rendered_rows_are_wide_enough_for_default_descriptions() {
         rows.join("\n")
     );
 
+    app.overlays.help_menu_input.clear();
+    app.overlays.help_menu_input_cursor = 0;
     app.set_help_menu_scroll(usize::MAX);
     terminal
         .draw(|frame| crate::render::draw(frame, &mut app))

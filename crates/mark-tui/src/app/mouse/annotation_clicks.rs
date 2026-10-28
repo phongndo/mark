@@ -34,7 +34,7 @@ impl DiffApp {
 
     pub(crate) fn annotation_block_label(&self, key: &AnnotationKey, composing: bool) -> String {
         let label = if composing {
-            "Add note"
+            "Add mark"
         } else {
             self.annotations_state
                 .annotations

@@ -1544,6 +1544,18 @@ fn empty_diff_message_explains_clean_worktree_and_available_actions() {
 }
 
 #[test]
+fn empty_diff_message_only_offers_the_way_back_when_annotating_for_chat() {
+    let mut app = DiffApp::new(
+        DiffOptions::default(),
+        changeset_with_files(&[]),
+        DiffLayoutMode::Unified,
+    );
+    app.runtime.annotation_handoff = Some(None);
+
+    assert_eq!(empty_diff_message(&app).1, "q back to chat");
+}
+
+#[test]
 fn empty_diff_message_explains_filtered_results() {
     let mut app = DiffApp::new(
         DiffOptions::default(),
@@ -1675,7 +1687,7 @@ fn statusline_header_shows_saved_annotation_count() {
 
     let text = line_text(&statusline_header_line(&app, 120));
 
-    assert!(text.contains("1 note"));
+    assert!(text.contains("1 mark"));
 }
 
 #[test]
@@ -3029,7 +3041,7 @@ fn mouse_click_selects_line_and_enter_opens_annotation_input() {
 
     let lines = crate::render::diff::build_diff_viewport_lines(&mut app, 40, 6);
     assert_eq!(lines.len(), 4);
-    assert!(line_text(&lines[1]).starts_with("┌Add note · +1"));
+    assert!(line_text(&lines[1]).starts_with("┌Add mark · line 1"));
     assert!(line_text(&lines[1]).ends_with("[x]┐"));
     assert!(
         lines[1]
@@ -3073,12 +3085,12 @@ fn mouse_click_selects_line_and_enter_opens_annotation_input() {
         .expect("saved annotation body row");
     let edit_row = lines
         .iter()
-        .position(|line| line_text(line).contains("[↻]"))
+        .position(|line| line_text(line).contains("[e]"))
         .expect("saved annotation edit row");
     assert!(close_row < body_row);
     assert!(body_row < edit_row);
     assert!(lines[edit_row].spans.iter().any(|span| {
-        span.content.contains("[↻]") && span.style.fg == Some(app.config.theme.search_match_bg)
+        span.content.contains("[e]") && span.style.fg == Some(app.config.theme.search_match_bg)
     }));
 
     let diff_y = app.runtime.hit_map.diff_area.expect("diff area").y;

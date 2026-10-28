@@ -4,7 +4,6 @@ use super::{
 };
 use crate::annotation::{
     AnnotationDraft, AnnotationKey, AnnotationKeyIndex, AnnotationScope, AnnotationSide,
-    diff_file_has_path,
 };
 use crate::editor::{configured_editor, open_text_in_editor};
 use crate::keymap::{AnnotationMenuAction, GlobalAction, MenuAction};
@@ -14,9 +13,8 @@ use crate::review::FindingDisposition;
 use crate::selector::{SelectorController, SelectorMovement};
 use crate::syntax::DiffSide;
 use crate::text_input::{TextInputKeyResult, handle_text_input_key};
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use mark_core::MarkResult;
-use mark_diff::FileStatus;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::time::Instant;
@@ -26,7 +24,6 @@ pub(crate) struct AnnotationMenuItem {
     pub(crate) key: AnnotationKey,
     pub(crate) model_row: usize,
     pub(crate) anchor_scroll: usize,
-    pub(crate) status: FileStatus,
     pub(crate) label: String,
     pub(crate) preview: String,
     pub(crate) text: String,
@@ -168,8 +165,9 @@ impl DiffApp {
     }
 
     pub(crate) fn open_annotation_menu(&mut self) {
+        self.overlays.annotation_selection.clear();
         if self.annotations_state.annotations.is_empty() {
-            self.set_notice("no annotations");
+            self.set_notice("No marks yet. Press Enter on a line to add one.");
             return;
         }
         self.close_color_scheme_picker();
@@ -197,19 +195,10 @@ impl DiffApp {
             .iter()
             .filter_map(|(key, text)| {
                 let model_row = self.annotation_model_row(key)?;
-                let status = self
-                    .document
-                    .changeset
-                    .files
-                    .iter()
-                    .find(|file| diff_file_has_path(file, &key.path))
-                    .map(|file| file.status())
-                    .unwrap_or(FileStatus::Unknown);
                 Some(AnnotationMenuItem {
                     key: key.clone(),
                     model_row,
                     anchor_scroll: self.annotation_anchor_visual_scroll(model_row),
-                    status,
                     label: key.menu_label(),
                     preview: text
                         .lines()
@@ -266,81 +255,98 @@ impl DiffApp {
     }
 
     pub(crate) fn handle_annotation_menu_key(&mut self, key: KeyEvent) -> MarkResult<bool> {
-        if self.config.keymap.matches_menu(MenuAction::Close, key) {
-            self.close_annotation_menu();
+        if self.overlays.annotation_menu_filtering {
+            self.handle_annotation_menu_filter_key(key);
             return Ok(false);
+        }
+        if let Some(quit) = self.annotation_submission_key(key) {
+            return Ok(quit);
+        }
+        let plain = key.modifiers == KeyModifiers::NONE || key.modifiers == KeyModifiers::SHIFT;
+        let menu = |action| self.config.keymap.matches_menu(action, key);
+        let item_action = |action| self.config.keymap.matches_annotation_menu(action, key);
+        if menu(MenuAction::Close) || (plain && matches!(key.code, KeyCode::Char('q' | 'n'))) {
+            self.close_annotation_menu();
+        } else if menu(MenuAction::Down) || (plain && key.code == KeyCode::Char('j')) {
+            self.move_annotation_menu_selection(1);
+        } else if menu(MenuAction::Up) || (plain && key.code == KeyCode::Char('k')) {
+            self.move_annotation_menu_selection(-1);
+        } else if plain && key.code == KeyCode::Char('g') || key.code == KeyCode::Home {
+            self.set_annotation_menu_selection(0);
+        } else if plain && key.code == KeyCode::Char('G') || key.code == KeyCode::End {
+            self.set_annotation_menu_selection(usize::MAX);
+        } else if key.code == KeyCode::PageDown {
+            self.move_annotation_menu_selection(10);
+        } else if key.code == KeyCode::PageUp {
+            self.move_annotation_menu_selection(-10);
+        } else if plain && key.code == KeyCode::Char('/') {
+            self.overlays.annotation_menu_filtering = true;
+            self.runtime.dirty = true;
+        } else if plain && key.code == KeyCode::Char('a') {
+            self.toggle_all_annotation_menu_selection();
+        } else if item_action(AnnotationMenuAction::Jump) {
+            self.edit_selected_annotation(AnnotationEditMode::Inline);
+        } else if item_action(AnnotationMenuAction::EditExternal) {
+            self.edit_selected_annotation(AnnotationEditMode::External);
+        } else if item_action(AnnotationMenuAction::Remove)
+            || (plain && matches!(key.code, KeyCode::Char('d' | 'x')))
+        {
+            self.remove_selected_annotation();
+        } else if item_action(AnnotationMenuAction::Accept) {
+            self.set_selected_agent_disposition(FindingDisposition::Accepted);
+        } else if item_action(AnnotationMenuAction::Dismiss) {
+            self.set_selected_agent_disposition(FindingDisposition::Dismissed);
+        } else if item_action(AnnotationMenuAction::Blocking) {
+            self.set_selected_agent_disposition(FindingDisposition::Blocking);
+        } else if item_action(AnnotationMenuAction::NonBlocking) {
+            self.set_selected_agent_disposition(FindingDisposition::NonBlocking);
+        } else if item_action(AnnotationMenuAction::Fixed) {
+            self.set_selected_agent_disposition(FindingDisposition::Fixed);
+        }
+        Ok(false)
+    }
+
+    fn handle_annotation_menu_filter_key(&mut self, key: KeyEvent) {
+        if matches!(key.code, KeyCode::Esc | KeyCode::Enter) {
+            if key.code == KeyCode::Esc {
+                self.overlays.annotation_menu.reset();
+            }
+            self.overlays.annotation_menu_filtering = false;
+            self.runtime.dirty = true;
+            return;
         }
         if self.config.keymap.matches_menu(MenuAction::Down, key) {
             self.move_annotation_menu_selection(1);
-        } else if self.config.keymap.matches_menu(MenuAction::Up, key) {
-            self.move_annotation_menu_selection(-1);
-        } else if self
-            .config
-            .keymap
-            .matches_annotation_menu(AnnotationMenuAction::Jump, key)
-        {
-            self.edit_selected_annotation(AnnotationEditMode::Inline);
-        } else if self
-            .config
-            .keymap
-            .matches_annotation_menu(AnnotationMenuAction::EditExternal, key)
-        {
-            self.edit_selected_annotation(AnnotationEditMode::External);
-        } else if self
-            .config
-            .keymap
-            .matches_annotation_menu(AnnotationMenuAction::Remove, key)
-        {
-            self.remove_selected_annotation();
-        } else if self
-            .config
-            .keymap
-            .matches_annotation_menu(AnnotationMenuAction::Accept, key)
-        {
-            self.set_selected_agent_disposition(FindingDisposition::Accepted);
-        } else if self
-            .config
-            .keymap
-            .matches_annotation_menu(AnnotationMenuAction::Dismiss, key)
-        {
-            self.set_selected_agent_disposition(FindingDisposition::Dismissed);
-        } else if self
-            .config
-            .keymap
-            .matches_annotation_menu(AnnotationMenuAction::Blocking, key)
-        {
-            self.set_selected_agent_disposition(FindingDisposition::Blocking);
-        } else if self
-            .config
-            .keymap
-            .matches_annotation_menu(AnnotationMenuAction::NonBlocking, key)
-        {
-            self.set_selected_agent_disposition(FindingDisposition::NonBlocking);
-        } else if self
-            .config
-            .keymap
-            .matches_annotation_menu(AnnotationMenuAction::Fixed, key)
-        {
-            self.set_selected_agent_disposition(FindingDisposition::Fixed);
-        } else {
-            let len = self.filtered_annotation_menu_items().len();
-            let outcome = SelectorController::new(&mut self.overlays.annotation_menu, len)
-                .apply_input_key(key);
-            if outcome.handled() {
-                if outcome.changed() {
-                    self.runtime.dirty = true;
-                }
-                return Ok(false);
-            }
-            match key.code {
-                KeyCode::PageDown => self.move_annotation_menu_selection(10),
-                KeyCode::PageUp => self.move_annotation_menu_selection(-10),
-                KeyCode::Home => self.set_annotation_menu_selection(0),
-                KeyCode::End => self.set_annotation_menu_selection(usize::MAX),
-                _ => {}
-            }
+            return;
         }
-        Ok(false)
+        if self.config.keymap.matches_menu(MenuAction::Up, key) {
+            self.move_annotation_menu_selection(-1);
+            return;
+        }
+        let len = self.filtered_annotation_menu_items().len();
+        let outcome =
+            SelectorController::new(&mut self.overlays.annotation_menu, len).apply_input_key(key);
+        if outcome.changed() {
+            self.runtime.dirty = true;
+        }
+    }
+
+    fn toggle_all_annotation_menu_selection(&mut self) {
+        let keys = self
+            .filtered_annotation_menu_items()
+            .into_iter()
+            .map(|item| item.key)
+            .filter(|key| self.annotations_state.annotations.has_human(key))
+            .collect::<Vec<_>>();
+        let selection = &mut self.overlays.annotation_selection;
+        if keys.iter().all(|key| selection.contains(key)) {
+            for key in &keys {
+                selection.remove(key);
+            }
+        } else {
+            selection.extend(keys);
+        }
+        self.runtime.dirty = true;
     }
 
     fn selected_annotation_menu_item(&self) -> Option<AnnotationMenuItem> {
@@ -774,6 +780,20 @@ impl DiffApp {
             .keymap
             .matches_single(GlobalAction::CancelMark, key)
         {
+            // Esc reverts an edit, but a new note's text exists nowhere else: keep it.
+            if self
+                .annotations_state
+                .annotation_draft
+                .as_ref()
+                .is_some_and(|draft| {
+                    !draft.input.trim().is_empty()
+                        && !self.annotations_state.annotations.has_human(&draft.key)
+                })
+            {
+                let draft = self.annotations_state.annotation_draft.take();
+                self.commit_annotation_draft(draft.expect("draft"));
+                return true;
+            }
             self.annotations_state.annotation_draft = None;
             self.annotations_state.annotation_block_scroll = None;
             self.annotations_state.sticky_annotation_draft = false;

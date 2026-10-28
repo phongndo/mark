@@ -65,6 +65,13 @@ pub(crate) fn empty_diff_message(app: &DiffApp) -> (String, String) {
         DiffSource::Patch(PatchSource::Review { .. }) => "This review contains no changes.",
         DiffSource::Patch(_) => "This patch contains no changes.",
     };
+    if app.runtime.annotation_handoff.is_some() {
+        // Annotating for a chat: there is nothing to choose, only a way back.
+        return (
+            title.to_owned(),
+            action_hints(app, &[(GlobalAction::Quit, "back to chat")]),
+        );
+    }
     (
         title.to_owned(),
         action_hints(

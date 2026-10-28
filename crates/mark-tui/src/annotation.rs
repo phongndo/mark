@@ -12,7 +12,8 @@ pub(crate) const ANNOTATION_CLOSE_BUTTON_WIDTH: usize = 3;
 pub(crate) const ANNOTATION_SUBMIT_BUTTON: &str = "[✓]";
 pub(crate) const ANNOTATION_SUBMIT_BUTTON_ASCII: &str = "[s]";
 pub(crate) const ANNOTATION_SUBMIT_BUTTON_WIDTH: usize = 3;
-pub(crate) const ANNOTATION_EDIT_BUTTON: &str = "[↻]";
+// Glyphs like ✎ or ↻ are missing or misleading in common terminal fonts.
+pub(crate) const ANNOTATION_EDIT_BUTTON: &str = "[e]";
 pub(crate) const ANNOTATION_EDIT_BUTTON_ASCII: &str = "[e]";
 pub(crate) const ANNOTATION_EDIT_BUTTON_WIDTH: usize = 3;
 
@@ -43,13 +44,6 @@ pub(crate) enum AnnotationSide {
 }
 
 impl AnnotationSide {
-    pub(crate) fn label(self) -> char {
-        match self {
-            Self::Old => 'L',
-            Self::New => 'R',
-        }
-    }
-
     pub(crate) fn sign(self) -> char {
         match self {
             Self::Old => '-',
@@ -258,23 +252,31 @@ impl AnnotationKey {
                 format_source_range(AnnotationSide::Old, old_start, old_count),
                 format_source_range(AnnotationSide::New, new_start, new_count)
             ),
-            AnnotationScope::Line => format!("{}{}", self.side.sign(), self.line),
+            AnnotationScope::Line if self.side == AnnotationSide::Old => {
+                format!("line {} (old)", self.line)
+            }
+            AnnotationScope::Line => format!("line {}", self.line),
         }
     }
 
     /// Path-qualified label used to list a mark in the annotation menu.
     pub(crate) fn menu_label(&self) -> String {
-        let target = match self.scope {
-            AnnotationScope::File => "file".to_owned(),
+        match self.scope {
+            AnnotationScope::File => format!("{} (file)", self.path),
             AnnotationScope::Hunk {
                 old_start,
                 old_count,
                 new_start,
                 new_count,
-            } => format!("@@ -{old_start},{old_count} +{new_start},{new_count} @@"),
-            AnnotationScope::Line => format!("{}{}", self.side.label(), self.line),
-        };
-        format!("{} {target}", self.path)
+            } => format!(
+                "{} @@ -{old_start},{old_count} +{new_start},{new_count} @@",
+                self.path
+            ),
+            AnnotationScope::Line if self.side == AnnotationSide::Old => {
+                format!("{}:{} (old)", self.path, self.line)
+            }
+            AnnotationScope::Line => format!("{}:{}", self.path, self.line),
+        }
     }
 }
 
