@@ -55,7 +55,7 @@ export async function publishNpmPackages(index, {
   async function eventually(task, label) {
     for (let attempt = 0; attempt < 20; attempt++) {
       if (await task()) return;
-      await delay(1500);
+      await delay(15000);
     }
     throw Error(`npm registry did not confirm ${label}; do not promote the release`);
   }

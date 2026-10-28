@@ -176,4 +176,19 @@ jobs:
       - name: Publish npm packages, verify bytes, then promote latest
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: node scripts/ci/publish-integration-npm.mjs dist/integrations-release
+        # npm can process first publications for several minutes. Keep the
+        # retry interval here too, so retries of older qualified source commits
+        # receive the same five-minute indexing window without changing bytes.
+        run: |
+          node --input-type=module <<'JS'
+          import { readFileSync } from "node:fs";
+          import { join, resolve } from "node:path";
+          import { publishNpmPackages } from "./scripts/ci/publish-integration-npm.mjs";
+          const directory = resolve("dist/integrations-release");
+          const index = JSON.parse(readFileSync(join(directory, "release-index.json"), "utf8"));
+          const result = await publishNpmPackages(index, {
+            directory,
+            delay: () => new Promise(resolve => setTimeout(resolve, 15000)),
+          });
+          console.log(JSON.stringify(result));
+          JS

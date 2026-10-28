@@ -151,6 +151,37 @@ test("new npm versions stage first and both published tarballs verify before lat
   } finally { f.cleanup(); }
 });
 
+test("accepted npm publications can take a minute to become readable before verification and promotion", async () => {
+  const f = registryFixture();
+  let elapsed = 0;
+  const acceptedAt = new Map();
+  try {
+    const result = await publishNpmPackages(f.index, {
+      ...f,
+      delay: async ms => { elapsed += ms; },
+      runNpm: async args => {
+        await f.runNpm(args);
+        if (args[0] === "publish") {
+          const item = f.index.npm.find(item => args[1].endsWith(item.file));
+          acceptedAt.set(item.name, elapsed);
+        }
+      },
+      fetchRegistry: async input => {
+        const url = new URL(input);
+        const [encoded, version] = url.pathname.slice(1).split("/"), name = decodeURIComponent(encoded);
+        if (version && acceptedAt.has(name) && elapsed - acceptedAt.get(name) < 60000) return new Response("publication processing", { status: 404 });
+        return f.fetchRegistry(input);
+      },
+    });
+    assert.equal(result.length, 2);
+    assert(result.every(item => item.latest && !item.existing));
+    assert(elapsed >= 120000, "both accepted packages must finish indexing before latest promotion");
+    assert.equal(f.writes.filter(args => args[0] === "publish").length, 2);
+    assert.equal(f.writes.filter(args => args[0] === "dist-tag").length, 2);
+    assert(f.index.npm.every(item => f.events.includes(`download:${item.name}`)), "newly indexed tarball bytes must be verified");
+  } finally { f.cleanup(); }
+});
+
 test("reruns verify existing bytes and do not republish or retag completed versions", async () => {
   const f = registryFixture();
   try {
