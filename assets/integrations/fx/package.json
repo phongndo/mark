@@ -1,6 +1,6 @@
 {
   "name": "@mark-review/fx",
-  "version": "0.16.0",
+  "version": "0.16.1",
   "private": true,
   "type": "module",
   "description": "Terminal diff annotations with Markdown feedback for fx",

@@ -1,6 +1,6 @@
 {
   "name": "mark-opencode",
-  "version": "0.16.0",
+  "version": "0.16.1",
   "type": "module",
   "description": "Annotate the diff in the terminal and prepare selected notes as a Markdown chat draft.",
   "license": "MIT",
