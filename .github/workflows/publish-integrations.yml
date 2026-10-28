@@ -1,6 +1,24 @@
 name: Publish integrations
 
 on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Published workspace version to retry.
+        required: true
+        type: string
+      source_sha:
+        description: Exact source commit of the published release.
+        required: true
+        type: string
+      release_tag:
+        description: Published release tag, such as v0.16.0.
+        required: true
+        type: string
+      diagnose_only:
+        description: Check the fallback npm token identity without publishing.
+        default: false
+        type: boolean
   workflow_call:
     inputs:
       version:
@@ -24,8 +42,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  diagnose:
+    name: Diagnose fallback npm authentication
+    if: github.event_name == 'workflow_dispatch' && inputs.diagnose_only
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: release
+    steps:
+      - name: Install npm runtime
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      # This checks only the optional traditional token. It is deliberately
+      # separate from publication: whoami does not validate OIDC permissions.
+      - name: Check fallback token identity
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${NODE_AUTH_TOKEN:-}" ]]; then
+            echo "::error::NPM_TOKEN is not configured; this diagnostic requires the fallback token"
+            exit 1
+          fi
+          npm whoami --registry=https://registry.npmjs.org/
+
   publish:
     name: Publish qualified integration packages
+    if: ${{ !inputs.diagnose_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: release

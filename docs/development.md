@@ -125,11 +125,19 @@ GitHub downloads and marketplace publication can finish even when npm needs
 authentication. The workflow reports npm failures and can resume without
 republishing conflicting immutable versions.
 
+To retry integrations independently of the native builds, dispatch that
+workflow with the published `version`, `release_tag`, and exact tagged
+`source_sha`. It rechecks source qualification before preparing packages.
+Select `diagnose_only` to check the optional fallback token's npm identity
+without publishing. This diagnostic does not validate OIDC permissions.
+
 npm trusted publishers for `mark-pi` and `mark-opencode` must name GitHub owner
 `phongndo`, repository `mark`, calling workflow `release.yml`, and environment
-`release`. Allow both direct publication and `npm dist-tag`. The workflow pins
+`release`. A direct manual retry uses `publish-integrations.yml` as its caller
+and needs its own trusted publisher configuration when using OIDC. Allow both
+direct publication and `npm dist-tag`. The workflow pins
 Node 24 and npm 11.21.0 for OIDC publication and tag promotion. An optional
-`NPM_TOKEN` secret in the `release` environment is the explicit fallback.
+`NPM_TOKEN` repository or `release` environment secret is the explicit fallback.
 Configure publishers in each package's npm settings after its initial
 authenticated publication; see [npm's trusted publisher documentation](https://docs.npmjs.com/trusted-publishers/).
 No npm login token belongs in the repository.
