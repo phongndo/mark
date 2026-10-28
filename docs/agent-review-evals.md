@@ -1,15 +1,14 @@
 # Live agent workflow evaluations
 
-For native packages, first run `just ci-integrations`,
-the installed host's plugin tests, `scripts/test-pi-review`, and
-`scripts/test-browser-review` where available. Then exercise the complete native
-loop in a disposable repository: invoke Mark, submit a question and a requested
-change, have the agent address both, and reopen the same review to inspect the
-next pass. Check the exact originating conversation/worktree, preserved replies,
-changed scope, cancellation, failed delivery, and repeated invocation. Record
-host/model versions and distinguish unsupported surfaces from failures. Native
-launch is part of this workflow; the existing-session prohibition below applies
-to standalone live sessions only.
+For native packages, first run `just ci-integrations`, the installed host's
+plugin tests, and `scripts/test-pi-review`.
+In a disposable dirty worktree, invoke Mark, add a note, a question, and an
+explicit change request, then submit selected annotations. Check that the chat
+input receives only Markdown without starting a turn. Saving sends nothing; Shift-Q returns all marks immediately, including an open
+draft. The `n` menu can return one or multiple selected marks with Space and
+Ctrl-S. Enter in chat starts the turn. Back sends nothing, and another invocation opens
+a fresh snapshot without old annotations. Notes are not automatically change
+requests. The checks below cover the separate standalone live-session skill.
 
 These are behavioral evaluations of the bundled skill, not phrase-matching unit
 tests. Run them with a real shell-capable agent against a disposable repository.
@@ -53,7 +52,7 @@ context before and after to check focus and generation. Read all pages of
 
 Open two `mark diff` instances in the same fixture repository. Ask:
 
-> Answer my saved marks in Mark.
+> Read my saved Mark annotations and answer here in chat.
 
 Assertions:
 
@@ -63,19 +62,18 @@ Assertions:
 - Close the selected session before a follow-up; the agent stops and asks
   instead of falling back to the remaining session.
 
-## 2. Deleted-line reply
+## 2. Deleted-line question
 
-Open only `mark diff -- src/access.rs`. On the deleted `is_admin` line
-(`old_line: 2`), save: “What protection does removing this lose?” Ask:
-
-> Answer my saved mark, without reviewing other lines.
+Open only `mark diff -- src/access.rs`. On the deleted line (`old_line: 2`),
+save: “What protection does removing this lose?” Ask the agent to read the
+annotation and answer in chat without editing code.
 
 Assertions:
 
-- The agent reads the saved mark and the relevant patch.
-- Its answer explains that returning true admits non-admin callers.
-- The reply preserves the mark's complete anchor, including `old_line: 2`;
-  it does not substitute `new_line: 2` or plant unrelated findings.
+- It reads the annotation and the relevant deleted-side patch.
+- Its chat answer explains that returning true admits non-admin callers.
+- Mark's annotation IDs, bodies, and count remain unchanged. No answer is
+  written into Mark.
 
 ## 3. Pagination and incomplete evidence
 
@@ -84,7 +82,7 @@ Open the full fixture diff. Ask:
 > Review the complete changeset. For this evaluation, use --limit 2 for review
 > and comment-list reads, --changed-files-limit 2 for context, and --max-bytes
 > 64 for patches. Keep these bounds on continuation calls too. Report coverage
-> and publish only actionable findings.
+> and report actionable findings here in chat.
 
 Save at least three human marks on different files before starting, so comment
 pagination is exercised too.
@@ -107,8 +105,8 @@ not a pagination failure. Score that targeted variant separately.
 
 Open `mark diff -- src/access.rs`. Ask:
 
-> Inspect the access change and prepare a finding, but pause before publishing
-> it until I say continue.
+> Inspect the access change and prepare an annotation, but pause before writing
+> that annotation into Mark until I say continue.
 
 After the agent reads the patch, the operator restores the original function
 in the disposable repository, then presses `r` in Mark. Tell the agent:
@@ -129,35 +127,26 @@ Variant: keep a changed function but move its lines before reloading. Require
 re-reading its patch and revalidating the new anchor before publishing. Repeat
 reloads during recovery; the agent should pause rather than retry indefinitely.
 
-## 5. Repeated invocation and follow-up
+## 5. Annotations are not conversation turns
 
-Use the deleted-line case to obtain one human question and one agent answer.
-Record all comment IDs. In fresh agent context ask the same question again:
-
-> Answer my saved marks in Mark.
+Save one human question in Mark and record all annotation IDs and bodies. Ask
+for an answer in chat. Then edit the same note to ask a follow-up and ask the
+agent to read it again.
 
 Assertions:
 
-- The agent reads existing human and agent marks and adds no equivalent answer.
-- A different agent author name does not cause another duplicate.
+- Both answers appear in chat. Mark receives no agent replies.
+- The human edit updates the annotation instead of appending a conversation
+  turn. Its anchor remains attached to the selected code.
+- A contextual note without a question or change request does not cause a code
+  edit. An explicit change request is handled according to its content.
+- A separate explicit request to add a code annotation writes only that concise
+  annotation, using inspected source evidence and generation.
 
-Now append an explicit new question to the same human mark, preserving its
-previous text: “Follow-up: what should happen for a non-admin caller?” Ask the
-agent to answer again.
-
-- It answers the new question at the same complete anchor, without repeating
-  the original explanation as another standalone answer.
-- A third invocation adds nothing further.
-
-Ambiguity variant: replace the human text with “Again?” The agent asks for
-clarification rather than inventing a chronology from IDs, list order, or
-`document_generation`.
-
-Uncertain-write variant (requires an agent tool approval/interception facility):
-allow a comment write to reach Mark but hide its response from the agent and
-report a transport failure. The agent must list current comments before retrying
-and avoid duplicating the successful write. Record this variant as untested if
-the agent harness cannot simulate response loss.
+Uncertain-write variant (requires an agent tool interception facility): explicitly
+request a code annotation, allow the write to reach Mark, and hide its response.
+The agent must read existing annotations before retrying and avoid a duplicate.
+Record this variant as untested if the harness cannot simulate response loss.
 
 ## Report template
 

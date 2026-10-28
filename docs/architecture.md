@@ -48,30 +48,21 @@ exposed content and Mark's allocations, since engine storage is private.
 
 ## Live sessions
 
-[mark-session](../crates/mark-session/src/lib.rs) owns UI-independent transport,
-protocol, and durable integrated review records. A live `session_id` identifies
-one process endpoint; a durable `review_id` identifies a review bound to an
-exact harness conversation, canonical worktree, and typed source. Standalone
-TUI sessions retain their existing in-memory lifetime.
+[mark-session](../crates/mark-session/src/lib.rs) owns UI-independent live
+session transport and the existing durable machine-review interface. Standalone
+TUI sessions retain their in-memory lifetime. Checkpoint validation, atomic
+replacement, and process locking remain behind that module.
 
-Checkpoint paths, schema validation, atomic replacement, and process locking
-belong to `mark-session`. The TUI adapts annotations and progress through the
-[integration](../crates/mark-tui/src/integration.rs) seam; viewport indexes,
-render caches, and drafts being composed remain UI-owned. Snapshot generations
-and review revisions serve separate purposes; feedback submissions retain
-immutable message versions.
+Harness commands use a one-shot terminal annotation session. Pi and OpenCode
+release their renderer while Mark owns the inherited terminal; Claude uses a
+native terminal pane. Shift-Q immediately returns all marks as Markdown; the marks
+menu separately supports returning a selection. Back returns an empty result.
+Neither the snapshot nor annotations are written to the durable store.
 
-The CLI bridge loads source evidence through Mark's diff modules. Headless
-refresh uses the existing review transition to preserve progress and re-anchor
-comments consistently with a terminal reload. CLI, native panes, the local
-browser viewer, and MCP use the shared record interface. `mark-mcp` owns MCP
-framing, schemas, bounded responses, and the agent-facing projection; a callback
-connects it to review behavior. Agents see submitted human feedback through
-this projection. Human submission, navigation, reviewed state, dispositions,
-and verdicts remain human-owned.
-
-Harness adapters own presentation, exact conversation binding, and returning
-accepted feedback to that conversation. MCP subprocesses do not own the user's
-terminal. Browser viewers run on demand on loopback with a capability URL scoped
-to one review and expire after inactivity. Lifecycle and installation are
-described in [integrations](integrations.md).
+Native adapters put that text in the initiating conversation’s input as a draft.
+The human sends it with Enter; the handoff starts no agent turn. They register no
+MCP and manage no review IDs, acknowledgements, history, or subsequent agent
+work. The existing bridge/MCP machine interfaces continue to use durable
+records when called explicitly. The optional legacy browser viewer remains an
+explicit machine API, never an integration fallback. Installation and host
+limits are described in [integrations](integrations.md).

@@ -64,8 +64,8 @@ targeting are described in [configuration](configuration.md).
 
 ## Live agent review sessions
 
-For a native command with automatic conversation binding and saved review
-passes, use a [harness integration](integrations.md). The live-session CLI
+For a terminal command that sends selected annotations to chat, use a
+[harness integration](integrations.md). The live-session CLI
 below remains available for an already-open standalone terminal review:
 
 1. Open `mark diff` in a human terminal.
@@ -80,9 +80,8 @@ Keep Mark open: comments, reviewed progress, dispositions, and verdicts are
 in-memory and discarded when it closes. There is no daemon or hosted service.
 Export anything you need before closing the review.
 
-This lifetime applies to standalone sessions. Native harness reviews use durable
-records, so returning to the conversation preserves submitted feedback and
-saved annotations.
+Harness annotation sessions start fresh each time. They return selected notes
+as Markdown without creating durable review records.
 
 Session discovery and bounded inspection start with:
 
@@ -94,8 +93,9 @@ mark session review --repo . --json
 
 When more than one session matches, choose an explicit session ID instead of
 guessing. Pin subsequent commands to that ID. Follow the bundled skill for
-pagination, complete anchors, generation checks, and publishing comment batches;
-this guide does not duplicate that protocol.
+pagination, complete anchors, and generation checks. Answer questions in chat;
+write an annotation only when explicitly asked to annotate code. This guide
+does not duplicate that protocol.
 
 Reloading the same source compares file fingerprints: unchanged progress can
 survive, while comments are re-anchored only when evidence has one unambiguous

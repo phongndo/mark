@@ -74,21 +74,21 @@ interface.
 - Stable snapshots by default; continuous reload only with `--watch`.
 - Custom themes, keybindings, and editor integration.
 - Lazy loading and viewport rendering for large diffs.
-- Local agent reviews with conversation binding, saved feedback, and resumable passes.
+- Terminal annotations that return selected notes as plain Markdown.
 
 ## Use with an AI agent
 
-Install Mark's native harness package to get its command, review-loop skill,
-and local MCP connection together. In Pi, for example:
+Install Mark's native harness package. In Pi, for example:
 
 ```sh
 pi install npm:mark-pi
 ```
 
-Run `/mark` in Pi to review in the same terminal. Save notes with `Ctrl-S`,
-then press `Q` to send feedback or `q` to return without submitting it. The
-integration binds the review to the current conversation and worktree;
-reopening continues the review against the next snapshot.
+Run `/mark` to annotate the current worktree diff in the terminal. Add notes,
+questions, or requests. **Shift-Q** immediately puts all marks in the chat draft
+and closes Mark. Use the **`n` marks list** (`j`/`k`, Space, Ctrl-S) to send some instead.
+Edit the chat draft and press Enter when ready; returning marks never auto-sends.
+Each invocation starts fresh.
 
 [Harness integrations](docs/integrations.md) covers installation and the
 supported experience in Claude Code, Codex, Pi, OpenCode V2, and fx. Command
