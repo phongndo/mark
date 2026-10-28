@@ -82,6 +82,9 @@ fn serve_inner(review_id: &str, ready_file: &Path) -> io::Result<()> {
         match listener.accept() {
             Ok((mut stream, _)) => {
                 last_activity = Instant::now();
+                // macOS inherits the listener's nonblocking mode. The request
+                // parser expects blocking reads bounded by these timeouts.
+                stream.set_nonblocking(false)?;
                 stream.set_read_timeout(Some(Duration::from_secs(3)))?;
                 stream.set_write_timeout(Some(Duration::from_secs(3)))?;
                 if let Err(error) = connection(&mut stream, review_id, &prefix, &address, &origin) {

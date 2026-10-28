@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, lstatSync, readdirSync } from "node:fs";
+import { mkdtempSync, realpathSync, mkdirSync, writeFileSync, readFileSync, rmSync, lstatSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -10,7 +10,7 @@ import { createBridge } from "../common/bridge.mjs";
 const source = dirname(fileURLToPath(import.meta.url));
 
 test("npm tarballs include the standalone runtime and exclude internal package files", async () => {
-  const task = mkdtempSync(join(tmpdir(), "mark-npm-pack-"));
+  const task = mkdtempSync(join(realpathSync(tmpdir()), "mark-npm-pack-"));
   const env = { ...process.env, npm_config_cache: join(task, "npm-cache"), npm_config_update_notifier: "false" };
   try {
     const generated = join(task, "generated");

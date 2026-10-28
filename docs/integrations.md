@@ -151,6 +151,8 @@ Integrated records live under `$XDG_STATE_HOME/mark/reviews`, or
 `~/.local/state/mark/reviews`. Checkpoints use private permissions, atomic writes,
 and process locks. They retain snapshot evidence and feedback after the UI exits.
 Standalone `mark diff` sessions retain their existing volatile lifetime.
+Checkpoint files from older formats are preserved and excluded from integrated
+review discovery.
 
 Records are bounded: patches 2 MiB, checkpoints 4 MiB, 256 threads, 1,024
 messages, 128 submissions, and 512 distinct mutations. Limit errors preserve

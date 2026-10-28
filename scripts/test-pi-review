@@ -123,7 +123,7 @@ def main():
     if not Path(mark).is_file():
         parser.error("Build Mark first: nix develop -c cargo build -p mark-cli --locked")
     with tempfile.TemporaryDirectory(prefix="mark-pi-pty-") as temporary:
-        task = Path(temporary)
+        task = Path(temporary).resolve()
         repository = task / "repository"
         repository.mkdir()
         # Pass no inherited credentials or provider settings into the fixture.
@@ -132,6 +132,12 @@ def main():
                    PI_CODING_AGENT_DIR=str(task / "pi"), XDG_STATE_HOME=str(task / "state"),
                    XDG_CONFIG_HOME=str(task / "config"), XDG_DATA_HOME=str(task / "data"),
                    XDG_CACHE_HOME=str(task / "cache"))
+        # Existing installations may retain an older checkpoint in this store.
+        # It must neither prevent /mark from opening nor be overwritten.
+        older = task / "state/mark/reviews/e2400d07f9833faa1abca4ee4bfd502b.json"
+        older.parent.mkdir(parents=True, mode=0o700)
+        older_bytes = b'{"schema":1,"identity":{},"comments":[]}'
+        older.write_bytes(older_bytes)
         package = args.package_dir
         if package is None:
             if not shutil.which("node"):
@@ -237,6 +243,7 @@ def main():
             assert current()["review_id"] == review_id
         finally:
             accepted.close()
+        assert older.read_bytes() == older_bytes, "Older checkpoints must be preserved"
     print("Pi terminal check passed: real MCP discovery, same-terminal review, Back preserves drafts, Submit stays pending until recorded, retry keeps the review ID.")
 
 

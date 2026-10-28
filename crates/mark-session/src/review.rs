@@ -1395,6 +1395,51 @@ mod tests {
     }
 
     #[test]
+    fn discovery_preserves_foreign_checkpoints_without_accepting_their_ids() {
+        let (temp, store, review) = fixture();
+        let older_id = "e2400d07f9833faa1abca4ee4bfd502b";
+        let older_path = store.directory().join(format!("{older_id}.json"));
+        let older_bytes = br#"{"schema":1,"identity":{},"comments":[]}"#;
+        fs::write(&older_path, older_bytes).unwrap();
+        fs::write(store.directory().join("notes.json"), b"not a review").unwrap();
+
+        assert_eq!(store.list().unwrap().len(), 1);
+        let resumed = store
+            .open(OpenReview {
+                harness: review.binding.harness.clone(),
+                conversation: review.binding.conversation.clone(),
+                repository: temp.path().to_string_lossy().into_owned(),
+                source: review.source.clone(),
+                patch: "new patch".to_owned(),
+                review_id: None,
+            })
+            .unwrap();
+        assert_eq!(resumed.review_id, review.review_id);
+        assert_eq!(fs::read(older_path).unwrap(), older_bytes);
+        assert!(
+            store
+                .get(older_id)
+                .unwrap_err()
+                .to_string()
+                .starts_with("invalid_review_id:")
+        );
+
+        // Corruption of a recognized record must still be reported.
+        fs::write(
+            store.directory().join(format!("{}.json", review.review_id)),
+            b"{}",
+        )
+        .unwrap();
+        assert!(
+            store
+                .list()
+                .unwrap_err()
+                .to_string()
+                .starts_with("invalid_checkpoint:")
+        );
+    }
+
+    #[test]
     fn reviews_and_idempotency_receipts_survive_process_lifetime() {
         let (_temp, store, review) = fixture();
         let first = comment(&store, &review, "comment-1", "human");

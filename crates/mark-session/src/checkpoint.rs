@@ -119,8 +119,12 @@ impl LockedDirectory {
                 continue;
             };
             if let Some(id) = name.strip_suffix(".json") {
-                validate_id(id)?;
-                ids.push(id.to_owned());
+                // Older checkpoints share this directory but use a different
+                // filename format. Discover only this store's records; direct
+                // reads and writes still reject invalid IDs.
+                if validate_id(id).is_ok() {
+                    ids.push(id.to_owned());
+                }
             }
         }
         ids.sort();

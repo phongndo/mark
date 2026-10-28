@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, lstatSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, realpathSync, readFileSync, readdirSync, rmSync, lstatSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -13,7 +13,7 @@ function allFiles(directory, prefix = "") {
 }
 
 test("generated packages load outside the source tree and carry a versioned skill", async () => {
-  const output = mkdtempSync(join(tmpdir(), "mark-packages-"));
+  const output = mkdtempSync(join(realpathSync(tmpdir()), "mark-packages-"));
   try {
     const source = dirname(fileURLToPath(import.meta.url));
     execFileSync(process.execPath, [join(source, "../package.mjs"), output]);
@@ -39,7 +39,7 @@ test("generated packages load outside the source tree and carry a versioned skil
 });
 
 test("fx skill is an executable detached consumer after its parent package is removed", async () => {
-  const temporary = mkdtempSync(join(tmpdir(), "mark-detached-fx-"));
+  const temporary = mkdtempSync(join(realpathSync(tmpdir()), "mark-detached-fx-"));
   try {
     const output = join(temporary, "packages");
     writePackages(output);
@@ -66,7 +66,7 @@ test("fx skill is an executable detached consumer after its parent package is re
 });
 
 test("release version is explicit, deterministic, and no development files ship", () => {
-  const temporary = mkdtempSync(join(tmpdir(), "mark-public-packages-"));
+  const temporary = mkdtempSync(join(realpathSync(tmpdir()), "mark-public-packages-"));
   try {
     const options = parseArguments([temporary, "--version", "12.34.56-rc.1"]);
     assert.equal(options.version, "12.34.56-rc.1");
@@ -90,7 +90,7 @@ test("release version is explicit, deterministic, and no development files ship"
 });
 
 test("generated package drift is preserved rather than overwritten", () => {
-  const temporary = mkdtempSync(join(tmpdir(), "mark-generator-drift-"));
+  const temporary = mkdtempSync(join(realpathSync(tmpdir()), "mark-generator-drift-"));
   try {
     writePackages(temporary);
     writeFileSync(join(temporary, "pi/index.js"), "local edit");
@@ -100,7 +100,7 @@ test("generated package drift is preserved rather than overwritten", () => {
 });
 
 test("public packages and installed-binary exports have identical consumer files", { skip: !process.env.MARK_TEST_BIN && "MARK_TEST_BIN supplies the freshly built binary" }, () => {
-  const temporary = mkdtempSync(join(tmpdir(), "mark-package-parity-"));
+  const temporary = mkdtempSync(join(realpathSync(tmpdir()), "mark-package-parity-"));
   try {
     const generated = join(temporary, "generated");
     writePackages(generated, workspaceVersion());

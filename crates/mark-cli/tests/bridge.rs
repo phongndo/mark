@@ -935,6 +935,31 @@ fn response(stream: &mut TcpStream) -> (u16, Vec<u8>) {
 }
 
 #[test]
+fn local_viewer_accepts_fragmented_http_requests() {
+    let fixture = Fixture::new();
+    let opened = fixture.open("browser-fragmented");
+    let viewer = WebServer::start(&fixture, &opened);
+    let mut stream = TcpStream::connect(&viewer.address).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    write!(
+        stream,
+        "GET {} HTTP/1.1\r\nHost: {}\r\n",
+        viewer.prefix, viewer.address
+    )
+    .unwrap();
+    // Let the listener accept and read the first segment before completing
+    // the headers. Accepted sockets inherit nonblocking mode on macOS.
+    thread::sleep(Duration::from_millis(100));
+    stream.write_all(b"\r\n").unwrap();
+    stream.shutdown(Shutdown::Write).unwrap();
+    let (status, body) = response(&mut stream);
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
+    assert!(String::from_utf8(body).unwrap().contains("Send feedback"));
+}
+
+#[test]
 fn local_viewer_records_human_feedback_and_returns_it_to_same_review() {
     let fixture = Fixture::new();
     let opened = fixture.open("browser");
