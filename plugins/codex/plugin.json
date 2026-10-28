@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-  "description": "Mark review tools and review-loop skill. Invoke with $mark; desktop reviews use the local browser.",
+  "description": "Annotate the diff in the terminal and discuss selected notes in chat.",
   "license": "MIT",
   "name": "mark",
   "repository": "https://github.com/phongndo/mark",
-  "version": "0.16.0"
+  "version": "0.16.1"
 }

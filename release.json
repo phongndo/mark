@@ -1,20 +1,20 @@
 {
   "schema_version": 1,
-  "version": "0.16.0",
-  "source_sha": "a9087db0a1829c7b4764a2ca55292c1ee7b96175",
-  "release_tag": "v0.16.0",
+  "version": "0.16.1",
+  "source_sha": "3fc8865cd32d79889412be1c53f840b23395771f",
+  "release_tag": "v0.16.1",
   "npm": [
     {
       "host": "pi",
       "name": "mark-pi",
-      "version": "0.16.0",
-      "integrity": "sha512-JK1skCEQYxt4JrS8WoxlvcsLnSHHTXnjH5CI4+GZRgxW3RyI+sn6GT3DMPJFra41o6z2otYPKWut7ox9qPVsLQ=="
+      "version": "0.16.1",
+      "integrity": "sha512-XwzB/3un9niLllHBe6Bst9BEY9tuR1/wBWeeq7TvFgyKtnfIe8hAxGCR0C/ziUw38txYFQwmsVUU7t3nQy21Pw=="
     },
     {
       "host": "opencode",
       "name": "mark-opencode",
-      "version": "0.16.0",
-      "integrity": "sha512-MW8SrPbqK9jqR3v7DoL50WTxt/v0l7y8FOL96kW7DZeYj+Q+EOOS977DgZLZ/vmEpicJF6J6L9ttLJUEkuwagg=="
+      "version": "0.16.1",
+      "integrity": "sha512-fLN+IXZqOly1ehHY9+p5Qs/VtWHliuFxItE3eEigSu1C+Gwg+Aaqz6W5OziuMNkwJFEQs2LzSwV/Piir2UJ3yQ=="
     }
   ]
 }

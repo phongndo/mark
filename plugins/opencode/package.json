@@ -3,7 +3,7 @@
   "dependencies": {
     "@opencode/plugin": ">=2.2.0 <3"
   },
-  "description": "Run a Mark review in the current OpenCode V2 terminal.",
+  "description": "Annotate the diff in the terminal and prepare selected notes as a Markdown chat draft.",
   "engines": {
     "node": ">=22.19.0"
   },
@@ -15,8 +15,7 @@
     "server.js",
     "tui.js",
     "adapter.mjs",
-    "common/bridge.mjs",
-    "skills/mark-review-loop"
+    "common/review.mjs"
   ],
   "homepage": "https://github.com/phongndo/mark",
   "keywords": [
@@ -24,8 +23,7 @@
     "opencode-plugin",
     "mark",
     "code-review",
-    "diff",
-    "mcp"
+    "diff"
   ],
   "license": "MIT",
   "name": "mark-opencode",
@@ -41,5 +39,5 @@
     "url": "git+https://github.com/phongndo/mark.git"
   },
   "type": "module",
-  "version": "0.16.0"
+  "version": "0.16.1"
 }

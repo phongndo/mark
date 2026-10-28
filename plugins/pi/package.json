@@ -1,30 +1,25 @@
 {
   "bugs": "https://github.com/phongndo/mark/issues",
-  "description": "Review Mark changes in the same Pi terminal and return feedback to the originating conversation.",
+  "description": "Annotate the diff in the terminal and prepare selected notes as a Markdown chat draft.",
   "engines": {
     "node": ">=22.19.0"
   },
   "files": [
     "index.js",
-    "common/bridge.mjs",
-    "skills/mark-review-loop"
+    "common/review.mjs"
   ],
   "homepage": "https://github.com/phongndo/mark",
   "keywords": [
     "pi-package",
     "mark",
     "code-review",
-    "diff",
-    "mcp"
+    "diff"
   ],
   "license": "MIT",
   "name": "mark-pi",
   "pi": {
     "extensions": [
       "./index.js"
-    ],
-    "skills": [
-      "./skills/mark-review-loop"
     ]
   },
   "publishConfig": {
@@ -36,5 +31,5 @@
     "url": "git+https://github.com/phongndo/mark.git"
   },
   "type": "module",
-  "version": "0.16.0"
+  "version": "0.16.1"
 }
