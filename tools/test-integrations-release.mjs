@@ -70,6 +70,7 @@ test("one-version artifacts contain detached packages, npm packlists, and valid 
     const claude = json(join(distribution, ".claude-plugin/marketplace.json"));
     const codex = json(join(distribution, ".agents/plugins/marketplace.json"));
     assert.equal(claude.name, "mark"); assert.equal(codex.name, "mark");
+    assert.deepEqual(codex.plugins, [{ name: "mark", source: { source: "local", path: "./plugins/codex" }, policy: { installation: "AVAILABLE", authentication: "ON_INSTALL" }, category: "Productivity" }], "public Codex catalog must declare the native installation and authentication policy");
     assert.equal(json(join(distribution, claude.plugins[0].source, ".claude-plugin/plugin.json")).version, "1.2.3");
     const codexRoot = join(distribution, codex.plugins[0].source.path);
     assert.equal(json(join(codexRoot, "plugin.json")).version, "1.2.3");

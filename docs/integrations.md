@@ -50,9 +50,15 @@ codex plugin marketplace add phongndo/mark --ref integrations
 codex plugin add mark@mark
 ```
 
-Invoke `$mark` or select its skill. The skill's host instructions open an exact
-local review URL in the desktop app's built-in browser and wait for submitted
-feedback. Its browser entry helper uses `CODEX_THREAD_ID` for binding.
+Invoke `$mark:mark` or select Mark's skill in the picker. The host instructions
+open an exact local review URL in the desktop app's built-in browser and wait
+for submitted feedback. Its browser entry helper uses `CODEX_THREAD_ID` for
+binding.
+
+These commands install from Mark's GitHub marketplace. OpenAI's universal
+public directory has a separate submission process; local MCP plugins
+currently require approved-partner access and organization allowlisting.
+See the [desktop-only submission requirements](https://developers.openai.com/plugins/deploy/desktop-only).
 
 For fx, materialize its skill/MCP package:
 
