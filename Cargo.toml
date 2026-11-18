@@ -22,7 +22,7 @@ notify = "8"
 num_cpus = "1.17"
 ratatui = { version = "0.30.2", default-features = false, features = ["crossterm", "layout-cache", "underline-color"] }
 rayon = "1.10"
-rustix = { version = "1.1.4", default-features = false, features = ["process", "std", "stdio", "termios"] }
+rustix = { version = "1.1.6", default-features = false, features = ["process", "std", "stdio", "termios"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 shlex = "2.0.1"
