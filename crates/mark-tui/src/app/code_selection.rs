@@ -195,8 +195,13 @@ impl CodeSelectionState {
         let (start, end) = ordered_points(selection.anchor, selection.head);
         let mut pieces = Vec::new();
 
-        for row_index in start.row..=end.row.min(self.rows.len().saturating_sub(1)) {
-            let row = &self.rows[row_index];
+        for (row_index, row) in self
+            .rows
+            .iter()
+            .enumerate()
+            .take(end.row.saturating_add(1))
+            .skip(start.row)
+        {
             let Some(region) = row
                 .regions
                 .iter()
